@@ -1,0 +1,9 @@
+[package]
+name = "chakra"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.3", features = ["derive"] }
+tiny_http = "0.12"
+webbrowser = "1.0.4"
