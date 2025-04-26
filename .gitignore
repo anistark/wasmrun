@@ -1,1 +1,6 @@
-/target
+# Build files
+target
+debug
+
+# MacOS
+.DS_Store
