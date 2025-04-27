@@ -1,10 +1,10 @@
-use std::fs;
-use std::path::Path;
-use std::process::Command;
-use tiny_http::{Server, Response, Request};
 use crate::template::generate_html;
 use crate::utils::content_type_header;
+use std::fs;
 use std::net::TcpListener;
+use std::path::Path;
+use std::process::Command;
+use tiny_http::{Request, Response, Server};
 
 const PID_FILE: &str = "/tmp/chakra_server.pid";
 
@@ -30,7 +30,7 @@ pub fn stop_existing_server() -> Result<(), String> {
         }
     }
 
-    Ok(())  // If no PID is stored, it's safe to proceed
+    Ok(()) // If no PID is stored, it's safe to proceed
 }
 
 /// Function to check if the given port is available (not in use)
@@ -47,7 +47,10 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
 
     // Check if the port is available
     if !is_port_available(port) {
-        return Err(format!("❗ Port {} is already in use, please choose a different port.", port));
+        return Err(format!(
+            "❗ Port {} is already in use, please choose a different port.",
+            port
+        ));
     }
 
     // Verify the WASM file exists
@@ -71,7 +74,8 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
 
     // Store the current process PID in /tmp/
     let pid = std::process::id();
-    fs::write(PID_FILE, pid.to_string()).map_err(|e| format!("Failed to write PID to {}: {}", PID_FILE, e))?;
+    fs::write(PID_FILE, pid.to_string())
+        .map_err(|e| format!("Failed to write PID to {}: {}", PID_FILE, e))?;
     println!("📝 PID file stored at: {}", PID_FILE);
 
     // Create the HTTP server
@@ -81,7 +85,8 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
     // Create assets directory if it doesn't exist
     let assets_dir = Path::new("assets");
     if !assets_dir.exists() {
-        fs::create_dir_all(assets_dir).map_err(|e| format!("Failed to create assets directory: {}", e))?;
+        fs::create_dir_all(assets_dir)
+            .map_err(|e| format!("Failed to create assets directory: {}", e))?;
     }
 
     // Monitor incoming requests
@@ -94,7 +99,7 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
 
 fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
     let url = request.url();
-    
+
     println!("📝 Received request for: {}", url);
 
     if url == "/" {
@@ -108,13 +113,17 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
         // Serve the WASM file
         match fs::read(wasm_path) {
             Ok(wasm_bytes) => {
-                println!("🔄 Serving WASM file: {} ({} bytes)", wasm_filename, wasm_bytes.len());
+                println!(
+                    "🔄 Serving WASM file: {} ({} bytes)",
+                    wasm_filename,
+                    wasm_bytes.len()
+                );
                 let response = Response::from_data(wasm_bytes)
                     .with_header(content_type_header("application/wasm"));
                 if let Err(e) = request.respond(response) {
                     eprintln!("❗ Error sending WASM response: {}", e);
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("❗ Error reading WASM file: {}", e);
                 let response = Response::from_string(format!("Error: {}", e))
@@ -130,7 +139,10 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
         let asset_path = url.trim_start_matches('/');
         match fs::read(asset_path) {
             Ok(asset_bytes) => {
-                let content_type = match Path::new(asset_path).extension().and_then(|ext| ext.to_str()) {
+                let content_type = match Path::new(asset_path)
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                {
                     Some("png") => "image/png",
                     Some("jpg") | Some("jpeg") => "image/jpeg",
                     Some("svg") => "image/svg+xml",
@@ -139,19 +151,24 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
                     Some("js") => "application/javascript",
                     _ => "application/octet-stream",
                 };
-                
-                println!("🔄 Serving asset: {} ({} bytes)", asset_path, asset_bytes.len());
-                let response = Response::from_data(asset_bytes)
-                    .with_header(content_type_header(content_type));
+
+                println!(
+                    "🔄 Serving asset: {} ({} bytes)",
+                    asset_path,
+                    asset_bytes.len()
+                );
+                let response =
+                    Response::from_data(asset_bytes).with_header(content_type_header(content_type));
                 if let Err(e) = request.respond(response) {
                     eprintln!("❗ Error sending asset response: {}", e);
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("❗ Error reading asset file {}: {}", asset_path, e);
-                let response = Response::from_string(format!("Error: Asset not found - {}", asset_path))
-                    .with_status_code(404)
-                    .with_header(content_type_header("text/plain"));
+                let response =
+                    Response::from_string(format!("Error: Asset not found - {}", asset_path))
+                        .with_status_code(404)
+                        .with_header(content_type_header("text/plain"));
                 if let Err(e) = request.respond(response) {
                     eprintln!("❗ Error sending error response: {}", e);
                 }
