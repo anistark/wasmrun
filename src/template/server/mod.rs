@@ -10,8 +10,17 @@ const SCRIPTS_JS: &str = include_str!("scripts.js");
 pub fn generate_html(filename: &str) -> String {
     let html = INDEX_HTML
         .replace("$FILENAME$", filename)
-        .replace("<!-- @style-placeholder -->", &format!("<style>\n{}\n    </style>", STYLE_CSS))
-        .replace("<!-- @script-placeholder -->", &format!("<script type=\"module\">\n{}\n    </script>", process_scripts(filename)));
+        .replace(
+            "<!-- @style-placeholder -->",
+            &format!("<style>\n{}\n    </style>", STYLE_CSS),
+        )
+        .replace(
+            "<!-- @script-placeholder -->",
+            &format!(
+                "<script type=\"module\">\n{}\n    </script>",
+                process_scripts(filename)
+            ),
+        );
 
     html
 }
@@ -26,21 +35,30 @@ fn process_scripts(filename: &str) -> String {
 #[allow(dead_code)]
 pub fn generate_html_dev(filename: &str) -> String {
     let template_dir = Path::new("src/template/server");
-    
+
     // Load templates from files at runtime
     let html = fs::read_to_string(template_dir.join("index.html"))
         .unwrap_or_else(|_| "Failed to load index.html".to_string());
-    
+
     let css = fs::read_to_string(template_dir.join("style.css"))
         .unwrap_or_else(|_| "/* Failed to load style.css */".to_string());
-    
+
     let js = fs::read_to_string(template_dir.join("scripts.js"))
         .unwrap_or_else(|_| "// Failed to load scripts.js".to_string());
-    
+
     let html = html
         .replace("$FILENAME$", filename)
-        .replace("<!-- @style-placeholder -->", &format!("<style>\n{}\n    </style>", css))
-        .replace("<!-- @script-placeholder -->", &format!("<script type=\"module\">\n{}\n    </script>", js.replace("$FILENAME$", filename)));
-    
+        .replace(
+            "<!-- @style-placeholder -->",
+            &format!("<style>\n{}\n    </style>", css),
+        )
+        .replace(
+            "<!-- @script-placeholder -->",
+            &format!(
+                "<script type=\"module\">\n{}\n    </script>",
+                js.replace("$FILENAME$", filename)
+            ),
+        );
+
     html
 }

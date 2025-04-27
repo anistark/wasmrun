@@ -4,7 +4,7 @@ Thank you for considering contributing to Chakra! This guide will help you under
 
 ## Project Structure
 
-```
+```sh
 src
 ├── cli.rs            # Command line argument handling
 ├── main.rs           # Application entry point
@@ -22,20 +22,62 @@ src
 ## Development Setup
 
 1. Clone the repository:
-   ```sh
-   git clone https://github.com/anistark/chakra.git
-   cd chakra
-   ```
 
-2. Build the project:
-   ```sh
-   cargo build
-   ```
+```sh
+git clone https://github.com/anistark/chakra.git
+cd chakra
+```
 
-3. Run in development mode:
-   ```sh
-   cargo run -- --path /path/to/your/test.wasm
-   ```
+2. Install just (task runner):
+
+```sh
+cargo install just
+```
+
+3. Build the project:
+
+```sh
+just build
+```
+
+4. Run in development mode:
+
+```sh
+just run /path/to/your/test.wasm
+```
+
+## Using Just
+
+Chakra uses a `justfile` for common development tasks:
+
+```sh
+# List all available commands
+just
+
+# Build the project
+just build
+
+# Build for release
+just build-release
+
+# Run with a test WASM file
+just run ./path/to/file.wasm
+
+# Run with a custom port
+just run-port ./path/to/file.wasm 9000
+
+# Stop any running server
+just stop
+
+# Format code
+just format
+
+# Run tests
+just test
+
+# Create and publish a release
+just publish-all
+```
 
 ## Template System
 
@@ -97,13 +139,35 @@ cargo build --release
 - Use comments for complex logic
 - Prefer descriptive error messages
 
+## Release Process
+
+To release a new version of Chakra:
+
+1. Update the version in `Cargo.toml`
+2. Update CHANGELOG.md if applicable
+3. Use the just commands to handle the release:
+
+```sh
+# Ensure everything builds
+just prepare-publish
+
+# Create a GitHub release and publish to crates.io
+just publish-all
+```
+
 ## Pull Request Process
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
 4. Add tests if applicable
-5. Submit a pull request
+5. Run quality checks with just:
+   ```sh
+   just format      # Format code
+   just lint        # Run clippy lints
+   just test        # Run tests
+   ```
+6. Submit a pull request
 
 ## Development Notes
 

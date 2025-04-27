@@ -1,10 +1,10 @@
-use std::fs;
-use std::path::Path;
-use std::process::Command;
-use tiny_http::{Server, Response, Request};
 use crate::template::generate_html;
 use crate::utils::content_type_header;
+use std::fs;
 use std::net::TcpListener;
+use std::path::Path;
+use std::process::Command;
+use tiny_http::{Request, Response, Server};
 
 const PID_FILE: &str = "/tmp/chakra_server.pid";
 
@@ -30,7 +30,7 @@ pub fn stop_existing_server() -> Result<(), String> {
         }
     }
 
-    Ok(())  // If no PID is stored, it's safe to proceed
+    Ok(()) // If no PID is stored, it's safe to proceed
 }
 
 /// Function to check if the given port is available (not in use)
@@ -47,7 +47,10 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
 
     // Check if the port is available
     if !is_port_available(port) {
-        return Err(format!("❗ Port {} is already in use, please choose a different port.", port));
+        return Err(format!(
+            "❗ Port {} is already in use, please choose a different port.",
+            port
+        ));
     }
 
     // Verify the WASM file exists
@@ -71,7 +74,8 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
 
     // Store the current process PID in /tmp/
     let pid = std::process::id();
-    fs::write(PID_FILE, pid.to_string()).map_err(|e| format!("Failed to write PID to {}: {}", PID_FILE, e))?;
+    fs::write(PID_FILE, pid.to_string())
+        .map_err(|e| format!("Failed to write PID to {}: {}", PID_FILE, e))?;
     println!("📝 PID file stored at: {}", PID_FILE);
 
     // Create the HTTP server
@@ -88,7 +92,7 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
 
 fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
     let url = request.url();
-    
+
     println!("📝 Received request for: {}", url);
 
     if url == "/" {
@@ -102,13 +106,17 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
         // Serve the WASM file
         match fs::read(wasm_path) {
             Ok(wasm_bytes) => {
-                println!("🔄 Serving WASM file: {} ({} bytes)", wasm_filename, wasm_bytes.len());
+                println!(
+                    "🔄 Serving WASM file: {} ({} bytes)",
+                    wasm_filename,
+                    wasm_bytes.len()
+                );
                 let response = Response::from_data(wasm_bytes)
                     .with_header(content_type_header("application/wasm"));
                 if let Err(e) = request.respond(response) {
                     eprintln!("❗ Error sending WASM response: {}", e);
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("❗ Error reading WASM file: {}", e);
                 let response = Response::from_string(format!("Error: {}", e))
