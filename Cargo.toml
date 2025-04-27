@@ -1,6 +1,6 @@
 [package]
 name = "chakra"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Run WebAssembly directly in browser with zero configuration"
 license = "MIT"

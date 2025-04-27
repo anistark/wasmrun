@@ -90,9 +90,14 @@ gh-release:
         exit 1
     fi
     
+    # Prompt for release title/codename with default
+    DEFAULT_TITLE="Chakra v{{version}}"
+    read -p "Enter release title/codename [${DEFAULT_TITLE}]: " RELEASE_TITLE
+    RELEASE_TITLE=${RELEASE_TITLE:-$DEFAULT_TITLE}
+    
     # Create a tag if it doesn't exist
     if ! git rev-parse "v{{version}}" >/dev/null 2>&1; then
-        git tag -a "v{{version}}" -m "Release v{{version}}"
+        git tag -a "v{{version}}" -m "Release ${RELEASE_TITLE}"
         echo "✓ Created tag v{{version}}"
     else
         echo "✓ Tag v{{version}} already exists"
@@ -104,7 +109,7 @@ gh-release:
     
     # Create GitHub release with auto-generated release notes
     gh release create "v{{version}}" \
-        --title "Chakra v{{version}}" \
+        --title "${RELEASE_TITLE}" \
         --generate-notes \
         "./target/release/chakra"
     
