@@ -2,6 +2,13 @@
 name = "chakra"
 version = "0.1.0"
 edition = "2021"
+description = "Run WebAssembly directly in browser with zero configuration"
+license = "MIT"
+authors = ["Kumar Anirudha <hi@anirudha.dev>"]
+repository = "https://github.com/anistark/chakra"
+readme = "README.md"
+keywords = ["wasm", "webassembly", "browser", "runtime", "cli"]
+categories = ["command-line-utilities", "development-tools", "wasm"]
 
 [dependencies]
 clap = { version = "4.3", features = ["derive"] }
