@@ -222,5 +222,5 @@ gh-release:
     echo "View it at: https://github.com/{{repo}}/releases/tag/v{{version}}"
 
 # Release to both GitHub and crates.io
-publish-all: build-release gh-release publish-crates
+publish: build-release publish-crates gh-release
     @echo "✓ Released v{{version}} to GitHub and crates.io"
