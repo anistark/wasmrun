@@ -19,7 +19,6 @@ pub struct Args {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-
     /// Stop the running Chakra server
     Stop,
 }

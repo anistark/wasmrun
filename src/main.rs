@@ -26,6 +26,7 @@ fn main() {
                 }
             } else {
                 eprintln!("❗ No path provided for the WASM file. Please specify a path.");
+                eprintln!("  Example: chakra --path /path/to/your/file.wasm");
             }
         }
     }

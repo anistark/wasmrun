@@ -6,7 +6,7 @@ use crate::template::generate_html;
 use crate::utils::content_type_header;
 use std::net::TcpListener;
 
-const PID_FILE: &str = "/tmp/chakra-server.pid";
+const PID_FILE: &str = "/tmp/chakra_server.pid";
 
 /// Helper function to stop the existing server using the PID stored in the file
 pub fn stop_existing_server() -> Result<(), String> {
@@ -38,6 +38,7 @@ fn is_port_available(port: u16) -> bool {
     TcpListener::bind(format!("0.0.0.0:{port}")).is_ok()
 }
 
+/// Run server with the given WASM file and port
 pub fn run_server(path: &str, port: u16) -> Result<(), String> {
     // First, stop any running server
     if let Err(e) = stop_existing_server() {
@@ -68,9 +69,10 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
         println!("❗ Failed to open browser automatically: {e}");
     }
 
-    // Store the current process PID
+    // Store the current process PID in /tmp/
     let pid = std::process::id();
-    fs::write(PID_FILE, pid.to_string()).map_err(|e| format!("Failed to write PID: {}", e))?;
+    fs::write(PID_FILE, pid.to_string()).map_err(|e| format!("Failed to write PID to {}: {}", PID_FILE, e))?;
+    println!("📝 PID file stored at: {}", PID_FILE);
 
     // Create the HTTP server
     let server = Server::http(format!("0.0.0.0:{port}"))
