@@ -1,8 +1,11 @@
-# Chakra 🔮
+# Chakra
+
+![Chakra Logo](./assets/logo.png)
 
 Chakra is a lightweight tool that lets you run WebAssembly (WASM) modules directly in your browser with zero configuration.
 
-<!-- ![Chakra Banner]() -->
+[![Crates.io Version](https://img.shields.io/crates/v/chakra)
+](https://crates.io/crates/chakra) [![Crates.io Downloads](https://img.shields.io/crates/d/chakra)](https://crates.io/crates/chakra) [![Crates.io Downloads (latest version)](https://img.shields.io/crates/dv/chakra)](https://crates.io/crates/chakra) [![Open Source](https://img.shields.io/badge/open-source-brightgreen)](https://github.com/anistark/chakra) [![Contributors](https://img.shields.io/github/contributors/anistark/chakra)](https://github.com/anistark/chakra/graphs/contributors) ![maintenance-status](https://img.shields.io/badge/maintenance-actively--developed-brightgreen.svg)
 
 ## Features
 

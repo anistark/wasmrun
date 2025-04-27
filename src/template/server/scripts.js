@@ -54,7 +54,7 @@ async function loadWasmWithRetries(retries = 5) {
                     importObject
                 );
                 
-                log('🧿 WASM Module loaded successfully!', 'success');
+                log('✅ Chakra WASM Module loaded successfully!', 'success');
                 updateStatus('✅ WASM Module loaded successfully!');
                 
                 // Call main function if it exists
