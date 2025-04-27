@@ -98,6 +98,10 @@ gh-release:
         echo "✓ Tag v{{version}} already exists"
     fi
     
+    # Push the tag to remote
+    echo "Pushing tag v{{version}} to remote..."
+    git push origin "v{{version}}"
+    
     # Create GitHub release with auto-generated release notes
     gh release create "v{{version}}" \
         --title "Chakra v{{version}}" \
