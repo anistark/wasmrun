@@ -1,22 +1,24 @@
 # Contributing to Chakra
 
+![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white) 
+
 Thank you for considering contributing to Chakra! This guide will help you understand the project structure and development workflow.
 
 ## Project Structure
 
 ```sh
 src
-├── cli.rs            # Command line argument handling
-├── main.rs           # Application entry point
-├── server.rs         # HTTP server implementation
-├── template          # HTML, CSS, JS templates
-│   ├── mod.rs        # Template module exports
-│   └── server        # Web server templates
+├── cli.rs              # Command line argument handling
+├── main.rs             # Application entry point
+├── server.rs           # HTTP server implementation
+├── template            # HTML, CSS, JS templates
+│   ├── mod.rs          # Template module exports
+│   └── server          # Web server templates
 │       ├── index.html  # Main HTML template
 │       ├── mod.rs      # Server template module
 │       ├── scripts.js  # Browser JavaScript
 │       └── style.css   # CSS styles
-└── utils.rs          # Utility functions
+└── utils.rs            # Utility functions
 ```
 
 ## Development Setup
@@ -123,8 +125,8 @@ The WebAssembly loading and execution is handled in `scripts.js`. When enhancing
 
 Test Chakra with different types of WebAssembly files:
 
-1. Simple C/C++ compiled files
-2. Rust WASM files (with and without wasm-bindgen)
+1. Simple C/C++ compiled files: `just example-wasm-emcc`
+2. Rust WASM files (with and without wasm-bindgen): `just example-wasm-rust`
 3. Files with different entry points
 
 ## Building for Release

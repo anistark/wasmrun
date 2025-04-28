@@ -1,36 +1,76 @@
-use crate::template::generate_html;
-use crate::utils::content_type_header;
 use std::fs;
-use std::net::TcpListener;
 use std::path::Path;
 use std::process::Command;
-use tiny_http::{Request, Response, Server};
+use tiny_http::{Server, Response, Request};
+use crate::template::generate_html;
+use crate::utils::content_type_header;
+use std::net::TcpListener;
 
 const PID_FILE: &str = "/tmp/chakra_server.pid";
 
-/// Helper function to stop the existing server using the PID stored in the file
-pub fn stop_existing_server() -> Result<(), String> {
+/// Helper function to check if a server is currently running
+pub fn is_server_running() -> bool {
+    if !Path::new(PID_FILE).exists() {
+        return false;
+    }
+    
     if let Ok(pid_str) = fs::read_to_string(PID_FILE) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            let kill_command = Command::new("kill")
-                .arg("-9")
+            // On Unix-like systems, checking if a process exists
+            let ps_command = Command::new("ps")
+                .arg("-p")
                 .arg(pid.to_string())
-                .output()
-                .map_err(|e| format!("Failed to kill server process: {}", e))?;
-
-            if kill_command.status.success() {
-                fs::remove_file(PID_FILE).map_err(|e| format!("Failed to remove PID file: {e}"))?;
-                println!("💀 Existing Chakra server terminated successfully.");
-                return Ok(());
-            } else {
-                return Err("Failed to stop Chakra server.".to_string());
+                .output();
+                
+            if let Ok(output) = ps_command {
+                // If ps returns success and has more than just the header line,
+                // the process exists
+                return output.status.success() && 
+                       String::from_utf8_lossy(&output.stdout).lines().count() > 1;
             }
-        } else {
-            return Err("Failed to parse PID.".to_string());
         }
     }
+    
+    false
+}
 
-    Ok(()) // If no PID is stored, it's safe to proceed
+/// Helper function to stop the existing server using the PID stored in the file
+pub fn stop_existing_server() -> Result<(), String> {
+    // Check if the server is running first
+    if !is_server_running() {
+        // No server is running, clean up any stale PID file
+        if Path::new(PID_FILE).exists() {
+            if let Err(e) = fs::remove_file(PID_FILE) {
+                return Err(format!("No server running, but failed to remove stale PID file: {e}"));
+            }
+        }
+        
+        // Not an error, just return success as there's no server to stop
+        return Ok(());
+    }
+    
+    // At this point, we know the server is running and the PID file exists
+    let pid_str = fs::read_to_string(PID_FILE)
+        .map_err(|e| format!("Failed to read PID file: {}", e))?;
+    
+    let pid = pid_str.trim().parse::<u32>()
+        .map_err(|e| format!("Failed to parse PID '{}': {}", pid_str.trim(), e))?;
+    
+    let kill_command = Command::new("kill")
+        .arg("-9")
+        .arg(pid.to_string())
+        .output()
+        .map_err(|e| format!("Failed to kill server process: {}", e))?;
+
+    if kill_command.status.success() {
+        fs::remove_file(PID_FILE).map_err(|e| format!("Failed to remove PID file: {e}"))?;
+        println!("💀 Existing Chakra server terminated successfully.");
+        return Ok(());
+    } else {
+        // Get the error output from kill command
+        let error_msg = String::from_utf8_lossy(&kill_command.stderr);
+        return Err(format!("Failed to stop Chakra server: {}", error_msg));
+    }
 }
 
 /// Function to check if the given port is available (not in use)
@@ -40,17 +80,17 @@ fn is_port_available(port: u16) -> bool {
 
 /// Run server with the given WASM file and port
 pub fn run_server(path: &str, port: u16) -> Result<(), String> {
-    // First, stop any running server
-    if let Err(e) = stop_existing_server() {
-        eprintln!("❗ Error stopping the server: {e}");
+    // First, try to stop any running server
+    if is_server_running() {
+        match stop_existing_server() {
+            Ok(_) => println!("💀 Existing server stopped successfully."),
+            Err(e) => eprintln!("❗ Warning when stopping existing server: {e}"),
+        }
     }
 
     // Check if the port is available
     if !is_port_available(port) {
-        return Err(format!(
-            "❗ Port {} is already in use, please choose a different port.",
-            port
-        ));
+        return Err(format!("❗ Port {} is already in use, please choose a different port.", port));
     }
 
     // Verify the WASM file exists
@@ -64,30 +104,55 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
         .ok_or_else(|| "Invalid path".to_string())?
         .to_string_lossy()
         .to_string();
+    
+    // Get absolute path to display
+    let absolute_path = fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string());
+        
+    // Get file size in a human-readable format
+    let file_size = match fs::metadata(path) {
+        Ok(metadata) => {
+            let bytes = metadata.len();
+            if bytes < 1024 {
+                format!("{} bytes", bytes)
+            } else if bytes < 1024 * 1024 {
+                format!("{:.2} KB", bytes as f64 / 1024.0)
+            } else {
+                format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
+            }
+        },
+        Err(_) => "unknown size".to_string(),
+    };
 
-    println!("🚀 Chakra server running at http://localhost:{port}");
-    println!("📦 Serving WASM file: {}", wasm_filename);
+    // Display a nice box with server info - corners only design
+    let url = format!("http://localhost:{}", port);
+    
+    println!("\n\x1b[1;34m╭\x1b[0m");
+    println!("  🌀 \x1b[1;36mChakra WASM Server\x1b[0m");
+    println!();
+    println!("  🚀 \x1b[1;34mServer URL:\x1b[0m \x1b[4;36m{}\x1b[0m", url);
+    println!("  🔌 \x1b[1;34mListening on port:\x1b[0m \x1b[1;33m{}\x1b[0m", port);
+    println!("  📦 \x1b[1;34mServing file:\x1b[0m \x1b[1;32m{}\x1b[0m", wasm_filename);
+    println!("  💾 \x1b[1;34mFile size:\x1b[0m \x1b[0;37m{}\x1b[0m", file_size);
+    println!("  🔍 \x1b[1;34mFull path:\x1b[0m \x1b[0;37m{:.45}\x1b[0m", absolute_path);
+    println!("  🆔 \x1b[1;34mServer PID:\x1b[0m \x1b[0;37m{}\x1b[0m", std::process::id());
+    println!();
+    println!("  \x1b[0;90mPress Ctrl+C to stop the server\x1b[0m");
+    println!("\x1b[1;34m╰\x1b[0m");
+    println!("\n🌐 Opening browser...");
 
-    if let Err(e) = webbrowser::open(&format!("http://localhost:{port}")) {
+    if let Err(e) = webbrowser::open(&url) {
         println!("❗ Failed to open browser automatically: {e}");
     }
 
     // Store the current process PID in /tmp/
     let pid = std::process::id();
-    fs::write(PID_FILE, pid.to_string())
-        .map_err(|e| format!("Failed to write PID to {}: {}", PID_FILE, e))?;
-    println!("📝 PID file stored at: {}", PID_FILE);
+    fs::write(PID_FILE, pid.to_string()).map_err(|e| format!("Failed to write PID to {}: {}", PID_FILE, e))?;
 
     // Create the HTTP server
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {}", e))?;
-
-    // Create assets directory if it doesn't exist
-    let assets_dir = Path::new("assets");
-    if !assets_dir.exists() {
-        fs::create_dir_all(assets_dir)
-            .map_err(|e| format!("Failed to create assets directory: {}", e))?;
-    }
 
     // Monitor incoming requests
     for request in server.incoming_requests() {
@@ -99,7 +164,7 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
 
 fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
     let url = request.url();
-
+    
     println!("📝 Received request for: {}", url);
 
     if url == "/" {
@@ -113,62 +178,18 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
         // Serve the WASM file
         match fs::read(wasm_path) {
             Ok(wasm_bytes) => {
-                println!(
-                    "🔄 Serving WASM file: {} ({} bytes)",
-                    wasm_filename,
-                    wasm_bytes.len()
-                );
+                println!("🔄 Serving WASM file: {} ({} bytes)", wasm_filename, wasm_bytes.len());
                 let response = Response::from_data(wasm_bytes)
                     .with_header(content_type_header("application/wasm"));
                 if let Err(e) = request.respond(response) {
                     eprintln!("❗ Error sending WASM response: {}", e);
                 }
-            }
+            },
             Err(e) => {
                 eprintln!("❗ Error reading WASM file: {}", e);
                 let response = Response::from_string(format!("Error: {}", e))
                     .with_status_code(500)
                     .with_header(content_type_header("text/plain"));
-                if let Err(e) = request.respond(response) {
-                    eprintln!("❗ Error sending error response: {}", e);
-                }
-            }
-        }
-    } else if url.starts_with("/assets/") {
-        // Serve static assets
-        let asset_path = url.trim_start_matches('/');
-        match fs::read(asset_path) {
-            Ok(asset_bytes) => {
-                let content_type = match Path::new(asset_path)
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                {
-                    Some("png") => "image/png",
-                    Some("jpg") | Some("jpeg") => "image/jpeg",
-                    Some("svg") => "image/svg+xml",
-                    Some("ico") => "image/x-icon",
-                    Some("css") => "text/css",
-                    Some("js") => "application/javascript",
-                    _ => "application/octet-stream",
-                };
-
-                println!(
-                    "🔄 Serving asset: {} ({} bytes)",
-                    asset_path,
-                    asset_bytes.len()
-                );
-                let response =
-                    Response::from_data(asset_bytes).with_header(content_type_header(content_type));
-                if let Err(e) = request.respond(response) {
-                    eprintln!("❗ Error sending asset response: {}", e);
-                }
-            }
-            Err(e) => {
-                eprintln!("❗ Error reading asset file {}: {}", asset_path, e);
-                let response =
-                    Response::from_string(format!("Error: Asset not found - {}", asset_path))
-                        .with_status_code(404)
-                        .with_header(content_type_header("text/plain"));
                 if let Err(e) = request.respond(response) {
                     eprintln!("❗ Error sending error response: {}", e);
                 }
