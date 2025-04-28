@@ -8,21 +8,19 @@ const SCRIPTS_JS: &str = include_str!("scripts.js");
 
 /// Generate the complete HTML by combining all template parts and replacing placeholders
 pub fn generate_html(filename: &str) -> String {
-    let html = INDEX_HTML
+    INDEX_HTML
         .replace("$FILENAME$", filename)
         .replace(
-            "<!-- @style-placeholder -->",
+        "<!-- @style-placeholder -->",
             &format!("<style>\n{}\n    </style>", STYLE_CSS),
         )
         .replace(
-            "<!-- @script-placeholder -->",
-            &format!(
-                "<script type=\"module\">\n{}\n    </script>",
-                process_scripts(filename)
+        "<!-- @script-placeholder -->",
+          &format!(
+               "<script type=\"module\">\n{}\n    </script>",
+               process_scripts(filename)
             ),
-        );
-
-    html
+        )
 }
 
 /// Process the JavaScript template, replacing any placeholders
@@ -46,7 +44,7 @@ pub fn generate_html_dev(filename: &str) -> String {
     let js = fs::read_to_string(template_dir.join("scripts.js"))
         .unwrap_or_else(|_| "// Failed to load scripts.js".to_string());
 
-    let html = html
+    html
         .replace("$FILENAME$", filename)
         .replace(
             "<!-- @style-placeholder -->",
@@ -58,7 +56,5 @@ pub fn generate_html_dev(filename: &str) -> String {
                 "<script type=\"module\">\n{}\n    </script>",
                 js.replace("$FILENAME$", filename)
             ),
-        );
-
-    html
+        )
 }
