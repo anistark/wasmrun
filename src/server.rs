@@ -66,11 +66,11 @@ pub fn stop_existing_server() -> Result<(), String> {
     if kill_command.status.success() {
         fs::remove_file(PID_FILE).map_err(|e| format!("Failed to remove PID file: {e}"))?;
         println!("💀 Existing Chakra server terminated successfully.");
-        return Ok(());
+        Ok(())
     } else {
         // Get the error output from kill command
         let error_msg = String::from_utf8_lossy(&kill_command.stderr);
-        return Err(format!("Failed to stop Chakra server: {}", error_msg));
+        Err(format!("Failed to stop Chakra server: {}", error_msg))
     }
 }
 
