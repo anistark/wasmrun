@@ -17,10 +17,10 @@ fn main() {
                 println!("\x1b[1;34m╰\x1b[0m");
                 return;
             }
-            
+
             // Show stopping message
             println!("\n⏳ Stopping Chakra server...");
-            
+
             // Attempt to stop the existing server
             match server::stop_existing_server() {
                 Ok(()) => {
@@ -30,7 +30,7 @@ fn main() {
                     println!();
                     println!("  ✅ \x1b[1;32mServer terminated successfully\x1b[0m");
                     println!("\x1b[1;34m╰\x1b[0m");
-                },
+                }
                 Err(e) => {
                     // Display error in a box
                     println!("\n\x1b[1;34m╭\x1b[0m");
@@ -50,26 +50,26 @@ fn main() {
                     eprintln!("\n\x1b[1;34m╭\x1b[0m");
                     eprintln!("  ❌ \x1b[1;31mError Running Chakra Server\x1b[0m");
                     eprintln!();
-                    
+
                     // Split error message into multiple lines if needed
                     let words: Vec<&str> = e.split_whitespace().collect();
                     let mut current_line = String::from("  ");
-                    
+
                     for word in words {
                         if current_line.len() + word.len() + 1 > 58 {
                             eprintln!("\x1b[0;91m{}\x1b[0m", current_line);
                             current_line = String::from("  ");
                         }
-                        
+
                         current_line.push_str(word);
                         current_line.push(' ');
                     }
-                    
+
                     // Print the last line
                     if current_line.len() > 2 {
                         eprintln!("\x1b[0;91m{}\x1b[0m", current_line);
                     }
-                    
+
                     eprintln!("\x1b[1;34m╰\x1b[0m");
                 }
             } else {

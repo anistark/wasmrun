@@ -1,10 +1,10 @@
-use std::fs;
-use std::path::Path;
-use std::process::Command;
-use tiny_http::{Server, Response, Request};
 use crate::template::generate_html;
 use crate::utils::content_type_header;
+use std::fs;
 use std::net::TcpListener;
+use std::path::Path;
+use std::process::Command;
+use tiny_http::{Request, Response, Server};
 
 const PID_FILE: &str = "/tmp/chakra_server.pid";
 
@@ -13,24 +13,21 @@ pub fn is_server_running() -> bool {
     if !Path::new(PID_FILE).exists() {
         return false;
     }
-    
+
     if let Ok(pid_str) = fs::read_to_string(PID_FILE) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
             // On Unix-like systems, checking if a process exists
-            let ps_command = Command::new("ps")
-                .arg("-p")
-                .arg(pid.to_string())
-                .output();
-                
+            let ps_command = Command::new("ps").arg("-p").arg(pid.to_string()).output();
+
             if let Ok(output) = ps_command {
                 // If ps returns success and has more than just the header line,
                 // the process exists
-                return output.status.success() && 
-                       String::from_utf8_lossy(&output.stdout).lines().count() > 1;
+                return output.status.success()
+                    && String::from_utf8_lossy(&output.stdout).lines().count() > 1;
             }
         }
     }
-    
+
     false
 }
 
@@ -41,21 +38,25 @@ pub fn stop_existing_server() -> Result<(), String> {
         // No server is running, clean up any stale PID file
         if Path::new(PID_FILE).exists() {
             if let Err(e) = fs::remove_file(PID_FILE) {
-                return Err(format!("No server running, but failed to remove stale PID file: {e}"));
+                return Err(format!(
+                    "No server running, but failed to remove stale PID file: {e}"
+                ));
             }
         }
-        
+
         // Not an error, just return success as there's no server to stop
         return Ok(());
     }
-    
+
     // At this point, we know the server is running and the PID file exists
-    let pid_str = fs::read_to_string(PID_FILE)
-        .map_err(|e| format!("Failed to read PID file: {}", e))?;
-    
-    let pid = pid_str.trim().parse::<u32>()
+    let pid_str =
+        fs::read_to_string(PID_FILE).map_err(|e| format!("Failed to read PID file: {}", e))?;
+
+    let pid = pid_str
+        .trim()
+        .parse::<u32>()
         .map_err(|e| format!("Failed to parse PID '{}': {}", pid_str.trim(), e))?;
-    
+
     let kill_command = Command::new("kill")
         .arg("-9")
         .arg(pid.to_string())
@@ -90,7 +91,10 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
 
     // Check if the port is available
     if !is_port_available(port) {
-        return Err(format!("❗ Port {} is already in use, please choose a different port.", port));
+        return Err(format!(
+            "❗ Port {} is already in use, please choose a different port.",
+            port
+        ));
     }
 
     // Verify the WASM file exists
@@ -104,12 +108,12 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
         .ok_or_else(|| "Invalid path".to_string())?
         .to_string_lossy()
         .to_string();
-    
+
     // Get absolute path to display
     let absolute_path = fs::canonicalize(path)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| path.to_string());
-        
+
     // Get file size in a human-readable format
     let file_size = match fs::metadata(path) {
         Ok(metadata) => {
@@ -121,22 +125,37 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
             } else {
                 format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
             }
-        },
+        }
         Err(_) => "unknown size".to_string(),
     };
 
     // Display a nice box with server info - corners only design
     let url = format!("http://localhost:{}", port);
-    
+
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  🌀 \x1b[1;36mChakra WASM Server\x1b[0m");
     println!();
     println!("  🚀 \x1b[1;34mServer URL:\x1b[0m \x1b[4;36m{}\x1b[0m", url);
-    println!("  🔌 \x1b[1;34mListening on port:\x1b[0m \x1b[1;33m{}\x1b[0m", port);
-    println!("  📦 \x1b[1;34mServing file:\x1b[0m \x1b[1;32m{}\x1b[0m", wasm_filename);
-    println!("  💾 \x1b[1;34mFile size:\x1b[0m \x1b[0;37m{}\x1b[0m", file_size);
-    println!("  🔍 \x1b[1;34mFull path:\x1b[0m \x1b[0;37m{:.45}\x1b[0m", absolute_path);
-    println!("  🆔 \x1b[1;34mServer PID:\x1b[0m \x1b[0;37m{}\x1b[0m", std::process::id());
+    println!(
+        "  🔌 \x1b[1;34mListening on port:\x1b[0m \x1b[1;33m{}\x1b[0m",
+        port
+    );
+    println!(
+        "  📦 \x1b[1;34mServing file:\x1b[0m \x1b[1;32m{}\x1b[0m",
+        wasm_filename
+    );
+    println!(
+        "  💾 \x1b[1;34mFile size:\x1b[0m \x1b[0;37m{}\x1b[0m",
+        file_size
+    );
+    println!(
+        "  🔍 \x1b[1;34mFull path:\x1b[0m \x1b[0;37m{:.45}\x1b[0m",
+        absolute_path
+    );
+    println!(
+        "  🆔 \x1b[1;34mServer PID:\x1b[0m \x1b[0;37m{}\x1b[0m",
+        std::process::id()
+    );
     println!();
     println!("  \x1b[0;90mPress Ctrl+C to stop the server\x1b[0m");
     println!("\x1b[1;34m╰\x1b[0m");
@@ -148,7 +167,8 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
 
     // Store the current process PID in /tmp/
     let pid = std::process::id();
-    fs::write(PID_FILE, pid.to_string()).map_err(|e| format!("Failed to write PID to {}: {}", PID_FILE, e))?;
+    fs::write(PID_FILE, pid.to_string())
+        .map_err(|e| format!("Failed to write PID to {}: {}", PID_FILE, e))?;
 
     // Create the HTTP server
     let server = Server::http(format!("0.0.0.0:{port}"))
@@ -164,7 +184,7 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
 
 fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
     let url = request.url();
-    
+
     println!("📝 Received request for: {}", url);
 
     if url == "/" {
@@ -178,13 +198,17 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
         // Serve the WASM file
         match fs::read(wasm_path) {
             Ok(wasm_bytes) => {
-                println!("🔄 Serving WASM file: {} ({} bytes)", wasm_filename, wasm_bytes.len());
+                println!(
+                    "🔄 Serving WASM file: {} ({} bytes)",
+                    wasm_filename,
+                    wasm_bytes.len()
+                );
                 let response = Response::from_data(wasm_bytes)
                     .with_header(content_type_header("application/wasm"));
                 if let Err(e) = request.respond(response) {
                     eprintln!("❗ Error sending WASM response: {}", e);
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("❗ Error reading WASM file: {}", e);
                 let response = Response::from_string(format!("Error: {}", e))

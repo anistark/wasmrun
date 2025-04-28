@@ -2,8 +2,7 @@ use clap::{Parser, Subcommand};
 
 /// Chakra - Run WebAssembly directly in browser 🌟
 #[derive(Parser, Debug)]
-#[command(author, version = get_version_string(), about, long_about = None, 
-          after_help = "If you find Chakra useful, please consider starring the repository \
+#[command(author, version = get_version_string(), about, long_about = None, after_help = "If you find Chakra useful, please consider starring the repository \
                        on GitHub to support this open source project! ✨\n\
                        https://github.com/anistark/chakra")]
 pub struct Args {
@@ -40,7 +39,7 @@ pub fn get_args() -> Args {
         print_styled_version();
         std::process::exit(0);
     }
-    
+
     Args::parse()
 }
 
@@ -48,7 +47,7 @@ pub fn get_args() -> Args {
 fn print_styled_version() {
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");
-    
+
     println!(
         "\n\x1b[1;34m╭\x1b[0m\n\
          \x1b[1;34m│\x1b[0m  🌀 \x1b[1;36m{} v{}\x1b[0m\n\
