@@ -62,7 +62,7 @@ docs:
 #     cargo set-version --bump {{TYPE}}
 
 # Prepare for publishing (format, lint, test)
-prepare-publish: format test build-release
+prepare-publish: format lint test build-release
     @echo "✓ Project is ready for publishing"
 
 # Publish to crates.io (requires cargo login)

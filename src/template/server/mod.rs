@@ -11,14 +11,14 @@ pub fn generate_html(filename: &str) -> String {
     INDEX_HTML
         .replace("$FILENAME$", filename)
         .replace(
-        "<!-- @style-placeholder -->",
+            "<!-- @style-placeholder -->",
             &format!("<style>\n{}\n    </style>", STYLE_CSS),
         )
         .replace(
-        "<!-- @script-placeholder -->",
-          &format!(
-               "<script type=\"module\">\n{}\n    </script>",
-               process_scripts(filename)
+            "<!-- @script-placeholder -->",
+            &format!(
+                "<script type=\"module\">\n{}\n    </script>",
+                process_scripts(filename)
             ),
         )
 }
@@ -44,8 +44,7 @@ pub fn generate_html_dev(filename: &str) -> String {
     let js = fs::read_to_string(template_dir.join("scripts.js"))
         .unwrap_or_else(|_| "// Failed to load scripts.js".to_string());
 
-    html
-        .replace("$FILENAME$", filename)
+    html.replace("$FILENAME$", filename)
         .replace(
             "<!-- @style-placeholder -->",
             &format!("<style>\n{}\n    </style>", css),
