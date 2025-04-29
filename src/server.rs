@@ -220,8 +220,11 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
             }
         }
     } else if url.starts_with("/assets/") {
-        // Serve assets from the assets directory
-        let asset_path = url.strip_prefix("/").unwrap_or(url);
+        // Extract the asset filename from the URL (remove the /assets/ prefix)
+        let asset_filename = url.strip_prefix("/assets/").unwrap_or("");
+        let asset_path = format!("./assets/{}", asset_filename);
+        // TODO: Remove this debug print in production
+        println!("🔍 Looking for asset at: {}", asset_path);
         let content_type = if url.ends_with(".png") {
             "image/png"
         } else if url.ends_with(".jpg") || url.ends_with(".jpeg") {
@@ -230,13 +233,17 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
             "image/svg+xml"
         } else if url.ends_with(".gif") {
             "image/gif"
+        } else if url.ends_with(".css") {
+            "text/css"
+        } else if url.ends_with(".js") {
+            "application/javascript"
         } else {
-            "image/webp"
+            "application/octet-stream"
         };
-
-        match fs::read(asset_path) {
+    
+        match fs::read(&asset_path) {
             Ok(asset_bytes) => {
-                println!("🖼️ Serving asset: {} ({} bytes)", asset_path, asset_bytes.len());
+                println!("🖼️ Successfully serving asset: {} ({} bytes)", asset_path, asset_bytes.len());
                 let response = Response::from_data(asset_bytes)
                     .with_header(content_type_header(content_type));
                 if let Err(e) = request.respond(response) {
@@ -244,7 +251,18 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
                 }
             }
             Err(e) => {
-                eprintln!("‼️ Error reading asset file {}: {}", asset_path, e);
+                eprintln!("‼️ Error reading asset file {}: {} (does the file exist?)", asset_path, e);
+
+                if let Ok(metadata) = fs::metadata("./assets") {
+                    if metadata.is_dir() {
+                        eprintln!("📁 The assets directory exists, but the specific file wasn't found");
+                    } else {
+                        eprintln!("❌ Found 'assets' but it's not a directory!");
+                    }
+                } else {
+                    eprintln!("❌ The assets directory doesn't exist at the expected location!");
+                }
+
                 let response = Response::from_string(format!("Asset not found: {}", e))
                     .with_status_code(404)
                     .with_header(content_type_header("text/plain"));
