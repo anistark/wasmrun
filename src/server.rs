@@ -219,6 +219,40 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
                 }
             }
         }
+    } else if url.starts_with("/assets/") {
+        // Serve assets from the assets directory
+        let asset_path = url.strip_prefix("/").unwrap_or(url);
+        let content_type = if url.ends_with(".png") {
+            "image/png"
+        } else if url.ends_with(".jpg") || url.ends_with(".jpeg") {
+            "image/jpeg"
+        } else if url.ends_with(".svg") {
+            "image/svg+xml"
+        } else if url.ends_with(".gif") {
+            "image/gif"
+        } else {
+            "image/webp"
+        };
+
+        match fs::read(asset_path) {
+            Ok(asset_bytes) => {
+                println!("🖼️ Serving asset: {} ({} bytes)", asset_path, asset_bytes.len());
+                let response = Response::from_data(asset_bytes)
+                    .with_header(content_type_header(content_type));
+                if let Err(e) = request.respond(response) {
+                    eprintln!("‼️ Error sending asset response: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("‼️ Error reading asset file {}: {}", asset_path, e);
+                let response = Response::from_string(format!("Asset not found: {}", e))
+                    .with_status_code(404)
+                    .with_header(content_type_header("text/plain"));
+                if let Err(e) = request.respond(response) {
+                    eprintln!("‼️ Error sending asset error response: {}", e);
+                }
+            }
+        }
     } else {
         // 404 for all other requests
         let response = Response::from_string("404 Not Found")
