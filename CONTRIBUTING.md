@@ -66,7 +66,7 @@ just build-release
 just run ./path/to/file.wasm
 
 # Run with a custom port
-just run-port ./path/to/file.wasm 9000
+just run-port ./path/to/file.wasm 3000
 
 # Stop any running server
 just stop
@@ -146,15 +146,14 @@ cargo build --release
 To release a new version of Chakra:
 
 1. Update the version in `Cargo.toml`
-2. Update CHANGELOG.md if applicable
-3. Use the just commands to handle the release:
+2. Use the just commands to handle the release:
 
 ```sh
 # Ensure everything builds
 just prepare-publish
 
-# Create a GitHub release and publish to crates.io
-just publish-all
+# Publish to crates.io and create a GitHub release
+just publish
 ```
 
 ## Pull Request Process

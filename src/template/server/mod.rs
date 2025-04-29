@@ -28,8 +28,8 @@ fn process_scripts(filename: &str) -> String {
     SCRIPTS_JS.replace("$FILENAME$", filename)
 }
 
-// Alternative implementation that loads templates at runtime (for development)
-// Only enable this when developing to see changes without recompiling
+// TODO: Alternative implementation that loads templates at runtime (for development)
+// To see changes without recompiling
 #[allow(dead_code)]
 pub fn generate_html_dev(filename: &str) -> String {
     let template_dir = Path::new("src/template/server");
