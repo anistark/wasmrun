@@ -233,22 +233,31 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
         } else {
             "application/octet-stream"
         };
-    
+
         match fs::read(&asset_path) {
             Ok(asset_bytes) => {
-                println!("🖼️ Successfully serving asset: {} ({} bytes)", asset_path, asset_bytes.len());
-                let response = Response::from_data(asset_bytes)
-                    .with_header(content_type_header(content_type));
+                println!(
+                    "🖼️ Successfully serving asset: {} ({} bytes)",
+                    asset_path,
+                    asset_bytes.len()
+                );
+                let response =
+                    Response::from_data(asset_bytes).with_header(content_type_header(content_type));
                 if let Err(e) = request.respond(response) {
                     eprintln!("‼️ Error sending asset response: {}", e);
                 }
             }
             Err(e) => {
-                eprintln!("‼️ Error reading asset file {}: {} (does the file exist?)", asset_path, e);
+                eprintln!(
+                    "‼️ Error reading asset file {}: {} (does the file exist?)",
+                    asset_path, e
+                );
 
                 if let Ok(metadata) = fs::metadata("./assets") {
                     if metadata.is_dir() {
-                        eprintln!("📁 The assets directory exists, but the specific file wasn't found");
+                        eprintln!(
+                            "📁 The assets directory exists, but the specific file wasn't found"
+                        );
                     } else {
                         eprintln!("❌ Found 'assets' but it's not a directory!");
                     }

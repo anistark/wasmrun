@@ -1,8 +1,8 @@
 mod cli;
+mod compiler;
 mod server;
 mod template;
 mod utils;
-mod compiler;
 
 fn main() {
     // Parse command line arguments
@@ -40,23 +40,32 @@ fn main() {
                 }
             }
         }
-        
+
         Some(cli::Commands::Compile { path, output }) => {
             let output_dir = output.unwrap_or_else(|| ".".to_string());
-            
+
             // Detect project language and operating system
             let language = compiler::detect_project_language(&path);
             let os = compiler::detect_operating_system();
-            
+
             // Get system information
             compiler::print_system_info();
-            
+
             println!("\n\x1b[1;34m╭\x1b[0m");
             println!("  🌀 \x1b[1;36mChakra WASM Compiler\x1b[0m\n");
-            println!("  📂 \x1b[1;34mProject Path:\x1b[0m \x1b[1;33m{}\x1b[0m", path);
-            println!("  🔍 \x1b[1;34mDetected Language:\x1b[0m \x1b[1;32m{:?}\x1b[0m", language);
-            println!("  📤 \x1b[1;34mOutput Directory:\x1b[0m \x1b[1;33m{}\x1b[0m", output_dir);
-            
+            println!(
+                "  📂 \x1b[1;34mProject Path:\x1b[0m \x1b[1;33m{}\x1b[0m",
+                path
+            );
+            println!(
+                "  🔍 \x1b[1;34mDetected Language:\x1b[0m \x1b[1;32m{:?}\x1b[0m",
+                language
+            );
+            println!(
+                "  📤 \x1b[1;34mOutput Directory:\x1b[0m \x1b[1;33m{}\x1b[0m",
+                output_dir
+            );
+
             // Check for missing tools
             let missing_tools = compiler::get_missing_tools(&language, &os);
             if !missing_tools.is_empty() {
@@ -69,14 +78,17 @@ fn main() {
                 return;
             }
             println!("\x1b[1;34m╰\x1b[0m\n");
-            
+
             // Compile WASM
             match compiler::create_wasm_from_project(&path, &output_dir) {
                 Ok(wasm_path) => {
                     // WASM compiled successfully
                     println!("\n\x1b[1;34m╭\x1b[0m");
                     println!("  ✅ \x1b[1;36mWASM Compiled Successfully\x1b[0m\n");
-                    println!("  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m", wasm_path);
+                    println!(
+                        "  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m",
+                        wasm_path
+                    );
                     println!("\n  🚀 \x1b[1;33mRun it with:\x1b[0m");
                     println!("     \x1b[1;37mchakra --path {}\x1b[0m", wasm_path);
                     println!("\x1b[1;34m╰\x1b[0m");

@@ -5,23 +5,23 @@ use std::process::Command;
 /// Build a WASM file from a Rust project
 pub fn build_wasm(project_path: &str, output_dir: &str) -> Result<String, String> {
     println!("🦀 Building WASM from Rust project at: {}", project_path);
-    
+
     // Check if wasm32 target is installed
     let check_target = Command::new("rustup")
         .args(["target", "list", "--installed"])
         .output()
         .map_err(|e| format!("Failed to run rustup: {}", e))?;
-    
+
     let target_output = String::from_utf8_lossy(&check_target.stdout);
     if !target_output.contains("wasm32-unknown-unknown") {
         // Target not installed, try to install it
         println!("⚙️ Installing wasm32-unknown-unknown target...");
-        
+
         let install_target = Command::new("rustup")
             .args(["target", "add", "wasm32-unknown-unknown"])
             .output()
             .map_err(|e| format!("Failed to install wasm32 target: {}", e))?;
-        
+
         if !install_target.status.success() {
             return Err(format!(
                 "Failed to install wasm32 target: {}",
@@ -29,26 +29,26 @@ pub fn build_wasm(project_path: &str, output_dir: &str) -> Result<String, String
             ));
         }
     }
-    
+
     // Build the project
     println!("🔨 Building the project...");
-    
+
     let build_output = Command::new("cargo")
         .current_dir(project_path)
         .args(["build", "--target", "wasm32-unknown-unknown", "--release"])
         .output()
         .map_err(|e| format!("Failed to build project: {}", e))?;
-    
+
     if !build_output.status.success() {
         return Err(format!(
             "Build failed: {}",
             String::from_utf8_lossy(&build_output.stderr)
         ));
     }
-    
+
     // Find the wasm file
     let target_dir = Path::new(project_path).join("target/wasm32-unknown-unknown/release");
-    
+
     let mut wasm_file = None;
     if let Ok(entries) = fs::read_dir(&target_dir) {
         for entry in entries.flatten() {
@@ -60,16 +60,18 @@ pub fn build_wasm(project_path: &str, output_dir: &str) -> Result<String, String
             }
         }
     }
-    
-    let wasm_path = wasm_file.ok_or_else(|| "No WASM file found in target directory".to_string())?;
-    
+
+    let wasm_path =
+        wasm_file.ok_or_else(|| "No WASM file found in target directory".to_string())?;
+
     // Create output directory if it doesn't exist
     let output_path = Path::new(output_dir);
-    fs::create_dir_all(output_path).map_err(|e| format!("Failed to create output directory: {}", e))?;
-    
+    fs::create_dir_all(output_path)
+        .map_err(|e| format!("Failed to create output directory: {}", e))?;
+
     // Copy the wasm file to the output directory
     let output_file = output_path.join(wasm_path.file_name().unwrap());
     fs::copy(&wasm_path, &output_file).map_err(|e| format!("Failed to copy WASM file: {}", e))?;
-    
+
     Ok(output_file.to_string_lossy().to_string())
 }

@@ -176,7 +176,8 @@ install:
 tag-release:
     git tag v{{version}}
     @echo "Created tag v{{version}}"
-    @echo "Run 'git push --tags' to push the tag"
+    echo "Pushing tag v{{version}} to remote..."
+    git push origin "v{{version}}"
 
 # Create GitHub release
 gh-release:

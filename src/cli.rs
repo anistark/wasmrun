@@ -23,13 +23,13 @@ pub struct Args {
 pub enum Commands {
     /// Stop the running Chakra server
     Stop,
-    
+
     /// Compile a project to WebAssembly
     Compile {
         /// Path to the project directory
         #[arg(short = 'p', long)]
         path: String,
-        
+
         /// Output directory for the WASM file (default: current directory)
         #[arg(short = 'o', long)]
         output: Option<String>,
