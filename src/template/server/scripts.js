@@ -1,4 +1,4 @@
-// Helper function to log messages
+// Log messages
 function log(message, type = 'info') {
     const logContainer = document.getElementById('log-container');
     const logEntry = document.createElement('div');
@@ -15,7 +15,7 @@ function updateStatus(message, isError = false) {
     statusEl.className = isError ? 'error' : 'success';
 }
 
-// Function to load WASM with better error handling
+// Load WASM with retries
 async function loadWasmWithRetries(retries = 5) {
     let attempt = 0;
     
@@ -30,14 +30,10 @@ async function loadWasmWithRetries(retries = 5) {
             }
             
             log(`WASM file fetched successfully, analyzing...`, 'success');
-            
-            // First, try to analyze the imports needed by the module
             const wasmBytes = await response.clone().arrayBuffer();
-            
             log(`WASM module size: ${wasmBytes.byteLength} bytes`, 'info');
             
             try {
-                // Create a basic import object
                 const importObject = {
                     env: {
                         memory: new WebAssembly.Memory({ initial: 256 }),
@@ -46,8 +42,6 @@ async function loadWasmWithRetries(retries = 5) {
                         }
                     }
                 };
-                
-                // Try to instantiate
                 log(`Attempting to instantiate WASM module...`, 'info');
                 const { instance, module } = await WebAssembly.instantiateStreaming(
                     response,
@@ -82,26 +76,18 @@ async function loadWasmWithRetries(retries = 5) {
                         }
                     }
                 }
-                
-                // Make instance global for debugging
                 window.wasmInstance = instance;
                 log('WASM instance exported as "window.wasmInstance" for console access', 'info');
                 
-                return; // Successfully loaded and instantiated
+                return;
             } catch (err) {
-                // This is where we catch import errors
                 log(`Error during instantiation: ${err.message}`, 'error');
-                
                 if (err.message.includes('function import requires a callable') || 
                     err.message.includes('Import #0')) {
-                    
-                    // This is likely a wasm-bindgen module that needs JS glue code
                     updateStatus(`⚠️ This appears to be a wasm-bindgen module`, false);
                     log(`This WASM file appears to be compiled with wasm-bindgen`, 'info');
                     log(`These modules require their JavaScript glue code to run`, 'info');
                     log(`Try running the original JavaScript file that loads this WASM`, 'info');
-                    
-                    // Display more helpful information about expected usage
                     const infoBox = document.createElement('div');
                     infoBox.className = 'info-box';
                     infoBox.innerHTML = `
@@ -117,10 +103,10 @@ async function loadWasmWithRetries(retries = 5) {
                     `;
                     document.body.appendChild(infoBox);
                     
-                    return; // Stop trying after showing detailed info
+                    return;
                 }
                 
-                throw err; // Re-throw if it's not an import error
+                throw err;
             }
             
         } catch (err) {
@@ -138,5 +124,4 @@ async function loadWasmWithRetries(retries = 5) {
     }
 }
 
-// Start loading the WASM with retry logic
 loadWasmWithRetries();

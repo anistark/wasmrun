@@ -18,7 +18,17 @@ src
 │       ├── mod.rs      # Server template module
 │       ├── scripts.js  # Browser JavaScript
 │       └── style.css   # CSS styles
-└── utils.rs            # Utility functions
+├── utils.rs            # Utility functions
+└── compiler            # WebAssembly compilation module
+    ├── detect.rs       # Language detection functionality
+    ├── language        # Language-specific implementations
+    │   ├── asc.rs      # AssemblyScript compiler
+    │   ├── c.rs        # C compiler (via Emscripten)
+    │   ├── go.rs       # Go compiler (via TinyGo)
+    │   ├── mod.rs      # Language module exports
+    │   ├── python.rs   # Python compiler
+    │   └── rust.rs     # Rust compiler (wasm32 target)
+    └── mod.rs          # Main WebAssembly builder interface
 ```
 
 ## Development Setup

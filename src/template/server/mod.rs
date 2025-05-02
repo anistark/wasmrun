@@ -1,12 +1,11 @@
 use std::fs;
 use std::path::Path;
 
-// Include the template files at compile time
 const INDEX_HTML: &str = include_str!("index.html");
 const STYLE_CSS: &str = include_str!("style.css");
 const SCRIPTS_JS: &str = include_str!("scripts.js");
 
-/// Generate the complete HTML by combining all template parts and replacing placeholders
+/// Generate the complete HTML
 pub fn generate_html(filename: &str) -> String {
     INDEX_HTML
         .replace("$FILENAME$", filename)

@@ -10,7 +10,7 @@ pub struct Args {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// Path to .wasm file (only required for the start command)
+    /// Path to .wasm file
     #[arg(short = 'p', long)]
     pub path: Option<String>,
 
@@ -23,18 +23,25 @@ pub struct Args {
 pub enum Commands {
     /// Stop the running Chakra server
     Stop,
+    
+    /// Compile a project to WebAssembly
+    Compile {
+        /// Path to the project directory
+        #[arg(short = 'p', long)]
+        path: String,
+        
+        /// Output directory for the WASM file (default: current directory)
+        #[arg(short = 'o', long)]
+        output: Option<String>,
+    },
 }
 
-/// Get enhanced version string with colors
+/// Get version string
 fn get_version_string() -> &'static str {
-    // Note: We need to use a static string because clap expects static lifetime for version
-    // This means we can't use dynamic formatting with colors here directly
-    // We'll rely on version printing hooks instead
     env!("CARGO_PKG_VERSION")
 }
 
 pub fn get_args() -> Args {
-    // Print our custom styled version if the user asked for the version
     if std::env::args().any(|arg| arg == "-V" || arg == "--version") {
         print_styled_version();
         std::process::exit(0);
@@ -43,7 +50,7 @@ pub fn get_args() -> Args {
     Args::parse()
 }
 
-/// Print a styled version output
+/// Print styled version output
 fn print_styled_version() {
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");

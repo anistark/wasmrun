@@ -8,7 +8,7 @@ use tiny_http::{Request, Response, Server};
 
 const PID_FILE: &str = "/tmp/chakra_server.pid";
 
-/// Helper function to check if a server is currently running
+/// Check if a server is currently running
 pub fn is_server_running() -> bool {
     if !Path::new(PID_FILE).exists() {
         return false;
@@ -16,11 +16,10 @@ pub fn is_server_running() -> bool {
 
     if let Ok(pid_str) = fs::read_to_string(PID_FILE) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            // On Unix-like systems, checking if a process exists
+            // Checking if a process exists
             let ps_command = Command::new("ps").arg("-p").arg(pid.to_string()).output();
 
             if let Ok(output) = ps_command {
-                // If ps returns success and has more than just the header line,
                 // the process exists
                 return output.status.success()
                     && String::from_utf8_lossy(&output.stdout).lines().count() > 1;
@@ -31,9 +30,9 @@ pub fn is_server_running() -> bool {
     false
 }
 
-/// Helper function to stop the existing server using the PID stored in the file
+/// Stop the existing server using the PID stored in the file
 pub fn stop_existing_server() -> Result<(), String> {
-    // Check if the server is running first
+    // Check if the server is running
     if !is_server_running() {
         // No server is running, clean up any stale PID file
         if Path::new(PID_FILE).exists() {
@@ -44,11 +43,9 @@ pub fn stop_existing_server() -> Result<(), String> {
             }
         }
 
-        // Not an error, just return success as there's no server to stop
         return Ok(());
     }
 
-    // At this point, we know the server is running and the PID file exists
     let pid_str =
         fs::read_to_string(PID_FILE).map_err(|e| format!("Failed to read PID file: {}", e))?;
 
@@ -68,20 +65,20 @@ pub fn stop_existing_server() -> Result<(), String> {
         println!("💀 Existing Chakra server terminated successfully.");
         Ok(())
     } else {
-        // Get the error output from kill command
+        // Failed to stop the server
         let error_msg = String::from_utf8_lossy(&kill_command.stderr);
         Err(format!("Failed to stop Chakra server: {}", error_msg))
     }
 }
 
-/// Function to check if the given port is available (not in use)
+/// Check if the given port is available
 fn is_port_available(port: u16) -> bool {
     TcpListener::bind(format!("0.0.0.0:{port}")).is_ok()
 }
 
 /// Run server with the given WASM file and port
 pub fn run_server(path: &str, port: u16) -> Result<(), String> {
-    // First, try to stop any running server
+    // Check if a server is already running
     if is_server_running() {
         match stop_existing_server() {
             Ok(_) => println!("💀 Existing server stopped successfully."),
@@ -114,7 +111,7 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| path.to_string());
 
-    // Get file size in a human-readable format
+    // Get file size
     let file_size = match fs::metadata(path) {
         Ok(metadata) => {
             let bytes = metadata.len();
@@ -129,12 +126,10 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
         Err(_) => "unknown size".to_string(),
     };
 
-    // Display a nice box with server info - corners only design
     let url = format!("http://localhost:{}", port);
 
     println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  🌀 \x1b[1;36mChakra WASM Server\x1b[0m");
-    println!();
+    println!("  🌀 \x1b[1;36mChakra WASM Server\x1b[0m\n");
     println!("  🚀 \x1b[1;34mServer URL:\x1b[0m \x1b[4;36m{}\x1b[0m", url);
     println!(
         "  🔌 \x1b[1;34mListening on port:\x1b[0m \x1b[1;33m{}\x1b[0m",
@@ -156,8 +151,7 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
         "  🆔 \x1b[1;34mServer PID:\x1b[0m \x1b[0;37m{}\x1b[0m",
         std::process::id()
     );
-    println!();
-    println!("  \x1b[0;90mPress Ctrl+C to stop the server\x1b[0m");
+    println!("\n  \x1b[0;90mPress Ctrl+C to stop the server\x1b[0m");
     println!("\x1b[1;34m╰\x1b[0m");
     println!("\n🌐 Opening browser...");
 
@@ -220,7 +214,6 @@ fn handle_request(request: Request, wasm_filename: &str, wasm_path: &str) {
             }
         }
     } else if url.starts_with("/assets/") {
-        // Extract the asset filename from the URL (remove the /assets/ prefix)
         let asset_filename = url.strip_prefix("/assets/").unwrap_or("");
         let asset_path = format!("./assets/{}", asset_filename);
         // TODO: Remove this debug print in production

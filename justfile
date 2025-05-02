@@ -23,6 +23,8 @@ build-release:
 # Clean the project
 clean:
     cargo clean
+    rm -rf examples || true
+    rm -rf example.* || true
 
 # Run with a test WASM file (replace with your test file path)
 run WASM_FILE="./examples/simple.wasm":
@@ -114,8 +116,6 @@ example-wasm-rust:
     
     // Standard main function with proper return type
     fn main() {
-        // This won't actually run in WebAssembly context
-        // It's just here to satisfy the Rust compiler
         println!("Hello from Rust!");
     }
     EOF
