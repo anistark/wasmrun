@@ -45,6 +45,13 @@ pub enum Commands {
         #[arg(short = 'd', long)]
         detailed: bool,
     },
+
+    /// Perform detailed inspection on a WebAssembly file
+    Inspect {
+        /// Path to the WASM file
+        #[arg(short = 'p', long)]
+        path: String,
+    },
 }
 
 /// Get version string

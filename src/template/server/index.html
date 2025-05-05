@@ -18,7 +18,100 @@
     <main>
         <h2>Running: $FILENAME$</h2>
         <div id="status" class="info">⏳ Loading WASM module...</div>
-        <div id="log-container" class="log-container"></div>
+        
+        <div class="container">
+            <div class="tabs">
+                <button class="tab-button active" data-tab="console">Console</button>
+                <!-- <button class="tab-button" data-tab="filesystem">Filesystem</button> -->
+                <button class="tab-button" data-tab="info">Module Info</button>
+            </div>
+            
+            <div class="tab-content">
+                <div id="console-tab" class="tab-pane active">
+                    <div id="log-container" class="log-container"></div>
+                </div>
+                
+                <div id="filesystem-tab" class="tab-pane">
+                    <div class="wasi-explorer">
+                        <p>No filesystem available. This module may not use WASI.</p>
+                    </div>
+                </div>
+                
+                <div id="info-tab" class="tab-pane">
+                    <div class="module-info">
+                        <h3>WebAssembly Module Information</h3>
+                        <div id="module-details">
+                            <p>Module will be analyzed after loading...</p>
+                        </div>
+                        
+                        <h3>WASI Support</h3>
+                        <p>Chakra includes a full WASI implementation for running WebAssembly System Interface modules directly in your browser.</p>
+                        
+                        <table class="wasi-features">
+                            <thead>
+                                <tr>
+                                    <th>Feature</th>
+                                    <th>Status</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Virtual Filesystem</td>
+                                    <td class="status-supported">Supported</td>
+                                    <td>Full filesystem with directory structure, file creation and manipulation</td>
+                                </tr>
+                                <tr>
+                                    <td>Standard I/O</td>
+                                    <td class="status-supported">Supported</td>
+                                    <td>stdout, stderr with console integration</td>
+                                </tr>
+                                <tr>
+                                    <td>Environment Variables</td>
+                                    <td class="status-supported">Supported</td>
+                                    <td>Reading environment variables</td>
+                                </tr>
+                                <tr>
+                                    <td>Command Arguments</td>
+                                    <td class="status-supported">Supported</td>
+                                    <td>Access to command-line arguments</td>
+                                </tr>
+                                <tr>
+                                    <td>File I/O</td>
+                                    <td class="status-supported">Supported</td>
+                                    <td>Read/write operations on files</td>
+                                </tr>
+                                <tr>
+                                    <td>Random Number Generation</td>
+                                    <td class="status-supported">Supported</td>
+                                    <td>Secure random number generation using crypto API</td>
+                                </tr>
+                                <tr>
+                                    <td>Time Functions</td>
+                                    <td class="status-supported">Supported</td>
+                                    <td>Access to system time and high-precision timers</td>
+                                </tr>
+                                <tr>
+                                    <td>Pre-opened Directories</td>
+                                    <td class="status-supported">Supported</td>
+                                    <td>Access to pre-opened filesystem paths</td>
+                                </tr>
+                                <tr>
+                                    <td>Network Sockets</td>
+                                    <td class="status-unsupported">Unsupported</td>
+                                    <td>Network operations (will be added in future updates)</td>
+                                </tr>
+                                <tr>
+                                    <td>Multi-threading</td>
+                                    <td class="status-unsupported">Unsupported</td>
+                                    <td>Thread-related APIs (will be added in future updates)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
     </main>
     
     <footer>
@@ -27,7 +120,7 @@
                 <img src="/assets/logo.png" alt="Chakra Logo" width="32" height="32">
                 <span>Chakra</span>
             </div>
-            <p>Powered by Chakra</p>
+            <p>Powered by Chakra with full WASI support</p>
             <div class="social-links">
                 <a href="https://github.com/anistark/chakra" target="_blank" title="GitHub" class="social-icon">
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

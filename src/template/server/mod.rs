@@ -4,6 +4,7 @@ use std::path::Path;
 const INDEX_HTML: &str = include_str!("index.html");
 const STYLE_CSS: &str = include_str!("style.css");
 const SCRIPTS_JS: &str = include_str!("scripts.js");
+const WASI_JS: &str = include_str!("chakra_wasi_impl.js");
 
 /// Generate the complete HTML
 pub fn generate_html(filename: &str) -> String {
@@ -16,7 +17,8 @@ pub fn generate_html(filename: &str) -> String {
         .replace(
             "<!-- @script-placeholder -->",
             &format!(
-                "<script type=\"module\">\n{}\n    </script>",
+                "<script>\n// Chakra WASI implementation\n{}\n</script>\n<script>\n// Main script\n{}\n</script>",
+                WASI_JS,
                 process_scripts(filename)
             ),
         )
@@ -42,6 +44,9 @@ pub fn generate_html_dev(filename: &str) -> String {
 
     let js = fs::read_to_string(template_dir.join("scripts.js"))
         .unwrap_or_else(|_| "// Failed to load scripts.js".to_string());
+        
+    let wasi_js = fs::read_to_string(template_dir.join("chakra_wasi_impl.js"))
+        .unwrap_or_else(|_| "// Failed to load chakra_wasi_impl.js".to_string());
 
     html.replace("$FILENAME$", filename)
         .replace(
@@ -51,7 +56,8 @@ pub fn generate_html_dev(filename: &str) -> String {
         .replace(
             "<!-- @script-placeholder -->",
             &format!(
-                "<script type=\"module\">\n{}\n    </script>",
+                "<script>\n// WASI implementation\n{}\n\n// Main script\n{}\n    </script>",
+                wasi_js,
                 js.replace("$FILENAME$", filename)
             ),
         )

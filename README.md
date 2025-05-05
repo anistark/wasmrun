@@ -1,19 +1,22 @@
 # Chakra
 
-![Chakra Logo](./assets/logo.png)
-
-Chakra is a lightweight tool that lets you run WebAssembly (WASM) modules directly in your browser with zero configuration.
-
 [![Crates.io Version](https://img.shields.io/crates/v/chakra)
 ](https://crates.io/crates/chakra) [![Crates.io Downloads](https://img.shields.io/crates/d/chakra)](https://crates.io/crates/chakra) [![Crates.io Downloads (latest version)](https://img.shields.io/crates/dv/chakra)](https://crates.io/crates/chakra) [![Open Source](https://img.shields.io/badge/open-source-brightgreen)](https://github.com/anistark/chakra) [![Contributors](https://img.shields.io/github/contributors/anistark/chakra)](https://github.com/anistark/chakra/graphs/contributors) ![maintenance-status](https://img.shields.io/badge/maintenance-actively--developed-brightgreen.svg)
 
+![Chakra Logo](./assets/banner.png)
+
+> Chakra is a WebAssembly (WASM) runtime CLI tool.
+
 ## Features
 
-- 🚀 **Simple**: Just point Chakra at your .wasm file and go
-- 🌐 **Browser-based**: Instantly opens your default browser
-- 📊 **Interactive console**: View execution results and logs
-- 🔍 **Smart detection**: Identifies common entry points [slightly buggy]
-- 🧩 **Diagnostic tools**: Helps troubleshoot WASM modules [TODO]
+- 🚀 Start Chakra Server by pointing to your .wasm file/project and get a ready playground on your browser.
+- 🌐 Instantly opens your default browser with your wasm project and other necessary dependencies pre-loaded.
+- 💻 View execution results and logs on an interactive console.
+- 🔍 Identifies common entry points and runs your wasm project.
+- 📦 Compile your project to wasm using CLI tool directly. (Needs external dependencies.) [WIP]
+- 🧩 Verify and inspect your wasm file weather generated via chakra or any other tool. [WIP]
+
+> 👋 It's highly experimental, but fast iterating. Welcoming contributors and support to help bring out this project even better!
 
 ## Installation
 

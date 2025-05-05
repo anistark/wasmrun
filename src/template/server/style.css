@@ -202,3 +202,253 @@ footer {
         margin: 1rem 0;
     }
 }
+
+/* WASI UI Styles */
+
+/* Tab system */
+.container {
+    max-width: 1000px;
+    margin: 1.5rem auto;
+    border-radius: 6px;
+    overflow: hidden;
+    background-color: #1e1e2e;
+    border: 1px solid #313244;
+}
+
+.tabs {
+    display: flex;
+    background-color: #252b37;
+    border-bottom: 1px solid #313244;
+}
+
+.tab-button {
+    padding: 0.8rem 1.5rem;
+    background: none;
+    border: none;
+    color: #cdd6f4;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background-color 0.2s;
+}
+
+.tab-button:hover {
+    background-color: #313244;
+}
+
+.tab-button.active {
+    background-color: #1e1e2e;
+    border-bottom: 2px solid #94e2d5;
+}
+
+.tab-content {
+    position: relative;
+    min-height: 400px;
+}
+
+.tab-pane {
+    display: none;
+    padding: 1rem;
+}
+
+.tab-pane.active {
+    display: block;
+}
+
+/* WASI File Explorer */
+.wasi-explorer {
+    display: flex;
+    flex-direction: column;
+    height: 400px;
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+}
+
+.wasi-header {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid #313244;
+}
+
+.wasi-header h3 {
+    margin: 0;
+    margin-right: auto;
+    font-size: 1.2rem;
+}
+
+.wasi-button {
+    padding: 0.5rem 0.8rem;
+    margin-left: 0.5rem;
+    background-color: #313244;
+    border: none;
+    border-radius: 4px;
+    color: #cdd6f4;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: background-color 0.2s;
+}
+
+.wasi-button:hover {
+    background-color: #45475a;
+}
+
+.wasi-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.wasi-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.wasi-sidebar {
+    width: 25%;
+    border-right: 1px solid #313244;
+    padding: 0.5rem;
+    overflow-y: auto;
+}
+
+.wasi-sidebar h4 {
+    margin: 0 0 0.8rem 0;
+    font-size: 1rem;
+    color: #cdd6f4;
+}
+
+.wasi-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.wasi-file-header {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid #313244;
+}
+
+.wasi-file-header h4 {
+    margin: 0;
+    margin-right: auto;
+    font-size: 1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: monospace;
+}
+
+.wasi-file-actions {
+    display: flex;
+}
+
+.wasi-file-editor {
+    flex: 1;
+    background-color: #11111b;
+    color: #cdd6f4;
+    border: none;
+    padding: 0.8rem;
+    font-family: monospace;
+    font-size: 0.9rem;
+    resize: none;
+    outline: none;
+}
+
+.wasi-file-tree {
+    font-family: monospace;
+    font-size: 0.9rem;
+}
+
+.wasi-file-tree-file,
+.wasi-file-tree-dir {
+    padding: 0.3rem 0.5rem;
+    cursor: pointer;
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wasi-file-tree-file:hover,
+.wasi-file-tree-dir:hover {
+    background-color: #313244;
+}
+
+.wasi-file-tree-dir {
+    color: #cba6f7;
+}
+
+.wasi-file-tree-dir::before {
+    content: '📁 ';
+}
+
+.wasi-file-tree-dir.expanded::before {
+    content: '📂 ';
+}
+
+.wasi-file-tree-file::before {
+    content: '📄 ';
+}
+
+.wasi-file-children {
+    margin-left: 1rem;
+    border-left: 1px dashed #45475a;
+    padding-left: 0.5rem;
+}
+
+/* Module Info tab */
+.module-info {
+    padding: 1rem;
+}
+
+.module-info h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 1.2rem;
+}
+
+.wasi-features {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+}
+
+.wasi-features th {
+    text-align: left;
+    padding: 0.5rem;
+    background-color: #252b37;
+    border-bottom: 1px solid #313244;
+}
+
+.wasi-features td {
+    padding: 0.5rem;
+    border-bottom: 1px solid #313244;
+}
+
+.status-supported {
+    color: #a6e3a1;
+}
+
+.status-partial {
+    color: #f9e2af;
+}
+
+.status-unsupported {
+    color: #f38ba8;
+}
+
+/* Responsiveness */
+@media (max-width: 768px) {
+    .wasi-content {
+        flex-direction: column;
+    }
+    
+    .wasi-sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid #313244;
+        max-height: 150px;
+    }
+}

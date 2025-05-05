@@ -125,6 +125,22 @@ fn main() {
             }
         }
 
+        // Inspect wasm file
+        Some(cli::Commands::Inspect { path }) => {
+            println!("🔍 Inspecting WebAssembly file: {}", path);
+            match verify::print_detailed_binary_info(&path) {
+                Ok(()) => {
+                    println!("Inspection completed successfully.");
+                }
+                Err(e) => {
+                    eprintln!("\n\x1b[1;34m╭\x1b[0m");
+                    eprintln!("  ❌ \x1b[1;31mInspection Error:\x1b[0m");
+                    eprintln!("  \x1b[0;91m{}\x1b[0m", e);
+                    eprintln!("\x1b[1;34m╰\x1b[0m");
+                }
+            }
+        },
+
         // Default case: Start the chakra server
         None => {
             if let Some(path) = args.path.clone() {
