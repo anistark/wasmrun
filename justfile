@@ -183,40 +183,35 @@ tag-release:
 gh-release:
     #!/usr/bin/env bash
     set -euo pipefail
-    
+
     # Check if gh CLI is installed
     if ! command -v gh &> /dev/null; then
         echo "Error: GitHub CLI not installed. Please install it from https://cli.github.com/"
         exit 1
     fi
-    
+
     # Check if user is logged in to GitHub
     if ! gh auth status &> /dev/null; then
         echo "Error: Not logged in to GitHub. Please run 'gh auth login'"
         exit 1
     fi
-    
-    # Prompt for release title/codename with default
-    DEFAULT_TITLE="Chakra v{{version}}"
-    read -p "Enter release title/codename [${DEFAULT_TITLE}]: " RELEASE_TITLE
-    RELEASE_TITLE=${RELEASE_TITLE:-$DEFAULT_TITLE}
-    
+
     # Create a tag if it doesn't exist
     if ! git rev-parse "v{{version}}" >/dev/null 2>&1; then
-        git tag -a "v{{version}}" -m "Release ${RELEASE_TITLE}"
+        git tag -a "v{{version}}"
         echo "✓ Created tag v{{version}}"
     else
         echo "✓ Tag v{{version}} already exists"
     fi
-    
+
     # Push the tag to remote
     echo "Pushing tag v{{version}} to remote..."
     git push origin "v{{version}}"
-    
+
     # Create GitHub release with auto-generated release notes
     gh release create "v{{version}}" \
         "./target/release/chakra"
-    
+
     echo "✓ GitHub release v{{version}} created successfully!"
     echo "View it at: https://github.com/{{repo}}/releases/tag/v{{version}}"
 
