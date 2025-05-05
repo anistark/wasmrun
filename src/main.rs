@@ -109,7 +109,7 @@ fn main() {
         // Verify wasm file
         Some(cli::Commands::Verify { path, detailed }) => {
             println!("🔍 Verifying WebAssembly file: {}", path);
-            
+
             match verify::verify_wasm(&path) {
                 Ok(result) => {
                     // Display verification results

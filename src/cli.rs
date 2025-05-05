@@ -34,13 +34,13 @@ pub enum Commands {
         #[arg(short = 'o', long)]
         output: Option<String>,
     },
-    
+
     /// Verify WebAssembly file
     Verify {
         /// Path to the WASM file
         #[arg(short = 'p', long)]
         path: String,
-        
+
         /// Show detailed information about the WASM module
         #[arg(short = 'd', long)]
         detailed: bool,

@@ -215,8 +215,6 @@ gh-release:
     
     # Create GitHub release with auto-generated release notes
     gh release create "v{{version}}" \
-        --title "${RELEASE_TITLE}" \
-        --generate-notes \
         "./target/release/chakra"
     
     echo "✓ GitHub release v{{version}} created successfully!"
