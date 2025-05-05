@@ -3,12 +3,14 @@ mod compiler;
 mod server;
 mod template;
 mod utils;
+mod verify;
 
 fn main() {
     // Parse command line arguments
     let args = cli::get_args();
 
     match args.command {
+        // Stop the running Chakra server
         Some(cli::Commands::Stop) => {
             // Check if a server is running before attempting to stop it
             if !server::is_server_running() {
@@ -41,6 +43,7 @@ fn main() {
             }
         }
 
+        // Compile project to WebAssembly
         Some(cli::Commands::Compile { path, output }) => {
             let output_dir = output.unwrap_or_else(|| ".".to_string());
 
@@ -103,8 +106,27 @@ fn main() {
             }
         }
 
+        // Verify wasm file
+        Some(cli::Commands::Verify { path, detailed }) => {
+            println!("🔍 Verifying WebAssembly file: {}", path);
+            
+            match verify::verify_wasm(&path) {
+                Ok(result) => {
+                    // Display verification results
+                    verify::print_verification_results(&path, &result, detailed);
+                }
+                Err(e) => {
+                    // Error verifying the file
+                    println!("\n\x1b[1;34m╭\x1b[0m");
+                    println!("  ❌ \x1b[1;31mVerification Error:\x1b[0m");
+                    println!("  \x1b[0;91m{}\x1b[0m", e);
+                    println!("\x1b[1;34m╰\x1b[0m");
+                }
+            }
+        }
+
+        // Default case: Start the chakra server
         None => {
-            // Default to start if no subcommand is provided
             if let Some(path) = args.path.clone() {
                 // Run the server with the provided path and port
                 if let Err(e) = server::run_server(&path, args.port) {

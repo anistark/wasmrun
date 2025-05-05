@@ -49,6 +49,20 @@ Specify a custom port (default is `8420`):
 chakra --path ./path/to/your/file.wasm --port 3000
 ```
 
+### Verify WASM File
+
+Verify if a WebAssembly file is in the correct format:
+
+```sh
+chakra verify --path ./path/to/your/file.wasm
+```
+
+For detailed output:
+
+```sh
+chakra verify --path ./path/to/your/file.wasm --detailed
+```
+
 ### Stop Server
 
 Stop any running Chakra server:
