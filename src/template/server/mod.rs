@@ -44,7 +44,7 @@ pub fn generate_html_dev(filename: &str) -> String {
 
     let js = fs::read_to_string(template_dir.join("scripts.js"))
         .unwrap_or_else(|_| "// Failed to load scripts.js".to_string());
-        
+
     let wasi_js = fs::read_to_string(template_dir.join("chakra_wasi_impl.js"))
         .unwrap_or_else(|_| "// Failed to load chakra_wasi_impl.js".to_string());
 

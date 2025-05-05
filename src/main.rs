@@ -139,7 +139,7 @@ fn main() {
                     eprintln!("\x1b[1;34m╰\x1b[0m");
                 }
             }
-        },
+        }
 
         // Default case: Start the chakra server
         None => {

@@ -482,8 +482,17 @@ pub fn print_detailed_binary_info(path: &str) -> Result<(), String> {
 
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  🔬 \x1b[1;36mDetailed WASM Binary Analysis\x1b[0m\n");
-    println!("  📄 \x1b[1;34mFile:\x1b[0m \x1b[1;33m{}\x1b[0m", Path::new(path).file_name().unwrap_or_default().to_string_lossy());
-    println!("  💾 \x1b[1;34mSize:\x1b[0m \x1b[1;33m{} bytes\x1b[0m", wasm_bytes.len());
+    println!(
+        "  📄 \x1b[1;34mFile:\x1b[0m \x1b[1;33m{}\x1b[0m",
+        Path::new(path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+    );
+    println!(
+        "  💾 \x1b[1;34mSize:\x1b[0m \x1b[1;33m{} bytes\x1b[0m",
+        wasm_bytes.len()
+    );
 
     // Check magic bytes
     if wasm_bytes.len() < 8 {
@@ -493,8 +502,10 @@ pub fn print_detailed_binary_info(path: &str) -> Result<(), String> {
     }
 
     let magic_bytes = &wasm_bytes[0..4];
-    println!("  🔑 \x1b[1;34mMagic bytes:\x1b[0m \x1b[1;33m{:02X} {:02X} {:02X} {:02X}\x1b[0m", 
-        magic_bytes[0], magic_bytes[1], magic_bytes[2], magic_bytes[3]);
+    println!(
+        "  🔑 \x1b[1;34mMagic bytes:\x1b[0m \x1b[1;33m{:02X} {:02X} {:02X} {:02X}\x1b[0m",
+        magic_bytes[0], magic_bytes[1], magic_bytes[2], magic_bytes[3]
+    );
 
     if magic_bytes == b"\0asm" {
         println!("  ✅ \x1b[1;32mValid WebAssembly magic bytes\x1b[0m");
@@ -506,7 +517,10 @@ pub fn print_detailed_binary_info(path: &str) -> Result<(), String> {
 
     // Check version
     let version = u32::from_le_bytes([wasm_bytes[4], wasm_bytes[5], wasm_bytes[6], wasm_bytes[7]]);
-    println!("  📊 \x1b[1;34mWASM version:\x1b[0m \x1b[1;33m{}\x1b[0m", version);
+    println!(
+        "  📊 \x1b[1;34mWASM version:\x1b[0m \x1b[1;33m{}\x1b[0m",
+        version
+    );
 
     if version != 1 {
         println!("  ⚠️ \x1b[1;33mUnexpected WASM version (expected 1)\x1b[0m");
@@ -515,88 +529,102 @@ pub fn print_detailed_binary_info(path: &str) -> Result<(), String> {
     // Analyze sections
     let mut offset = 8;
     println!("\n  📋 \x1b[1;34mSection analysis:\x1b[0m");
-    
+
     let section_names = [
-        "Custom", "Type", "Import", "Function", "Table", 
-        "Memory", "Global", "Export", "Start", "Element",
-        "Code", "Data", "DataCount"
+        "Custom",
+        "Type",
+        "Import",
+        "Function",
+        "Table",
+        "Memory",
+        "Global",
+        "Export",
+        "Start",
+        "Element",
+        "Code",
+        "Data",
+        "DataCount",
     ];
 
     let mut section_count = 0;
-    
+
     while offset < wasm_bytes.len() {
         if offset + 1 > wasm_bytes.len() {
             println!("  ❌ \x1b[1;31mUnexpected end of file\x1b[0m");
             break;
         }
-        
+
         let section_id = wasm_bytes[offset];
         offset += 1;
-        
+
         // Read section size (LEB128)
         let mut section_size = 0u32;
         let mut shift = 0;
         let mut byte;
-        
+
         loop {
             if offset >= wasm_bytes.len() {
                 println!("  ❌ \x1b[1;31mUnexpected end of file reading section size\x1b[0m");
                 println!("\x1b[1;34m╰\x1b[0m");
                 return Err("Unexpected end of file".to_string());
             }
-            
+
             byte = wasm_bytes[offset];
             offset += 1;
-            
+
             section_size |= ((byte & 0x7F) as u32) << shift;
             shift += 7;
-            
+
             if byte & 0x80 == 0 {
                 break;
             }
         }
-        
+
         section_count += 1;
         let section_name = if section_id < section_names.len() as u8 {
             section_names[section_id as usize]
         } else {
             "Unknown"
         };
-        
+
         let section_start = offset;
         let section_end = offset + section_size as usize;
-        
+
         println!("  \x1b[1;36m{:2}.\x1b[0m \x1b[1;37m{:10}\x1b[0m ID: {:2}, Size: {:6} bytes, Offset: 0x{:08X}-0x{:08X}",
             section_count, section_name, section_id, section_size, section_start - 1, section_end - 1);
-        
+
         // Special handling for memory section - check if it's around offset 128
-        if section_start - 1 <= 130 && section_end - 1 >= 126 {
+        if section_start - 1 <= 130 && section_end > 126 {
             println!("     \x1b[1;31m⚠️  WARNING: This section contains offset 128 where the error was reported!\x1b[0m");
-            
+
             // For Memory sections, add extra detail
-            if section_id == 5 {  // Memory section
+            if section_id == 5 {
+                // Memory section
                 println!("     \x1b[1;33mChecking Memory section details:\x1b[0m");
                 if section_size >= 1 && offset < wasm_bytes.len() {
                     let num_memories = wasm_bytes[offset];
                     println!("     \x1b[1;33mNumber of memories: {}\x1b[0m", num_memories);
-                    
+
                     // Further analysis can be done here if needed
                 }
             }
         }
-        
+
         // Skip this section's data
         offset = section_end;
     }
-    
-    println!("\n  📊 \x1b[1;34mTotal sections found:\x1b[0m \x1b[1;33m{}\x1b[0m", section_count);
-    
+
+    println!(
+        "\n  📊 \x1b[1;34mTotal sections found:\x1b[0m \x1b[1;33m{}\x1b[0m",
+        section_count
+    );
+
     if section_count > 0 {
         println!("  ✅ \x1b[1;32mWASM file structure seems valid\x1b[0m");
     } else {
         println!("  ❌ \x1b[1;31mNo sections found in WASM file\x1b[0m");
     }
-    
+
     // Offer diagnostic advice
     println!("\n  🔍 \x1b[1;34mPossible Issues:\x1b[0m");
     println!("     \x1b[0;37m• Sections in incorrect order (browsers require specific section ordering)\x1b[0m");
@@ -606,6 +634,6 @@ pub fn print_detailed_binary_info(path: &str) -> Result<(), String> {
     // println!("\n  💡 \x1b[1;34mSuggestions:\x1b[0m");
     // TODO: Add suggestions for fixing issues
     println!("\x1b[1;34m╰\x1b[0m");
-    
+
     Ok(())
 }
