@@ -69,14 +69,8 @@ just
 # Build the project
 just build
 
-# Build for release
-just build-release
-
 # Run with a test WASM file
 just run ./path/to/file.wasm
-
-# Run with a custom port
-just run-port ./path/to/file.wasm 3000
 
 # Stop any running server
 just stop
@@ -84,11 +78,11 @@ just stop
 # Format code
 just format
 
+# Lint code
+just lint
+
 # Run tests
 just test
-
-# Create and publish a release
-just publish-all
 ```
 
 ## Template System
