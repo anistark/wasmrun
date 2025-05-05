@@ -132,3 +132,5 @@ Chakra is built with:
 - [tiny_http](https://github.com/tiny-http/tiny-http) - A lightweight HTTP server
 - [clap](https://github.com/clap-rs/clap) - Command line argument parsing
 - ❤️ and WebAssembly enthusiasm
+
+![Chakra Logo](./assets/loader.svg)
