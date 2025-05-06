@@ -5,6 +5,8 @@ mod template;
 mod utils;
 mod verify;
 
+use std::path::Path;
+
 fn main() {
     // Parse command line arguments
     let args = cli::get_args();
@@ -143,7 +145,35 @@ fn main() {
 
         // Default case: Start the chakra server
         None => {
-            if let Some(path) = args.path.clone() {
+            let path = args.path;
+            let path_obj = Path::new(&path);
+
+            // Check if path is a directory
+            if path_obj.is_dir() {
+                println!("\n\x1b[1;34m╭\x1b[0m");
+                println!("  🔍 \x1b[1;36mDetected directory: {}\x1b[0m", path);
+
+                // Try to detect project language
+                let language = compiler::detect_project_language(&path);
+
+                // If it's a known project type, offer to compile
+                if language != compiler::ProjectLanguage::Unknown {
+                    println!("  📦 \x1b[1;34mDetected a {:?} project\x1b[0m", language);
+                    println!("\n  💡 \x1b[1;33mTip: To compile this project to WASM, run:\x1b[0m");
+                    println!("     \x1b[1;37mchakra compile --path {}\x1b[0m", path);
+                    println!("\x1b[1;34m╰\x1b[0m");
+                } else {
+                    // If we can't find any WASM files in the directory, suggest compilation
+                    println!("  ❓ \x1b[1;33mNo WASM files found in directory\x1b[0m");
+                    println!("\n  💡 \x1b[1;33mTo run a WASM file, use --path to specify its location\x1b[0m");
+                    println!("     \x1b[1;37mchakra --path /path/to/your/file.wasm\x1b[0m");
+                    println!("\x1b[1;34m╰\x1b[0m");
+                }
+                return;
+            }
+
+            // Check if path is a WASM file
+            if path_obj.extension().map_or(false, |ext| ext == "wasm") {
                 // Run the server with the provided path and port
                 if let Err(e) = server::run_server(&path, args.port) {
                     // Chakra server failed to start
@@ -170,10 +200,10 @@ fn main() {
                     eprintln!("\x1b[1;34m╰\x1b[0m");
                 }
             } else {
-                // No path provided
+                // Not a WASM file
                 eprintln!("\n\x1b[1;34m╭\x1b[0m");
-                eprintln!("  ❌ \x1b[1;31mError: No path provided for the WASM file\x1b[0m\n");
-                eprintln!("  \x1b[1;37mPlease specify a path using the --path option:\x1b[0m\n");
+                eprintln!("  ❌ \x1b[1;31mError: Not a WASM file: {}\x1b[0m", path);
+                eprintln!("\n  \x1b[1;37mPlease specify a path to a .wasm file:\x1b[0m\n");
                 eprintln!("  \x1b[1;33mchakra --path /path/to/your/file.wasm\x1b[0m\n");
                 eprintln!("  \x1b[0;90mRun 'chakra --help' for more information\x1b[0m");
                 eprintln!("\x1b[1;34m╰\x1b[0m");

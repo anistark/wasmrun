@@ -76,6 +76,35 @@ fn is_port_available(port: u16) -> bool {
     TcpListener::bind(format!("0.0.0.0:{port}")).is_ok()
 }
 
+/// Find WASM files in a directory
+fn find_wasm_files(dir_path: &Path) -> Vec<String> {
+    let mut wasm_files = Vec::new();
+
+    if dir_path.is_dir() {
+        if let Ok(entries) = fs::read_dir(dir_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+
+                if path.is_file() {
+                    if let Some(extension) = path.extension() {
+                        if extension.to_string_lossy().to_lowercase() == "wasm" {
+                            if let Some(file_name) = path.to_str() {
+                                wasm_files.push(file_name.to_string());
+                            }
+                        }
+                    }
+                } else if path.is_dir() {
+                    // Recursively check subdirectories
+                    let mut sub_wasm_files = find_wasm_files(&path);
+                    wasm_files.append(&mut sub_wasm_files);
+                }
+            }
+        }
+    }
+
+    wasm_files
+}
+
 /// Run server with the given WASM file and port
 pub fn run_server(path: &str, port: u16) -> Result<(), String> {
     // Check if a server is already running
@@ -94,9 +123,50 @@ pub fn run_server(path: &str, port: u16) -> Result<(), String> {
         ));
     }
 
+    let path_obj = Path::new(path);
+
+    if !path_obj.exists() {
+        return Err(format!("❗ Path not found: {}", path));
+    }
+
+    if path_obj.is_dir() {
+        // Find WASM files in directory
+        let wasm_files = find_wasm_files(path_obj);
+
+        if wasm_files.is_empty() {
+            return Err(format!("❗ No WASM files found in directory: {}", path));
+        }
+
+        if wasm_files.len() == 1 {
+            println!("🔍 Found a single WASM file: {}", wasm_files[0]);
+            return run_server(&wasm_files[0], port);
+        } else {
+            println!("\n\x1b[1;34m╭\x1b[0m");
+            println!("  🔍 \x1b[1;36mMultiple WASM files found:\x1b[0m\n");
+
+            for (i, file) in wasm_files.iter().enumerate() {
+                println!("  {}. \x1b[1;33m{}\x1b[0m", i + 1, file);
+            }
+
+            println!("\n  \x1b[1;34mPlease specify which file to run:\x1b[0m");
+            println!("  \x1b[1;37mchakra --path <filename.wasm>\x1b[0m");
+            println!("\x1b[1;34m╰\x1b[0m");
+
+            return Err("Please select a specific WASM file to run".to_string());
+        }
+    }
+
     // Verify the WASM file exists
-    if !Path::new(path).exists() {
-        return Err(format!("❗ WASM file not found at path: {}", path));
+    if !path_obj.is_file() {
+        return Err(format!("❗ Not a file: {}", path));
+    }
+
+    // Check if it's a WASM file
+    if path_obj
+        .extension()
+        .map_or(true, |ext| ext.to_string_lossy().to_lowercase() != "wasm")
+    {
+        return Err(format!("❗ Not a WASM file: {}", path));
     }
 
     // Get the WASM filename

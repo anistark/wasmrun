@@ -10,9 +10,9 @@ pub struct Args {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// Path to .wasm file
-    #[arg(short = 'p', long)]
-    pub path: Option<String>,
+    /// Path to .wasm file or project directory (default: current directory)
+    #[arg(short = 'p', long, default_value = "./")]
+    pub path: String,
 
     /// Port to serve (default: 8420)
     #[arg(short = 'P', long, default_value_t = 8420)]
