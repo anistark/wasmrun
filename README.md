@@ -41,8 +41,17 @@ cargo install --path .
 Run a WebAssembly file directly:
 
 ```sh
+chakra
+```
+
+to run chakra on your current path.
+Or, provide a `--path` of your choice.
+
+```sh
 chakra --path ./path/to/your/file.wasm
 ```
+
+Currently, chakra runs only 1 wasm file at a time.
 
 ### Custom Port
 
