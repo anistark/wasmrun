@@ -14,10 +14,6 @@ default:
 
 # Build the project in debug mode
 build:
-    cargo build
-
-# Build the project for release
-build-release:
     cargo build --release
 
 # Clean the project
@@ -31,7 +27,7 @@ run WASM_FILE="./examples/simple.wasm":
     cargo run -- --path {{WASM_FILE}}
 
 # Run with a custom port
-run-port WASM_FILE="./examples/simple.wasm" PORT="9000":
+run-port WASM_FILE="./examples/simple.wasm" PORT="3000":
     cargo run -- --path {{WASM_FILE}} --port {{PORT}}
 
 # Stop any running Chakra server
@@ -64,7 +60,7 @@ docs:
 #     cargo set-version --bump {{TYPE}}
 
 # Prepare for publishing (format, lint, test)
-prepare-publish: format lint test build-release
+prepare-publish: format lint test build
     @echo "✓ Project is ready for publishing"
 
 # Publish to crates.io (requires cargo login)
@@ -216,5 +212,5 @@ gh-release:
     echo "View it at: https://github.com/{{repo}}/releases/tag/v{{version}}"
 
 # Release to both GitHub and crates.io
-publish: build-release publish-crates gh-release
+publish: build publish-crates gh-release
     @echo "✓ Released v{{version}} to GitHub and crates.io"

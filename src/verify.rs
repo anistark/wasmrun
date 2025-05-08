@@ -470,7 +470,7 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
 
     if results.valid_magic && (results.has_export_section || results.has_start_section) {
         println!("\n  🚀 \x1b[1;33mRun with Chakra:\x1b[0m");
-        println!("     \x1b[1;37mchakra --path {}\x1b[0m", path);
+        println!("     \x1b[1;37mchakra --wasm --path {}\x1b[0m", path);
     }
 
     println!("\x1b[1;34m╰\x1b[0m");

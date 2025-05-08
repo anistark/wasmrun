@@ -19,6 +19,8 @@ src
 │       ├── scripts.js  # Browser JavaScript
 │       └── style.css   # CSS styles
 ├── utils.rs            # Utility functions
+├── verify.rs           # WASM file verification
+├── watcher.rs          # File watcher for live reload
 └── compiler            # WebAssembly compilation module
     ├── detect.rs       # Language detection functionality
     ├── language        # Language-specific implementations
@@ -85,6 +87,28 @@ just lint
 just test
 ```
 
+## Command Line Interface
+
+Chakra's CLI is implemented in `cli.rs` using clap's derive features. Each subcommand follows the same pattern, supporting both positional and flag-based paths.
+
+### Adding CLI Options
+
+To add new CLI options:
+
+1. Add the option to the `Args` struct or appropriate subcommand in `cli.rs`
+2. Update `main.rs` to handle the new option
+3. Ensure both positional and flag-based syntax is supported
+4. Update documentation to reflect the changes
+
+Example for handling a path argument in main.rs:
+
+```rust
+// Determine the actual path to use
+let actual_path = positional_path.clone().unwrap_or_else(|| {
+    path.clone().unwrap_or_else(|| String::from("./"))
+});
+```
+
 ## Template System
 
 Chakra uses a simple template system that embeds HTML, CSS, and JavaScript files at compile time:
@@ -98,18 +122,6 @@ To modify templates:
 2. Rebuild the project with `cargo build`
 
 ## Adding New Features
-
-### Adding CLI Options
-
-CLI options are defined in `cli.rs` using clap's derive features:
-
-```rust
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-pub struct Args {
-    // Add new options here
-}
-```
 
 ### Enhancing the Web UI
 
@@ -187,6 +199,13 @@ Chakra uses `tiny_http` for a minimal HTTP server that:
 
 - The server's PID is stored in `/tmp/chakra_server.pid`
 - The `stop` command uses this PID to terminate any running server
+
+### Watch Mode
+
+The `watcher.rs` module provides file-watching functionality for live reloading:
+- Monitors project files for changes
+- Triggers recompilation when changes are detected
+- Sends a reload signal to the browser
 
 ### Debugging Tips
 

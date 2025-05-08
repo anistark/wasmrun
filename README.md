@@ -36,22 +36,36 @@ cargo install --path .
 
 ## Usage
 
+Chakra supports both flag-based arguments using `--path` and direct positional arguments for a more intuitive command line experience.
+
 ### Basic Usage
 
-Run a WebAssembly file directly:
+Run on current directory:
 
 ```sh
 chakra
 ```
 
-to run chakra on your current path.
-Or, provide a `--path` of your choice.
+Run a WebAssembly file directly:
 
 ```sh
+chakra myfile.wasm
+
+# Using --path flag
 chakra --path ./path/to/your/file.wasm
+
+# With --wasm flag explicitly
+chakra --wasm myfile.wasm
 ```
 
-Currently, chakra runs only 1 wasm file at a time.
+Run a project directory:
+
+```sh
+chakra ./my-wasm-project
+
+# Using --path flag
+chakra --path ./my-wasm-project
+```
 
 ### Custom Port
 
@@ -59,6 +73,18 @@ Specify a custom port (default is `8420`):
 
 ```sh
 chakra --path ./path/to/your/file.wasm --port 3000
+# Or
+chakra ./path/to/your/file.wasm --port 3000
+```
+
+### Watch Mode
+
+Enable watch mode for live reloading:
+
+```sh
+chakra --path ./path/to/your/project --watch
+# Or
+chakra ./my-wasm-project --watch
 ```
 
 ### Verify WASM File
@@ -66,6 +92,9 @@ chakra --path ./path/to/your/file.wasm --port 3000
 Verify if a WebAssembly file is in the correct format:
 
 ```sh
+chakra verify ./path/to/your/file.wasm
+
+# Using --path flag
 chakra verify --path ./path/to/your/file.wasm
 ```
 
@@ -73,6 +102,42 @@ For detailed output:
 
 ```sh
 chakra verify --path ./path/to/your/file.wasm --detailed
+# Or
+chakra verify ./path/to/your/file.wasm --detailed
+```
+
+### Inspect WASM File
+
+Get detailed information about a WASM file:
+
+```sh
+chakra inspect ./path/to/your/file.wasm
+# Or
+chakra inspect --path ./path/to/your/file.wasm
+```
+
+### Compile a Project to WASM
+
+Compile a project directory to WebAssembly:
+
+```sh
+chakra compile ./my-project
+# Or
+chakra compile --path ./my-project
+```
+
+With a custom output directory:
+
+```sh
+chakra compile ./my-project --output ./build
+```
+
+### Run with Specific Language
+
+Specify a language for compilation:
+
+```sh
+chakra run ./my-project --language rust
 ```
 
 ### Stop Server
@@ -112,7 +177,7 @@ For complex WASM modules (like those compiled with wasm-bindgen), Chakra will de
 emcc -O2 hello.c -o hello.wasm
 
 # Run with Chakra
-chakra --path hello.wasm
+chakra hello.wasm
 ```
 
 ### Running a simple Rust WASM file:
@@ -122,7 +187,7 @@ chakra --path hello.wasm
 cargo build --target wasm32-unknown-unknown --release
 
 # Run with Chakra
-chakra --path ./target/wasm32-unknown-unknown/release/yourapp.wasm
+chakra ./target/wasm32-unknown-unknown/release/yourapp.wasm
 ```
 
 ## Troubleshooting

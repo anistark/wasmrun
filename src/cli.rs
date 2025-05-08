@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-/// Chakra - Run WebAssembly directly in browser 🌟
+/// Chakra - WebAssembly project compiler and runtime 🌟
 #[derive(Parser, Debug)]
 #[command(author, version = get_version_string(), about, long_about = None, after_help = "If you find Chakra useful, please consider starring the repository \
                        on GitHub to support this open source project! ✨\n\
@@ -10,13 +10,24 @@ pub struct Args {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// Path to .wasm file or project directory (default: current directory)
+    /// Path to project directory or WASM file (default: current directory)
     #[arg(short = 'p', long, default_value = "./")]
     pub path: String,
+
+    #[arg(index = 1)]
+    pub positional_path: Option<String>,
 
     /// Port to serve (default: 8420)
     #[arg(short = 'P', long, default_value_t = 8420)]
     pub port: u16,
+
+    /// Interpret path as a WebAssembly file (instead of a project directory)
+    #[arg(short = 'w', long)]
+    pub wasm: bool,
+
+    /// Enable watch mode for live-reloading on file changes
+    #[arg(short = 'W', long)]
+    pub watch: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -28,7 +39,10 @@ pub enum Commands {
     Compile {
         /// Path to the project directory
         #[arg(short = 'p', long)]
-        path: String,
+        path: Option<String>,
+
+        #[arg(index = 1)]
+        positional_path: Option<String>,
 
         /// Output directory for the WASM file (default: current directory)
         #[arg(short = 'o', long)]
@@ -39,7 +53,10 @@ pub enum Commands {
     Verify {
         /// Path to the WASM file
         #[arg(short = 'p', long)]
-        path: String,
+        path: Option<String>,
+
+        #[arg(index = 1)]
+        positional_path: Option<String>,
 
         /// Show detailed information about the WASM module
         #[arg(short = 'd', long)]
@@ -50,7 +67,32 @@ pub enum Commands {
     Inspect {
         /// Path to the WASM file
         #[arg(short = 'p', long)]
-        path: String,
+        path: Option<String>,
+
+        #[arg(index = 1)]
+        positional_path: Option<String>,
+    },
+
+    /// AOT Compile and run a project
+    Run {
+        /// Path to the project
+        #[arg(short = 'p', long)]
+        path: Option<String>,
+
+        #[arg(index = 1)]
+        positional_path: Option<String>,
+
+        /// Port to serve (default: 8420)
+        #[arg(short = 'P', long, default_value_t = 8420)]
+        port: u16,
+
+        /// Language to use for compilation (auto-detect if not specified)
+        #[arg(short = 'l', long)]
+        language: Option<String>,
+
+        /// Enable watch mode for live-reloading on file changes
+        #[arg(long)]
+        watch: bool,
     },
 }
 
@@ -65,7 +107,13 @@ pub fn get_args() -> Args {
         std::process::exit(0);
     }
 
-    Args::parse()
+    let mut args = Args::parse();
+
+    if let Some(pos_path) = args.positional_path.take() {
+        args.path = pos_path;
+    }
+
+    args
 }
 
 /// Print styled version output

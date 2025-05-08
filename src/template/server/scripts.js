@@ -715,5 +715,64 @@ async function analyzeWasmBinary(wasmBytes) {
     }
 }
 
+// Live reload support
+function setupLiveReload() {
+    let reloadInterval = null;
+    let lastReloadTime = 0;
+    
+    // Poll the server for reload events
+    function startPolling() {
+        if (reloadInterval) return;
+        
+        reloadInterval = setInterval(() => {
+            fetch('/reload', { cache: 'no-store' })
+            .then(response => {
+                if (response.headers.get('X-Reload') === 'true') {
+                    // Prevent multiple reloads in quick succession
+                    const now = Date.now();
+                    if (now - lastReloadTime < 2000) return;
+                    
+                    lastReloadTime = now;
+                    log("🔄 Change detected - reloading WASM module...", "info");
+                    
+                    // Stop polling during reload
+                    clearInterval(reloadInterval);
+                    reloadInterval = null;
+                    
+                    // Reload the page after a short delay
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 500);
+                }
+            })
+            .catch(e => {
+                // Ignore errors - server might be restarting
+            });
+        }, 1000);
+    }
+    
+    // Start polling
+    startPolling();
+    
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            log("Tab is visible again - checking for updates...", "info");
+            startPolling();
+        } else {
+            clearInterval(reloadInterval);
+            reloadInterval = null;
+        }
+    });
+    
+    // Handle window unload
+    window.addEventListener('beforeunload', () => {
+        clearInterval(reloadInterval);
+    });
+}
+
 // Start loading the WASM file
 loadWasmWithRetries();
+
+// Initialize live reload
+setupLiveReload();

@@ -4,6 +4,7 @@ mod server;
 mod template;
 mod utils;
 mod verify;
+mod watcher;
 
 use std::path::Path;
 
@@ -11,7 +12,7 @@ fn main() {
     // Parse command line arguments
     let args = cli::get_args();
 
-    match args.command {
+    match &args.command {
         // Stop the running Chakra server
         Some(cli::Commands::Stop) => {
             // Check if a server is running before attempting to stop it
@@ -46,11 +47,20 @@ fn main() {
         }
 
         // Compile project to WebAssembly
-        Some(cli::Commands::Compile { path, output }) => {
-            let output_dir = output.unwrap_or_else(|| ".".to_string());
+        Some(cli::Commands::Compile {
+            path,
+            positional_path,
+            output,
+        }) => {
+            // Determine the actual path to use
+            let actual_path = positional_path
+                .clone()
+                .unwrap_or_else(|| path.clone().unwrap_or_else(|| String::from("./")));
+
+            let output_dir = output.clone().unwrap_or_else(|| String::from("."));
 
             // Detect project language and operating system
-            let language = compiler::detect_project_language(&path);
+            let language = compiler::detect_project_language(&actual_path);
             let os = compiler::detect_operating_system();
 
             // Get system information
@@ -60,7 +70,7 @@ fn main() {
             println!("  🌀 \x1b[1;36mChakra WASM Compiler\x1b[0m\n");
             println!(
                 "  📂 \x1b[1;34mProject Path:\x1b[0m \x1b[1;33m{}\x1b[0m",
-                path
+                actual_path
             );
             println!(
                 "  🔍 \x1b[1;34mDetected Language:\x1b[0m \x1b[1;32m{:?}\x1b[0m",
@@ -85,7 +95,7 @@ fn main() {
             println!("\x1b[1;34m╰\x1b[0m\n");
 
             // Compile WASM
-            match compiler::create_wasm_from_project(&path, &output_dir) {
+            match compiler::create_wasm_from_project(&actual_path, &output_dir) {
                 Ok(wasm_path) => {
                     // WASM compiled successfully
                     println!("\n\x1b[1;34m╭\x1b[0m");
@@ -95,7 +105,7 @@ fn main() {
                         wasm_path
                     );
                     println!("\n  🚀 \x1b[1;33mRun it with:\x1b[0m");
-                    println!("     \x1b[1;37mchakra --path {}\x1b[0m", wasm_path);
+                    println!("     \x1b[1;37mchakra --wasm --path {}\x1b[0m", wasm_path);
                     println!("\x1b[1;34m╰\x1b[0m");
                 }
                 Err(e) => {
@@ -109,13 +119,40 @@ fn main() {
         }
 
         // Verify wasm file
-        Some(cli::Commands::Verify { path, detailed }) => {
-            println!("🔍 Verifying WebAssembly file: {}", path);
+        Some(cli::Commands::Verify {
+            path,
+            positional_path,
+            detailed,
+        }) => {
+            // Determine the actual path to use
+            let actual_path = positional_path
+                .clone()
+                .unwrap_or_else(|| path.clone().unwrap_or_else(|| String::from("./")));
 
-            match verify::verify_wasm(&path) {
+            println!("🔍 Verifying WebAssembly file: {}", actual_path);
+
+            let path_obj = Path::new(&actual_path);
+
+            // Check if it's a WASM file
+            if !path_obj.extension().map_or(false, |ext| ext == "wasm") {
+                // Not a WASM file
+                eprintln!("\n\x1b[1;34m╭\x1b[0m");
+                eprintln!(
+                    "  ❌ \x1b[1;31mError: Not a WASM file: {}\x1b[0m",
+                    actual_path
+                );
+                eprintln!("\n  \x1b[1;37mPlease specify a path to a .wasm file:\x1b[0m\n");
+                eprintln!("  \x1b[1;33mchakra verify --path /path/to/your/file.wasm\x1b[0m\n");
+                eprintln!("  \x1b[0;90mTo run a WASM file directly, use:\x1b[0m");
+                eprintln!("  \x1b[1;33mchakra --wasm --path /path/to/your/file.wasm\x1b[0m");
+                eprintln!("\x1b[1;34m╰\x1b[0m");
+                return;
+            }
+
+            match verify::verify_wasm(&actual_path) {
                 Ok(result) => {
                     // Display verification results
-                    verify::print_verification_results(&path, &result, detailed);
+                    verify::print_verification_results(&actual_path, &result, *detailed);
                 }
                 Err(e) => {
                     // Error verifying the file
@@ -128,9 +165,17 @@ fn main() {
         }
 
         // Inspect wasm file
-        Some(cli::Commands::Inspect { path }) => {
-            println!("🔍 Inspecting WebAssembly file: {}", path);
-            match verify::print_detailed_binary_info(&path) {
+        Some(cli::Commands::Inspect {
+            path,
+            positional_path,
+        }) => {
+            // Determine the actual path to use
+            let actual_path = positional_path
+                .clone()
+                .unwrap_or_else(|| path.clone().unwrap_or_else(|| String::from("./")));
+
+            println!("🔍 Inspecting WebAssembly file: {}", actual_path);
+            match verify::print_detailed_binary_info(&actual_path) {
                 Ok(()) => {
                     println!("Inspection completed successfully.");
                 }
@@ -143,70 +188,34 @@ fn main() {
             }
         }
 
-        // Default case: Start the chakra server
+        // Run command
+        Some(cli::Commands::Run {
+            path,
+            positional_path,
+            port,
+            language,
+            watch,
+        }) => {
+            // Determine the actual path to use
+            let actual_path = positional_path
+                .clone()
+                .unwrap_or_else(|| path.clone().unwrap_or_else(|| String::from("./")));
+
+            server::run_project(&actual_path, *port, language.clone(), *watch);
+        }
+
+        // Default case - either run WASM file or compile and run project
         None => {
-            let path = args.path;
-            let path_obj = Path::new(&path);
+            // Get path and port from args
+            let path = &args.path;
+            let port = args.port;
 
-            // Check if path is a directory
-            if path_obj.is_dir() {
-                println!("\n\x1b[1;34m╭\x1b[0m");
-                println!("  🔍 \x1b[1;36mDetected directory: {}\x1b[0m", path);
-
-                // Try to detect project language
-                let language = compiler::detect_project_language(&path);
-
-                // If it's a known project type, offer to compile
-                if language != compiler::ProjectLanguage::Unknown {
-                    println!("  📦 \x1b[1;34mDetected a {:?} project\x1b[0m", language);
-                    println!("\n  💡 \x1b[1;33mTip: To compile this project to WASM, run:\x1b[0m");
-                    println!("     \x1b[1;37mchakra compile --path {}\x1b[0m", path);
-                    println!("\x1b[1;34m╰\x1b[0m");
-                } else {
-                    // If we can't find any WASM files in the directory, suggest compilation
-                    println!("  ❓ \x1b[1;33mNo WASM files found in directory\x1b[0m");
-                    println!("\n  💡 \x1b[1;33mTo run a WASM file, use --path to specify its location\x1b[0m");
-                    println!("     \x1b[1;37mchakra --path /path/to/your/file.wasm\x1b[0m");
-                    println!("\x1b[1;34m╰\x1b[0m");
-                }
-                return;
-            }
-
-            // Check if path is a WASM file
-            if path_obj.extension().map_or(false, |ext| ext == "wasm") {
-                // Run the server with the provided path and port
-                if let Err(e) = server::run_server(&path, args.port) {
-                    // Chakra server failed to start
-                    eprintln!("\n\x1b[1;34m╭\x1b[0m");
-                    eprintln!("  ❌ \x1b[1;31mError Running Chakra Server\x1b[0m\n");
-
-                    let words: Vec<&str> = e.split_whitespace().collect();
-                    let mut current_line = String::from("  ");
-
-                    for word in words {
-                        if current_line.len() + word.len() + 1 > 58 {
-                            eprintln!("\x1b[0;91m{}\x1b[0m", current_line);
-                            current_line = String::from("  ");
-                        }
-
-                        current_line.push_str(word);
-                        current_line.push(' ');
-                    }
-
-                    if current_line.len() > 2 {
-                        eprintln!("\x1b[0;91m{}\x1b[0m", current_line);
-                    }
-
-                    eprintln!("\x1b[1;34m╰\x1b[0m");
-                }
+            // Check if user specified --wasm flag
+            if args.wasm {
+                server::run_wasm_file(path, port);
             } else {
-                // Not a WASM file
-                eprintln!("\n\x1b[1;34m╭\x1b[0m");
-                eprintln!("  ❌ \x1b[1;31mError: Not a WASM file: {}\x1b[0m", path);
-                eprintln!("\n  \x1b[1;37mPlease specify a path to a .wasm file:\x1b[0m\n");
-                eprintln!("  \x1b[1;33mchakra --path /path/to/your/file.wasm\x1b[0m\n");
-                eprintln!("  \x1b[0;90mRun 'chakra --help' for more information\x1b[0m");
-                eprintln!("\x1b[1;34m╰\x1b[0m");
+                // Default to compile and run project
+                server::run_project(path, port, None, args.watch);
             }
         }
     }
