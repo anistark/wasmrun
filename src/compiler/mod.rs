@@ -1,4 +1,3 @@
-// Import submodules
 mod detect;
 mod language;
 
@@ -68,9 +67,11 @@ pub fn compile_for_execution(project_path: &str, output_dir: &str) -> Result<Str
     // Use language-specific compiler with extra verbosity for direct execution
     match language_type {
         ProjectLanguage::Rust => language::rust::build_wasm_verbose(project_path, output_dir),
-        ProjectLanguage::Go => language::go::build_wasm(project_path, output_dir),
-        ProjectLanguage::C => language::c::build_wasm(project_path, output_dir),
-        ProjectLanguage::AssemblyScript => language::asc::build_wasm(project_path, output_dir),
+        ProjectLanguage::Go => language::go::build_wasm_verbose(project_path, output_dir),
+        ProjectLanguage::C => language::c::build_wasm_verbose(project_path, output_dir),
+        ProjectLanguage::AssemblyScript => {
+            language::asc::build_wasm_verbose(project_path, output_dir)
+        }
         ProjectLanguage::Python => language::python::build_wasm(project_path, output_dir),
         ProjectLanguage::Unknown => Err(format!(
             "Could not determine project language for: {}",
