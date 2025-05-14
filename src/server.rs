@@ -1,5 +1,5 @@
 use crate::compiler;
-use crate::template::generate_html;
+use crate::template::{generate_html, generate_html_wasm_bindgen};
 use crate::utils::content_type_header;
 use crate::watcher;
 use std::fs;
@@ -27,14 +27,143 @@ pub fn run_wasm_file(path: &str, port: u16) {
     let path_obj = Path::new(path);
 
     if !path_obj.extension().map_or(false, |ext| ext == "wasm") {
+        // Check if it's a JavaScript file that might be wasm-bindgen output
+        if path_obj.extension().map_or(false, |ext| ext == "js") {
+            // Look for a corresponding .wasm file
+            let wasm_path = path_obj.with_extension("wasm");
+
+            // Check for regular .js -> .wasm pattern
+            if wasm_path.exists() {
+                handle_wasm_bindgen_files(path, wasm_path.to_str().unwrap(), port);
+                return;
+            }
+
+            // Check for .js -> _bg.wasm pattern
+            let file_stem = path_obj.file_stem().unwrap().to_string_lossy();
+            let bg_wasm_path = path_obj.with_file_name(format!("{}_bg.wasm", file_stem));
+            if bg_wasm_path.exists() {
+                handle_wasm_bindgen_files(path, bg_wasm_path.to_str().unwrap(), port);
+                return;
+            }
+        }
+
         print_error(format!("Error: Not a WASM file: {}", path));
         println!("  \x1b[1;37mPlease specify a path to a .wasm file:\x1b[0m");
         println!("  \x1b[1;33mchakra --wasm --path /path/to/your/file.wasm\x1b[0m");
         return;
     }
 
+    // WASM file handling enhancement for _bg.wasm files
+    let file_name = path_obj.file_name().unwrap().to_string_lossy();
+    if file_name.ends_with("_bg.wasm") {
+        // This is a strong indicator of wasm-bindgen output
+        println!("\n\x1b[1;34m╭\x1b[0m");
+        println!(
+            "  ℹ️  \x1b[1;34mDetected wasm-bindgen _bg.wasm file: {}\x1b[0m",
+            path
+        );
+
+        // Look for the corresponding .js file
+        // Remove _bg.wasm and add .js
+        let base_name = file_name.trim_end_matches("_bg.wasm");
+        let js_file_name = format!("{}.js", base_name);
+        let js_path = path_obj.with_file_name(&js_file_name);
+
+        if js_path.exists() {
+            println!(
+                "  \x1b[0;37mFound corresponding JS file: {}\x1b[0m",
+                js_path.display()
+            );
+            println!("  \x1b[1;32mRunning with wasm-bindgen support\x1b[0m");
+            println!("\x1b[1;34m╰\x1b[0m\n");
+
+            handle_wasm_bindgen_files(js_path.to_str().unwrap(), path, port);
+            return;
+        } else {
+            println!(
+                "  \x1b[1;33mWarning: Could not find corresponding JS file: {}\x1b[0m",
+                js_path.display()
+            );
+            println!("  \x1b[0;37mLooking for other JS files in the same directory...\x1b[0m");
+
+            // Look for any .js file in the same directory that might be the glue code
+            let dir = path_obj.parent().unwrap_or_else(|| Path::new("."));
+            let mut found_js = None;
+
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let entry_path = entry.path();
+                    if entry_path.extension().map_or(false, |ext| ext == "js") {
+                        // Check if this JS file contains wasm-bindgen signatures
+                        if let Ok(js_content) = fs::read_to_string(&entry_path) {
+                            if js_content.contains("wasm_bindgen")
+                                || js_content.contains("__wbindgen")
+                                || js_content.contains("wbg")
+                            {
+                                found_js = Some(entry_path);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(js_file) = found_js {
+                println!(
+                    "  \x1b[1;32mFound potential wasm-bindgen JS file: {}\x1b[0m",
+                    js_file.display()
+                );
+                println!("\x1b[1;34m╰\x1b[0m\n");
+
+                handle_wasm_bindgen_files(js_file.to_str().unwrap(), path, port);
+                return;
+            }
+
+            println!(
+                "  \x1b[1;33mNo matching JS file found. Attempting to run WASM directly...\x1b[0m"
+            );
+            println!("  \x1b[0;37mNote: Running wasm-bindgen modules without JS glue code may fail.\x1b[0m");
+            println!("\x1b[1;34m╰\x1b[0m\n");
+        }
+    }
+
+    // Check for any wasm-bindgen JS file for this WASM file
+    let js_path = path_obj.with_extension("js");
+    if js_path.exists() {
+        // This might be a wasm-bindgen output
+        if let Ok(js_content) = fs::read_to_string(&js_path) {
+            if js_content.contains("wasm_bindgen") || js_content.contains("__wbindgen") {
+                handle_wasm_bindgen_files(js_path.to_str().unwrap(), path, port);
+                return;
+            }
+        }
+    }
+
+    // Standard WASM file handling
     if let Err(e) = run_server(ServerConfig {
         wasm_path: path.to_string(),
+        js_path: None,
+        port,
+        watch_mode: false,
+        project_path: None,
+        output_dir: None,
+    }) {
+        print_error(format!("Error Running Chakra Server: {}", e));
+    }
+}
+
+// Helper function to handle wasm-bindgen files
+fn handle_wasm_bindgen_files(js_path: &str, wasm_path: &str, port: u16) {
+    println!("\n\x1b[1;34m╭\x1b[0m");
+    println!("  ✅  \x1b[1;32mRunning wasm-bindgen project\x1b[0m");
+    println!("  \x1b[0;37mJS File: {}\x1b[0m", js_path);
+    println!("  \x1b[0;37mWASM File: {}\x1b[0m", wasm_path);
+    println!("\x1b[1;34m╰\x1b[0m\n");
+
+    // Run with wasm-bindgen support
+    if let Err(e) = run_server(ServerConfig {
+        wasm_path: wasm_path.to_string(),
+        js_path: Some(js_path.to_string()),
         port,
         watch_mode: false,
         project_path: None,
@@ -59,6 +188,52 @@ pub fn run_project(path: &str, port: u16, language_override: Option<String>, wat
         return;
     }
 
+    // Handle JS file that might be wasm-bindgen output
+    if path_obj.is_file() && path_obj.extension().map_or(false, |ext| ext == "js") {
+        // Look for a corresponding .wasm file
+        let wasm_path = path_obj.with_extension("wasm");
+        if wasm_path.exists() {
+            println!("\n\x1b[1;34m╭\x1b[0m");
+            println!(
+                "  ℹ️  \x1b[1;34mDetected potential wasm-bindgen JS file: {}\x1b[0m",
+                path
+            );
+            println!(
+                "  \x1b[0;37mFound corresponding WASM file: {}\x1b[0m",
+                wasm_path.display()
+            );
+            println!("\x1b[1;34m╰\x1b[0m\n");
+
+            // Check if JS file contains wasm-bindgen patterns
+            if let Ok(js_content) = fs::read_to_string(path) {
+                if js_content.contains("wasm_bindgen") || js_content.contains("__wbindgen") {
+                    println!("\n\x1b[1;34m╭\x1b[0m");
+                    println!("  ✅  \x1b[1;32mConfirmed wasm-bindgen project\x1b[0m");
+                    println!("  \x1b[0;37mRunning with wasm-bindgen support\x1b[0m");
+                    println!("\x1b[1;34m╰\x1b[0m\n");
+
+                    // Run with wasm-bindgen support
+                    if let Err(e) = run_server(ServerConfig {
+                        wasm_path: wasm_path.to_str().unwrap().to_string(),
+                        js_path: Some(path.to_string()),
+                        port,
+                        watch_mode: watch,
+                        project_path: None,
+                        output_dir: None,
+                    }) {
+                        print_error(format!("Error Running Chakra Server: {}", e));
+                    }
+
+                    return;
+                }
+            }
+
+            // If not confirmed as wasm-bindgen, run as regular WASM
+            run_wasm_file(wasm_path.to_str().unwrap(), port);
+            return;
+        }
+    }
+
     // Handle project directory
     if !path_obj.is_dir() {
         print_error(if !path_obj.exists() {
@@ -79,26 +254,33 @@ pub fn run_project(path: &str, port: u16, language_override: Option<String>, wat
     };
 
     // Compile the project
-    let wasm_path = match compile_project(path, &temp_output_dir, lang, watch) {
-        Some(path) => path,
-        None => return, // Error already printed
-    };
+    let result = compile_project(path, &temp_output_dir, lang, watch);
 
-    // Run the server
-    let server_config = ServerConfig {
-        wasm_path,
-        port,
-        watch_mode: watch,
-        project_path: if watch { Some(path.to_string()) } else { None },
-        output_dir: if watch {
-            Some(temp_output_dir.to_string())
+    if let Some((wasm_path, is_wasm_bindgen, js_path)) = result {
+        // Run the server based on project type
+        let server_config = ServerConfig {
+            wasm_path,
+            js_path,
+            port,
+            watch_mode: watch,
+            project_path: if watch { Some(path.to_string()) } else { None },
+            output_dir: if watch {
+                Some(temp_output_dir.to_string())
+            } else {
+                None
+            },
+        };
+
+        // Log a message based on the project type
+        if is_wasm_bindgen {
+            println!("Running wasm-bindgen project with JS support");
         } else {
-            None
-        },
-    };
+            println!("Running standard WASM project");
+        }
 
-    if let Err(e) = run_server(server_config) {
-        print_error(format!("Error Running Server: {}", e));
+        if let Err(e) = run_server(server_config) {
+            print_error(format!("Error Running Server: {}", e));
+        }
     }
 }
 
@@ -172,6 +354,7 @@ pub fn stop_existing_server() -> Result<(), String> {
 // Configuration struct for server setup
 struct ServerConfig {
     wasm_path: String,
+    js_path: Option<String>,
     port: u16,
     watch_mode: bool,
     project_path: Option<String>,
@@ -246,6 +429,23 @@ fn run_server(config: ServerConfig) -> Result<(), String> {
         .to_string_lossy()
         .to_string();
 
+    let js_filename = if let Some(js_path) = &config.js_path {
+        let js_path_obj = Path::new(js_path);
+        if js_path_obj.exists() && js_path_obj.is_file() {
+            Some(
+                js_path_obj
+                    .file_name()
+                    .ok_or_else(|| "Invalid JS path".to_string())?
+                    .to_string_lossy()
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let absolute_path = fs::canonicalize(&config.wasm_path)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| config.wasm_path.clone());
@@ -316,6 +516,7 @@ fn run_server(config: ServerConfig) -> Result<(), String> {
                             // Handle the request
                             handle_request(
                                 request,
+                                js_filename.as_deref(),
                                 &wasm_filename,
                                 &wasm_path_clone,
                                 true,
@@ -383,8 +584,16 @@ fn run_server(config: ServerConfig) -> Result<(), String> {
             Err(e) => {
                 eprintln!("Failed to set up file watcher: {}", e);
 
-                // Fall back to regular server
-                serve_wasm_file(&config.wasm_path, config.port, &wasm_filename)?;
+                if config.js_path.is_some() {
+                    serve_wasm_bindgen_files(
+                        &config.wasm_path,
+                        config.js_path.as_ref().unwrap(),
+                        config.port,
+                        &wasm_filename,
+                    )?;
+                } else {
+                    serve_wasm_file(&config.wasm_path, config.port, &wasm_filename)?;
+                }
             }
         }
     } else {
@@ -413,6 +622,7 @@ fn serve_wasm_file(wasm_path: &str, port: u16, wasm_filename: &str) -> Result<()
     for request in server.incoming_requests() {
         handle_request(
             request,
+            None, // No JS file for standard WASM
             wasm_filename,
             wasm_path,
             false,
@@ -430,6 +640,7 @@ fn serve_wasm_file(wasm_path: &str, port: u16, wasm_filename: &str) -> Result<()
 /// Handle an incoming HTTP request
 fn handle_request(
     request: Request,
+    js_filename: Option<&str>,
     wasm_filename: &str,
     wasm_path: &str,
     watch_mode: bool,
@@ -446,7 +657,14 @@ fn handle_request(
 
     if url == "/" {
         // Serve the main HTML page
-        let html = generate_html(wasm_filename);
+        let html = if let Some(js_file) = js_filename {
+            // This is a wasm-bindgen project, use the wasm-bindgen template
+            generate_html_wasm_bindgen(js_file, wasm_filename)
+        } else {
+            // Regular wasm file, use standard template
+            generate_html(wasm_filename)
+        };
+
         let response = Response::from_string(html).with_header(content_type_header("text/html"));
         if let Err(e) = request.respond(response) {
             eprintln!("❗ Error sending HTML response: {}", e);
@@ -458,28 +676,12 @@ fn handle_request(
         }
     } else if url == format!("/{}", wasm_filename) {
         // Serve the WASM file
-        match fs::read(wasm_path) {
-            Ok(wasm_bytes) => {
-                println!(
-                    "🔄 Serving WASM file: {} ({} bytes)",
-                    wasm_filename,
-                    wasm_bytes.len()
-                );
-                let response = Response::from_data(wasm_bytes)
-                    .with_header(content_type_header("application/wasm"));
-                if let Err(e) = request.respond(response) {
-                    eprintln!("❗ Error sending WASM response: {}", e);
-                }
-            }
-            Err(e) => {
-                eprintln!("❗ Error reading WASM file: {}", e);
-                let response = Response::from_string(format!("Error: {}", e))
-                    .with_status_code(500)
-                    .with_header(content_type_header("text/plain"));
-                if let Err(e) = request.respond(response) {
-                    eprintln!("❗ Error sending error response: {}", e);
-                }
-            }
+        serve_file(request, wasm_path, "application/wasm");
+    } else if let Some(js_file) = js_filename {
+        // Handle JS file requests for wasm-bindgen
+        if url == format!("/{}", js_file) {
+            let js_path = Path::new(wasm_path).parent().unwrap().join(js_file);
+            serve_file(request, js_path.to_str().unwrap(), "application/javascript");
         }
     } else if url == "/reload" {
         // Special reload endpoint
@@ -496,13 +698,70 @@ fn handle_request(
     } else if url.starts_with("/assets/") {
         serve_asset(request, &url);
     } else {
-        // 404 for all other requests
-        let response = Response::from_string("404 Not Found")
-            .with_status_code(404)
-            .with_header(content_type_header("text/plain"));
-        if let Err(e) = request.respond(response) {
-            eprintln!("❗ Error sending 404 response: {}", e);
+        // For any other files, try to serve them from the same directory as the wasm file
+        let base_dir = Path::new(wasm_path).parent().unwrap();
+        let requested_file = base_dir.join(url.trim_start_matches('/'));
+
+        if requested_file.exists() && requested_file.is_file() {
+            // Determine content type based on extension
+            let content_type = determine_content_type(&requested_file);
+            serve_file(request, requested_file.to_str().unwrap(), content_type);
+        } else {
+            // 404 for all other requests
+            let response = Response::from_string("404 Not Found")
+                .with_status_code(404)
+                .with_header(content_type_header("text/plain"));
+            if let Err(e) = request.respond(response) {
+                eprintln!("❗ Error sending 404 response: {}", e);
+            }
         }
+    }
+}
+
+// Helper function to serve a file
+fn serve_file(request: Request, file_path: &str, content_type: &str) {
+    match fs::read(file_path) {
+        Ok(file_bytes) => {
+            println!(
+                "🔄 Serving file: {} ({} bytes, content-type: {})",
+                file_path,
+                file_bytes.len(),
+                content_type
+            );
+            let response =
+                Response::from_data(file_bytes).with_header(content_type_header(content_type));
+            if let Err(e) = request.respond(response) {
+                eprintln!("❗ Error sending file response: {}", e);
+            }
+        }
+        Err(e) => {
+            eprintln!("❗ Error reading file {}: {}", file_path, e);
+            let response = Response::from_string(format!("Error: {}", e))
+                .with_status_code(500)
+                .with_header(content_type_header("text/plain"));
+            if let Err(e) = request.respond(response) {
+                eprintln!("❗ Error sending error response: {}", e);
+            }
+        }
+    }
+}
+
+// Function to determine content type based on file extension
+fn determine_content_type(path: &Path) -> &'static str {
+    if let Some(extension) = path.extension() {
+        match extension.to_string_lossy().to_lowercase().as_str() {
+            "html" => "text/html",
+            "css" => "text/css",
+            "js" => "application/javascript",
+            "json" => "application/json",
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "svg" => "image/svg+xml",
+            "wasm" => "application/wasm",
+            _ => "application/octet-stream",
+        }
+    } else {
+        "application/octet-stream"
     }
 }
 
@@ -682,24 +941,131 @@ fn compile_project(
     output_dir: &str,
     _lang: compiler::ProjectLanguage,
     watch: bool,
-) -> Option<String> {
+) -> Option<(String, bool, Option<String>)> {
     // Compile the project
     match compiler::compile_for_execution(path, output_dir) {
-        Ok(wasm_path) => {
+        Ok(output_path) => {
             println!("\n\x1b[1;34m╭\x1b[0m");
             println!("  ✅ \x1b[1;36mCompilation Successful\x1b[0m\n");
-            println!(
-                "  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m",
-                wasm_path
-            );
 
-            if watch {
-                println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m (Press Ctrl+C to stop)");
+            // Check if this is a JS file (indicating wasm-bindgen output)
+            let is_wasm_bindgen = output_path.ends_with(".js");
+
+            if is_wasm_bindgen {
+                // For wasm-bindgen, output_path is the JS file path
+                println!(
+                    "  📦 \x1b[1;34mJS File:\x1b[0m \x1b[1;32m{}\x1b[0m",
+                    output_path
+                );
+
+                // Find the corresponding WASM file
+                let wasm_path = Path::new(&output_path).with_extension("wasm");
+
+                if !wasm_path.exists() {
+                    // Check for the _bg.wasm file pattern
+                    let js_stem = Path::new(&output_path)
+                        .file_stem()
+                        .unwrap()
+                        .to_string_lossy();
+                    let dir = Path::new(&output_path).parent().unwrap();
+                    let bg_wasm_filename = format!("{}_bg.wasm", js_stem);
+                    let bg_wasm_path = dir.join(&bg_wasm_filename);
+
+                    if bg_wasm_path.exists() {
+                        println!(
+                            "  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m",
+                            bg_wasm_path.display()
+                        );
+
+                        if watch {
+                            println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m (Press Ctrl+C to stop)");
+                        }
+
+                        println!("\x1b[1;34m╰\x1b[0m\n");
+
+                        // Return the WASM path, indicate it's a wasm-bindgen project, and provide JS path
+                        return Some((
+                            bg_wasm_path.to_string_lossy().to_string(),
+                            true,
+                            Some(output_path),
+                        ));
+                    } else {
+                        // Try to find any .wasm file in the same directory
+                        let mut found_wasm = None;
+                        if let Ok(entries) = fs::read_dir(dir) {
+                            for entry in entries.flatten() {
+                                if let Some(ext) = entry.path().extension() {
+                                    if ext == "wasm" {
+                                        found_wasm = Some(entry.path());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(found_wasm_path) = found_wasm {
+                            println!(
+                                "  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m",
+                                found_wasm_path.display()
+                            );
+
+                            if watch {
+                                println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m (Press Ctrl+C to stop)");
+                            }
+
+                            println!("\x1b[1;34m╰\x1b[0m\n");
+
+                            return Some((
+                                found_wasm_path.to_string_lossy().to_string(),
+                                true,
+                                Some(output_path),
+                            ));
+                        } else {
+                            eprintln!("\n\x1b[1;34m╭\x1b[0m");
+                            eprintln!("  ❌ \x1b[1;31mWASM File Not Found\x1b[0m\n");
+                            eprintln!(
+                                "  \x1b[0;91mExpected WASM file at: {}\x1b[0m",
+                                wasm_path.display()
+                            );
+                            eprintln!("\x1b[1;34m╰\x1b[0m");
+                            return None;
+                        }
+                    }
+                }
+
+                println!(
+                    "  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m",
+                    wasm_path.display()
+                );
+
+                if watch {
+                    println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m (Press Ctrl+C to stop)");
+                }
+
+                println!("\x1b[1;34m╰\x1b[0m\n");
+
+                // Return the WASM path, indicate it's a wasm-bindgen project, and provide JS path
+                Some((
+                    wasm_path.to_string_lossy().to_string(),
+                    true,
+                    Some(output_path),
+                ))
+            } else {
+                // Standard WASM file
+                println!(
+                    "  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m",
+                    output_path
+                );
+
+                if watch {
+                    println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m (Press Ctrl+C to stop)");
+                }
+
+                println!("\x1b[1;34m╰\x1b[0m\n");
+
+                // Return the WASM path and indicate it's not a wasm-bindgen project
+                Some((output_path, false, None))
             }
-
-            println!("\x1b[1;34m╰\x1b[0m\n");
-
-            Some(wasm_path)
         }
         Err(e) => {
             eprintln!("\n\x1b[1;34m╭\x1b[0m");
@@ -792,4 +1158,41 @@ fn find_wasm_files(dir_path: &Path) -> Vec<String> {
 /// Check if the given port is available
 fn is_port_available(port: u16) -> bool {
     TcpListener::bind(format!("0.0.0.0:{port}")).is_ok()
+}
+
+/// Serve WASM files with wasm-bindgen support
+fn serve_wasm_bindgen_files(
+    wasm_path: &str,
+    js_path: &str,
+    port: u16,
+    wasm_filename: &str,
+) -> Result<(), String> {
+    // Create HTTP server
+    let server = Server::http(format!("0.0.0.0:{port}"))
+        .map_err(|e| format!("Failed to start server: {}", e))?;
+
+    // Get the JS filename
+    let js_path_obj = Path::new(js_path);
+    let js_filename = js_path_obj
+        .file_name()
+        .ok_or_else(|| "Invalid JS path".to_string())?
+        .to_string_lossy()
+        .to_string();
+
+    // Track connected clients for live reload
+    let mut clients_to_reload = Vec::new();
+
+    // Handle requests
+    for request in server.incoming_requests() {
+        handle_request(
+            request,
+            Some(&js_filename),
+            wasm_filename,
+            wasm_path,
+            false,
+            &mut clients_to_reload,
+        );
+    }
+
+    Ok(())
 }

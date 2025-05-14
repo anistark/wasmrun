@@ -133,14 +133,23 @@ pub fn detect_operating_system() -> OperatingSystem {
 
 /// Get recommended compilation tools based on OS and language.
 pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -> Vec<String> {
-    match (language, os) {
+    let recommended_tools = match (language, os) {
         (ProjectLanguage::Rust, _) => {
-            vec![
-                "rustup".to_string(),
-                "wasm-pack".to_string(),
-                "cargo".to_string(),
-            ]
+            // Start with basic Rust tools
+            let mut tools = vec!["rustup".to_string(), "cargo".to_string()];
+
+            // If this is a Rust project path that exists, check for wasm-bindgen
+            if let Ok(current_dir) = std::env::current_dir() {
+                let current_dir_str = current_dir.to_str().unwrap_or(".");
+                if crate::compiler::language::rust::uses_wasm_bindgen(current_dir_str) {
+                    // Add wasm-pack for wasm-bindgen projects
+                    tools.push("wasm-pack".to_string());
+                }
+            }
+
+            tools
         }
+        // Other language cases remain unchanged
         (ProjectLanguage::Go, _) => {
             vec!["tinygo".to_string(), "go".to_string()]
         }
@@ -163,11 +172,49 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
         }
         (ProjectLanguage::Python, _) => Vec::new(),
         (ProjectLanguage::Unknown, _) => Vec::new(),
-    }
+    };
+
+    // Filter installed tools
+    recommended_tools
+        .into_iter()
+        .filter(|tool| !is_tool_installed(tool))
+        .collect()
 }
 
 /// Check if a tool is installed and available in the system path
 pub fn is_tool_installed(tool_name: &str) -> bool {
+    // Special handling for wasm-pack
+    if tool_name == "wasm-pack" {
+        let check_command = if cfg!(target_os = "windows") {
+            "where wasm-pack"
+        } else {
+            "which wasm-pack"
+        };
+
+        let wasm_pack_installed = std::process::Command::new(if cfg!(target_os = "windows") {
+            "cmd"
+        } else {
+            "sh"
+        })
+        .args(if cfg!(target_os = "windows") {
+            ["/c", check_command]
+        } else {
+            ["-c", check_command]
+        })
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+
+        // If wasm-pack is not found, provide installation instructions
+        if !wasm_pack_installed {
+            println!("⚠️ wasm-pack is not installed. It's required for wasm-bindgen projects.");
+            println!("  To install wasm-pack, run: cargo install wasm-pack");
+        }
+
+        return wasm_pack_installed;
+    }
+
+    // Original implementation for other tools
     let command = if cfg!(target_os = "windows") {
         format!("where {}", tool_name)
     } else {
