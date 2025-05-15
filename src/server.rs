@@ -27,23 +27,40 @@ pub fn run_wasm_file(path: &str, port: u16) {
     let path_obj = Path::new(path);
 
     if !path_obj.extension().map_or(false, |ext| ext == "wasm") {
-        // Check if it's a JavaScript file that might be wasm-bindgen output
+        // Handle JS files
         if path_obj.extension().map_or(false, |ext| ext == "js") {
             // Look for a corresponding .wasm file
-            let wasm_path = path_obj.with_extension("wasm");
+            let dir = path_obj.parent().unwrap_or(Path::new("."));
+            let js_stem = path_obj.file_stem().unwrap().to_string_lossy();
 
-            // Check for regular .js -> .wasm pattern
-            if wasm_path.exists() {
-                handle_wasm_bindgen_files(path, wasm_path.to_str().unwrap(), port);
-                return;
-            }
+            // Try different patterns
+            let wasm_candidates = [
+                dir.join(format!("{}.wasm", js_stem)),
+                dir.join(format!("{}_bg.wasm", js_stem)),
+            ];
 
-            // Check for .js -> _bg.wasm pattern
-            let file_stem = path_obj.file_stem().unwrap().to_string_lossy();
-            let bg_wasm_path = path_obj.with_file_name(format!("{}_bg.wasm", file_stem));
-            if bg_wasm_path.exists() {
-                handle_wasm_bindgen_files(path, bg_wasm_path.to_str().unwrap(), port);
-                return;
+            for wasm_path in &wasm_candidates {
+                if wasm_path.exists() {
+                    println!("\n\x1b[1;34m╭\x1b[0m");
+                    println!("  ✅ \x1b[1;32mDetected wasm-bindgen module\x1b[0m");
+                    println!("  \x1b[0;37mJS File: {}\x1b[0m", path);
+                    println!("  \x1b[0;37mWASM File: {}\x1b[0m", wasm_path.display());
+                    println!("\x1b[1;34m╰\x1b[0m\n");
+
+                    // Run the server with both the JS and WASM files
+                    if let Err(e) = run_server(ServerConfig {
+                        wasm_path: wasm_path.to_str().unwrap().to_string(),
+                        js_path: Some(path.to_string()),
+                        port,
+                        watch_mode: false,
+                        project_path: None,
+                        output_dir: None,
+                    }) {
+                        print_error(format!("Error Running Chakra Server: {}", e));
+                    }
+
+                    return;
+                }
             }
         }
 
@@ -53,87 +70,123 @@ pub fn run_wasm_file(path: &str, port: u16) {
         return;
     }
 
-    // WASM file handling enhancement for _bg.wasm files
+    // Special handling for _bg.wasm files
     let file_name = path_obj.file_name().unwrap().to_string_lossy();
     if file_name.ends_with("_bg.wasm") {
-        // This is a strong indicator of wasm-bindgen output
         println!("\n\x1b[1;34m╭\x1b[0m");
         println!(
             "  ℹ️  \x1b[1;34mDetected wasm-bindgen _bg.wasm file: {}\x1b[0m",
             path
         );
 
-        // Look for the corresponding .js file
-        // Remove _bg.wasm and add .js
-        let base_name = file_name.trim_end_matches("_bg.wasm");
-        let js_file_name = format!("{}.js", base_name);
-        let js_path = path_obj.with_file_name(&js_file_name);
+        // Remove _bg.wasm and add .js to find the JS file
+        let js_base_name = file_name.replace("_bg.wasm", "");
+        let js_file_name = format!("{}.js", js_base_name);
+        let js_path = path_obj.parent().unwrap().join(&js_file_name);
 
         if js_path.exists() {
             println!(
-                "  \x1b[0;37mFound corresponding JS file: {}\x1b[0m",
+                "  ✅ \x1b[1;32mFound corresponding JS file: {}\x1b[0m",
                 js_path.display()
             );
-            println!("  \x1b[1;32mRunning with wasm-bindgen support\x1b[0m");
+            println!("  \x1b[0;37mRunning with wasm-bindgen support\x1b[0m");
             println!("\x1b[1;34m╰\x1b[0m\n");
 
-            handle_wasm_bindgen_files(js_path.to_str().unwrap(), path, port);
+            if let Err(e) = handle_wasm_bindgen_files(
+                js_path.to_str().unwrap(),
+                path,
+                port,
+                path_obj.file_name().unwrap().to_string_lossy().as_ref(),
+            ) {
+                print_error(format!("Error Running Chakra Server: {}", e));
+            }
+
             return;
         } else {
             println!(
-                "  \x1b[1;33mWarning: Could not find corresponding JS file: {}\x1b[0m",
+                "  ⚠️ \x1b[1;33mWarning: Could not find corresponding JS file: {}\x1b[0m",
                 js_path.display()
             );
             println!("  \x1b[0;37mLooking for other JS files in the same directory...\x1b[0m");
 
-            // Look for any .js file in the same directory that might be the glue code
-            let dir = path_obj.parent().unwrap_or_else(|| Path::new("."));
-            let mut found_js = None;
+            // Search for any JS file in the same directory
+            if let Some(dir) = path_obj.parent() {
+                if let Ok(entries) = fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let entry_path = entry.path();
+                        if entry_path.extension().map_or(false, |ext| ext == "js") {
+                            // Check if this might be a wasm-bindgen JS by reading its content
+                            if let Ok(js_content) = fs::read_to_string(&entry_path) {
+                                if js_content.contains("wasm_bindgen")
+                                    || js_content.contains("__wbindgen")
+                                {
+                                    println!("  ✅ \x1b[1;32mFound potential wasm-bindgen JS file: {}\x1b[0m", entry_path.display());
+                                    println!("\x1b[1;34m╰\x1b[0m\n");
 
-            if let Ok(entries) = fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let entry_path = entry.path();
-                    if entry_path.extension().map_or(false, |ext| ext == "js") {
-                        // Check if this JS file contains wasm-bindgen signatures
-                        if let Ok(js_content) = fs::read_to_string(&entry_path) {
-                            if js_content.contains("wasm_bindgen")
-                                || js_content.contains("__wbindgen")
-                                || js_content.contains("wbg")
-                            {
-                                found_js = Some(entry_path);
-                                break;
+                                    // Run with this JS file
+                                    if let Err(e) = run_server(ServerConfig {
+                                        wasm_path: path.to_string(),
+                                        js_path: Some(entry_path.to_str().unwrap().to_string()),
+                                        port,
+                                        watch_mode: false,
+                                        project_path: None,
+                                        output_dir: None,
+                                    }) {
+                                        print_error(format!("Error Running Chakra Server: {}", e));
+                                    }
+
+                                    return;
+                                }
                             }
                         }
                     }
                 }
             }
 
-            if let Some(js_file) = found_js {
-                println!(
-                    "  \x1b[1;32mFound potential wasm-bindgen JS file: {}\x1b[0m",
-                    js_file.display()
-                );
-                println!("\x1b[1;34m╰\x1b[0m\n");
-
-                handle_wasm_bindgen_files(js_file.to_str().unwrap(), path, port);
-                return;
-            }
-
-            println!(
-                "  \x1b[1;33mNo matching JS file found. Attempting to run WASM directly...\x1b[0m"
-            );
-            println!("  \x1b[0;37mNote: Running wasm-bindgen modules without JS glue code may fail.\x1b[0m");
+            println!("  ⚠️ \x1b[1;33mNo suitable JS file found. This is likely a wasm-bindgen module without its JS counterpart.\x1b[0m");
+            println!("  \x1b[0;37mTry running the .js file directly instead.\x1b[0m");
             println!("\x1b[1;34m╰\x1b[0m\n");
         }
     }
 
-    // Check for any wasm-bindgen JS file for this WASM file
+    // Regular WASM file handling (check for wasm-bindgen patterns)
+    if let Ok(wasm_bytes) = fs::read(path) {
+        // Quick check for wasm-bindgen patterns in the binary
+        let wasm_content = String::from_utf8_lossy(&wasm_bytes);
+        if wasm_content.contains("wasm-bindgen")
+            || wasm_content.contains("__wbindgen")
+            || wasm_content.contains("wbg")
+        {
+            println!("\n\x1b[1;34m╭\x1b[0m");
+            println!("  ⚠️ \x1b[1;33mThis appears to be a wasm-bindgen module but no JS file was found\x1b[0m");
+            println!(
+                "  \x1b[0;37mIt might not run correctly without its JavaScript counterpart\x1b[0m"
+            );
+            println!("\x1b[1;34m╰\x1b[0m\n");
+        }
+    }
+
+    // Check for a corresponding JS file with the same base name
     let js_path = path_obj.with_extension("js");
     if js_path.exists() {
         // This might be a wasm-bindgen output
         if let Ok(js_content) = fs::read_to_string(&js_path) {
             if js_content.contains("wasm_bindgen") || js_content.contains("__wbindgen") {
-                handle_wasm_bindgen_files(js_path.to_str().unwrap(), path, port);
+                println!("\n\x1b[1;34m╭\x1b[0m");
+                println!("  ✅ \x1b[1;32mFound corresponding wasm-bindgen JS file\x1b[0m");
+                println!("  \x1b[0;37mRunning with wasm-bindgen support\x1b[0m");
+                println!("\x1b[1;34m╰\x1b[0m\n");
+
+                // Run with wasm-bindgen support
+                if let Err(e) = handle_wasm_bindgen_files(
+                    js_path.to_str().unwrap(),
+                    path,
+                    port,
+                    path_obj.file_name().unwrap().to_string_lossy().as_ref(),
+                ) {
+                    print_error(format!("Error Running Chakra Server: {}", e));
+                }
+
                 return;
             }
         }
@@ -153,7 +206,12 @@ pub fn run_wasm_file(path: &str, port: u16) {
 }
 
 // Helper function to handle wasm-bindgen files
-fn handle_wasm_bindgen_files(js_path: &str, wasm_path: &str, port: u16) {
+fn handle_wasm_bindgen_files(
+    js_path: &str,
+    wasm_path: &str,
+    port: u16,
+    _wasm_filename: &str,
+) -> Result<(), String> {
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  ✅  \x1b[1;32mRunning wasm-bindgen project\x1b[0m");
     println!("  \x1b[0;37mJS File: {}\x1b[0m", js_path);
@@ -161,16 +219,14 @@ fn handle_wasm_bindgen_files(js_path: &str, wasm_path: &str, port: u16) {
     println!("\x1b[1;34m╰\x1b[0m\n");
 
     // Run with wasm-bindgen support
-    if let Err(e) = run_server(ServerConfig {
+    run_server(ServerConfig {
         wasm_path: wasm_path.to_string(),
         js_path: Some(js_path.to_string()),
         port,
         watch_mode: false,
         project_path: None,
         output_dir: None,
-    }) {
-        print_error(format!("Error Running Chakra Server: {}", e));
-    }
+    })
 }
 
 /// Compile and run a project
@@ -207,20 +263,20 @@ pub fn run_project(path: &str, port: u16, language_override: Option<String>, wat
             // Check if JS file contains wasm-bindgen patterns
             if let Ok(js_content) = fs::read_to_string(path) {
                 if js_content.contains("wasm_bindgen") || js_content.contains("__wbindgen") {
-                    println!("\n\x1b[1;34m╭\x1b[0m");
                     println!("  ✅  \x1b[1;32mConfirmed wasm-bindgen project\x1b[0m");
                     println!("  \x1b[0;37mRunning with wasm-bindgen support\x1b[0m");
                     println!("\x1b[1;34m╰\x1b[0m\n");
 
-                    // Run with wasm-bindgen support
-                    if let Err(e) = run_server(ServerConfig {
-                        wasm_path: wasm_path.to_str().unwrap().to_string(),
-                        js_path: Some(path.to_string()),
+                    // Get wasm filename
+                    let wasm_filename =
+                        wasm_path.file_name().unwrap().to_string_lossy().to_string();
+
+                    if let Err(e) = handle_wasm_bindgen_files(
+                        path,
+                        wasm_path.to_str().unwrap(),
                         port,
-                        watch_mode: watch,
-                        project_path: None,
-                        output_dir: None,
-                    }) {
+                        &wasm_filename,
+                    ) {
                         print_error(format!("Error Running Chakra Server: {}", e));
                     }
 
@@ -707,6 +763,56 @@ fn handle_request(
             let content_type = determine_content_type(&requested_file);
             serve_file(request, requested_file.to_str().unwrap(), content_type);
         } else {
+            // Special handling for _bg.wasm and other common patterns
+            if url.ends_with("_bg.wasm") {
+                // The URL might be requesting a _bg.wasm file directly
+                // Check if there's a file matching this pattern in the directory
+                if let Ok(entries) = fs::read_dir(base_dir) {
+                    for entry in entries.flatten() {
+                        let entry_path = entry.path();
+                        if let Some(name) = entry_path.file_name() {
+                            if name.to_string_lossy().ends_with("_bg.wasm") && entry_path.is_file()
+                            {
+                                // Found a _bg.wasm file, serve it
+                                serve_file(
+                                    request,
+                                    entry_path.to_str().unwrap(),
+                                    "application/wasm",
+                                );
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check for common file patterns (js, css, etc.)
+            for ext in &["js", "css", "json", "wasm"] {
+                if url.ends_with(&format!(".{}", ext)) {
+                    // Look for any file with this name in the directory
+                    let filename = url.split('/').last().unwrap_or("");
+                    if let Ok(entries) = fs::read_dir(base_dir) {
+                        for entry in entries.flatten() {
+                            let entry_path = entry.path();
+                            if entry_path
+                                .file_name()
+                                .map_or(false, |name| name.to_string_lossy() == filename)
+                            {
+                                let content_type = match *ext {
+                                    "js" => "application/javascript",
+                                    "css" => "text/css",
+                                    "json" => "application/json",
+                                    "wasm" => "application/wasm",
+                                    _ => "application/octet-stream",
+                                };
+                                serve_file(request, entry_path.to_str().unwrap(), content_type);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
             // 404 for all other requests
             let response = Response::from_string("404 Not Found")
                 .with_status_code(404)
@@ -748,20 +854,20 @@ fn serve_file(request: Request, file_path: &str, content_type: &str) {
 
 // Function to determine content type based on file extension
 fn determine_content_type(path: &Path) -> &'static str {
-    if let Some(extension) = path.extension() {
-        match extension.to_string_lossy().to_lowercase().as_str() {
-            "html" => "text/html",
-            "css" => "text/css",
-            "js" => "application/javascript",
-            "json" => "application/json",
-            "png" => "image/png",
-            "jpg" | "jpeg" => "image/jpeg",
-            "svg" => "image/svg+xml",
-            "wasm" => "application/wasm",
-            _ => "application/octet-stream",
-        }
-    } else {
-        "application/octet-stream"
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("html") => "text/html",
+        Some("css") => "text/css",
+        Some("js") => "application/javascript",
+        Some("json") => "application/json",
+        Some("wasm") => "application/wasm",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        Some("txt") => "text/plain",
+        Some("md") => "text/markdown",
+        Some("map") => "application/json",
+        _ => "application/octet-stream",
     }
 }
 
