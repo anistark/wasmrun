@@ -2,25 +2,6 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-/// Check if a Rust project uses wasm-bindgen
-pub fn uses_wasm_bindgen(project_path: &str) -> bool {
-    let cargo_toml_path = Path::new(project_path).join("Cargo.toml");
-
-    if let Ok(cargo_toml) = fs::read_to_string(cargo_toml_path) {
-        // Check for wasm-bindgen dependencies
-        if cargo_toml.contains("wasm-bindgen") {
-            return true;
-        }
-
-        // Also check for common patterns that indicate wasm-bindgen usage
-        if cargo_toml.contains("web-sys") || cargo_toml.contains("js-sys") {
-            return true;
-        }
-    }
-
-    false
-}
-
 /// Build a WASM file from a Rust project using wasm-bindgen
 pub fn build_wasm_bindgen(project_path: &str, output_dir: &str) -> Result<String, String> {
     println!(
@@ -458,4 +439,243 @@ pub fn build_wasm_verbose(project_path: &str, output_dir: &str) -> Result<String
     fs::copy(&wasm_path, &output_file).map_err(|e| format!("Failed to copy WASM file: {}", e))?;
 
     Ok(output_file.to_string_lossy().to_string())
+}
+
+/// Check if a Rust project uses wasm-bindgen
+pub fn uses_wasm_bindgen(project_path: &str) -> bool {
+    let cargo_toml_path = Path::new(project_path).join("Cargo.toml");
+
+    if let Ok(cargo_toml) = fs::read_to_string(cargo_toml_path) {
+        // Check for wasm-bindgen dependencies
+        if cargo_toml.contains("wasm-bindgen") {
+            return true;
+        }
+
+        // Also check for common patterns that indicate wasm-bindgen usage
+        if cargo_toml.contains("web-sys") || cargo_toml.contains("js-sys") {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Check if a project is a Rust web application
+pub fn is_rust_web_application(project_path: &str) -> bool {
+    let cargo_toml_path = Path::new(project_path).join("Cargo.toml");
+
+    if !cargo_toml_path.exists() {
+        return false;
+    }
+
+    if let Ok(cargo_toml) = fs::read_to_string(cargo_toml_path) {
+        // First check if it uses wasm-bindgen
+        let uses_wasm_bindgen = cargo_toml.contains("wasm-bindgen")
+            || cargo_toml.contains("web-sys")
+            || cargo_toml.contains("js-sys");
+
+        if !uses_wasm_bindgen {
+            return false;
+        }
+
+        // Look for web framework dependencies
+        let web_frameworks = [
+            "yew", "leptos", "dioxus", "sycamore", "mogwai", "seed", "percy", "iced", "dodrio",
+            "smithy", "trunk",
+        ];
+
+        for framework in web_frameworks {
+            if cargo_toml.contains(framework) {
+                return true;
+            }
+        }
+
+        // Check for lib target with cdylib
+        if cargo_toml.contains("[lib]") && cargo_toml.contains("cdylib") {
+            // Check if there's an index.html in the project
+            if Path::new(project_path).join("index.html").exists() {
+                return true;
+            }
+
+            // Check for static directories that might indicate a web app
+            let potential_static_dirs = ["public", "static", "assets", "dist", "www"];
+            for dir in potential_static_dirs {
+                if Path::new(project_path).join(dir).exists() {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Build a web application from a Rust project
+pub fn build_rust_web_application(project_path: &str, output_dir: &str) -> Result<String, String> {
+    println!("🦀 Building Rust web application at: {}", project_path);
+
+    // Check if wasm-pack is installed
+    let check_wasm_pack = Command::new("wasm-pack").arg("--version").output();
+
+    if check_wasm_pack.is_err() || !check_wasm_pack.as_ref().unwrap().status.success() {
+        println!("⚠️ wasm-pack is not installed. Attempting to install it...");
+
+        let install_output = Command::new("cargo")
+            .args(["install", "wasm-pack"])
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status()
+            .map_err(|e| format!("Failed to install wasm-pack: {}", e))?;
+
+        if !install_output.success() {
+            return Err("Failed to install wasm-pack. Please install it manually with 'cargo install wasm-pack'".to_string());
+        }
+
+        println!("✅ wasm-pack installed successfully");
+    } else if let Ok(output) = check_wasm_pack {
+        let version = String::from_utf8_lossy(&output.stdout);
+        println!("✅ Using wasm-pack version: {}", version.trim());
+    }
+
+    // Create output directory if it doesn't exist
+    let output_path = Path::new(output_dir);
+    fs::create_dir_all(output_path)
+        .map_err(|e| format!("Failed to create output directory: {}", e))?;
+
+    // Check if the project has a Trunk.toml file
+    let uses_trunk = Path::new(project_path).join("Trunk.toml").exists()
+        || Path::new(project_path).join("trunk.toml").exists();
+
+    if uses_trunk {
+        println!("📦 Detected Trunk configuration");
+        println!("🔨 Building with trunk...");
+
+        // Build with trunk
+        let trunk_status = Command::new("trunk")
+            .current_dir(project_path)
+            .args(["build", "--release"])
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status()
+            .map_err(|e| format!("Failed to execute trunk build: {}", e))?;
+
+        if !trunk_status.success() {
+            return Err("Trunk build failed. See output above for details.".to_string());
+        }
+
+        // Copy the dist directory to output
+        let trunk_dist = Path::new(project_path).join("dist");
+        if !trunk_dist.exists() {
+            return Err("Trunk build completed but dist directory was not created".to_string());
+        }
+
+        // Find the main JS file
+        let mut js_file = None;
+        let mut wasm_file = None;
+
+        if let Ok(entries) = fs::read_dir(&trunk_dist) {
+            for entry in entries.flatten() {
+                if let Some(extension) = entry.path().extension() {
+                    let ext = extension.to_string_lossy().to_lowercase();
+                    if ext == "js" {
+                        js_file = Some(entry.path());
+                    } else if ext == "wasm" {
+                        wasm_file = Some(entry.path());
+                    }
+                }
+            }
+        }
+
+        if js_file.is_none() || wasm_file.is_none() {
+            return Err("Could not find JS or WASM files in trunk dist directory".to_string());
+        }
+
+        // Copy the dist directory
+        copy_dir_recursively(&trunk_dist, output_path)
+            .map_err(|e| format!("Failed to copy trunk dist directory: {}", e))?;
+
+        // Get the path to the JS file relative to the output directory
+        let js_file_name = js_file
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        Ok(js_file_name)
+    } else {
+        println!("🔨 Building with wasm-pack...");
+        println!("📝 Log output:");
+
+        // Build with wasm-pack
+        let build_status = Command::new("wasm-pack")
+            .current_dir(project_path)
+            .args(["build", "--target", "web", "--release", "--no-typescript"])
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status()
+            .map_err(|e| format!("Failed to execute wasm-pack build: {}", e))?;
+
+        if !build_status.success() {
+            return Err("Build failed. See output above for details.".to_string());
+        }
+
+        println!("✅ wasm-pack build completed successfully");
+
+        // Find the JS and WASM files in the pkg directory
+        let pkg_dir = Path::new(project_path).join("pkg");
+        if !pkg_dir.exists() {
+            return Err("wasm-pack build completed but pkg directory was not created".to_string());
+        }
+
+        // Copy the pkg directory to the output directory
+        copy_dir_recursively(&pkg_dir, output_path)
+            .map_err(|e| format!("Failed to copy pkg directory: {}", e))?;
+
+        // Find the main JS file name
+        let mut js_file = None;
+        if let Ok(entries) = fs::read_dir(&pkg_dir) {
+            for entry in entries.flatten() {
+                if let Some(extension) = entry.path().extension() {
+                    if extension.to_string_lossy().to_lowercase() == "js" {
+                        // Skip .d.js files
+                        if !entry.path().to_string_lossy().contains(".d.") {
+                            js_file = Some(
+                                entry
+                                    .path()
+                                    .file_name()
+                                    .unwrap()
+                                    .to_string_lossy()
+                                    .to_string(),
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        js_file.ok_or_else(|| "No JS file found in pkg directory".to_string())
+    }
+}
+
+/// Helper function to recursively copy a directory
+pub fn copy_dir_recursively(source: &Path, destination: &Path) -> Result<(), std::io::Error> {
+    if !destination.exists() {
+        fs::create_dir_all(destination)?;
+    }
+
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+
+        if source_path.is_dir() {
+            copy_dir_recursively(&source_path, &destination_path)?;
+        } else {
+            fs::copy(source_path, destination_path)?;
+        }
+    }
+
+    Ok(())
 }

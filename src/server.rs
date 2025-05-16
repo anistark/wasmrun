@@ -1,7 +1,10 @@
 use crate::compiler;
-use crate::template::{generate_html, generate_html_wasm_bindgen};
+use crate::template::{
+    generate_html, generate_html_wasm_bindgen, generate_webapp_html, get_app_name,
+};
 use crate::utils::content_type_header;
 use crate::watcher;
+
 use std::fs;
 use std::io::Write;
 use std::net::{TcpListener, TcpStream};
@@ -300,6 +303,28 @@ pub fn run_project(path: &str, port: u16, language_override: Option<String>, wat
         println!("  \x1b[1;37mPlease specify a path to a project directory or use --wasm for WASM files:\x1b[0m");
         println!("  \x1b[1;33mchakra --path /path/to/your/project/\x1b[0m");
         println!("  \x1b[1;33mchakra --wasm --path /path/to/your/file.wasm\x1b[0m");
+        return;
+    }
+
+    // Check if it's a Rust web application
+    let detected_language = crate::compiler::detect_project_language(path);
+
+    if detected_language == crate::compiler::ProjectLanguage::Rust
+        && crate::compiler::is_rust_web_application(path)
+    {
+        println!("\n\x1b[1;34m╭\x1b[0m");
+        println!("  🌐 \x1b[1;36mDetected Rust Web Application\x1b[0m");
+        println!("  \x1b[0;37mRunning as a web app on port {}\x1b[0m", 3000); // Use port 3000 for web apps
+        println!("\x1b[1;34m╰\x1b[0m\n");
+
+        // Run as a web application on port 3000
+        if let Err(e) = run_webapp(path, 3000, watch) {
+            eprintln!("\n\x1b[1;34m╭\x1b[0m");
+            eprintln!("  ❌ \x1b[1;31mError Running Web Application:\x1b[0m");
+            eprintln!("  \x1b[0;91m{}\x1b[0m", e);
+            eprintln!("\x1b[1;34m╰\x1b[0m");
+        }
+
         return;
     }
 
@@ -1301,4 +1326,327 @@ fn serve_wasm_bindgen_files(
     }
 
     Ok(())
+}
+
+/// Run a Rust web application
+pub fn run_webapp(path: &str, port: u16, watch_mode: bool) -> Result<(), String> {
+    println!("\n\x1b[1;34m╭\x1b[0m");
+    println!("  🚀 \x1b[1;36mChakra: Running Rust Web Application\x1b[0m\n");
+    println!(
+        "  📂 \x1b[1;34mProject Path:\x1b[0m \x1b[1;33m{}\x1b[0m",
+        path
+    );
+    println!(
+        "  🌐 \x1b[1;34mTarget Port:\x1b[0m \x1b[1;33m{}\x1b[0m",
+        port
+    );
+
+    if watch_mode {
+        println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mEnabled\x1b[0m");
+    }
+
+    // Check if we're already running a server on this port
+    if !is_port_available(port) {
+        // Try to stop any existing server
+        if is_server_running() {
+            match stop_existing_server() {
+                Ok(_) => println!("  💀 \x1b[1;34mStopped existing server\x1b[0m"),
+                Err(e) => eprintln!(
+                    "  ⚠️ \x1b[1;33mWarning when stopping existing server: {}\x1b[0m",
+                    e
+                ),
+            }
+        } else {
+            println!(
+                "  ❌ \x1b[1;31mPort {} is already in use by another process\x1b[0m",
+                port
+            );
+            println!("\x1b[1;34m╰\x1b[0m");
+            return Err(format!("Port {} is already in use", port));
+        }
+    }
+
+    // Create a temporary directory for the build output
+    let temp_dir = std::env::temp_dir().join("chakra_webapp_temp");
+    let temp_output_dir = temp_dir.to_str().unwrap_or("/tmp").to_string();
+
+    // Create temp directory if it doesn't exist
+    if !temp_dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(&temp_dir) {
+            println!(
+                "  ❌ \x1b[1;31mFailed to create temporary directory: {}\x1b[0m",
+                e
+            );
+            println!("\x1b[1;34m╰\x1b[0m");
+            return Err(format!("Failed to create temporary directory: {}", e));
+        }
+    }
+
+    println!(
+        "  📁 \x1b[1;34mOutput Directory:\x1b[0m \x1b[1;33m{}\x1b[0m",
+        temp_output_dir
+    );
+    println!("\x1b[1;34m╰\x1b[0m\n");
+
+    // Build the web application
+    println!("Building Rust web application...");
+    let app_name = get_app_name(path);
+
+    let js_entrypoint = match crate::compiler::build_rust_web_application(path, &temp_output_dir) {
+        Ok(js_file) => {
+            println!("\n\x1b[1;34m╭\x1b[0m");
+            println!("  ✅ \x1b[1;36mBuild Successful\x1b[0m\n");
+            println!(
+                "  📦 \x1b[1;34mJS Entry Point:\x1b[0m \x1b[1;32m{}\x1b[0m",
+                js_file
+            );
+            println!("\x1b[1;34m╰\x1b[0m\n");
+            js_file
+        }
+        Err(e) => {
+            println!("\n\x1b[1;34m╭\x1b[0m");
+            println!("  ❌ \x1b[1;31mBuild Failed\x1b[0m\n");
+            println!("  \x1b[0;91m{}\x1b[0m", e);
+            println!("\x1b[1;34m╰\x1b[0m\n");
+            return Err(format!("Build failed: {}", e));
+        }
+    };
+
+    // Generate the web app HTML
+    let html = generate_webapp_html(&app_name, &js_entrypoint);
+
+    // Run the server
+    run_webapp_server(path, &temp_output_dir, port, &html, watch_mode)?;
+
+    Ok(())
+}
+
+/// Run the server for a web application
+fn run_webapp_server(
+    project_path: &str,
+    output_dir: &str,
+    port: u16,
+    html: &str,
+    watch_mode: bool,
+) -> Result<(), String> {
+    // Store PID
+    let pid = std::process::id();
+    fs::write(PID_FILE, pid.to_string())
+        .map_err(|e| format!("Failed to write PID to {}: {}", PID_FILE, e))?;
+
+    let url = format!("http://localhost:{}", port);
+
+    // Display welcome message
+    println!("\n\x1b[1;34m╭\x1b[0m");
+    println!("  🌐 \x1b[1;36mChakra Web App Server\x1b[0m\n");
+    println!("  🚀 \x1b[1;34mServer URL:\x1b[0m \x1b[4;36m{}\x1b[0m", url);
+    println!(
+        "  🔌 \x1b[1;34mListening on port:\x1b[0m \x1b[1;33m{}\x1b[0m",
+        port
+    );
+
+    if watch_mode {
+        println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m");
+    }
+
+    println!("  🆔 \x1b[1;34mServer PID:\x1b[0m \x1b[0;37m{}\x1b[0m", pid);
+    println!("\n  \x1b[0;90mPress Ctrl+C to stop the server\x1b[0m");
+    println!("\x1b[1;34m╰\x1b[0m\n");
+
+    // Open browser
+    if let Err(e) = webbrowser::open(&url) {
+        println!("❗ Failed to open browser automatically: {e}");
+    } else {
+        println!("🌐 Opening browser...");
+    }
+
+    // Setup for watch mode if needed
+    if watch_mode {
+        match crate::watcher::ProjectWatcher::new(project_path) {
+            Ok(watcher) => {
+                // Create channels for communication
+                let (tx, rx) = channel();
+                let reload_flag = Arc::new(AtomicBool::new(false));
+
+                // Clone values for server thread
+                let html_content = html.to_string();
+                let output_path = output_dir.to_string();
+
+                // Start server in a new thread
+                let server_thread = thread::spawn(move || {
+                    // Create HTTP server
+                    if let Ok(server) = Server::http(format!("0.0.0.0:{port}")) {
+                        // Track connected clients for live reload
+                        let mut clients_to_reload = Vec::new();
+
+                        // Handle requests
+                        for request in server.incoming_requests() {
+                            // Check for shutdown signal
+                            if rx.try_recv().is_ok() {
+                                break;
+                            }
+
+                            // Handle the request
+                            handle_webapp_request(
+                                request,
+                                &html_content,
+                                &output_path,
+                                &mut clients_to_reload,
+                            );
+                        }
+                    }
+                });
+
+                // Let the server start up
+                thread::sleep(Duration::from_millis(500));
+
+                // Watch for file changes in the main thread
+                println!("👀 Watching project directory for changes...");
+
+                loop {
+                    // Wait for file changes
+                    if let Some(Ok(events)) = watcher.wait_for_change() {
+                        if watcher.should_recompile(&events) {
+                            println!("\n📝 File change detected. Recompiling...");
+
+                            // Recompile the project
+                            match crate::compiler::build_rust_web_application(
+                                project_path,
+                                output_dir,
+                            ) {
+                                Ok(_) => {
+                                    println!("✅ Recompilation successful!");
+                                    println!("🔄 Reloading in browser...");
+
+                                    // Set the reload flag
+                                    reload_flag.store(true, Ordering::SeqCst);
+
+                                    // Send reload signal to the server
+                                    if let Ok(mut stream) =
+                                        TcpStream::connect(format!("127.0.0.1:{}", port))
+                                    {
+                                        let reload_request =
+                                            "GET /reload HTTP/1.1\r\nHost: localhost\r\n\r\n";
+                                        let _ = stream.write_all(reload_request.as_bytes());
+                                    }
+                                }
+                                Err(e) => {
+                                    println!("❌ Recompilation failed: {}", e);
+                                }
+                            }
+                        }
+                    }
+
+                    // Check for server exit
+                    if server_thread.is_finished() {
+                        println!("Server stopped. Exiting watch mode.");
+                        break;
+                    }
+
+                    // Sleep to avoid high CPU usage
+                    thread::sleep(Duration::from_millis(100));
+                }
+
+                // Signal the server to stop if still running
+                let _ = tx.send(());
+
+                // Wait for server thread to finish
+                if let Err(e) = server_thread.join() {
+                    eprintln!("Error joining server thread: {:?}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to set up file watcher: {}", e);
+                run_webapp_server_without_watch(html, output_dir, port)?;
+            }
+        }
+    } else {
+        // Run server without watching
+        run_webapp_server_without_watch(html, output_dir, port)?;
+    }
+
+    // Clean up PID file
+    if Path::new(PID_FILE).exists() {
+        let _ = fs::remove_file(PID_FILE);
+    }
+
+    Ok(())
+}
+
+/// Run the webapp server without watch mode
+fn run_webapp_server_without_watch(html: &str, output_dir: &str, port: u16) -> Result<(), String> {
+    // Create HTTP server
+    let server = Server::http(format!("0.0.0.0:{port}"))
+        .map_err(|e| format!("Failed to start server: {}", e))?;
+
+    // Track connected clients for live reload (not used in non-watch mode)
+    let mut clients_to_reload = Vec::new();
+
+    // Handle requests
+    for request in server.incoming_requests() {
+        handle_webapp_request(request, html, output_dir, &mut clients_to_reload);
+    }
+
+    Ok(())
+}
+
+/// Handle a request for a web application
+fn handle_webapp_request(
+    request: Request,
+    html: &str,
+    output_dir: &str,
+    clients_to_reload: &mut Vec<String>,
+) {
+    let url = request.url().to_string();
+
+    // Get client address safely
+    let client_addr = match request.remote_addr() {
+        Some(addr) => addr.to_string(),
+        None => "unknown".to_string(),
+    };
+
+    println!("📝 Received request for: {}", url);
+
+    if url == "/" {
+        // Serve the main HTML page
+        let response = Response::from_string(html).with_header(content_type_header("text/html"));
+        if let Err(e) = request.respond(response) {
+            eprintln!("❗ Error sending HTML response: {}", e);
+        }
+
+        // Track this client for reload notifications
+        if !clients_to_reload.contains(&client_addr) {
+            clients_to_reload.push(client_addr);
+        }
+    } else if url == "/reload" {
+        // Special reload endpoint
+        println!("🔄 Handling reload request");
+
+        // Send a special response to tell the browser to refresh
+        let response = Response::from_string("reload")
+            .with_header(Header::from_bytes(&b"X-Reload"[..], &b"true"[..]).unwrap())
+            .with_header(content_type_header("text/plain"));
+
+        if let Err(e) = request.respond(response) {
+            eprintln!("❗ Error sending reload response: {}", e);
+        }
+    } else if url.starts_with("/assets/") {
+        serve_asset(request, &url);
+    } else {
+        // For any other files, try to serve them from the output directory
+        let file_path = Path::new(output_dir).join(url.trim_start_matches('/'));
+
+        if file_path.exists() && file_path.is_file() {
+            // Determine content type based on extension
+            let content_type = determine_content_type(&file_path);
+            serve_file(request, file_path.to_str().unwrap(), content_type);
+        } else {
+            // If the file doesn't exist, try to serve the main HTML page for SPA routing
+            let response =
+                Response::from_string(html).with_header(content_type_header("text/html"));
+            if let Err(e) = request.respond(response) {
+                eprintln!("❗ Error sending HTML response for SPA routing: {}", e);
+            }
+        }
+    }
 }

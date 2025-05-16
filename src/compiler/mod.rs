@@ -1,10 +1,11 @@
 mod detect;
-mod language;
+pub mod language;
 
 pub use detect::{
     detect_operating_system, detect_project_language, get_missing_tools, print_system_info,
     OperatingSystem, ProjectLanguage,
 };
+pub use language::rust::{build_rust_web_application, is_rust_web_application};
 
 use std::fs;
 use std::path::Path;

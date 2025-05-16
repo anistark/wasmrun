@@ -214,8 +214,29 @@ fn main() {
             if args.wasm {
                 server::run_wasm_file(path, port);
             } else {
-                // Default to compile and run project
-                server::run_project(path, port, None, args.watch);
+                // Check if it's a Rust web application
+                let path_obj = Path::new(path);
+                if path_obj.exists()
+                    && path_obj.is_dir()
+                    && compiler::detect_project_language(path) == compiler::ProjectLanguage::Rust
+                    && compiler::is_rust_web_application(path)
+                {
+                    println!("\n\x1b[1;34m╭\x1b[0m");
+                    println!("  🌐 \x1b[1;36mDetected Rust Web Application\x1b[0m");
+                    println!("  \x1b[0;37mRunning as a web app on port {}\x1b[0m", 3000); // Use port 3000 for web apps
+                    println!("\x1b[1;34m╰\x1b[0m\n");
+
+                    // Run as a web application on port 3000
+                    if let Err(e) = server::run_webapp(path, 3000, args.watch) {
+                        eprintln!("\n\x1b[1;34m╭\x1b[0m");
+                        eprintln!("  ❌ \x1b[1;31mError Running Web Application:\x1b[0m");
+                        eprintln!("  \x1b[0;91m{}\x1b[0m", e);
+                        eprintln!("\x1b[1;34m╰\x1b[0m");
+                    }
+                } else {
+                    // Default to compile and run project
+                    server::run_project(path, port, None, args.watch);
+                }
             }
         }
     }
