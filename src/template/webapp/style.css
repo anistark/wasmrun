@@ -1,0 +1,150 @@
+/* Base Styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Chakra Dev Bar */
+.chakra-dev-bar {
+    background-color: #1e1e2e;
+    color: #ffffff;
+    padding: 0.5rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 1000;
+}
+
+.chakra-dev-bar.collapsed {
+    height: 0.5rem;
+    padding: 0;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.chakra-logo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.chakra-logo img {
+    width: 28px;
+    height: 28px;
+}
+
+.chakra-actions {
+    display: flex;
+    gap: 1rem;
+}
+
+.chakra-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.chakra-status.success {
+    color: #50fa7b;
+}
+
+.chakra-status.error {
+    color: #ff5555;
+}
+
+.chakra-status.info {
+    color: #8be9fd;
+}
+
+.chakra-toggler {
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    background-color: #313244;
+    color: #cdd6f4;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.chakra-toggler:hover {
+    background-color: #45475a;
+}
+
+/* App Container */
+.app-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+}
+
+#app {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+}
+
+/* Dev Console */
+.dev-console {
+    background-color: rgba(0, 0, 0, 0.85);
+    border-top: 1px solid #313244;
+    color: #f8f8f2;
+    font-family: monospace;
+    font-size: 0.9rem;
+    height: 200px;
+    overflow: auto;
+    padding: 0.5rem;
+    display: none;
+}
+
+.dev-console.visible {
+    display: block;
+}
+
+.dev-console .info {
+    color: #8be9fd;
+}
+
+.dev-console .error {
+    color: #ff5555;
+}
+
+.dev-console .warning {
+    color: #f1fa8c;
+}
+
+/* Loading Indicator */
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-indicator {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    border-top-color: #ffffff;
+    animation: spin 1s linear infinite;
+}
+
+/* Resource Timer */
+.resource-timer {
+    font-size: 0.8rem;
+    color: #6272a4;
+    margin-left: 1rem;
+}

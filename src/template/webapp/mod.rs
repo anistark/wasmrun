@@ -1,13 +1,61 @@
+use std::fs;
 use std::path::Path;
 
-// HTML template for web applications
-const WEBAPP_HTML: &str = include_str!("index.html");
+// For development, we can load templates at runtime
+pub fn generate_webapp_html_dev(app_name: &str, js_entrypoint: &str) -> String {
+    let template_dir = Path::new("src/template/webapp");
 
-/// Generate HTML for a web application
+    // Load templates from files at runtime
+    let html = fs::read_to_string(template_dir.join("index.html"))
+        .unwrap_or_else(|_| "Failed to load index.html".to_string());
+
+    let css = fs::read_to_string(template_dir.join("style.css"))
+        .unwrap_or_else(|_| "/* Failed to load style.css */".to_string());
+
+    let js = fs::read_to_string(template_dir.join("scripts.js"))
+        .unwrap_or_else(|_| "// Failed to load scripts.js".to_string());
+
+    html.replace("$APP_NAME$", app_name)
+        .replace(
+            "<!-- @style-placeholder -->",
+            &format!("<style>\n{}\n</style>", css),
+        )
+        .replace(
+            "<!-- @script-placeholder -->",
+            &format!(
+                "<script>\n{}\n</script>",
+                js.replace("$JS_ENTRYPOINT$", js_entrypoint)
+            ),
+        )
+}
+
+// For production, we'll use included templates
+const HTML_TEMPLATE: &str = include_str!("index.html");
+const CSS_TEMPLATE: &str = include_str!("style.css");
+const JS_TEMPLATE: &str = include_str!("scripts.js");
+
 pub fn generate_webapp_html(app_name: &str, js_entrypoint: &str) -> String {
-    WEBAPP_HTML
+    // Determine if we're in development mode
+    let in_dev_mode = Path::new("src/template/webapp/index.html").exists();
+
+    if in_dev_mode {
+        return generate_webapp_html_dev(app_name, js_entrypoint);
+    }
+
+    // Otherwise use the included templates
+    HTML_TEMPLATE
         .replace("$APP_NAME$", app_name)
-        .replace("$JS_ENTRYPOINT$", js_entrypoint)
+        .replace(
+            "<!-- @style-placeholder -->",
+            &format!("<style>\n{}\n</style>", CSS_TEMPLATE),
+        )
+        .replace(
+            "<!-- @script-placeholder -->",
+            &format!(
+                "<script>\n{}\n</script>",
+                JS_TEMPLATE.replace("$JS_ENTRYPOINT$", js_entrypoint)
+            ),
+        )
 }
 
 /// Get the app name from a project path

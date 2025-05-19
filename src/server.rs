@@ -1471,6 +1471,7 @@ fn run_webapp_server(
                 // Clone values for server thread
                 let html_content = html.to_string();
                 let output_path = output_dir.to_string();
+                let reload_flag_clone = Arc::clone(&reload_flag);
 
                 // Start server in a new thread
                 let server_thread = thread::spawn(move || {
@@ -1492,6 +1493,7 @@ fn run_webapp_server(
                                 &html_content,
                                 &output_path,
                                 &mut clients_to_reload,
+                                &reload_flag_clone, // Pass the reload flag
                             );
                         }
                     }
@@ -1516,19 +1518,10 @@ fn run_webapp_server(
                             ) {
                                 Ok(_) => {
                                     println!("✅ Recompilation successful!");
-                                    println!("🔄 Reloading in browser...");
+                                    println!("🔄 Triggering browser reload...");
 
                                     // Set the reload flag
                                     reload_flag.store(true, Ordering::SeqCst);
-
-                                    // Send reload signal to the server
-                                    if let Ok(mut stream) =
-                                        TcpStream::connect(format!("127.0.0.1:{}", port))
-                                    {
-                                        let reload_request =
-                                            "GET /reload HTTP/1.1\r\nHost: localhost\r\n\r\n";
-                                        let _ = stream.write_all(reload_request.as_bytes());
-                                    }
                                 }
                                 Err(e) => {
                                     println!("❌ Recompilation failed: {}", e);
@@ -1582,9 +1575,18 @@ fn run_webapp_server_without_watch(html: &str, output_dir: &str, port: u16) -> R
     // Track connected clients for live reload (not used in non-watch mode)
     let mut clients_to_reload = Vec::new();
 
+    // Create a reload flag that will never be set in non-watch mode
+    let reload_flag = Arc::new(AtomicBool::new(false));
+
     // Handle requests
     for request in server.incoming_requests() {
-        handle_webapp_request(request, html, output_dir, &mut clients_to_reload);
+        handle_webapp_request(
+            request,
+            html,
+            output_dir,
+            &mut clients_to_reload,
+            &reload_flag, // Pass the reload flag
+        );
     }
 
     Ok(())
@@ -1596,6 +1598,7 @@ fn handle_webapp_request(
     html: &str,
     output_dir: &str,
     clients_to_reload: &mut Vec<String>,
+    reload_flag: &Arc<AtomicBool>,
 ) {
     let url = request.url().to_string();
 
@@ -1619,16 +1622,44 @@ fn handle_webapp_request(
             clients_to_reload.push(client_addr);
         }
     } else if url == "/reload" {
-        // Special reload endpoint
-        println!("🔄 Handling reload request");
+        // Special reload endpoint for manual reload
+        println!("🔄 Handling manual reload request");
 
-        // Send a special response to tell the browser to refresh
-        let response = Response::from_string("reload")
-            .with_header(Header::from_bytes(&b"X-Reload"[..], &b"true"[..]).unwrap())
+        // Set reload flag
+        reload_flag.store(true, Ordering::SeqCst);
+
+        // Send a response to confirm
+        let response = Response::from_string("Reload triggered")
             .with_header(content_type_header("text/plain"));
 
         if let Err(e) = request.respond(response) {
             eprintln!("❗ Error sending reload response: {}", e);
+        }
+    } else if url.starts_with("/reload-check") {
+        // This is a polling endpoint specifically for reload checks
+        let mut response = Response::from_string("");
+
+        // Add cache control headers
+        response = response.with_header(
+            Header::from_bytes(
+                &b"Cache-Control"[..],
+                &b"no-cache, no-store, must-revalidate"[..],
+            )
+            .unwrap(),
+        );
+
+        // If reload flag is set, tell browser to reload
+        if reload_flag.load(Ordering::SeqCst) {
+            response = response
+                .with_header(Header::from_bytes(&b"X-Reload-Needed"[..], &b"true"[..]).unwrap());
+
+            // Reset the flag after sending the reload signal
+            reload_flag.store(false, Ordering::SeqCst);
+            println!("🔄 Sent reload signal to browser");
+        }
+
+        if let Err(e) = request.respond(response) {
+            eprintln!("❗ Error sending reload-check response: {}", e);
         }
     } else if url.starts_with("/assets/") {
         serve_asset(request, &url);
