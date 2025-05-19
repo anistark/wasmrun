@@ -2,7 +2,6 @@ mod cli;
 mod compiler;
 mod server;
 mod template;
-mod utils;
 mod verify;
 mod watcher;
 
