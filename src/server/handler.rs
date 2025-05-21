@@ -153,7 +153,8 @@ pub fn handle_webapp_request(
     };
 
     // Log request to console
-    if !url.contains("reload-check") { // Don't log polling requests
+    if !url.contains("reload-check") {
+        // Don't log polling requests
         println!("📝 Request: {}", url);
     }
 
@@ -192,7 +193,8 @@ pub fn handle_webapp_request(
         }
 
         if let Err(e) = request.respond(response) {
-            if !url.contains("reload-check") { // Don't log polling errors
+            if !url.contains("reload-check") {
+                // Don't log polling errors
                 eprintln!("❗ Error sending reload-check response: {}", e);
             }
         }
@@ -209,7 +211,8 @@ pub fn handle_webapp_request(
         } else {
             // If the file doesn't exist, serve the main HTML page for SPA routing
             // This allows SPA-style navigation to work
-            let response = Response::from_string(html).with_header(content_type_header("text/html"));
+            let response =
+                Response::from_string(html).with_header(content_type_header("text/html"));
             if let Err(e) = request.respond(response) {
                 eprintln!("❗ Error sending HTML response for SPA routing: {}", e);
             }

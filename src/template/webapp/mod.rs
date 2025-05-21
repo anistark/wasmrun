@@ -11,28 +11,27 @@ pub fn generate_webapp_html(app_name: &str, js_entrypoint: &str) -> String {
     // Determine if we're in development mode
     let in_dev_mode = Path::new("src/template/webapp/index.html").exists();
 
-    // In this update, we're moving most of the CSS inline in the HTML template 
-    // and only keeping minimal additional styles in the separate CSS file,
-    // to avoid CSS conflicts with the web app
-    
     if in_dev_mode {
         // If we're in development mode, load templates from disk
         let template_dir = Path::new("src/template/webapp");
-        
+
         let html = fs::read_to_string(template_dir.join("index.html"))
             .unwrap_or_else(|_| "Failed to load index.html".to_string());
-            
+
         let css = fs::read_to_string(template_dir.join("style.css"))
             .unwrap_or_else(|_| "/* Failed to load style.css */".to_string());
-            
+
         let js = fs::read_to_string(template_dir.join("scripts.js"))
             .unwrap_or_else(|_| "// Failed to load scripts.js".to_string());
-        
+
         return html
             .replace("$APP_NAME$", app_name)
             .replace(
                 "<!-- @style-placeholder -->",
-                &format!("<!-- Additional Chakra styles -->\n<style>\n{}\n</style>", css),
+                &format!(
+                    "<!-- Additional Chakra styles -->\n<style>\n{}\n</style>",
+                    css
+                ),
             )
             .replace(
                 "<!-- @script-placeholder -->",
@@ -48,7 +47,10 @@ pub fn generate_webapp_html(app_name: &str, js_entrypoint: &str) -> String {
         .replace("$APP_NAME$", app_name)
         .replace(
             "<!-- @style-placeholder -->",
-            &format!("<!-- Additional Chakra styles -->\n<style>\n{}\n</style>", CSS_TEMPLATE),
+            &format!(
+                "<!-- Additional Chakra styles -->\n<style>\n{}\n</style>",
+                CSS_TEMPLATE
+            ),
         )
         .replace(
             "<!-- @script-placeholder -->",
@@ -82,7 +84,7 @@ pub fn get_app_name(project_path: &str) -> String {
                         })
                         .collect::<Vec<String>>()
                         .join(" ");
-                    
+
                     return formatted_name;
                 }
             }
@@ -105,11 +107,10 @@ pub fn get_app_name(project_path: &str) -> String {
                 })
                 .collect::<Vec<String>>()
                 .join(" ");
-            
+
             return formatted_name;
         }
     }
 
-    // Final fallback
     "Rust Web Application".to_string()
 }
