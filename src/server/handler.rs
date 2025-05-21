@@ -152,7 +152,10 @@ pub fn handle_webapp_request(
         None => "unknown".to_string(),
     };
 
-    println!("📝 Received request for: {}", url);
+    // Log request to console
+    if !url.contains("reload-check") { // Don't log polling requests
+        println!("📝 Request: {}", url);
+    }
 
     if url == "/" {
         // Serve the main HTML page
@@ -165,21 +168,7 @@ pub fn handle_webapp_request(
         if !clients_to_reload.contains(&client_addr) {
             clients_to_reload.push(client_addr);
         }
-    } else if url == "/reload" {
-        // Special reload endpoint for manual reload
-        println!("🔄 Handling manual reload request");
-
-        // Set reload flag
-        reload_flag.store(true, std::sync::atomic::Ordering::SeqCst);
-
-        // Send a response to confirm
-        let response = Response::from_string("Reload triggered")
-            .with_header(content_type_header("text/plain"));
-
-        if let Err(e) = request.respond(response) {
-            eprintln!("❗ Error sending reload response: {}", e);
-        }
-    } else if url.starts_with("/reload-check") {
+    } else if url == "/reload-check" {
         // This is a polling endpoint specifically for reload checks
         let mut response = Response::from_string("");
 
@@ -203,7 +192,9 @@ pub fn handle_webapp_request(
         }
 
         if let Err(e) = request.respond(response) {
-            eprintln!("❗ Error sending reload-check response: {}", e);
+            if !url.contains("reload-check") { // Don't log polling errors
+                eprintln!("❗ Error sending reload-check response: {}", e);
+            }
         }
     } else if url.starts_with("/assets/") {
         serve_asset(request, &url);
@@ -216,9 +207,9 @@ pub fn handle_webapp_request(
             let content_type = determine_content_type(&file_path);
             serve_file(request, file_path.to_str().unwrap(), content_type);
         } else {
-            // If the file doesn't exist, try to serve the main HTML page for SPA routing
-            let response =
-                Response::from_string(html).with_header(content_type_header("text/html"));
+            // If the file doesn't exist, serve the main HTML page for SPA routing
+            // This allows SPA-style navigation to work
+            let response = Response::from_string(html).with_header(content_type_header("text/html"));
             if let Err(e) = request.respond(response) {
                 eprintln!("❗ Error sending HTML response for SPA routing: {}", e);
             }

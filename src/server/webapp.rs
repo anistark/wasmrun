@@ -121,7 +121,7 @@ fn run_webapp_server(
 
     // Display welcome message
     println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  🌐 \x1b[1;36mChakra Web App Server\x1b[0m\n");
+    println!("  🌐 \x1b[1;36mWeb Application Server\x1b[0m\n");
     println!("  🚀 \x1b[1;34mServer URL:\x1b[0m \x1b[4;36m{}\x1b[0m", url);
     println!(
         "  🔌 \x1b[1;34mListening on port:\x1b[0m \x1b[1;33m{}\x1b[0m",
@@ -188,7 +188,7 @@ fn run_webapp_server_with_watch(
     // Start server in a new thread
     let server_thread = std::thread::spawn(move || {
         // Create HTTP server
-        if let Ok(server) = Server::http(format!("0.0.0.0:{port}")) {
+        if let Ok(server) = Server::http(format!("0.0.0.0:{}", port)) {
             // Track connected clients for live reload
             let mut clients_to_reload = Vec::new();
 
@@ -263,7 +263,7 @@ fn run_webapp_server_with_watch(
 /// Run the webapp server without watch mode
 fn run_webapp_server_without_watch(html: &str, output_dir: &str, port: u16) -> Result<(), String> {
     // Create HTTP server
-    let server = Server::http(format!("0.0.0.0:{port}"))
+    let server = Server::http(format!("0.0.0.0:{}", port))
         .map_err(|e| format!("Failed to start server: {}", e))?;
 
     // Track connected clients for live reload (not used in non-watch mode)
@@ -279,7 +279,7 @@ fn run_webapp_server_without_watch(html: &str, output_dir: &str, port: u16) -> R
             html,
             output_dir,
             &mut clients_to_reload,
-            &reload_flag, // Pass the reload flag
+            &reload_flag,
         );
     }
 

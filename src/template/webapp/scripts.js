@@ -1,189 +1,213 @@
-// Chakra Dev Tools
-(function() {
-    // Setup toggles
-    const barToggle = document.getElementById('bar-toggle');
-    const consoleToggle = document.getElementById('console-toggle');
-    const devBar = document.getElementById('chakra-dev-bar');
-    const devConsole = document.getElementById('dev-console');
-    
-    // Toggle dev bar
-    barToggle.addEventListener('click', () => {
-        devBar.classList.toggle('collapsed');
-        barToggle.innerHTML = devBar.classList.contains('collapsed') 
-            ? '<span>⬇️</span> Show' 
-            : '<span>⬆️</span> Hide';
-    });
-    
-    // Toggle console
-    consoleToggle.addEventListener('click', () => {
-        devConsole.classList.toggle('visible');
-    });
-    
-    // Console logging override
-    const originalConsoleLog = console.log;
-    const originalConsoleError = console.error;
-    const originalConsoleWarn = console.warn;
-    
-    function addLogToConsole(message, type = 'info') {
-        const logEntry = document.createElement('div');
-        logEntry.className = type;
-        logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-        devConsole.appendChild(logEntry);
-        devConsole.scrollTop = devConsole.scrollHeight;
-    }
-    
-    console.log = function(...args) {
-        originalConsoleLog.apply(console, args);
-        addLogToConsole(args.join(' '), 'info');
-    };
-    
-    console.error = function(...args) {
-        originalConsoleError.apply(console, args);
-        addLogToConsole(args.join(' '), 'error');
-    };
-    
-    console.warn = function(...args) {
-        originalConsoleWarn.apply(console, args);
-        addLogToConsole(args.join(' '), 'warning');
-    };
-    
-    // Status update function
-    window.updateChakraStatus = function(message, type = 'info') {
-        const statusEl = document.getElementById('chakra-status');
-        statusEl.className = `chakra-status ${type}`;
-        statusEl.innerHTML = `<span>${message}</span>`;
-    };
-    
-    // Resource loading timer
-    const startTime = performance.now();
-    window.addEventListener('load', () => {
-        const loadTime = Math.round(performance.now() - startTime);
-        const statusEl = document.getElementById('chakra-status');
-        
-        if (!statusEl.classList.contains('error')) {
-            statusEl.innerHTML += `<span class="resource-timer">(${loadTime}ms)</span>`;
-        }
-    });
-
-    // Live reload support
-    setupLiveReload();
-})();
-
-// Live reload polling
-function setupLiveReload() {
-    let reloadTimer = null;
-    
-    function checkForReload() {
-        if (reloadTimer) clearTimeout(reloadTimer);
-        
-        fetch('/reload-check?t=' + Date.now(), {
-            cache: 'no-store'
-        })
-        .then(response => {
-            if (response.headers.get('X-Reload-Needed') === 'true') {
-                console.log("⚡ Change detected - reloading page now...");
-                window.location.reload();
-                return;
-            }
-            
-            // Schedule next check
-            reloadTimer = setTimeout(checkForReload, 1000);
-        })
-        .catch(err => {
-            console.log("⚠️ Reload check error, retrying in 2s...", err);
-            reloadTimer = setTimeout(checkForReload, 2000);
-        });
-    }
-    
-    // Start checking for reloads
-    checkForReload();
-    
-    // Handle visibility changes
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            console.log("Tab is visible again - resuming reload checks");
-            checkForReload();
-        } else {
-            if (reloadTimer) clearTimeout(reloadTimer);
-        }
-    });
-}
-
-// App Initialization
-document.addEventListener('DOMContentLoaded', async function() {
+// Modified section to add debugging for CSS loading issues
+async function initializeApp() {
     try {
-        console.log("Initializing Rust web application...");
+        console.log("Chakra: Loading app from $JS_ENTRYPOINT$");
         
-        // Import the application
-        // First approach - Add a leading slash to ensure absolute path
-        const modulePath = '/$JS_ENTRYPOINT$';
-        console.log(`Attempting to import module from: ${modulePath}`);
+        // Debug CSS loading - log all stylesheets that are loaded in the document
+        console.log("Current stylesheets loaded:", Array.from(document.styleSheets).map(sheet => {
+            try {
+                return sheet.href || 'inline stylesheet';
+            } catch (e) {
+                return 'Cross-origin stylesheet';
+            }
+        }));
+        
+        // Get references to elements
+        const appElement = document.getElementById('app');
+        const loadingElement = document.getElementById('chakra-loading');
         
         let module;
         try {
-            module = await import(modulePath);
-        } catch (importError) {
-            console.warn(`Failed to import using absolute path: ${importError.message}`);
-            
-            // Second approach - Try without leading slash
-            const relativePath = '$JS_ENTRYPOINT$';
-            console.log(`Trying alternate import path: ${relativePath}`);
-            module = await import(relativePath);
+            // Try with absolute path first
+            module = await import('/$JS_ENTRYPOINT$');
+        } catch (error) {
+            console.warn("Failed to load module with absolute path, trying relative path...");
+            try {
+                module = await import('./$JS_ENTRYPOINT$');
+            } catch (secondError) {
+                // Try one more time without the leading dot
+                console.warn("Failed with relative path, trying plain import...");
+                module = await import('$JS_ENTRYPOINT$');
+            }
         }
         
-        // Get the initialization function - accommodate different export styles
+        // Get the initialization function (different frameworks export differently)
         const init = module.default || module.init || module;
         
         if (typeof init !== 'function') {
-            throw new Error(`Could not find initialization function in module. Exports available: ${Object.keys(module).join(', ')}`);
+            throw new Error(`Could not find initialization function in the module. Available exports: ${Object.keys(module).join(', ')}`);
         }
         
-        console.log("Found initialization function, starting app...");
+        console.log("Chakra: Initializing web application...");
         
-        // Initialize the application - try with target first
-        try {
-            await init({
-                target: document.getElementById('app')
-            });
-            console.log("App initialized with target option");
-        } catch (targetError) {
-            console.warn(`Initialization with target failed: ${targetError.message}. Trying without options...`);
+        // Different initialization strategies
+        let initialized = false;
+        
+        // Strategy 1: Try with target option
+        if (!initialized) {
+            try {
+                await init({ target: appElement });
+                console.log("Chakra: Application initialized with target option");
+                initialized = true;
+            } catch (error) {
+                console.warn("Target initialization failed, trying alternative methods...", error);
+            }
+        }
+        
+        // Strategy 2: Try with root element instead of target (some frameworks use this)
+        if (!initialized) {
+            try {
+                await init({ root: appElement });
+                console.log("Chakra: Application initialized with root option");
+                initialized = true;
+            } catch (error) {
+                console.warn("Root initialization failed, trying next method...", error);
+            }
+        }
+        
+        // Strategy 3: Try with DOM element directly
+        if (!initialized) {
+            try {
+                await init(appElement);
+                console.log("Chakra: Application initialized with direct element");
+                initialized = true;
+            } catch (error) {
+                console.warn("Direct element initialization failed, trying next method...", error);
+            }
+        }
+        
+        // Strategy 4: Try with no arguments
+        if (!initialized) {
+            try {
+                await init();
+                console.log("Chakra: Application initialized without arguments");
+                initialized = true;
+            } catch (error) {
+                console.warn("No-argument initialization failed", error);
+                throw new Error("All initialization methods failed, application cannot be loaded");
+            }
+        }
+        
+        // Correct any container issues that might have occurred
+        // Some frameworks might create their own containers with classes like 'app'
+        setTimeout(() => {
+            // Look for a div with class="app" that might have been created outside our container
+            const appClassElements = document.querySelectorAll('.app');
+            const appContainerExists = document.querySelector('#app');
             
-            // If initialization with options fails, try without options
-            await init();
-            console.log("App initialized without options");
-        }
+            if (appClassElements.length > 0 && appContainerExists) {
+                // Check if the .app element is not inside #app
+                appClassElements.forEach(element => {
+                    const isOutside = !appContainerExists.contains(element);
+                    if (isOutside) {
+                        console.log("Chakra: Found app element outside container, moving it inside");
+                        // If the framework created a container outside our app div, move it inside
+                        appContainerExists.innerHTML = '';
+                        appContainerExists.appendChild(element);
+                    }
+                });
+            }
+            
+            // Debug CSS loading - log all stylesheets again after initialization
+            console.log("Stylesheets after app initialization:", Array.from(document.styleSheets).map(sheet => {
+                try {
+                    return sheet.href || 'inline stylesheet';
+                } catch (e) {
+                    return 'Cross-origin stylesheet';
+                }
+            }));
+            
+            // Check if there are links for CSS that might need to be loaded
+            const cssLinks = document.querySelectorAll('link[rel="stylesheet"]');
+            console.log(`Found ${cssLinks.length} CSS links in the document`);
+            cssLinks.forEach(link => {
+                console.log(`CSS link: ${link.href}`);
+                
+                // Force reload CSS that might not have been loaded correctly
+                if (link.href) {
+                    const originalHref = link.href;
+                    link.href = '';
+                    setTimeout(() => {
+                        link.href = originalHref;
+                    }, 10);
+                }
+            });
+            
+            // For frameworks that create style elements dynamically
+            const styles = document.querySelectorAll('style');
+            console.log(`Found ${styles.length} style elements in the document`);
+        }, 100);
         
-        // Update status on success
-        window.updateChakraStatus('Application loaded successfully ✅', 'success');
-        console.log("Rust web application initialized successfully!");
+        // Remove loading indicator
+        if (loadingElement) {
+            // First fade it out with a CSS transition
+            loadingElement.classList.add('hidden');
+            // Then remove it completely after animation completes
+            setTimeout(() => {
+                if (loadingElement.parentNode) {
+                    loadingElement.parentNode.removeChild(loadingElement);
+                }
+            }, 300);
+        }
     } catch (error) {
-        // Handle errors during initialization
-        window.updateChakraStatus(`Error loading application ❌`, 'error');
         console.error("Failed to initialize application:", error);
         
-        // Show error in app container with more detailed information
+        // Remove loading indicator
+        const loadingElement = document.getElementById('chakra-loading');
+        if (loadingElement && loadingElement.parentNode) {
+            loadingElement.parentNode.removeChild(loadingElement);
+        }
+        
+        // Show error message
         document.getElementById('app').innerHTML = `
-            <div style="padding: 2rem; color: #ff5555; max-width: 800px; margin: 2rem auto; border: 1px solid #ff5555; border-radius: 8px;">
+            <div class="app-error">
                 <h2>Application Failed to Load</h2>
                 <p>There was an error initializing the Rust application:</p>
-                <pre style="background: rgba(0,0,0,0.1); padding: 1rem; border-radius: 4px; overflow: auto; white-space: pre-wrap;">${error.message}</pre>
+                <pre>${error.message}</pre>
                 
-                <h3 style="margin-top: 1.5rem;">Debugging Information</h3>
+                <h3>Debugging Information</h3>
                 <p><strong>Module Path:</strong> $JS_ENTRYPOINT$</p>
-                <p><strong>Error Type:</strong> ${error.name}</p>
-                ${error.stack ? `<p><strong>Stack Trace:</strong></p><pre style="background: rgba(0,0,0,0.1); padding: 1rem; border-radius: 4px; overflow: auto; font-size: 0.8rem;">${error.stack}</pre>` : ''}
                 
-                <h3 style="margin-top: 1.5rem;">Possible Solutions</h3>
+                <h3>Possible Solutions</h3>
                 <ul>
-                    <li>Verify the JavaScript file name matches what was generated</li>
-                    <li>Check if the JavaScript file is in the correct location</li>
-                    <li>Try rebuilding the application with <code>wasm-pack build --target web</code></li>
-                    <li>If using Trunk, check that the output files are properly generated</li>
+                    <li>Check the browser console for detailed error messages (F12)</li>
+                    <li>Verify the JavaScript file was correctly generated</li>
+                    <li>Make sure all required dependencies are available</li>
+                    <li>For Rust wasm-bindgen projects, try rebuilding with <code>wasm-pack build --target web</code></li>
                 </ul>
-                
-                <p style="margin-top: 1rem;">Check the browser console for more details (press F12).</p>
             </div>
         `;
+    }
+}
+
+// Start the application
+initializeApp();
+
+// Simple live reload
+let checkTimer;
+function checkForReload() {
+    fetch('/reload-check?t=' + Date.now(), { cache: 'no-store' })
+        .then(response => {
+            if (response.headers.get('X-Reload-Needed') === 'true') {
+                console.log("Chakra: Change detected - reloading page");
+                window.location.reload();
+                return;
+            }
+            checkTimer = setTimeout(checkForReload, 1000);
+        })
+        .catch(() => {
+            checkTimer = setTimeout(checkForReload, 2000);
+        });
+}
+
+// Start reload checking
+checkForReload();
+
+// Handle visibility changes
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        checkForReload();
+    } else {
+        clearTimeout(checkTimer);
     }
 });
