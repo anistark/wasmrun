@@ -10,28 +10,95 @@ Thank you for considering contributing to Chakra! This guide will help you under
 src
 ├── cli.rs              # Command line argument handling
 ├── main.rs             # Application entry point
-├── server.rs           # HTTP server implementation
+├── compiler            # WebAssembly compilation module
+│   ├── detect.rs       # Language detection functionality
+│   ├── language        # Language-specific implementations
+│   │   ├── asc.rs      # AssemblyScript compiler
+│   │   ├── c.rs        # C compiler (via Emscripten)
+│   │   ├── go.rs       # Go compiler (via TinyGo)
+│   │   ├── mod.rs      # Language module exports
+│   │   ├── python.rs   # Python compiler
+│   │   └── rust.rs     # Rust compiler (wasm32 target)
+│   └── mod.rs          # Main WebAssembly builder interface
+├── server              # HTTP server implementation (modular)
+│   ├── mod.rs          # Server public API and re-exports
+│   ├── config.rs       # Server configuration and setup
+│   ├── handler.rs      # HTTP request handling
+│   ├── utils.rs        # Server utility functions
+│   ├── wasm.rs         # WebAssembly file handling
+│   └── webapp.rs       # Web application support
 ├── template            # HTML, CSS, JS templates
 │   ├── mod.rs          # Template module exports
-│   └── server          # Web server templates
-│       ├── index.html  # Main HTML template
-│       ├── mod.rs      # Server template module
-│       ├── scripts.js  # Browser JavaScript
-│       └── style.css   # CSS styles
+│   ├── server          # Web server templates
+│   │   ├── chakra_wasi_impl.js  # WASI implementation for browser
+│   │   ├── index.html  # Main HTML template
+│   │   ├── mod.rs      # Server template module
+│   │   ├── scripts.js  # Browser JavaScript
+│   │   └── style.css   # CSS styles
+│   └── webapp          # Web application templates
+│       ├── index.html  # Web app HTML template
+│       ├── mod.rs      # Web app template module
+│       ├── scripts.js  # Web app JavaScript
+│       └── style.css   # Web app CSS styles
 ├── utils.rs            # Utility functions
 ├── verify.rs           # WASM file verification
-├── watcher.rs          # File watcher for live reload
-└── compiler            # WebAssembly compilation module
-    ├── detect.rs       # Language detection functionality
-    ├── language        # Language-specific implementations
-    │   ├── asc.rs      # AssemblyScript compiler
-    │   ├── c.rs        # C compiler (via Emscripten)
-    │   ├── go.rs       # Go compiler (via TinyGo)
-    │   ├── mod.rs      # Language module exports
-    │   ├── python.rs   # Python compiler
-    │   └── rust.rs     # Rust compiler (wasm32 target)
-    └── mod.rs          # Main WebAssembly builder interface
+└── watcher.rs          # File watcher for live reload
 ```
+
+## Module Responsibilities
+
+### Core Modules
+- **cli.rs**: Handles command-line argument parsing and application commands
+- **main.rs**: The entry point that processes arguments and routes to appropriate functionality
+- **utils.rs**: General utility functions used across the application
+- **verify.rs**: Functions for verifying and inspecting WebAssembly files
+- **watcher.rs**: Implements file watching for live reload functionality
+
+### Server Module (`src/server/`)
+The server module has been redesigned with a modular structure for better organization:
+
+- **mod.rs**: Defines the public API for the server functionality, including:
+  - `run_wasm_file`: Runs a WebAssembly file directly
+  - `run_project`: Compiles and runs a project
+  - `is_server_running`: Checks if a server is currently running
+  - `stop_existing_server`: Stops an existing server
+  - `run_webapp`: Runs a Rust web application
+
+- **config.rs**: Server configuration and setup logic:
+  - `ServerConfig`: Structure for server configuration
+  - `run_server`: Core server implementation
+  - `setup_project_compilation`: Sets up the project compilation environment
+
+- **handler.rs**: HTTP request handling functions:
+  - `handle_request`: Processes incoming HTTP requests
+  - `handle_webapp_request`: Handles requests for web applications
+  - `serve_file`: Serves file content
+  - `serve_asset`: Serves static assets
+
+- **wasm.rs**: WebAssembly-specific functionality:
+  - `serve_wasm_file`: Serves a WebAssembly file
+  - `serve_wasm_bindgen_files`: Serves wasm-bindgen files
+  - `handle_wasm_bindgen_files`: Helper for wasm-bindgen projects
+
+- **webapp.rs**: Web application support:
+  - `run_webapp`: Runs a Rust web application
+  - `run_webapp_server`: Manages the server for web applications
+  - `run_webapp_server_with_watch`: Implements watch mode for web apps
+
+- **utils.rs**: Server-specific utility functions:
+  - `content_type_header`: Generates content-type headers
+  - `print_server_info`: Displays server information
+  - `find_wasm_files`: Locates WASM files in directories
+
+### Compiler Module (`src/compiler/`)
+- **detect.rs**: Project language detection logic
+- **mod.rs**: Main compiler interface
+- **language/**: Language-specific implementations
+  - Each file implements compilation for a specific language (Rust, Go, C, etc.)
+
+### Template Module (`src/template/`)
+- **server/**: Templates for the WebAssembly server
+- **webapp/**: Templates for Rust web applications
 
 ## Development Setup
 
