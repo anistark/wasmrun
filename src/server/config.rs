@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -166,6 +165,7 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
                 let port = config.port;
                 let project_path = config.project_path.unwrap();
                 let output_dir = config.output_dir.unwrap();
+                let reload_flag_clone = Arc::clone(&reload_flag);
 
                 let server_thread = thread::spawn(move || {
                     // Create HTTP server
@@ -180,14 +180,15 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
                                 break;
                             }
 
-                            // Handle the request
-                            handler::handle_request(
+                            // Handle the request with proper reload flag checking
+                            handle_request_with_reload_flag(
                                 request,
                                 js_filename.as_deref(),
                                 &wasm_filename,
                                 &wasm_path_clone,
-                                true,
+                                true, // watch_mode is true
                                 &mut clients_to_reload,
+                                &reload_flag_clone,
                             );
                         }
                     }
@@ -213,15 +214,6 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
 
                                     // Set the reload flag
                                     reload_flag.store(true, Ordering::SeqCst);
-
-                                    // Send reload signal to the server
-                                    if let Ok(mut stream) =
-                                        std::net::TcpStream::connect(format!("127.0.0.1:{}", port))
-                                    {
-                                        let reload_request =
-                                            "GET /reload HTTP/1.1\r\nHost: localhost\r\n\r\n";
-                                        let _ = stream.write_all(reload_request.as_bytes());
-                                    }
                                 }
                                 Err(e) => {
                                     println!("❌ Recompilation failed: {}", e);
@@ -288,6 +280,59 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Handle request with reload flag support for watch mode
+fn handle_request_with_reload_flag(
+    request: tiny_http::Request,
+    js_filename: Option<&str>,
+    wasm_filename: &str,
+    wasm_path: &str,
+    watch_mode: bool,
+    clients_to_reload: &mut Vec<String>,
+    reload_flag: &Arc<AtomicBool>,
+) {
+    let url = request.url().to_string();
+
+    // Handle the special reload endpoint for watch mode
+    if url == "/reload" && watch_mode {
+        println!("🔄 Handling reload request in watch mode");
+
+        // Check if there's a reload pending
+        if reload_flag.load(Ordering::SeqCst) {
+            // Send reload signal
+            let response = tiny_http::Response::from_string("reload")
+                .with_header(tiny_http::Header::from_bytes(&b"X-Reload"[..], &b"true"[..]).unwrap())
+                .with_header(utils::content_type_header("text/plain"));
+
+            // Reset the flag after sending the reload signal
+            reload_flag.store(false, Ordering::SeqCst);
+            println!("🔄 Sent reload signal to browser");
+
+            if let Err(e) = request.respond(response) {
+                eprintln!("❗ Error sending reload response: {}", e);
+            }
+        } else {
+            // No reload needed
+            let response = tiny_http::Response::from_string("no-reload")
+                .with_header(utils::content_type_header("text/plain"));
+
+            if let Err(e) = request.respond(response) {
+                eprintln!("❗ Error sending reload response: {}", e);
+            }
+        }
+        return;
+    }
+
+    // For all other requests, use the standard handler
+    handler::handle_request(
+        request,
+        js_filename,
+        wasm_filename,
+        wasm_path,
+        watch_mode,
+        clients_to_reload,
+    );
 }
 
 /// Set up project compilation environment and detect language

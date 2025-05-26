@@ -8,6 +8,17 @@ const WASI_JS: &str = include_str!("chakra_wasi_impl.js");
 
 /// Generate the complete HTML
 pub fn generate_html(filename: &str) -> String {
+    generate_html_with_watch_mode(filename, false)
+}
+
+/// Generate the complete HTML with watch mode support
+pub fn generate_html_with_watch_mode(filename: &str, watch_mode: bool) -> String {
+    let watch_meta = if watch_mode {
+        r#"<meta name="chakra-watch" content="true">"#
+    } else {
+        ""
+    };
+
     INDEX_HTML
         .replace("$FILENAME$", filename)
         .replace(
@@ -17,7 +28,8 @@ pub fn generate_html(filename: &str) -> String {
         .replace(
             "<!-- @script-placeholder -->",
             &format!(
-                "<script>\n// Chakra WASI implementation\n{}\n</script>\n<script>\n// Main script\n{}\n</script>",
+                "{}\n<script>\n// Chakra WASI implementation\n{}\n</script>\n<script>\n// Main script\n{}\n</script>",
+                watch_meta,
                 WASI_JS,
                 process_scripts(filename)
             ),

@@ -715,18 +715,40 @@ async function analyzeWasmBinary(wasmBytes) {
     }
 }
 
-// Live reload support
+// FIXED: Improved live reload support with better detection
 function setupLiveReload() {
+    // Only set up live reload if we detect we're in a watch mode environment
+    // Check if the page was loaded with watch mode indicators
+    const urlParams = new URLSearchParams(window.location.search);
+    const isWatchMode = urlParams.get('watch') === 'true' || 
+                        document.querySelector('meta[name="chakra-watch"]') !== null;
+    
+    if (!isWatchMode) {
+        log("Live reload not enabled (not in watch mode)", "info");
+        return;
+    }
+    
     let reloadInterval = null;
     let lastReloadTime = 0;
+    let consecutiveErrors = 0;
     
     // Poll the server for reload events
     function startPolling() {
         if (reloadInterval) return;
         
+        log("Starting live reload polling...", "info");
+        
         reloadInterval = setInterval(() => {
-            fetch('/reload', { cache: 'no-store' })
+            fetch('/reload', { 
+                cache: 'no-store',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
             .then(response => {
+                consecutiveErrors = 0; // Reset error count on successful request
+                
+                // Check for the reload header
                 if (response.headers.get('X-Reload') === 'true') {
                     // Prevent multiple reloads in quick succession
                     const now = Date.now();
@@ -743,12 +765,25 @@ function setupLiveReload() {
                     setTimeout(() => {
                         window.location.reload();
                     }, 500);
+                } else {
+                    // No reload needed, continue polling
+                    // log("No changes detected", "info"); // Too verbose
                 }
             })
             .catch(e => {
-                // Ignore errors - server might be restarting
+                consecutiveErrors++;
+                
+                // If we get too many consecutive errors, the server might be down
+                if (consecutiveErrors > 5) {
+                    log("Live reload: Server appears to be down, stopping polling", "info");
+                    clearInterval(reloadInterval);
+                    reloadInterval = null;
+                } else {
+                    // Ignore occasional errors - server might be restarting
+                    // log(`Live reload polling error: ${e.message}`, "info");
+                }
             });
-        }, 1000);
+        }, 2000); // Poll every 2 seconds instead of every second to reduce load
     }
     
     // Start polling
@@ -757,8 +792,10 @@ function setupLiveReload() {
     // Listen for visibility changes
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-            log("Tab is visible again - checking for updates...", "info");
-            startPolling();
+            if (consecutiveErrors <= 5) {
+                log("Tab is visible again - checking for updates...", "info");
+                startPolling();
+            }
         } else {
             clearInterval(reloadInterval);
             reloadInterval = null;
@@ -774,5 +811,5 @@ function setupLiveReload() {
 // Start loading the WASM file
 loadWasmWithRetries();
 
-// Initialize live reload
+// Initialize live reload (but only if in watch mode)
 setupLiveReload();

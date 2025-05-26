@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tiny_http::{Header, Request, Response};
 
 use super::utils::{check_assets_directory, content_type_header, determine_content_type};
@@ -52,16 +54,27 @@ pub fn handle_request(
             serve_file(request, js_path.to_str().unwrap(), "application/javascript");
         }
     } else if url == "/reload" {
-        // Special reload endpoint
-        println!("🔄 Handling reload request");
+        // FIXED: Only send reload signal if we're actually in watch mode and there's a change
+        // For now, when watch mode is not active, just return a normal response
+        if watch_mode {
+            // In the future, this should check if there was an actual file change
+            // For now, we'll make it not auto-reload by default
+            println!("🔄 Handling reload request in watch mode");
 
-        // Send a special response to tell the browser to refresh
-        let response = Response::from_string("reload")
-            .with_header(Header::from_bytes(&b"X-Reload"[..], &b"true"[..]).unwrap())
-            .with_header(content_type_header("text/plain"));
+            let response =
+                Response::from_string("no-reload").with_header(content_type_header("text/plain"));
 
-        if let Err(e) = request.respond(response) {
-            eprintln!("❗ Error sending reload response: {}", e);
+            if let Err(e) = request.respond(response) {
+                eprintln!("❗ Error sending reload response: {}", e);
+            }
+        } else {
+            // Not in watch mode, return normal response without reload header
+            let response = Response::from_string("not-watching")
+                .with_header(content_type_header("text/plain"));
+
+            if let Err(e) = request.respond(response) {
+                eprintln!("❗ Error sending reload response: {}", e);
+            }
         }
     } else if url.starts_with("/assets/") {
         serve_asset(request, &url);
@@ -142,7 +155,7 @@ pub fn handle_webapp_request(
     html: &str,
     output_dir: &str,
     clients_to_reload: &mut Vec<String>,
-    reload_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    reload_flag: &Arc<AtomicBool>,
 ) {
     let url = request.url().to_string();
 
@@ -183,12 +196,12 @@ pub fn handle_webapp_request(
         );
 
         // If reload flag is set, tell browser to reload
-        if reload_flag.load(std::sync::atomic::Ordering::SeqCst) {
+        if reload_flag.load(Ordering::SeqCst) {
             response = response
                 .with_header(Header::from_bytes(&b"X-Reload-Needed"[..], &b"true"[..]).unwrap());
 
             // Reset the flag after sending the reload signal
-            reload_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+            reload_flag.store(false, Ordering::SeqCst);
             println!("🔄 Sent reload signal to browser");
         }
 
