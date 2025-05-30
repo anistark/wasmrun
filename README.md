@@ -1,24 +1,28 @@
 # Chakra
 
-[![Crates.io Version](https://img.shields.io/crates/v/chakra)
-](https://crates.io/crates/chakra) [![Crates.io Downloads](https://img.shields.io/crates/d/chakra)](https://crates.io/crates/chakra) [![Crates.io Downloads (latest version)](https://img.shields.io/crates/dv/chakra)](https://crates.io/crates/chakra) [![Open Source](https://img.shields.io/badge/open-source-brightgreen)](https://github.com/anistark/chakra) [![Contributors](https://img.shields.io/github/contributors/anistark/chakra)](https://github.com/anistark/chakra/graphs/contributors) ![maintenance-status](https://img.shields.io/badge/maintenance-actively--developed-brightgreen.svg)
+[![Crates.io Version](https://img.shields.io/crates/v/chakra)](https://crates.io/crates/chakra) [![Crates.io Downloads](https://img.shields.io/crates/d/chakra)](https://crates.io/crates/chakra) [![Crates.io Downloads (latest version)](https://img.shields.io/crates/dv/chakra)](https://crates.io/crates/chakra) [![Open Source](https://img.shields.io/badge/open-source-brightgreen)](https://github.com/anistark/chakra) [![Contributors](https://img.shields.io/github/contributors/anistark/chakra)](https://github.com/anistark/chakra/graphs/contributors) ![maintenance-status](https://img.shields.io/badge/maintenance-actively--developed-brightgreen.svg)
 
 ![Chakra Logo](./assets/banner.png)
 
-> Chakra is a WebAssembly (WASM) runtime CLI tool.
+> Chakra is a powerful WebAssembly (WASM) runtime CLI tool with full WASI support.
 
-## Features
+## ✨ Features
 
-- 🚀 Start Chakra Server by pointing to your .wasm file/project and get a ready playground on your browser.
-- 🌐 Instantly opens your default browser with your wasm project and other necessary dependencies pre-loaded.
-- 💻 View execution results and logs on an interactive console.
-- 🔍 Identifies common entry points and runs your wasm project.
-- 📦 Compile your project to wasm using CLI tool directly. (Needs external dependencies.) [WIP]
-- 🧩 Verify and inspect your wasm file weather generated via chakra or any other tool. [WIP]
+- 🚀 **Instant Development Server** - Point Chakra to your .wasm file or project and get a ready playground in your browser
+- 🌐 **Browser Integration** - Automatically opens your default browser with interactive console and debugging tools
+- 💻 **Interactive Console** - View execution results and logs in a beautiful web interface
+- 🔍 **Smart Detection** - Automatically identifies entry points and module types (standard WASM vs wasm-bindgen)
+- 📦 **Multi-Language Support** - Compile Rust, Go, C/C++, AssemblyScript, and Python* projects to WASM
+- 🔧 **Built-in Compilation** - Integrated build system with optimization options
+- 🔍 **WASM Inspection** - Verify and analyze WASM files with detailed module information
+- 👀 **Live Reload** - Watch mode for automatic recompilation and browser refresh
+- 🌟 **Full WASI Support** - Complete WebAssembly System Interface implementation
+- 🌐 **Web Application Support** - First-class support for Rust web frameworks (Yew, Leptos, Dioxus, etc.)
+- ⚡ **Zero Configuration** - Works out of the box with sensible defaults
 
-> 👋 It's highly experimental, but fast iterating. Welcoming contributors and support to help bring out this project even better!
+*Python support coming soon
 
-## Installation
+## 🚀 Installation
 
 ### From Cargo (Recommended)
 
@@ -34,11 +38,11 @@ cd chakra
 cargo install --path .
 ```
 
-## Usage
+## 📖 Usage
 
-Chakra supports both flag-based arguments using `--path` and direct positional arguments for a more intuitive command line experience.
+Chakra supports both flag-based arguments using `--path` and direct positional arguments for an intuitive command line experience.
 
-### Basic Usage
+### Quick Start
 
 Run on current directory:
 
@@ -50,97 +54,69 @@ Run a WebAssembly file directly:
 
 ```sh
 chakra myfile.wasm
-
-# Using --path flag
+# Or using --path flag
 chakra --path ./path/to/your/file.wasm
-
-# With --wasm flag explicitly
-chakra --wasm myfile.wasm
 ```
 
 Run a project directory:
 
 ```sh
 chakra ./my-wasm-project
-
-# Using --path flag
+# Or using --path flag
 chakra --path ./my-wasm-project
 ```
 
-### Custom Port
+### 🔧 Commands
 
-Specify a custom port (default is `8420`):
+#### Development Server
 
-```sh
-chakra --path ./path/to/your/file.wasm --port 3000
-# Or
-chakra ./path/to/your/file.wasm --port 3000
-```
-
-### Watch Mode
-
-Enable watch mode for live reloading:
+Start the development server with live reload:
 
 ```sh
-chakra --path ./path/to/your/project --watch
-# Or
-chakra ./my-wasm-project --watch
+chakra run ./my-project --watch
+chakra run ./my-project --port 3000 --language rust
 ```
 
-### Verify WASM File
+#### Compilation
 
-Verify if a WebAssembly file is in the correct format:
+Compile a project to WebAssembly:
 
 ```sh
-chakra verify ./path/to/your/file.wasm
-
-# Using --path flag
-chakra verify --path ./path/to/your/file.wasm
+chakra compile ./my-project
+chakra compile ./my-project --output ./build --optimization release
 ```
 
-For detailed output:
+#### Verification & Inspection
+
+Verify a WASM file format:
 
 ```sh
-chakra verify --path ./path/to/your/file.wasm --detailed
-# Or
-chakra verify ./path/to/your/file.wasm --detailed
+chakra verify ./file.wasm
+chakra verify ./file.wasm --detailed
 ```
-
-### Inspect WASM File
 
 Get detailed information about a WASM file:
 
 ```sh
-chakra inspect ./path/to/your/file.wasm
-# Or
-chakra inspect --path ./path/to/your/file.wasm
+chakra inspect ./file.wasm
 ```
 
-### Compile a Project to WASM
+#### Project Management
 
-Compile a project directory to WebAssembly:
+Initialize a new project:
 
 ```sh
-chakra compile ./my-project
-# Or
-chakra compile --path ./my-project
+chakra init my-app --template rust
+chakra init my-app --template go --directory ./projects/
 ```
 
-With a custom output directory:
+Clean build artifacts:
 
 ```sh
-chakra compile ./my-project --output ./build
+chakra clean ./my-project
 ```
 
-### Run with Specific Language
-
-Specify a language for compilation:
-
-```sh
-chakra run ./my-project --language rust
-```
-
-### Stop Server
+#### Server Control
 
 Stop any running Chakra server:
 
@@ -148,63 +124,190 @@ Stop any running Chakra server:
 chakra stop
 ```
 
-## How It Works
+## 🛠️ Supported Languages & Frameworks
 
-When you run Chakra with a WASM file:
+### Programming Languages
 
-1. It starts a lightweight HTTP server
-2. Opens your default browser
-3. Serves the WASM file along with a nice UI
-4. Attempts to instantiate and run the WebAssembly module
-5. Shows execution results and console logs
+| Language | Status | Compiler | Notes |
+|----------|--------|----------|-------|
+| **Rust** | ✅ Full Support | `cargo` + `rustc` | Standard WASM, wasm-bindgen, and web apps |
+| **Go** | ✅ Full Support | `tinygo` | Lightweight Go runtime |
+| **C/C++** | ✅ Full Support | `emscripten` | Complete toolchain support |
+| **AssemblyScript** | ✅ Full Support | `asc` | TypeScript-like syntax |
+| **Python** | 🚧 Coming Soon | `py2wasm` / `waspy` | In development |
 
-## Supported WASM Types
+### Web Frameworks (Rust)
 
-Chakra works best with:
+Chakra automatically detects and supports Rust web frameworks. Highly experimental!
+_Currently in active development. Feel free to contribute in if you're interested in working on it._
 
-- Simple C/C++ compiled WASM files
-- Rust WASM files compiled without wasm-bindgen
-- Any WASM that doesn't require extensive JavaScript bindings
+## 🌟 How It Works
 
-For complex WASM modules (like those compiled with wasm-bindgen), Chakra will detect this and provide helpful information, but may not be able to execute them fully.
+### For WASM Files
 
-## Examples
+1. Chakra starts a lightweight HTTP server
+2. Opens your default browser with an interactive interface
+3. Serves the WASM file with comprehensive WASI support
+4. Provides real-time console output and debugging tools
 
-### Running a simple C-compiled WASM file:
+### For Projects
+
+1. **Language Detection** - Automatically identifies project type
+2. **Dependency Checking** - Verifies required tools are installed
+3. **Compilation** - Builds optimized WASM with proper flags
+4. **Serving** - Runs development server with live reload
+5. **Web App Mode** - Special handling for web applications
+
+## 🔍 WASI Support
+
+Chakra includes a complete WebAssembly System Interface (WASI) implementation:
+
+### Supported Features ✅
+
+- **Virtual Filesystem** - Complete file system with directories and files
+- **Standard I/O** - stdout, stderr with console integration
+- **Environment Variables** - Full environment variable support
+- **Command Arguments** - Access to command-line arguments
+- **File Operations** - Read, write, seek, and file management
+- **Random Number Generation** - Secure random numbers via Web Crypto API
+- **Time Functions** - System time and high-precision timers
+- **Pre-opened Directories** - Filesystem sandboxing
+
+### Coming Soon 🚧
+
+- **Network Sockets** - TCP/UDP socket support
+- **Threading** - Multi-threading and shared memory
+
+## 🎯 Use Cases
+
+### Development & Testing
 
 ```sh
-# Compile C to WASM (requires emscripten)
-emcc -O2 hello.c -o hello.wasm
+# Quick WASM testing
+chakra test.wasm
 
-# Run with Chakra
+# Project development with live reload
+chakra run ./my-rust-project --watch
+
+# Build and optimize for production
+chakra compile ./my-project --optimization size
+```
+
+### Learning & Education
+
+```sh
+# Analyze WASM structure
+chakra inspect ./complex-module.wasm
+
+# Verify WASM compliance
+chakra verify ./student-submission.wasm --detailed
+```
+
+### Web Application Development
+
+```sh
+# Rust web app with hot reload
+chakra run ./my-yew-app --watch
+
+# Multi-framework support
+chakra run ./leptos-project
+chakra run ./dioxus-app
+```
+
+## 🔧 Configuration
+
+### Environment Variables
+
+- `CHAKRA_PORT` - Default server port (default: 8420)
+- `CHAKRA_WATCH` - Enable watch mode by default
+- `CHAKRA_OUTPUT` - Default output directory for builds
+
+### Project Detection
+
+Chakra automatically detects project types:
+
+- **Rust**: `Cargo.toml` present
+- **Go**: `go.mod` or `.go` files
+- **C/C++**: `.c` or `.cpp` files
+- **AssemblyScript**: `package.json` with AssemblyScript dependency
+- **Python**: 🚧 Coming Soon
+
+## 🚀 Examples
+
+### Rust Examples
+
+```sh
+# Standard Rust WASM
+cargo new --bin my-wasm-app
+cd my-wasm-app
+# Add your Rust code
+chakra run .
+
+# Rust web application
+cargo new --bin my-web-app
+cd my-web-app
+# Add Yew/Leptos dependencies
+chakra run . --watch
+```
+
+### C Examples
+
+```sh
+# Simple C program
+echo 'int main() { return 42; }' > hello.c
+emcc hello.c -o hello.wasm
 chakra hello.wasm
 ```
 
-### Running a simple Rust WASM file:
+### Go Examples
 
 ```sh
-# Build a WASM file from Rust
-cargo build --target wasm32-unknown-unknown --release
-
-# Run with Chakra
-chakra ./target/wasm32-unknown-unknown/release/yourapp.wasm
+# TinyGo project
+echo 'package main; func main() { println("Hello") }' > main.go
+chakra run .
 ```
 
-## Troubleshooting
+## 🔍 Troubleshooting
 
-- **"Port is already in use"**: Try specifying a different port with `--port`
-- **"No WASM entry point found"**: Your WASM file might not have standard entry points like `main()` or `_start()`
-- **"This appears to be a wasm-bindgen module"**: Try using the original JavaScript loader that came with your WASM file
+### Common Issues
 
-## License
+**"Port is already in use"**
+```sh
+chakra stop  # Stop existing server
+chakra --port 3001  # Use different port
+```
 
-[MIT](./LICENSE)
+**"No entry point found"**
+- Ensure your WASM has `main()`, `_start()`, or exported functions
+- Use `chakra inspect` to see available exports
 
-## Credits
+**"Missing compilation tools"**
+- Install required compilers (rustc, emcc, tinygo)
+- Run `chakra compile --help` for tool requirements
 
-Chakra is built with:
-- [tiny_http](https://github.com/tiny-http/tiny-http) - A lightweight HTTP server
+**"wasm-bindgen module detected"**
+- Use the `.js` file instead of the `.wasm` file directly
+- Run `chakra project-dir` instead of individual files
+
+## 🤝 Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines.
+
+## 📄 License
+
+[MIT License](./LICENSE)
+
+## 🙏 Credits
+
+Chakra is built with love using:
+
+- [tiny_http](https://github.com/tiny-http/tiny-http) - Lightweight HTTP server
 - [clap](https://github.com/clap-rs/clap) - Command line argument parsing
-- ❤️ and WebAssembly enthusiasm
+- [notify](https://github.com/notify-rs/notify) - File system watching
+- And the amazing Rust and WebAssembly communities ❤️
+
+---
 
 ![Chakra Logo](./assets/loader.svg)
+
+**Made with ❤️ for the WebAssembly community**
