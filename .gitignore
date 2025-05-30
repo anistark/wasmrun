@@ -8,3 +8,6 @@ debug
 # testing
 examples
 example.*
+
+# Custom files
+NOTES.md

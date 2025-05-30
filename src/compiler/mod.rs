@@ -1,49 +1,30 @@
+pub mod builder;
 mod detect;
 pub mod language;
 
+pub use builder::build_wasm_project;
 pub use detect::{
     detect_operating_system, detect_project_language, get_missing_tools, print_system_info,
     OperatingSystem, ProjectLanguage,
 };
 pub use language::rust::{build_rust_web_application, is_rust_web_application};
 
-use std::fs;
-use std::path::Path;
+use crate::utils::PathResolver;
 
-/// Compile a WASM file from a project directory
+/// Compile a WASM file from a project directory (legacy function)
+#[allow(dead_code)]
 pub fn create_wasm_from_project(project_path: &str, output_dir: &str) -> Result<String, String> {
     let language_type: ProjectLanguage = detect_project_language(project_path);
-    let _os: OperatingSystem = detect_operating_system();
-
-    let output_directory = if output_dir.is_empty() {
-        "."
-    } else {
-        output_dir
-    };
 
     // Create output directory if it doesn't exist
-    let output_path = Path::new(output_directory);
-    if !output_path.exists() {
-        fs::create_dir_all(output_path)
-            .map_err(|e| format!("Failed to create output directory: {}", e))?;
-    }
+    PathResolver::ensure_output_directory(output_dir)?;
 
-    match language_type {
-        ProjectLanguage::Rust => language::rust::build_wasm(project_path, output_directory),
-        ProjectLanguage::Go => language::go::build_wasm(project_path, output_directory),
-        ProjectLanguage::C => language::c::build_wasm(project_path, output_directory),
-        ProjectLanguage::AssemblyScript => {
-            language::asc::build_wasm(project_path, output_directory)
-        }
-        ProjectLanguage::Python => language::python::build_wasm(project_path, output_directory),
-        ProjectLanguage::Unknown => Err(format!(
-            "Could not determine project language for: {}",
-            project_path
-        )),
-    }
+    // Use the new builder system
+    let result = build_wasm_project(project_path, output_dir, &language_type, false)?;
+    Ok(result.wasm_path)
 }
 
-/// AOT compile a project for execution
+/// AOT compile a project for execution (legacy function)
 pub fn compile_for_execution(project_path: &str, output_dir: &str) -> Result<String, String> {
     let language_type: ProjectLanguage = detect_project_language(project_path);
     let os: OperatingSystem = detect_operating_system();
@@ -59,24 +40,11 @@ pub fn compile_for_execution(project_path: &str, output_dir: &str) -> Result<Str
     }
 
     // Create output directory if it doesn't exist
-    let output_path = Path::new(output_dir);
-    if !output_path.exists() {
-        fs::create_dir_all(output_path)
-            .map_err(|e| format!("Failed to create output directory: {}", e))?;
-    }
+    PathResolver::ensure_output_directory(output_dir)?;
 
-    // Use language-specific compiler with extra verbosity for direct execution
-    match language_type {
-        ProjectLanguage::Rust => language::rust::build_wasm_verbose(project_path, output_dir),
-        ProjectLanguage::Go => language::go::build_wasm_verbose(project_path, output_dir),
-        ProjectLanguage::C => language::c::build_wasm_verbose(project_path, output_dir),
-        ProjectLanguage::AssemblyScript => {
-            language::asc::build_wasm_verbose(project_path, output_dir)
-        }
-        ProjectLanguage::Python => language::python::build_wasm(project_path, output_dir),
-        ProjectLanguage::Unknown => Err(format!(
-            "Could not determine project language for: {}",
-            project_path
-        )),
-    }
+    // Use the new builder system with verbose output
+    let result = build_wasm_project(project_path, output_dir, &language_type, true)?;
+
+    // For legacy compatibility, return the JS path if available (for wasm-bindgen), otherwise WASM path
+    Ok(result.js_path.unwrap_or(result.wasm_path))
 }
