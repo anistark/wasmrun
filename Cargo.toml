@@ -1,6 +1,6 @@
 [package]
 name = "chakra"
-version = "0.7.5"
+version = "0.7.6"
 edition = "2021"
 description = "A WebAssembly Runtime"
 license = "MIT"
@@ -14,7 +14,7 @@ documentation = "https://docs.rs/chakra"
 rust-version = "1.70.0"
 
 [dependencies]
-clap = { version = "4.3", features = ["derive"] }
+clap = { version = "4.5.39", features = ["derive"] }
 tiny_http = "0.12"
 webbrowser = "1.0.4"
 notify = "5.1.0"
