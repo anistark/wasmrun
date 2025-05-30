@@ -130,11 +130,11 @@ chakra stop
 
 | Language | Status | Compiler | Notes |
 |----------|--------|----------|-------|
-| **Rust** | ✅ Full Support | `cargo` + `rustc` | Standard WASM, wasm-bindgen, and web apps |
-| **Go** | ✅ Full Support | `tinygo` | Lightweight Go runtime |
-| **C/C++** | ✅ Full Support | `emscripten` | Complete toolchain support |
-| **AssemblyScript** | ✅ Full Support | `asc` | TypeScript-like syntax |
-| **Python** | 🚧 Coming Soon | `py2wasm` / `waspy` | In development |
+| ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white) | ✅ Full Support | `cargo` + `rustc` | Standard WASM, wasm-bindgen, and web apps |
+| ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white) | ✅ Full Support | `tinygo` | Lightweight Go runtime |
+| ![C](https://img.shields.io/badge/c-%2300599C.svg?style=for-the-badge&logo=c&logoColor=white) ![C++](https://img.shields.io/badge/c++-%2300599C.svg?style=for-the-badge&logo=c%2B%2B&logoColor=white) | ✅ Full Support | `emscripten` | Complete toolchain support |
+| ![AssemblyScript](https://img.shields.io/badge/assembly%20script-%23000000.svg?style=for-the-badge&logo=assemblyscript&logoColor=white) | ✅ Full Support | `asc` | TypeScript-like syntax |
+| ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54) | 🚧 Coming Soon | `py2wasm` / `waspy` | In development |
 
 ### Web Frameworks (Rust)
 
