@@ -6,7 +6,6 @@ mod server;
 mod template;
 mod ui;
 mod utils;
-mod verify;
 mod watcher;
 
 use cli::Commands;
