@@ -1,4 +1,5 @@
 use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
+use crate::error::CompilationResult;
 
 pub struct PythonBuilder;
 
@@ -34,19 +35,9 @@ impl WasmBuilder for PythonBuilder {
         missing
     }
 
-    fn build(&self, config: &BuildConfig) -> Result<BuildResult, String> {
-        // For now, call the existing build_wasm function which returns an error
-        build_wasm(&config.project_path, &config.output_dir)?;
-
-        // This will never be reached since build_wasm returns an error
-        unreachable!()
+    fn build(&self, _config: &BuildConfig) -> CompilationResult<BuildResult> {
+        Err(crate::error::CompilationError::UnsupportedLanguage {
+            language: "Python".to_string(),
+        })
     }
-}
-
-/// Build a WASM file from a Python project
-/// TODO: Integrate chakrapy
-pub fn build_wasm(project_path: &str, _output_dir: &str) -> Result<String, String> {
-    println!("🐍 Detected Python project at: {}", project_path);
-    println!("\x1b[1;33mPython WebAssembly compilation coming soon!\x1b[0m");
-    Err("Python WebAssembly compilation is coming soon.".to_string())
 }

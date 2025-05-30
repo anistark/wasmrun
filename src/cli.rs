@@ -1,5 +1,6 @@
-use clap::{Parser, Subcommand};
+use crate::error::{ChakraError, Result};
 use crate::utils::PathResolver;
+use clap::{Parser, Subcommand};
 
 /// Chakra - WebAssembly project compiler and runtime 🌟
 #[derive(Parser, Debug)]
@@ -18,8 +19,8 @@ pub struct Args {
 
     /// Path to project directory or WASM file (default: current directory)
     #[arg(
-        short = 'p', 
-        long, 
+        short = 'p',
+        long,
         default_value = "./",
         value_hint = clap::ValueHint::AnyPath,
         help = "Project directory or WASM file path"
@@ -32,8 +33,8 @@ pub struct Args {
 
     /// Port to serve (default: 8420)
     #[arg(
-        short = 'P', 
-        long, 
+        short = 'P',
+        long,
         default_value_t = 8420,
         value_parser = clap::value_parser!(u16).range(1..=65535),
         help = "Server port number"
@@ -60,7 +61,7 @@ pub enum Commands {
     Compile {
         /// Path to the project directory
         #[arg(
-            short = 'p', 
+            short = 'p',
             long,
             value_hint = clap::ValueHint::DirPath,
             help = "Project directory to compile"
@@ -73,7 +74,7 @@ pub enum Commands {
 
         /// Output directory for the WASM file (default: current directory)
         #[arg(
-            short = 'o', 
+            short = 'o',
             long,
             value_hint = clap::ValueHint::DirPath,
             help = "Output directory for compiled files"
@@ -86,7 +87,7 @@ pub enum Commands {
 
         /// Optimization level: debug, release, size
         #[arg(
-            long, 
+            long,
             default_value = "release",
             value_parser = ["debug", "release", "size"],
             help = "Compilation optimization level"
@@ -95,11 +96,10 @@ pub enum Commands {
     },
 
     /// Verify WebAssembly file format and structure
-    #[command(alias = "check")]
     Verify {
         /// Path to the WASM file
         #[arg(
-            short = 'p', 
+            short = 'p',
             long,
             value_hint = clap::ValueHint::FilePath,
             help = "WASM file to verify"
@@ -116,11 +116,10 @@ pub enum Commands {
     },
 
     /// Perform detailed inspection on a WebAssembly file
-    #[command(alias = "analyze")]
     Inspect {
         /// Path to the WASM file
         #[arg(
-            short = 'p', 
+            short = 'p',
             long,
             value_hint = clap::ValueHint::FilePath,
             help = "WASM file to inspect"
@@ -137,7 +136,7 @@ pub enum Commands {
     Run {
         /// Path to the project
         #[arg(
-            short = 'p', 
+            short = 'p',
             long,
             value_hint = clap::ValueHint::DirPath,
             help = "Project directory to run"
@@ -150,8 +149,8 @@ pub enum Commands {
 
         /// Port to serve (default: 8420)
         #[arg(
-            short = 'P', 
-            long, 
+            short = 'P',
+            long,
             default_value_t = 8420,
             value_parser = clap::value_parser!(u16).range(1..=65535),
             help = "Development server port"
@@ -160,7 +159,7 @@ pub enum Commands {
 
         /// Language to use for compilation (auto-detect if not specified)
         #[arg(
-            short = 'l', 
+            short = 'l',
             long,
             value_parser = ["rust", "go", "c", "assemblyscript", "python"],
             help = "Force specific language for compilation"
@@ -185,8 +184,8 @@ pub enum Commands {
 
         /// Template to use (rust, go, c, assemblyscript)
         #[arg(
-            short = 't', 
-            long, 
+            short = 't',
+            long,
             default_value = "rust",
             value_parser = ["rust", "go", "c", "assemblyscript", "python"],
             help = "Project template to use"
@@ -195,7 +194,7 @@ pub enum Commands {
 
         /// Target directory (default: project name)
         #[arg(
-            short = 'd', 
+            short = 'd',
             long,
             value_hint = clap::ValueHint::DirPath,
             help = "Directory to create project in"
@@ -208,7 +207,7 @@ pub enum Commands {
     Clean {
         /// Path to the project directory
         #[arg(
-            short = 'p', 
+            short = 'p',
             long,
             value_hint = clap::ValueHint::DirPath,
             help = "Project directory to clean"
@@ -234,7 +233,7 @@ pub struct ResolvedArgs {
 
 impl ResolvedArgs {
     /// Create from CLI args with path resolution and validation
-    pub fn from_args(args: Args) -> Result<Self, String> {
+    pub fn from_args(args: Args) -> Result<Self> {
         let resolved_path = PathResolver::resolve_input_path(args.positional_path, Some(args.path));
 
         Ok(Self {
@@ -248,10 +247,13 @@ impl ResolvedArgs {
 
     /// Validate the resolved arguments
     #[allow(dead_code)]
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<()> {
         // Validate port range
         if self.port == 0 {
-            return Err(format!("Invalid port number: {}. Must be between 1-65535", self.port));
+            return Err(ChakraError::from(format!(
+                "Invalid port number: {}. Must be between 1-65535",
+                self.port
+            )));
         }
 
         // Validate path based on context
@@ -260,7 +262,9 @@ impl ResolvedArgs {
                 // These commands expect WASM files
                 PathResolver::validate_wasm_file(&self.path)?;
             }
-            Some(Commands::Compile { .. }) | Some(Commands::Run { .. }) | Some(Commands::Clean { .. }) => {
+            Some(Commands::Compile { .. })
+            | Some(Commands::Run { .. })
+            | Some(Commands::Clean { .. }) => {
                 // These commands expect project directories
                 PathResolver::validate_directory_exists(&self.path)?;
             }
@@ -271,7 +275,7 @@ impl ResolvedArgs {
                 } else {
                     // Could be either file or directory
                     if !std::path::Path::new(&self.path).exists() {
-                        return Err(format!("Path not found: {}", self.path));
+                        return Err(ChakraError::path(format!("Path not found: {}", self.path)));
                     }
                 }
             }
@@ -290,26 +294,37 @@ pub trait CommandArgs {
 impl CommandArgs for Commands {
     fn resolve_path(&self) -> String {
         match self {
-            Commands::Compile { path, positional_path, .. } => {
-                PathResolver::resolve_input_path(positional_path.clone(), path.clone())
-            }
-            Commands::Verify { path, positional_path, .. } => {
-                PathResolver::resolve_input_path(positional_path.clone(), path.clone())
-            }
-            Commands::Inspect { path, positional_path, .. } => {
-                PathResolver::resolve_input_path(positional_path.clone(), path.clone())
-            }
-            Commands::Run { path, positional_path, .. } => {
-                PathResolver::resolve_input_path(positional_path.clone(), path.clone())
-            }
-            Commands::Clean { path, positional_path, .. } => {
-                PathResolver::resolve_input_path(positional_path.clone(), path.clone())
-            }
-            Commands::Init { name, directory, .. } => {
-                directory.clone().unwrap_or_else(|| {
-                    name.clone().unwrap_or_else(|| "my-chakra-project".to_string())
-                })
-            }
+            Commands::Compile {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Verify {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Inspect {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Run {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Clean {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Init {
+                name, directory, ..
+            } => directory.clone().unwrap_or_else(|| {
+                name.clone()
+                    .unwrap_or_else(|| "my-chakra-project".to_string())
+            }),
             Commands::Stop => "./".to_string(),
         }
     }
@@ -323,7 +338,7 @@ impl CommandValidator {
         path: &Option<String>,
         positional_path: &Option<String>,
         output: &Option<String>,
-    ) -> Result<(String, String), String> {
+    ) -> Result<(String, String)> {
         let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
         let output_dir = output.clone().unwrap_or_else(|| ".".to_string());
 
@@ -336,13 +351,8 @@ impl CommandValidator {
     pub fn validate_verify_args(
         path: &Option<String>,
         positional_path: &Option<String>,
-    ) -> Result<String, String> {
-        // Debug output
-        eprintln!("validate_verify_args - path: {:?}, positional: {:?}", path, positional_path);
-        
+    ) -> Result<String> {
         let wasm_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
-        eprintln!("validate_verify_args - resolved path: {}", wasm_path);
-        
         PathResolver::validate_wasm_file(&wasm_path)?;
         Ok(wasm_path)
     }
@@ -351,13 +361,16 @@ impl CommandValidator {
         path: &Option<String>,
         positional_path: &Option<String>,
         port: u16,
-    ) -> Result<(String, u16), String> {
+    ) -> Result<(String, u16)> {
         let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
-        
+
         // Port validation is now handled by clap's value_parser
         // Just validate the path exists
         if !std::path::Path::new(&project_path).exists() {
-            return Err(format!("Path not found: {}", project_path));
+            return Err(ChakraError::path(format!(
+                "Path not found: {}",
+                project_path
+            )));
         }
 
         Ok((project_path, port))
@@ -367,23 +380,28 @@ impl CommandValidator {
         name: &Option<String>,
         template: &str,
         directory: &Option<String>,
-    ) -> Result<(String, String, String), String> {
-        let project_name = name.clone().unwrap_or_else(|| "my-chakra-project".to_string());
+    ) -> Result<(String, String, String)> {
+        let project_name = name
+            .clone()
+            .unwrap_or_else(|| "my-chakra-project".to_string());
         let target_dir = directory.clone().unwrap_or_else(|| project_name.clone());
 
         // Validate template
         let valid_templates = ["rust", "go", "c", "assemblyscript", "python"];
         if !valid_templates.contains(&template) {
-            return Err(format!(
+            return Err(ChakraError::from(format!(
                 "Invalid template '{}'. Valid templates: {}",
                 template,
                 valid_templates.join(", ")
-            ));
+            )));
         }
 
         // Check if target directory already exists
         if std::path::Path::new(&target_dir).exists() {
-            return Err(format!("Directory '{}' already exists", target_dir));
+            return Err(ChakraError::path(format!(
+                "Directory '{}' already exists",
+                target_dir
+            )));
         }
 
         Ok((project_name, template.to_string(), target_dir))
@@ -427,18 +445,25 @@ fn print_styled_version() {
 
 /// Enhanced argument parsing with validation
 #[allow(dead_code)]
-pub fn get_validated_args() -> Result<ResolvedArgs, String> {
+pub fn get_validated_args() -> Result<ResolvedArgs> {
     let args = get_args();
     let resolved = ResolvedArgs::from_args(args)?;
     resolved.validate()?;
     Ok(resolved)
 }
 
+// Helper function for error conversion
+impl From<String> for ChakraError {
+    fn from(message: String) -> Self {
+        Self::Command(crate::error::CommandError::invalid_arguments(message))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_resolved_args_from_args() {
@@ -498,7 +523,7 @@ mod tests {
     fn test_validate_verify_args_valid_wasm() {
         let temp_dir = tempdir().unwrap();
         let wasm_file = temp_dir.path().join("test.wasm");
-        
+
         // Create a fake WASM file
         fs::write(&wasm_file, b"fake wasm content").unwrap();
 
@@ -514,7 +539,7 @@ mod tests {
     fn test_validate_verify_args_invalid_extension() {
         let temp_dir = tempdir().unwrap();
         let js_file = temp_dir.path().join("test.js");
-        
+
         fs::write(&js_file, b"console.log('test')").unwrap();
 
         let result = CommandValidator::validate_verify_args(
@@ -523,16 +548,16 @@ mod tests {
         );
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Not a WASM file"));
+        match result.unwrap_err() {
+            ChakraError::InvalidFileFormat { .. } => {}
+            _ => panic!("Expected InvalidFileFormat error"),
+        }
     }
 
     #[test]
     fn test_validate_init_args() {
-        let result = CommandValidator::validate_init_args(
-            &Some("my-project".to_string()),
-            "rust",
-            &None,
-        );
+        let result =
+            CommandValidator::validate_init_args(&Some("my-project".to_string()), "rust", &None);
 
         assert!(result.is_ok());
         let (name, template, dir) = result.unwrap();
@@ -550,7 +575,10 @@ mod tests {
         );
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid template"));
+        match result.unwrap_err() {
+            ChakraError::Command(crate::error::CommandError::InvalidArguments { .. }) => {}
+            _ => panic!("Expected InvalidArguments error"),
+        }
     }
 
     #[test]
@@ -566,8 +594,25 @@ mod tests {
 
         let resolved = ResolvedArgs::from_args(args).unwrap();
         let validation_result = resolved.validate();
-        
+
         assert!(validation_result.is_err());
-        assert!(validation_result.unwrap_err().contains("Invalid port number"));
+        match validation_result.unwrap_err() {
+            ChakraError::Command(crate::error::CommandError::InvalidArguments { .. }) => {}
+            _ => panic!("Expected InvalidArguments error"),
+        }
+    }
+
+    #[test]
+    fn test_file_not_found_error() {
+        let result = CommandValidator::validate_verify_args(
+            &Some("/nonexistent/file.wasm".to_string()),
+            &None,
+        );
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ChakraError::FileNotFound { .. } => {}
+            _ => panic!("Expected FileNotFound error"),
+        }
     }
 }

@@ -196,7 +196,7 @@ chakra compile ./my-project --optimization size
 ### Learning & Education
 
 ```sh
-# Analyze WASM structure
+# Inspect WASM structure
 chakra inspect ./complex-module.wasm
 
 # Verify WASM compliance

@@ -1,8 +1,9 @@
+use crate::error::Result;
 use crate::server;
 use crate::ui::{print_info, print_status, print_success};
 
 /// Handle stop command
-pub fn handle_stop_command() -> Result<(), String> {
+pub fn handle_stop_command() -> Result<()> {
     if !server::is_server_running() {
         print_info("No Chakra server is currently running");
         return Ok(());
@@ -15,6 +16,6 @@ pub fn handle_stop_command() -> Result<(), String> {
             print_success("Chakra Server Stopped", "Server terminated successfully");
             Ok(())
         }
-        Err(e) => Err(format!("Error stopping server: {}", e)),
+        Err(e) => Err(e),
     }
 }

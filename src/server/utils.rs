@@ -50,6 +50,7 @@ pub fn print_server_info(
 }
 
 /// Print an error message in a formatted box
+#[allow(dead_code)]
 pub fn print_error(message: String) {
     eprintln!("\n\x1b[1;34m╭\x1b[0m");
     eprintln!("  ❌ \x1b[1;31m{}\x1b[0m", message);

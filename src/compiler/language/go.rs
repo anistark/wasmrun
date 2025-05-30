@@ -1,4 +1,5 @@
 use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
+use crate::error::CompilationResult;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -38,10 +39,9 @@ impl WasmBuilder for GoBuilder {
         missing
     }
 
-    fn build(&self, config: &BuildConfig) -> Result<BuildResult, String> {
-        // For now, call the existing build_wasm function
-        // TODO: Refactor the existing Go build code to use this pattern
-        let wasm_path = build_wasm(&config.project_path, &config.output_dir)?;
+    fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        let wasm_path = build_wasm(&config.project_path, &config.output_dir)
+            .map_err(|e| crate::error::CompilationError::build_failed(self.language_name(), e))?;
 
         Ok(BuildResult {
             wasm_path,

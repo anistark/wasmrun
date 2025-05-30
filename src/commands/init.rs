@@ -1,4 +1,5 @@
 use crate::cli::CommandValidator;
+use crate::error::{ChakraError, Result};
 use crate::ui::print_init_info;
 
 /// Handle init command
@@ -6,7 +7,7 @@ pub fn handle_init_command(
     name: &Option<String>,
     template: &str,
     directory: &Option<String>,
-) -> Result<(), String> {
+) -> Result<()> {
     let (project_name, template_name, target_dir) =
         CommandValidator::validate_init_args(name, template, directory)?;
 
@@ -21,8 +22,8 @@ pub fn handle_init_command(
     println!("📂 Target directory: {}", target_dir);
 
     // For now, return an error since this feature isn't implemented yet
-    Err(
+    Err(ChakraError::from(
         "Project initialization is not yet implemented. This will be added in a future version."
             .to_string(),
-    )
+    ))
 }

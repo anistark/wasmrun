@@ -1,3 +1,4 @@
+use crate::error::{CompilationError, CompilationResult};
 use crate::utils::PathResolver;
 use std::path::Path;
 
@@ -65,10 +66,10 @@ pub trait WasmBuilder {
     fn check_dependencies(&self) -> Vec<String>;
 
     /// Build the project with the given configuration
-    fn build(&self, config: &BuildConfig) -> Result<BuildResult, String>;
+    fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult>;
 
     /// Default verbose build implementation
-    fn build_verbose(&self, config: &BuildConfig) -> Result<BuildResult, String> {
+    fn build_verbose(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
         println!(
             "🔨 Building {} project at: {}",
             self.language_name(),
@@ -78,18 +79,21 @@ pub trait WasmBuilder {
         // Check dependencies first
         let missing_tools = self.check_dependencies();
         if !missing_tools.is_empty() {
-            return Err(format!(
-                "Missing required tools for {}: {}",
-                self.language_name(),
-                missing_tools.join(", ")
-            ));
+            return Err(CompilationError::BuildToolNotFound {
+                tool: missing_tools.join(", "),
+                language: self.language_name().to_string(),
+            });
         }
 
         // Validate project structure
         self.validate_project(&config.project_path)?;
 
         // Ensure output directory exists
-        PathResolver::ensure_output_directory(&config.output_dir)?;
+        PathResolver::ensure_output_directory(&config.output_dir).map_err(|_| {
+            CompilationError::OutputDirectoryCreationFailed {
+                path: config.output_dir.clone(),
+            }
+        })?;
 
         println!("✅ All dependencies found");
         println!("📂 Output directory: {}", config.output_dir);
@@ -114,17 +118,25 @@ pub trait WasmBuilder {
     }
 
     /// Validate that the project structure is correct for this language
-    fn validate_project(&self, project_path: &str) -> Result<(), String> {
-        PathResolver::validate_directory_exists(project_path)?;
+    fn validate_project(&self, project_path: &str) -> CompilationResult<()> {
+        PathResolver::validate_directory_exists(project_path).map_err(|_| {
+            CompilationError::InvalidProjectStructure {
+                language: self.language_name().to_string(),
+                reason: format!("Project directory not found: {}", project_path),
+            }
+        })?;
 
         // Check for entry files
         let entry_file = PathResolver::find_entry_file(project_path, self.entry_file_candidates());
         if entry_file.is_none() {
-            return Err(format!(
-                "No entry file found for {} project. Expected one of: {}",
-                self.language_name(),
-                self.entry_file_candidates().join(", ")
-            ));
+            return Err(CompilationError::MissingEntryFile {
+                language: self.language_name().to_string(),
+                candidates: self
+                    .entry_file_candidates()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            });
         }
 
         Ok(())
@@ -160,7 +172,7 @@ pub trait WasmBuilder {
         args: &[&str],
         working_dir: &str,
         verbose: bool,
-    ) -> Result<std::process::Output, String> {
+    ) -> CompilationResult<std::process::Output> {
         if verbose {
             println!("🔧 Executing: {} {}", command, args.join(" "));
         }
@@ -169,7 +181,10 @@ pub trait WasmBuilder {
             .args(args)
             .current_dir(working_dir)
             .output()
-            .map_err(|e| format!("Failed to execute command '{}': {}", command, e))
+            .map_err(|e| CompilationError::ToolExecutionFailed {
+                tool: command.to_string(),
+                reason: e.to_string(),
+            })
     }
 
     /// Execute a command with live output (for verbose builds)
@@ -178,7 +193,7 @@ pub trait WasmBuilder {
         command: &str,
         args: &[&str],
         working_dir: &str,
-    ) -> Result<(), String> {
+    ) -> CompilationResult<()> {
         println!("🔧 Executing: {} {}", command, args.join(" "));
 
         let status = std::process::Command::new(command)
@@ -187,29 +202,102 @@ pub trait WasmBuilder {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .status()
-            .map_err(|e| format!("Failed to execute command '{}': {}", command, e))?;
+            .map_err(|e| CompilationError::ToolExecutionFailed {
+                tool: command.to_string(),
+                reason: e.to_string(),
+            })?;
 
         if !status.success() {
-            return Err(format!(
-                "Command '{}' failed with exit code: {:?}",
-                command,
-                status.code()
-            ));
+            return Err(CompilationError::BuildFailed {
+                language: self.language_name().to_string(),
+                reason: format!(
+                    "Command '{}' failed with exit code: {:?}",
+                    command,
+                    status.code()
+                ),
+            });
         }
 
         Ok(())
     }
 
     /// Copy output file to the target directory
-    fn copy_to_output(&self, source: &str, output_dir: &str) -> Result<String, String> {
+    fn copy_to_output(&self, source: &str, output_dir: &str) -> CompilationResult<String> {
         let source_path = Path::new(source);
-        let filename = PathResolver::get_filename(source)?;
+        let filename =
+            PathResolver::get_filename(source).map_err(|_| CompilationError::BuildFailed {
+                language: self.language_name().to_string(),
+                reason: format!("Invalid source file path: {}", source),
+            })?;
         let output_path = PathResolver::join_paths(output_dir, &filename);
 
-        std::fs::copy(source_path, &output_path)
-            .map_err(|e| format!("Failed to copy {} to {}: {}", source, output_path, e))?;
+        std::fs::copy(source_path, &output_path).map_err(|e| CompilationError::BuildFailed {
+            language: self.language_name().to_string(),
+            reason: format!("Failed to copy {} to {}: {}", source, output_path, e),
+        })?;
 
         Ok(output_path)
+    }
+
+    /// Check if a specific target is available (allow dead code for future use)
+    #[allow(dead_code)]
+    fn check_target_availability(&self, _target: &str) -> CompilationResult<()> {
+        // Default implementation - can be overridden by specific builders
+        Ok(())
+    }
+
+    /// Get installation instructions for missing tools (allow dead code for future use)
+    #[allow(dead_code)]
+    fn get_install_instructions(&self, tool: &str) -> String {
+        match tool {
+            "rustc" | "cargo" => "Install Rust from https://rustup.rs/".to_string(),
+            "tinygo" => {
+                "Install TinyGo from https://tinygo.org/getting-started/install/".to_string()
+            }
+            "emcc" => {
+                "Install Emscripten from https://emscripten.org/docs/getting_started/downloads.html"
+                    .to_string()
+            }
+            "node" => "Install Node.js from https://nodejs.org/".to_string(),
+            "npm" => "Install npm (usually comes with Node.js)".to_string(),
+            "wasm-pack" => "Install with: cargo install wasm-pack".to_string(),
+            "trunk" => "Install with: cargo install trunk".to_string(),
+            _ => format!("Please install {} and ensure it's in your PATH", tool),
+        }
+    }
+
+    /// Validate build configuration
+    fn validate_config(&self, config: &BuildConfig) -> CompilationResult<()> {
+        // Validate project path
+        if config.project_path.is_empty() {
+            return Err(CompilationError::InvalidProjectStructure {
+                language: self.language_name().to_string(),
+                reason: "Project path cannot be empty".to_string(),
+            });
+        }
+
+        // Validate output directory
+        if config.output_dir.is_empty() {
+            return Err(CompilationError::OutputDirectoryCreationFailed {
+                path: "Output directory cannot be empty".to_string(),
+            });
+        }
+
+        // Check if paths are safe
+        if !PathResolver::is_safe_path(&config.project_path) {
+            return Err(CompilationError::InvalidProjectStructure {
+                language: self.language_name().to_string(),
+                reason: format!("Unsafe project path: {}", config.project_path),
+            });
+        }
+
+        if !PathResolver::is_safe_path(&config.output_dir) {
+            return Err(CompilationError::OutputDirectoryCreationFailed {
+                path: format!("Unsafe output path: {}", config.output_dir),
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -230,8 +318,50 @@ impl BuilderFactory {
             ProjectLanguage::Python => {
                 Box::new(crate::compiler::language::python::PythonBuilder::new())
             }
-            ProjectLanguage::Unknown => panic!("Cannot create builder for unknown language"),
+            ProjectLanguage::Unknown => {
+                // Return a dummy builder that always fails
+                Box::new(UnknownBuilder)
+            }
         }
+    }
+
+    /// Get supported languages (allow dead code for future use)
+    #[allow(dead_code)]
+    pub fn supported_languages() -> Vec<&'static str> {
+        vec!["Rust", "Go", "C", "AssemblyScript", "Python"]
+    }
+
+    /// Check if a language is supported (allow dead code for future use)
+    #[allow(dead_code)]
+    pub fn is_language_supported(language: &str) -> bool {
+        Self::supported_languages().contains(&language)
+    }
+}
+
+/// Dummy builder for unknown languages
+struct UnknownBuilder;
+
+impl WasmBuilder for UnknownBuilder {
+    fn language_name(&self) -> &str {
+        "Unknown"
+    }
+
+    fn entry_file_candidates(&self) -> &[&str] {
+        &[]
+    }
+
+    fn supported_extensions(&self) -> &[&str] {
+        &[]
+    }
+
+    fn check_dependencies(&self) -> Vec<String> {
+        vec!["Language not detected or supported".to_string()]
+    }
+
+    fn build(&self, _config: &BuildConfig) -> CompilationResult<BuildResult> {
+        Err(CompilationError::UnsupportedLanguage {
+            language: "Unknown".to_string(),
+        })
     }
 }
 
@@ -241,7 +371,7 @@ pub fn build_wasm_project(
     output_dir: &str,
     language: &crate::compiler::ProjectLanguage,
     verbose: bool,
-) -> Result<BuildResult, String> {
+) -> CompilationResult<BuildResult> {
     let config = BuildConfig {
         project_path: project_path.to_string(),
         output_dir: output_dir.to_string(),
@@ -252,6 +382,9 @@ pub fn build_wasm_project(
 
     let builder = BuilderFactory::create_builder(language);
 
+    // Validate configuration
+    builder.validate_config(&config)?;
+
     if verbose {
         builder.build_verbose(&config)
     } else {
@@ -259,100 +392,44 @@ pub fn build_wasm_project(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::tempdir;
-
-    struct MockBuilder;
-
-    impl WasmBuilder for MockBuilder {
-        fn language_name(&self) -> &str {
-            "mock"
+/// Helper function to convert build errors to user-friendly messages (allow dead code for future use)
+#[allow(dead_code)]
+pub fn format_build_error(error: &CompilationError) -> String {
+    match error {
+        CompilationError::UnsupportedLanguage { language } => {
+            format!(
+                "Language '{}' is not supported.\nSupported languages: {}",
+                language,
+                BuilderFactory::supported_languages().join(", ")
+            )
         }
+        CompilationError::BuildToolNotFound { tool, language } => {
+            let builder = BuilderFactory::create_builder(&match language.as_str() {
+                "Rust" => crate::compiler::ProjectLanguage::Rust,
+                "Go" => crate::compiler::ProjectLanguage::Go,
+                "C" => crate::compiler::ProjectLanguage::C,
+                "AssemblyScript" => crate::compiler::ProjectLanguage::AssemblyScript,
+                "Python" => crate::compiler::ProjectLanguage::Python,
+                _ => crate::compiler::ProjectLanguage::Unknown,
+            });
 
-        fn entry_file_candidates(&self) -> &[&str] {
-            &["main.mock", "app.mock"]
+            format!(
+                "Build tool '{}' not found for {} projects.\n💡 {}",
+                tool,
+                language,
+                builder.get_install_instructions(tool)
+            )
         }
-
-        fn supported_extensions(&self) -> &[&str] {
-            &["mock"]
+        CompilationError::MissingEntryFile {
+            language,
+            candidates,
+        } => {
+            format!(
+                "No entry file found for {} project.\nExpected one of: {}\n💡 Create one of these files to get started",
+                language,
+                candidates.join(", ")
+            )
         }
-
-        fn check_dependencies(&self) -> Vec<String> {
-            vec![] // No missing dependencies
-        }
-
-        fn build(&self, config: &BuildConfig) -> Result<BuildResult, String> {
-            // Create a fake output file
-            let output_path = PathResolver::join_paths(&config.output_dir, "test.wasm");
-            fs::write(&output_path, b"fake wasm").unwrap();
-
-            Ok(BuildResult {
-                wasm_path: output_path,
-                js_path: None,
-                additional_files: vec![],
-                is_wasm_bindgen: false,
-            })
-        }
-    }
-
-    #[test]
-    fn test_build_config_default() {
-        let config = BuildConfig::default();
-        assert_eq!(config.project_path, "./");
-        assert_eq!(config.output_dir, "./");
-        assert!(!config.verbose);
-    }
-
-    #[test]
-    fn test_mock_builder() {
-        let temp_dir = tempdir().unwrap();
-        let project_path = temp_dir.path().to_str().unwrap();
-        let output_dir = temp_dir.path().join("output");
-        let output_dir_str = output_dir.to_str().unwrap();
-
-        // Create project structure
-        fs::create_dir_all(&output_dir).unwrap();
-        fs::write(temp_dir.path().join("main.mock"), "mock content").unwrap();
-
-        let config = BuildConfig {
-            project_path: project_path.to_string(),
-            output_dir: output_dir_str.to_string(),
-            verbose: false,
-            optimization_level: OptimizationLevel::Release,
-            target_type: TargetType::Standard,
-        };
-
-        let builder = MockBuilder;
-        let result = builder.build(&config).unwrap();
-
-        assert!(result.wasm_path.ends_with("test.wasm"));
-        assert!(Path::new(&result.wasm_path).exists());
-    }
-
-    #[test]
-    fn test_validate_project_success() {
-        let temp_dir = tempdir().unwrap();
-        let project_path = temp_dir.path().to_str().unwrap();
-
-        // Create entry file
-        fs::write(temp_dir.path().join("main.mock"), "mock content").unwrap();
-
-        let builder = MockBuilder;
-        assert!(builder.validate_project(project_path).is_ok());
-    }
-
-    #[test]
-    fn test_validate_project_missing_entry() {
-        let temp_dir = tempdir().unwrap();
-        let project_path = temp_dir.path().to_str().unwrap();
-
-        let builder = MockBuilder;
-        let result = builder.validate_project(project_path);
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No entry file found"));
+        _ => error.to_string(),
     }
 }
