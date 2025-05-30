@@ -64,6 +64,7 @@ pub enum Commands {
         #[arg(short = 'p', long)]
         path: Option<String>,
 
+        /// WASM file path (positional argument)
         #[arg(index = 1)]
         positional_path: Option<String>,
 
@@ -72,12 +73,13 @@ pub enum Commands {
         detailed: bool,
     },
 
-    /// Perform detailed inspection on a WebAssembly file
+    /// Inspect WebAssembly file
     Inspect {
         /// Path to the WASM file
         #[arg(short = 'p', long)]
         path: Option<String>,
 
+        /// WASM file path (positional argument)
         #[arg(index = 1)]
         positional_path: Option<String>,
     },
@@ -197,6 +199,51 @@ impl ResolvedArgs {
     }
 }
 
+/// Command-specific argument resolution
+#[allow(dead_code)]
+pub trait CommandArgs {
+    fn resolve_path(&self) -> String;
+}
+
+impl CommandArgs for Commands {
+    fn resolve_path(&self) -> String {
+        match self {
+            Commands::Compile {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Verify {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Inspect {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Run {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Clean {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Init {
+                name, directory, ..
+            } => directory.clone().unwrap_or_else(|| {
+                name.clone()
+                    .unwrap_or_else(|| "my-chakra-project".to_string())
+            }),
+            Commands::Stop => "./".to_string(),
+        }
+    }
+}
+
 /// Validation helper for specific command arguments
 pub struct CommandValidator;
 
@@ -219,7 +266,15 @@ impl CommandValidator {
         path: &Option<String>,
         positional_path: &Option<String>,
     ) -> Result<String, String> {
+        // Debug output
+        eprintln!(
+            "validate_verify_args - path: {:?}, positional: {:?}",
+            path, positional_path
+        );
+
         let wasm_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
+        eprintln!("validate_verify_args - resolved path: {}", wasm_path);
+
         PathResolver::validate_wasm_file(&wasm_path)?;
         Ok(wasm_path)
     }
@@ -312,6 +367,7 @@ fn print_styled_version() {
 }
 
 /// Enhanced argument parsing with validation
+#[allow(dead_code)]
 pub fn get_validated_args() -> Result<ResolvedArgs, String> {
     let args = get_args();
     let resolved = ResolvedArgs::from_args(args)?;
@@ -341,6 +397,19 @@ mod tests {
         assert_eq!(resolved.port, 8420);
         assert!(!resolved.wasm);
         assert!(!resolved.watch);
+    }
+
+    #[test]
+    fn test_command_args_resolve_path() {
+        let compile_cmd = Commands::Compile {
+            path: Some("./flag".to_string()),
+            positional_path: Some("./positional".to_string()),
+            output: None,
+            verbose: false,
+            optimization: "release".to_string(),
+        };
+
+        assert_eq!(compile_cmd.resolve_path(), "./positional");
     }
 
     #[test]
