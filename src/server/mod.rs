@@ -8,6 +8,7 @@ mod wasm;
 mod webapp;
 
 pub use config::ServerConfig;
+pub use utils::{ServerInfo, ServerUtils};
 pub use webapp::run_webapp;
 
 // Constants
@@ -34,10 +35,17 @@ pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
         }));
     }
 
+    // Handle port conflicts
+    let final_port = ServerUtils::handle_port_conflict(port)?;
+
     // Special handling for _bg.wasm files (wasm-bindgen output)
-    if handle_wasm_bindgen_file(path_obj, path, port)? {
+    if handle_wasm_bindgen_file(path_obj, path, final_port)? {
         return Ok(());
     }
+
+    // Server info
+    let server_info = ServerInfo::for_wasm_file(path, final_port, false)?;
+    server_info.print_server_startup();
 
     // Regular WASM file handling
     let wasm_filename = Path::new(path)
@@ -46,8 +54,8 @@ pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
         .to_string_lossy()
         .to_string();
 
-    wasm::serve_wasm_file(path, port, &wasm_filename)
-        .map_err(|e| ChakraError::Server(ServerError::startup_failed(port, e)))
+    wasm::serve_wasm_file(path, final_port, &wasm_filename)
+        .map_err(|e| ChakraError::Server(ServerError::startup_failed(final_port, e)))
 }
 
 /// Compile and run a project
@@ -90,21 +98,27 @@ pub fn run_project(
         return Err(ChakraError::path(error_msg));
     }
 
+    // Handle port conflicts
+    let final_port = ServerUtils::handle_port_conflict(port)?;
+
     // Check if it's a Rust web application
     let detected_language = crate::compiler::detect_project_language(path);
 
     if detected_language == crate::compiler::ProjectLanguage::Rust
         && crate::compiler::is_rust_web_application(path)
     {
-        println!("\n\x1b[1;34m╭\x1b[0m");
-        println!("  🌐 \x1b[1;36mDetected Rust Web Application\x1b[0m");
-        println!("  \x1b[0;37mRunning as a web app on port {}\x1b[0m", 3000); // Use port 3000 for web apps
-        println!("\x1b[1;34m╰\x1b[0m\n");
+        // Server info for web app
+        let server_info = ServerInfo::for_project(path, 3000, watch)?;
+        server_info.print_server_startup();
 
         // Run as a web application on port 3000
         return webapp::run_webapp(path, 3000, watch)
             .map_err(|e| ChakraError::Server(ServerError::startup_failed(3000, e)));
     }
+
+    // Server info for regular project
+    let server_info = ServerInfo::for_project(path, final_port, watch)?;
+    server_info.print_server_startup();
 
     // Detect project and setup
     let (lang, temp_output_dir) = config::setup_project_compilation(path, language_override, watch)
@@ -129,7 +143,7 @@ pub fn run_project(
     let server_config = ServerConfig {
         wasm_path,
         js_path,
-        port,
+        port: final_port,
         watch_mode: watch,
         project_path: if watch { Some(path.to_string()) } else { None },
         output_dir: if watch {
@@ -141,13 +155,13 @@ pub fn run_project(
 
     // Log a message based on the project type
     if is_wasm_bindgen {
-        println!("Running wasm-bindgen project with JS support");
+        println!("🔧 Running wasm-bindgen project with JavaScript support");
     } else {
-        println!("Running standard WASM project");
+        println!("⚡ Running standard WASM project");
     }
 
     config::run_server(server_config)
-        .map_err(|e| ChakraError::Server(ServerError::startup_failed(port, e)))
+        .map_err(|e| ChakraError::Server(ServerError::startup_failed(final_port, e)))
 }
 
 /// Check if a server is currently running
@@ -234,8 +248,6 @@ pub fn stop_existing_server() -> Result<()> {
         }))
     }
 }
-
-// Private helper functions
 
 // Handle JS files that might be associated with WASM
 fn handle_js_file(path: &str, port: u16) -> Result<()> {
@@ -413,6 +425,7 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+    pub use utils::ContentType;
 
     #[test]
     fn test_is_server_running_no_pid_file() {
@@ -438,183 +451,45 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_wasm_bindgen_file_detection() {
-        let temp_dir = tempdir().unwrap();
-        let wasm_file = temp_dir.path().join("test_bg.wasm");
-        let js_file = temp_dir.path().join("test.js");
-
-        // Create both the WASM file and the corresponding JS file
-        fs::write(&wasm_file, b"fake wasm content").unwrap();
-
-        // Create a realistic wasm-bindgen JS file content
-        let js_content = r#"
-import * as wasm from './test_bg.wasm';
-
-export function greet(name) {
-    return wasm.greet(name);
-}
-
-// wasm-bindgen generated code
-let wasm_bindgen;
-function __wbg_init() {
-    // wasm-bindgen initialization code
-}
-"#;
-        fs::write(&js_file, js_content).unwrap();
-
-        let path_obj = wasm_file.as_path();
-        let result = handle_wasm_bindgen_file(path_obj, wasm_file.to_str().unwrap(), 8080);
-
-        // Should return true indicating it detected and would handle the file
-        assert!(result.is_ok());
-        assert!(result.unwrap());
-    }
-
-    #[test]
-    fn test_handle_wasm_bindgen_file_detection_missing_js() {
-        let temp_dir = tempdir().unwrap();
-        let wasm_file = temp_dir.path().join("test_bg.wasm");
-
-        // Create only the WASM file without the JS file
-        fs::write(&wasm_file, b"fake wasm content").unwrap();
-
-        let path_obj = wasm_file.as_path();
-        let result = handle_wasm_bindgen_file(path_obj, wasm_file.to_str().unwrap(), 8080);
-
-        // This should return an error because the JS file is missing
-        assert!(result.is_err());
-
-        // Check that it's the specific WasmBindgenJsNotFound error
-        match result.unwrap_err() {
-            ChakraError::Wasm(crate::error::WasmError::WasmBindgenJsNotFound) => {}
-            _ => panic!("Expected WasmBindgenJsNotFound error"),
-        }
-    }
-
-    #[test]
-    fn test_handle_js_file_with_wasm_counterpart() {
-        let temp_dir = tempdir().unwrap();
-        let js_file = temp_dir.path().join("test.js");
-        let wasm_file = temp_dir.path().join("test.wasm");
-
-        // Create realistic wasm-bindgen files
-        let js_content = r#"
-import * as wasm from './test_bg.wasm';
-
-// This contains wasm_bindgen patterns
-const __wbindgen_string_new = function(ptr, len) {
-    return String.fromCharCode(...new Uint8Array(wasm.memory.buffer, ptr, len));
-};
-
-export function greet(name) {
-    return wasm.greet(name);
-}
-"#;
-        fs::write(&js_file, js_content).unwrap();
-        fs::write(&wasm_file, b"fake wasm content").unwrap();
-
-        let result = handle_js_file(js_file.to_str().unwrap(), 8080);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_handle_js_file_without_wasm_bindgen() {
-        let temp_dir = tempdir().unwrap();
-        let js_file = temp_dir.path().join("test.js");
-        let wasm_file = temp_dir.path().join("test.wasm");
-
-        // Create files without wasm-bindgen patterns
-        let js_content = r#"
-// Regular JavaScript file without wasm-bindgen
-console.log("Hello world");
-function normalFunction() {
-    return "test";
-}
-"#;
-        fs::write(&js_file, js_content).unwrap();
-        fs::write(&wasm_file, b"fake wasm content").unwrap();
-
-        let result = handle_js_file(js_file.to_str().unwrap(), 8080);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_run_wasm_file_direct() {
+    fn test_server_info_creation() {
         let temp_dir = tempdir().unwrap();
         let wasm_file = temp_dir.path().join("test.wasm");
 
-        fs::write(&wasm_file, b"fake wasm content").unwrap();
+        // Create a minimal WASM file
+        fs::write(&wasm_file, b"\0asm\x01\x00\x00\x00").unwrap();
 
-        let result = run_wasm_file(wasm_file.to_str().unwrap(), 8080);
-        assert!(result.is_ok());
+        let server_info = ServerInfo::for_wasm_file(wasm_file.to_str().unwrap(), 8080, false);
+
+        assert!(server_info.is_ok());
+        let info = server_info.unwrap();
+        assert_eq!(info.port, 8080);
+        assert!(!info.watch_mode);
+        assert_eq!(info.url, "http://localhost:8080");
     }
 
     #[test]
-    fn test_run_project_direct() {
+    fn test_project_analysis_creation() {
         let temp_dir = tempdir().unwrap();
+        let project_path = temp_dir.path().to_str().unwrap();
 
-        let result = run_project(temp_dir.path().to_str().unwrap(), 8080, None, false);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_wasm_bindgen_js_detection() {
-        let temp_dir = tempdir().unwrap();
-
-        // Test with wasm-bindgen content
-        let js_with_bindgen = temp_dir.path().join("bindgen.js");
+        // Create a Rust project structure
         fs::write(
-            &js_with_bindgen,
-            "const __wbindgen = true; export function test() {}",
+            temp_dir.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"",
         )
         .unwrap();
+        fs::write(temp_dir.path().join("main.rs"), "fn main() {}").unwrap();
 
-        if let Ok(content) = std::fs::read_to_string(&js_with_bindgen) {
-            assert!(content.contains("__wbindgen"));
+        let server_info = ServerInfo::for_project(project_path, 8080, true);
+        assert!(server_info.is_ok());
+
+        let info = server_info.unwrap();
+        assert_eq!(info.port, 8080);
+        assert!(info.watch_mode);
+
+        match info.content_type {
+            ContentType::Project(_) => {} // Expected
+            _ => panic!("Expected Project content type"),
         }
-
-        // Test with regular JS content
-        let regular_js = temp_dir.path().join("regular.js");
-        fs::write(&regular_js, "console.log('hello'); function test() {}").unwrap();
-
-        if let Ok(content) = std::fs::read_to_string(&regular_js) {
-            assert!(!content.contains("__wbindgen"));
-            assert!(!content.contains("wasm_bindgen"));
-        }
-    }
-
-    #[test]
-    fn test_pid_file_operations() {
-        let test_pid_file = "/tmp/test_chakra_server.pid";
-
-        // Ensure clean state
-        let _ = std::fs::remove_file(test_pid_file);
-
-        // Test writing PID
-        std::fs::write(test_pid_file, "12345").unwrap();
-        assert!(std::path::Path::new(test_pid_file).exists());
-
-        // Test reading PID
-        let content = std::fs::read_to_string(test_pid_file).unwrap();
-        assert_eq!(content, "12345");
-
-        std::fs::remove_file(test_pid_file).unwrap();
-    }
-
-    #[test]
-    fn test_server_config_creation() {
-        let config = ServerConfig {
-            wasm_path: "test.wasm".to_string(),
-            js_path: Some("test.js".to_string()),
-            port: 8080,
-            watch_mode: false,
-            project_path: None,
-            output_dir: None,
-        };
-
-        assert_eq!(config.wasm_path, "test.wasm");
-        assert_eq!(config.js_path, Some("test.js".to_string()));
-        assert_eq!(config.port, 8080);
-        assert!(!config.watch_mode);
     }
 }

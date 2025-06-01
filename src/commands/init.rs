@@ -3,6 +3,7 @@ use crate::error::{ChakraError, Result};
 use crate::ui::print_init_info;
 
 /// Handle init command
+#[allow(dead_code)]
 pub fn handle_init_command(
     name: &Option<String>,
     template: &str,

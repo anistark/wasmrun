@@ -175,33 +175,33 @@ pub enum Commands {
         verbose: bool,
     },
 
-    /// Initialize a new Chakra project from template
-    #[command(alias = "new")]
-    Init {
-        /// Project name
-        #[arg(index = 1, help = "Name of the new project")]
-        name: Option<String>,
+    // TODO: Implement WASM project using Chakra
+    // /// Initialize a new Chakra project from template
+    // #[command(alias = "new")]
+    // Init {
+    //     /// Project name
+    //     #[arg(index = 1, help = "Name of the new project")]
+    //     name: Option<String>,
 
-        /// Template to use (rust, go, c, assemblyscript)
-        #[arg(
-            short = 't',
-            long,
-            default_value = "rust",
-            value_parser = ["rust", "go", "c", "assemblyscript", "python"],
-            help = "Project template to use"
-        )]
-        template: String,
+    //     /// Template to use (rust, go, c, assemblyscript)
+    //     #[arg(
+    //         short = 't',
+    //         long,
+    //         default_value = "rust",
+    //         value_parser = ["rust", "go", "c", "assemblyscript", "python"],
+    //         help = "Project template to use"
+    //     )]
+    //     template: String,
 
-        /// Target directory (default: project name)
-        #[arg(
-            short = 'd',
-            long,
-            value_hint = clap::ValueHint::DirPath,
-            help = "Directory to create project in"
-        )]
-        directory: Option<String>,
-    },
-
+    //     /// Target directory (default: project name)
+    //     #[arg(
+    //         short = 'd',
+    //         long,
+    //         value_hint = clap::ValueHint::DirPath,
+    //         help = "Directory to create project in"
+    //     )]
+    //     directory: Option<String>,
+    // },
     /// Clean build artifacts and temporary files
     #[command(aliases = ["clear", "reset"])]
     Clean {
@@ -220,7 +220,7 @@ pub enum Commands {
     },
 }
 
-/// Enhanced argument resolution with validation
+/// Argument resolution with validation
 #[derive(Debug)]
 pub struct ResolvedArgs {
     pub path: String,
@@ -319,12 +319,13 @@ impl CommandArgs for Commands {
                 positional_path,
                 ..
             } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
-            Commands::Init {
-                name, directory, ..
-            } => directory.clone().unwrap_or_else(|| {
-                name.clone()
-                    .unwrap_or_else(|| "my-chakra-project".to_string())
-            }),
+            // TODO: Implement Init command
+            // Commands::Init {
+            //     name, directory, ..
+            // } => directory.clone().unwrap_or_else(|| {
+            //     name.clone()
+            //         .unwrap_or_else(|| "my-chakra-project".to_string())
+            // }),
             Commands::Stop => "./".to_string(),
         }
     }
@@ -376,6 +377,7 @@ impl CommandValidator {
         Ok((project_path, port))
     }
 
+    #[allow(dead_code)]
     pub fn validate_init_args(
         name: &Option<String>,
         template: &str,
@@ -443,7 +445,7 @@ fn print_styled_version() {
     );
 }
 
-/// Enhanced argument parsing with validation
+/// Argument parsing with validation
 #[allow(dead_code)]
 pub fn get_validated_args() -> Result<ResolvedArgs> {
     let args = get_args();

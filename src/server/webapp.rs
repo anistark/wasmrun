@@ -132,7 +132,7 @@ fn run_webapp_server(
         println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m");
     }
 
-    println!("  🆔 \x1b[1;34mServer PID:\x1b[0m \x1b[0;37m{}\x1b[0m", pid);
+    println!("  ℹ️ \x1b[1;34mServer PID:\x1b[0m \x1b[0;37m{}\x1b[0m", pid);
     println!("\n  \x1b[0;90mPress Ctrl+C to stop the server\x1b[0m");
     println!("\x1b[1;34m╰\x1b[0m\n");
 

@@ -6,7 +6,6 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 // Magic bytes for WebAssembly binary format
-// \0asm followed by version 1
 const WASM_MAGIC_BYTES: [u8; 8] = [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
 
 /// WASM section
@@ -676,7 +675,7 @@ impl CursorExt for Cursor<Vec<u8>> {
     }
 }
 
-/// Resolve and validate WASM file path with enhanced error handling
+/// Resolve and validate WASM file path
 fn resolve_and_validate_wasm_path(
     path: &Option<String>,
     positional_path: &Option<String>,

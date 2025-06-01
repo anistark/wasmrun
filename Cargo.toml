@@ -1,10 +1,10 @@
 [package]
 name = "chakra"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2021"
 description = "A WebAssembly Runtime"
 license = "MIT"
-authors = ["Kumar Anirudha <hi@anirudha.dev>"]
+authors = ["Kumar Anirudha <chakra@anirudha.dev>"]
 repository = "https://github.com/anistark/chakra"
 readme = "README.md"
 keywords = ["wasm", "webassembly", "browser", "runtime", "cli"]

@@ -1,12 +1,5 @@
 use crate::compiler::builder::OptimizationLevel;
 
-/// Print an error message in a formatted box
-pub fn print_error(message: &str) {
-    eprintln!("\n\x1b[1;34m╭\x1b[0m");
-    eprintln!("  ❌ \x1b[1;31m{}\x1b[0m", message);
-    eprintln!("\x1b[1;34m╰\x1b[0m");
-}
-
 /// Print a success message with title and details
 pub fn print_success(title: &str, message: &str) {
     println!("\n\x1b[1;34m╭\x1b[0m");
@@ -114,6 +107,7 @@ pub fn print_webapp_detected(port: u16) {
 }
 
 /// Print init command information
+#[allow(dead_code)]
 pub fn print_init_info(project_name: &str, template: &str, target_dir: &str) {
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  🚀 \x1b[1;36mInitializing New Chakra Project\x1b[0m\n");
