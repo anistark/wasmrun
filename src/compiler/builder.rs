@@ -51,7 +51,7 @@ pub struct BuildResult {
 }
 
 /// Common interface for all WASM builders
-pub trait WasmBuilder {
+pub trait WasmBuilder: Send + Sync {
     /// Get the human-readable name of this language
     fn language_name(&self) -> &str;
 

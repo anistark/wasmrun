@@ -271,7 +271,8 @@ class WasiFS {
 
     // Handle special case for stdin
     if (fd === WASI.FD_STDIN) {
-      // For now, return 0 bytes (would need proper stdin handling in a real implementation)
+      // TODO: Implement proper stdin handling
+      // For now, return 0 bytes
       return { bytesRead: 0, errno: WASI.ERRNO_SUCCESS };
     }
 

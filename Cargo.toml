@@ -1,6 +1,6 @@
 [package]
 name = "chakra"
-version = "0.8.2"
+version = "0.9.1"
 edition = "2021"
 description = "A WebAssembly Runtime"
 license = "MIT"
@@ -21,6 +21,9 @@ notify = "5.1.0"
 notify-debouncer-mini = "0.2.1"
 thiserror = "1.0"
 anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+dirs = "5.0"
 
 [dev-dependencies]
 tempfile = "3.8"

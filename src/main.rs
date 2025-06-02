@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod compiler;
 mod error;
+mod plugin;
 mod server;
 mod template;
 mod ui;
@@ -78,6 +79,13 @@ fn main() {
                 _ => e,
             },
         ),
+
+        Some(Commands::Plugin(plugin_cmd)) => {
+            commands::handle_plugin_command(plugin_cmd).map_err(|e| match e {
+                ChakraError::Command(_) | ChakraError::Path { .. } => e,
+                _ => e,
+            })
+        }
 
         // TODO: WASM project using Chakra
         // Some(Commands::Init {

@@ -298,7 +298,13 @@ impl CommandError {
     }
 }
 
-// Note: From<String> implementation is in cli.rs to avoid conflicts
+impl From<&str> for ChakraError {
+    fn from(message: &str) -> Self {
+        ChakraError::Path {
+            message: message.to_string(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

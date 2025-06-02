@@ -175,6 +175,10 @@ pub enum Commands {
         verbose: bool,
     },
 
+    /// Plugin management commands
+    #[command(subcommand)]
+    Plugin(PluginSubcommands),
+
     // TODO: Implement WASM project using Chakra
     // /// Initialize a new Chakra project from template
     // #[command(alias = "new")]
@@ -217,6 +221,61 @@ pub enum Commands {
         /// Project directory path (positional argument)
         #[arg(index = 1, value_hint = clap::ValueHint::DirPath)]
         positional_path: Option<String>,
+    },
+}
+
+/// Plugin management subcommands
+#[derive(Subcommand, Debug)]
+pub enum PluginSubcommands {
+    /// List all available plugins
+    List {
+        /// Show detailed information
+        #[arg(short, long)]
+        all: bool,
+    },
+
+    /// Install a plugin
+    Install {
+        /// Plugin name, URL, or path
+        plugin: String,
+
+        /// Specific version to install (for crates.io plugins)
+        #[arg(short, long)]
+        version: Option<String>,
+    },
+
+    /// Uninstall a plugin
+    Uninstall {
+        /// Plugin name to uninstall
+        plugin: String,
+    },
+
+    /// Update a plugin
+    Update {
+        /// Plugin name to update, or 'all' for all plugins
+        plugin: String,
+    },
+
+    /// Enable or disable a plugin
+    Enable {
+        /// Plugin name
+        plugin: String,
+
+        /// Disable instead of enable
+        #[arg(long)]
+        disable: bool,
+    },
+
+    /// Show detailed information about a plugin
+    Info {
+        /// Plugin name
+        plugin: String,
+    },
+
+    /// Search for available plugins
+    Search {
+        /// Search query
+        query: String,
     },
 }
 
@@ -326,6 +385,7 @@ impl CommandArgs for Commands {
             //     name.clone()
             //         .unwrap_or_else(|| "my-chakra-project".to_string())
             // }),
+            Commands::Plugin(_) => "./".to_string(),
             Commands::Stop => "./".to_string(),
         }
     }
