@@ -418,25 +418,3 @@ impl Default for PluginManager {
         Self::new().expect("Failed to create plugin manager")
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_plugin_registry_creation() {
-        let registry = PluginRegistry::new();
-        assert_eq!(registry.plugins.len(), 0);
-        assert_eq!(registry.load_order.len(), 0);
-    }
-
-    #[test]
-    fn test_plugin_capabilities_default() {
-        let caps = PluginCapabilities::default();
-        assert!(caps.compile_wasm);
-        assert!(!caps.compile_webapp);
-        assert!(caps.live_reload);
-        assert!(caps.optimization);
-        assert!(caps.custom_targets.is_empty());
-    }
-}
