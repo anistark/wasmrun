@@ -1,6 +1,6 @@
 use crate::commands::{verify_wasm, VerificationResult};
 use crate::error::{ChakraError, Result};
-use crate::utils::PathResolver;
+use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
 use std::path::Path;
 
@@ -59,7 +59,7 @@ impl WasmAnalysis {
             .map_err(|e| ChakraError::add_context(format!("Getting file size for {}", path), e))?
             .len();
 
-        let file_size = format_file_size(file_size_bytes);
+        let file_size = CommandExecutor::format_file_size(file_size_bytes);
 
         // Perform verification analysis
         let verification = match verify_wasm(path) {
@@ -340,18 +340,6 @@ impl ProjectAnalysis {
 }
 
 // Helper functions
-
-fn format_file_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} bytes", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.2} KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-    }
-}
 
 fn extract_entry_points(verification: &VerificationResult) -> Vec<String> {
     let mut entry_points = Vec::new();

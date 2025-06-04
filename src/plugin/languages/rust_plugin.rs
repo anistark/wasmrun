@@ -1,7 +1,7 @@
 use crate::compiler::builder::{BuildConfig, BuildResult, OptimizationLevel, WasmBuilder};
 use crate::error::{CompilationError, CompilationResult};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
-use crate::utils::PathResolver;
+use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -140,10 +140,11 @@ impl RustBuilder {
 
         // Execute cargo build
         let output = if config.verbose {
-            self.execute_command_with_output("cargo", &args, &config.project_path)?;
+            CommandExecutor::execute_command_with_output("cargo", &args, &config.project_path)?;
             true
         } else {
-            let output = self.execute_command("cargo", &args, &config.project_path, false)?;
+            let output =
+                CommandExecutor::execute_command("cargo", &args, &config.project_path, false)?;
             output.status.success()
         };
 
@@ -181,7 +182,7 @@ impl RustBuilder {
         }
 
         let wasm_file = &wasm_files[0]; // Take the first one
-        let output_path = self.copy_to_output(wasm_file, &config.output_dir)?;
+        let output_path = CommandExecutor::copy_to_output(wasm_file, &config.output_dir, "Rust")?;
 
         Ok(BuildResult {
             wasm_path: output_path,
@@ -194,7 +195,7 @@ impl RustBuilder {
     /// Build wasm-bindgen project
     fn build_wasm_bindgen(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
         // Check if wasm-pack is installed
-        if !self.is_tool_installed("wasm-pack") {
+        if !CommandExecutor::is_tool_installed("wasm-pack") {
             return Err(CompilationError::BuildToolNotFound {
                 tool: "wasm-pack".to_string(),
                 language: "Rust".to_string(),
@@ -220,10 +221,11 @@ impl RustBuilder {
 
         // Execute wasm-pack build
         let output = if config.verbose {
-            self.execute_command_with_output("wasm-pack", &args, &config.project_path)?;
+            CommandExecutor::execute_command_with_output("wasm-pack", &args, &config.project_path)?;
             true
         } else {
-            let output = self.execute_command("wasm-pack", &args, &config.project_path, false)?;
+            let output =
+                CommandExecutor::execute_command("wasm-pack", &args, &config.project_path, false)?;
             output.status.success()
         };
 
@@ -268,8 +270,9 @@ impl RustBuilder {
             })?;
 
         // Copy files to output directory
-        let wasm_output = self.copy_to_output(&wasm_files[0], &config.output_dir)?;
-        let js_output = self.copy_to_output(main_js_file, &config.output_dir)?;
+        let wasm_output =
+            CommandExecutor::copy_to_output(&wasm_files[0], &config.output_dir, "Rust")?;
+        let js_output = CommandExecutor::copy_to_output(main_js_file, &config.output_dir, "Rust")?;
 
         // Copy any additional files (.d.ts, etc.)
         let mut additional_files = Vec::new();
@@ -283,8 +286,11 @@ impl RustBuilder {
             if let Some(ext) = path.extension() {
                 let ext_str = ext.to_string_lossy();
                 if ext_str == "ts" || ext_str == "json" {
-                    let copied_file =
-                        self.copy_to_output(&path.to_string_lossy(), &config.output_dir)?;
+                    let copied_file = CommandExecutor::copy_to_output(
+                        &path.to_string_lossy(),
+                        &config.output_dir,
+                        "Rust",
+                    )?;
                     additional_files.push(copied_file);
                 }
             }
@@ -347,83 +353,9 @@ impl RustBuilder {
         Ok(())
     }
 
-    /// Copy a file to the output directory
-    fn copy_to_output(&self, source: &str, output_dir: &str) -> CompilationResult<String> {
-        let source_path = Path::new(source);
-        let filename =
-            PathResolver::get_filename(source).map_err(|_| CompilationError::BuildFailed {
-                language: "Rust".to_string(),
-                reason: format!("Invalid source file path: {}", source),
-            })?;
-        let output_path = PathResolver::join_paths(output_dir, &filename);
-
-        fs::copy(source_path, &output_path).map_err(|e| CompilationError::BuildFailed {
-            language: "Rust".to_string(),
-            reason: format!("Failed to copy {} to {}: {}", source, output_path, e),
-        })?;
-
-        Ok(output_path)
-    }
-
-    /// Execute a command and return the result
-    fn execute_command(
-        &self,
-        command: &str,
-        args: &[&str],
-        working_dir: &str,
-        verbose: bool,
-    ) -> CompilationResult<std::process::Output> {
-        if verbose {
-            println!("🔧 Executing: {} {}", command, args.join(" "));
-        }
-
-        std::process::Command::new(command)
-            .args(args)
-            .current_dir(working_dir)
-            .output()
-            .map_err(|e| CompilationError::ToolExecutionFailed {
-                tool: command.to_string(),
-                reason: e.to_string(),
-            })
-    }
-
-    /// Execute a command with live output (for verbose builds)
-    fn execute_command_with_output(
-        &self,
-        command: &str,
-        args: &[&str],
-        working_dir: &str,
-    ) -> CompilationResult<()> {
-        println!("🔧 Executing: {} {}", command, args.join(" "));
-
-        let status = std::process::Command::new(command)
-            .args(args)
-            .current_dir(working_dir)
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .status()
-            .map_err(|e| CompilationError::ToolExecutionFailed {
-                tool: command.to_string(),
-                reason: e.to_string(),
-            })?;
-
-        if !status.success() {
-            return Err(CompilationError::BuildFailed {
-                language: "Rust".to_string(),
-                reason: format!(
-                    "Command '{}' failed with exit code: {:?}",
-                    command,
-                    status.code()
-                ),
-            });
-        }
-
-        Ok(())
-    }
-
     /// Build with Trunk (for web frameworks like Yew)
     fn build_with_trunk(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        if !self.is_tool_installed("trunk") {
+        if !CommandExecutor::is_tool_installed("trunk") {
             return Err(CompilationError::BuildToolNotFound {
                 tool: "trunk".to_string(),
                 language: "Rust".to_string(),
@@ -444,10 +376,11 @@ impl RustBuilder {
 
         // Execute trunk build
         let output = if config.verbose {
-            self.execute_command_with_output("trunk", &args, &config.project_path)?;
+            CommandExecutor::execute_command_with_output("trunk", &args, &config.project_path)?;
             true
         } else {
-            let output = self.execute_command("trunk", &args, &config.project_path, false)?;
+            let output =
+                CommandExecutor::execute_command("trunk", &args, &config.project_path, false)?;
             output.status.success()
         };
 
@@ -522,29 +455,6 @@ impl RustBuilder {
             is_wasm_bindgen: true,
         })
     }
-
-    /// Check if a tool is installed on the system
-    fn is_tool_installed(&self, tool_name: &str) -> bool {
-        let command = if cfg!(target_os = "windows") {
-            format!("where {}", tool_name)
-        } else {
-            format!("which {}", tool_name)
-        };
-
-        std::process::Command::new(if cfg!(target_os = "windows") {
-            "cmd"
-        } else {
-            "sh"
-        })
-        .args(if cfg!(target_os = "windows") {
-            ["/c", &command]
-        } else {
-            ["-c", &command]
-        })
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-    }
 }
 
 impl WasmBuilder for RustBuilder {
@@ -563,11 +473,11 @@ impl WasmBuilder for RustBuilder {
     fn check_dependencies(&self) -> Vec<String> {
         let mut missing = Vec::new();
 
-        if !self.is_tool_installed("rustc") {
+        if !CommandExecutor::is_tool_installed("rustc") {
             missing.push("rustc (Rust compiler)".to_string());
         }
 
-        if !self.is_tool_installed("cargo") {
+        if !CommandExecutor::is_tool_installed("cargo") {
             missing.push("cargo (Rust package manager)".to_string());
         }
 
@@ -585,7 +495,7 @@ impl WasmBuilder for RustBuilder {
 
         // Check for wasm-pack if this looks like a wasm-bindgen project
         if self.uses_wasm_bindgen(&BuildConfig::default().project_path)
-            && !self.is_tool_installed("wasm-pack")
+            && !CommandExecutor::is_tool_installed("wasm-pack")
         {
             missing.push("wasm-pack (install with: cargo install wasm-pack)".to_string());
         }

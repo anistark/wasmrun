@@ -1,5 +1,6 @@
 use crate::error::Result;
 use crate::utils::wasm_analysis::{ProjectAnalysis, WasmAnalysis};
+use crate::utils::CommandExecutor;
 use std::fs;
 use std::net::TcpListener;
 use std::path::Path;
@@ -306,7 +307,7 @@ impl ServerUtils {
             .unwrap_or_else(|_| path.to_string());
 
         let file_size_bytes = metadata.len();
-        let file_size = format_file_size(file_size_bytes);
+        let file_size = CommandExecutor::format_file_size(file_size_bytes);
 
         Ok(FileInfo {
             filename,
@@ -371,18 +372,6 @@ pub struct FileInfo {
 pub enum PortStatus {
     Available,
     Unavailable { alternative: Option<u16> },
-}
-
-fn format_file_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} bytes", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.2} KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-    }
 }
 
 /// Legacy function for backward compatibility

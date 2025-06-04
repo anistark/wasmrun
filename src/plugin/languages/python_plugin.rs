@@ -1,7 +1,7 @@
 use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
 use crate::error::{CompilationError, CompilationResult};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
-use crate::utils::PathResolver;
+use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -80,29 +80,6 @@ impl PythonBuilder {
     pub fn new() -> Self {
         Self
     }
-
-    /// Check if a tool is installed on the system
-    fn is_tool_installed(&self, tool_name: &str) -> bool {
-        let command = if cfg!(target_os = "windows") {
-            format!("where {}", tool_name)
-        } else {
-            format!("which {}", tool_name)
-        };
-
-        std::process::Command::new(if cfg!(target_os = "windows") {
-            "cmd"
-        } else {
-            "sh"
-        })
-        .args(if cfg!(target_os = "windows") {
-            ["/c", &command]
-        } else {
-            ["-c", &command]
-        })
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-    }
 }
 
 impl WasmBuilder for PythonBuilder {
@@ -121,7 +98,7 @@ impl WasmBuilder for PythonBuilder {
     fn check_dependencies(&self) -> Vec<String> {
         let mut missing = Vec::new();
 
-        if !self.is_tool_installed("python") {
+        if !CommandExecutor::is_tool_installed("python") {
             missing.push("python (Python interpreter)".to_string());
         }
 

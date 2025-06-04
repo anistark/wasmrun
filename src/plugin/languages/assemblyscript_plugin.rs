@@ -1,7 +1,7 @@
 use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
 use crate::error::{CompilationError, CompilationResult};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
-use crate::utils::PathResolver;
+use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -88,69 +88,6 @@ impl AssemblyScriptBuilder {
     pub fn new() -> Self {
         Self
     }
-
-    /// Execute a command and return the result
-    fn execute_command(
-        &self,
-        command: &str,
-        args: &[&str],
-        working_dir: &str,
-        verbose: bool,
-    ) -> CompilationResult<std::process::Output> {
-        if verbose {
-            println!("🔧 Executing: {} {}", command, args.join(" "));
-        }
-
-        std::process::Command::new(command)
-            .args(args)
-            .current_dir(working_dir)
-            .output()
-            .map_err(|e| CompilationError::ToolExecutionFailed {
-                tool: command.to_string(),
-                reason: e.to_string(),
-            })
-    }
-
-    /// Check if a tool is installed on the system
-    fn is_tool_installed(&self, tool_name: &str) -> bool {
-        let command = if cfg!(target_os = "windows") {
-            format!("where {}", tool_name)
-        } else {
-            format!("which {}", tool_name)
-        };
-
-        std::process::Command::new(if cfg!(target_os = "windows") {
-            "cmd"
-        } else {
-            "sh"
-        })
-        .args(if cfg!(target_os = "windows") {
-            ["/c", &command]
-        } else {
-            ["-c", &command]
-        })
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-    }
-
-    /// Copy a file to the output directory
-    fn copy_to_output(&self, source: &str, output_dir: &str) -> CompilationResult<String> {
-        let source_path = Path::new(source);
-        let filename =
-            PathResolver::get_filename(source).map_err(|_| CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: format!("Invalid source file path: {}", source),
-            })?;
-        let output_path = PathResolver::join_paths(output_dir, &filename);
-
-        fs::copy(source_path, &output_path).map_err(|e| CompilationError::BuildFailed {
-            language: self.language_name().to_string(),
-            reason: format!("Failed to copy {} to {}: {}", source, output_path, e),
-        })?;
-
-        Ok(output_path)
-    }
 }
 
 impl WasmBuilder for AssemblyScriptBuilder {
@@ -169,11 +106,11 @@ impl WasmBuilder for AssemblyScriptBuilder {
     fn check_dependencies(&self) -> Vec<String> {
         let mut missing = Vec::new();
 
-        if !self.is_tool_installed("node") {
+        if !CommandExecutor::is_tool_installed("node") {
             missing.push("node (Node.js - install from https://nodejs.org)".to_string());
         }
 
-        if !self.is_tool_installed("npm") {
+        if !CommandExecutor::is_tool_installed("npm") {
             missing.push("npm (Node Package Manager)".to_string());
         }
 
@@ -202,7 +139,7 @@ impl WasmBuilder for AssemblyScriptBuilder {
 
     fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
         // Check if Node.js is installed
-        if !self.is_tool_installed("node") {
+        if !CommandExecutor::is_tool_installed("node") {
             return Err(CompilationError::BuildToolNotFound {
                 tool: "node".to_string(),
                 language: self.language_name().to_string(),
@@ -219,7 +156,7 @@ impl WasmBuilder for AssemblyScriptBuilder {
         println!("⚙️ Building with AssemblyScript...");
 
         // Try to build with npx asc first
-        let build_output = self.execute_command(
+        let build_output = CommandExecutor::execute_command(
             "npx",
             &[
                 "asc",
@@ -238,7 +175,7 @@ impl WasmBuilder for AssemblyScriptBuilder {
                 Path::new(&config.project_path).join("build/release.wasm")
             } else {
                 // Try npm build command instead
-                let npm_build = self.execute_command(
+                let npm_build = CommandExecutor::execute_command(
                     "npm",
                     &["run", "asbuild"],
                     &config.project_path,
@@ -285,8 +222,11 @@ impl WasmBuilder for AssemblyScriptBuilder {
         };
 
         // Copy the wasm file to the output directory
-        let output_file =
-            self.copy_to_output(wasm_file.to_string_lossy().as_ref(), &config.output_dir)?;
+        let output_file = CommandExecutor::copy_to_output(
+            wasm_file.to_string_lossy().as_ref(),
+            &config.output_dir,
+            "AssemblyScript",
+        )?;
 
         Ok(BuildResult {
             wasm_path: output_file,

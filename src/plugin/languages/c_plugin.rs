@@ -1,7 +1,7 @@
 use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
 use crate::error::{CompilationError, CompilationResult};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
-use crate::utils::PathResolver;
+use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -80,70 +80,6 @@ impl CBuilder {
         Self
     }
 
-    /// Execute a command and return the result
-    fn execute_command(
-        &self,
-        command: &str,
-        args: &[&str],
-        working_dir: &str,
-        verbose: bool,
-    ) -> CompilationResult<std::process::Output> {
-        if verbose {
-            println!("🔧 Executing: {} {}", command, args.join(" "));
-        }
-
-        std::process::Command::new(command)
-            .args(args)
-            .current_dir(working_dir)
-            .output()
-            .map_err(|e| CompilationError::ToolExecutionFailed {
-                tool: command.to_string(),
-                reason: e.to_string(),
-            })
-    }
-
-    /// Check if a tool is installed on the system
-    fn is_tool_installed(&self, tool_name: &str) -> bool {
-        let command = if cfg!(target_os = "windows") {
-            format!("where {}", tool_name)
-        } else {
-            format!("which {}", tool_name)
-        };
-
-        std::process::Command::new(if cfg!(target_os = "windows") {
-            "cmd"
-        } else {
-            "sh"
-        })
-        .args(if cfg!(target_os = "windows") {
-            ["/c", &command]
-        } else {
-            ["-c", &command]
-        })
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-    }
-
-    /// Copy a file to the output directory
-    #[allow(dead_code)]
-    fn copy_to_output(&self, source: &str, output_dir: &str) -> CompilationResult<String> {
-        let source_path = Path::new(source);
-        let filename =
-            PathResolver::get_filename(source).map_err(|_| CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: format!("Invalid source file path: {}", source),
-            })?;
-        let output_path = PathResolver::join_paths(output_dir, &filename);
-
-        fs::copy(source_path, &output_path).map_err(|e| CompilationError::BuildFailed {
-            language: self.language_name().to_string(),
-            reason: format!("Failed to copy {} to {}: {}", source, output_path, e),
-        })?;
-
-        Ok(output_path)
-    }
-
     /// Find main.c or similar entry point
     fn find_entry_file(&self, project_path: &str) -> CompilationResult<PathBuf> {
         let common_entry_files = [
@@ -197,7 +133,7 @@ impl WasmBuilder for CBuilder {
     fn check_dependencies(&self) -> Vec<String> {
         let mut missing = Vec::new();
 
-        if !self.is_tool_installed("emcc") {
+        if !CommandExecutor::is_tool_installed("emcc") {
             missing.push("emcc (Emscripten - install from https://emscripten.org)".to_string());
         }
 
@@ -220,7 +156,7 @@ impl WasmBuilder for CBuilder {
 
     fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
         // Check if emcc is installed
-        if !self.is_tool_installed("emcc") {
+        if !CommandExecutor::is_tool_installed("emcc") {
             return Err(CompilationError::BuildToolNotFound {
                 tool: "emcc".to_string(),
                 language: self.language_name().to_string(),
@@ -255,7 +191,7 @@ impl WasmBuilder for CBuilder {
             crate::compiler::builder::OptimizationLevel::Size => "-Oz",
         };
 
-        let build_output = self.execute_command(
+        let build_output = CommandExecutor::execute_command(
             "emcc",
             &[
                 entry_path.to_str().unwrap(),

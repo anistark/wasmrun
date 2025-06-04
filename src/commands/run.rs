@@ -1,6 +1,7 @@
 use crate::cli::CommandValidator;
 use crate::error::Result;
 use crate::server::{self};
+use crate::utils::CommandExecutor;
 
 /// Handle run command
 pub fn handle_run_command(
@@ -27,7 +28,7 @@ pub fn handle_run_command(
 
                     // Quick preview without full analysis
                     if let Ok(metadata) = std::fs::metadata(&project_path) {
-                        let size = format_file_size(metadata.len());
+                        let size = CommandExecutor::format_file_size(metadata.len());
                         println!("💾 \x1b[1;34mSize:\x1b[0m {}", size);
                     }
                 }
@@ -77,17 +78,4 @@ pub fn handle_run_command(
     // Run the actual server with full analysis
     server::run_project(&project_path, validated_port, language.clone(), watch)?;
     Ok(())
-}
-
-/// Helper function to format file sizes
-fn format_file_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} bytes", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.2} KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-    }
 }
