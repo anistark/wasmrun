@@ -10,7 +10,7 @@ pub use detect::{
 // Import the plugin-based functions
 use crate::compiler::builder::WasmBuilder;
 use crate::error::{ChakraError, Result};
-use crate::plugin::languages::rust_plugin::RustBuilder;
+use crate::plugin::languages::rust_plugin::RustPlugin;
 use crate::utils::PathResolver;
 
 /// Compile a WASM file from a project directory (legacy function)
@@ -59,7 +59,7 @@ pub fn build_rust_web_application(project_path: &str, output_dir: &str) -> Resul
         target_type: builder::TargetType::WebApp,
     };
 
-    let builder = RustBuilder::new();
+    let builder = RustPlugin::new();
     let result = builder.build(&config).map_err(ChakraError::Compilation)?;
 
     // Return the JS file path for web applications, or WASM path if no JS
@@ -68,6 +68,6 @@ pub fn build_rust_web_application(project_path: &str, output_dir: &str) -> Resul
 
 /// Check if a project is a Rust web application
 pub fn is_rust_web_application(project_path: &str) -> bool {
-    let builder = RustBuilder::new();
+    let builder = RustPlugin::new();
     builder.is_rust_web_application(project_path)
 }

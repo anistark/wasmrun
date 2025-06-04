@@ -313,11 +313,11 @@ impl BuilderFactory {
         use crate::compiler::ProjectLanguage;
         use crate::plugin::languages::{
             assemblyscript_plugin::AssemblyScriptBuilder, c_plugin::CBuilder, go_plugin::GoBuilder,
-            python_plugin::PythonBuilder, rust_plugin::RustBuilder,
+            python_plugin::PythonBuilder, rust_plugin::RustPlugin,
         };
 
         match language {
-            ProjectLanguage::Rust => Box::new(RustBuilder::new()),
+            ProjectLanguage::Rust => Box::new(RustPlugin::new()),
             ProjectLanguage::Go => Box::new(GoBuilder::new()),
             ProjectLanguage::C => Box::new(CBuilder::new()),
             ProjectLanguage::AssemblyScript => Box::new(AssemblyScriptBuilder::new()),

@@ -6,7 +6,7 @@ use crate::compiler::builder::WasmBuilder;
 use crate::error::Result;
 use crate::plugin::languages::{
     assemblyscript_plugin::AssemblyScriptBuilder, c_plugin::CBuilder, go_plugin::GoBuilder,
-    python_plugin::PythonBuilder, rust_plugin::RustBuilder,
+    python_plugin::PythonBuilder, rust_plugin::RustPlugin,
 };
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginRegistry, PluginType};
 use std::sync::Arc;
@@ -159,7 +159,7 @@ fn create_rust_plugin() -> BuiltinPlugin {
         vec!["rs".to_string()],
         vec!["Cargo.toml".to_string()],
         capabilities,
-        Arc::new(RustBuilder::new()),
+        Arc::new(RustPlugin::new()),
     )
 }
 

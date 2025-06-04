@@ -4,19 +4,14 @@ use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
 use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 
+/// Rust WebAssembly plugin - handles both plugin management and building
 pub struct RustPlugin {
     info: PluginInfo,
-    #[allow(dead_code)]
-    builder: Arc<RustBuilder>,
 }
 
 impl RustPlugin {
-    #[allow(dead_code)]
     pub fn new() -> Self {
-        let builder = Arc::new(RustBuilder::new());
-
         let info = PluginInfo {
             name: "rust".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -37,32 +32,7 @@ impl RustPlugin {
             },
         };
 
-        Self { info, builder }
-    }
-}
-
-impl Plugin for RustPlugin {
-    fn info(&self) -> &PluginInfo {
-        &self.info
-    }
-
-    fn can_handle_project(&self, project_path: &str) -> bool {
-        let cargo_toml_path = PathResolver::join_paths(project_path, "Cargo.toml");
-        Path::new(&cargo_toml_path).exists()
-    }
-
-    fn get_builder(&self) -> Box<dyn WasmBuilder> {
-        Box::new(RustBuilder::new())
-    }
-}
-
-pub struct RustBuilder {
-    // Internal state if needed
-}
-
-impl RustBuilder {
-    pub fn new() -> Self {
-        Self {}
+        Self { info }
     }
 
     /// Check if a Rust project uses wasm-bindgen
@@ -423,7 +393,7 @@ impl RustBuilder {
         }
 
         // Copy dist directory contents to output
-        copy_directory_recursively(&trunk_dist, &config.output_dir).map_err(|e| {
+        Self::copy_directory_recursively(&trunk_dist, &config.output_dir).map_err(|e| {
             CompilationError::BuildFailed {
                 language: "Rust".to_string(),
                 reason: format!("Failed to copy trunk dist directory: {}", e),
@@ -455,9 +425,54 @@ impl RustBuilder {
             is_wasm_bindgen: true,
         })
     }
+
+    /// Copy directory recursively
+    fn copy_directory_recursively(source: &str, destination: &str) -> Result<(), String> {
+        PathResolver::ensure_output_directory(destination)
+            .map_err(|e| format!("Failed to create destination directory: {}", e))?;
+
+        let entries = fs::read_dir(source)
+            .map_err(|e| format!("Failed to read source directory {}: {}", source, e))?;
+
+        for entry in entries.flatten() {
+            let source_path = entry.path();
+            let file_name = source_path
+                .file_name()
+                .ok_or_else(|| "Invalid file name".to_string())?;
+            let destination_path = Path::new(destination).join(file_name);
+
+            if source_path.is_dir() {
+                Self::copy_directory_recursively(
+                    &source_path.to_string_lossy(),
+                    &destination_path.to_string_lossy(),
+                )?;
+            } else {
+                fs::copy(&source_path, &destination_path)
+                    .map_err(|e| format!("Failed to copy file: {}", e))?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
-impl WasmBuilder for RustBuilder {
+impl Plugin for RustPlugin {
+    fn info(&self) -> &PluginInfo {
+        &self.info
+    }
+
+    fn can_handle_project(&self, project_path: &str) -> bool {
+        let cargo_toml_path = PathResolver::join_paths(project_path, "Cargo.toml");
+        Path::new(&cargo_toml_path).exists()
+    }
+
+    fn get_builder(&self) -> Box<dyn WasmBuilder> {
+        // Return a clone of self since we implement both traits
+        Box::new(RustPlugin::new())
+    }
+}
+
+impl WasmBuilder for RustPlugin {
     fn language_name(&self) -> &str {
         "Rust"
     }
@@ -584,31 +599,8 @@ impl WasmBuilder for RustBuilder {
     }
 }
 
-/// Copy directory recursively
-fn copy_directory_recursively(source: &str, destination: &str) -> Result<(), String> {
-    PathResolver::ensure_output_directory(destination)
-        .map_err(|e| format!("Failed to create destination directory: {}", e))?;
-
-    let entries = fs::read_dir(source)
-        .map_err(|e| format!("Failed to read source directory {}: {}", source, e))?;
-
-    for entry in entries.flatten() {
-        let source_path = entry.path();
-        let file_name = source_path
-            .file_name()
-            .ok_or_else(|| "Invalid file name".to_string())?;
-        let destination_path = Path::new(destination).join(file_name);
-
-        if source_path.is_dir() {
-            copy_directory_recursively(
-                &source_path.to_string_lossy(),
-                &destination_path.to_string_lossy(),
-            )?;
-        } else {
-            fs::copy(&source_path, &destination_path)
-                .map_err(|e| format!("Failed to copy file: {}", e))?;
-        }
+impl Default for RustPlugin {
+    fn default() -> Self {
+        Self::new()
     }
-
-    Ok(())
 }

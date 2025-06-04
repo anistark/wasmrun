@@ -141,7 +141,7 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
             // If this is a Rust project path that exists, check for wasm-bindgen
             if let Ok(current_dir) = std::env::current_dir() {
                 let current_dir_str = current_dir.to_str().unwrap_or(".");
-                let builder = crate::plugin::languages::rust_plugin::RustBuilder::new();
+                let builder = crate::plugin::languages::rust_plugin::RustPlugin::new();
                 if builder.uses_wasm_bindgen(current_dir_str) {
                     // Add wasm-pack for wasm-bindgen projects
                     tools.push("wasm-pack".to_string());
