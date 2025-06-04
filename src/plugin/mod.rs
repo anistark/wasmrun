@@ -12,6 +12,7 @@ use std::path::PathBuf;
 pub mod builtin;
 pub mod config;
 pub mod external;
+pub mod languages;
 pub mod manager;
 pub mod registry;
 

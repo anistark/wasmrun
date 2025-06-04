@@ -143,6 +143,7 @@ pub trait WasmBuilder: Send + Sync {
     }
 
     /// Check if a tool is installed on the system
+    #[allow(dead_code)]
     fn is_tool_installed(&self, tool_name: &str) -> bool {
         let command = if cfg!(target_os = "windows") {
             format!("where {}", tool_name)
@@ -166,6 +167,7 @@ pub trait WasmBuilder: Send + Sync {
     }
 
     /// Execute a command and return the result
+    #[allow(dead_code)]
     fn execute_command(
         &self,
         command: &str,
@@ -188,6 +190,7 @@ pub trait WasmBuilder: Send + Sync {
     }
 
     /// Execute a command with live output (for verbose builds)
+    #[allow(dead_code)]
     fn execute_command_with_output(
         &self,
         command: &str,
@@ -222,6 +225,7 @@ pub trait WasmBuilder: Send + Sync {
     }
 
     /// Copy output file to the target directory
+    #[allow(dead_code)]
     fn copy_to_output(&self, source: &str, output_dir: &str) -> CompilationResult<String> {
         let source_path = Path::new(source);
         let filename =
@@ -307,17 +311,17 @@ pub struct BuilderFactory;
 impl BuilderFactory {
     pub fn create_builder(language: &crate::compiler::ProjectLanguage) -> Box<dyn WasmBuilder> {
         use crate::compiler::ProjectLanguage;
+        use crate::plugin::languages::{
+            assemblyscript_plugin::AssemblyScriptBuilder, c_plugin::CBuilder, go_plugin::GoBuilder,
+            python_plugin::PythonBuilder, rust_plugin::RustBuilder,
+        };
 
         match language {
-            ProjectLanguage::Rust => Box::new(crate::compiler::language::rust::RustBuilder::new()),
-            ProjectLanguage::Go => Box::new(crate::compiler::language::go::GoBuilder::new()),
-            ProjectLanguage::C => Box::new(crate::compiler::language::c::CBuilder::new()),
-            ProjectLanguage::AssemblyScript => {
-                Box::new(crate::compiler::language::asc::AssemblyScriptBuilder::new())
-            }
-            ProjectLanguage::Python => {
-                Box::new(crate::compiler::language::python::PythonBuilder::new())
-            }
+            ProjectLanguage::Rust => Box::new(RustBuilder::new()),
+            ProjectLanguage::Go => Box::new(GoBuilder::new()),
+            ProjectLanguage::C => Box::new(CBuilder::new()),
+            ProjectLanguage::AssemblyScript => Box::new(AssemblyScriptBuilder::new()),
+            ProjectLanguage::Python => Box::new(PythonBuilder::new()),
             ProjectLanguage::Unknown => {
                 // Return a dummy builder that always fails
                 Box::new(UnknownBuilder)
@@ -325,16 +329,14 @@ impl BuilderFactory {
         }
     }
 
-    /// Get supported languages (allow dead code for future use)
-    #[allow(dead_code)]
-    pub fn supported_languages() -> Vec<&'static str> {
-        vec!["Rust", "Go", "C", "AssemblyScript", "Python"]
-    }
-
-    /// Check if a language is supported (allow dead code for future use)
-    #[allow(dead_code)]
-    pub fn is_language_supported(language: &str) -> bool {
-        Self::supported_languages().contains(&language)
+    pub fn supported_languages() -> Vec<String> {
+        vec![
+            "Rust".to_string(),
+            "Go".to_string(),
+            "C".to_string(),
+            "AssemblyScript".to_string(),
+            "Python".to_string(),
+        ]
     }
 }
 

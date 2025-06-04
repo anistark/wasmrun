@@ -11,16 +11,6 @@ impl PathResolver {
         positional.unwrap_or_else(|| flag.unwrap_or_else(|| String::from("./")))
     }
 
-    /// Resolve input path with custom default
-    #[allow(dead_code)]
-    pub fn resolve_input_path_with_default(
-        positional: Option<String>,
-        flag: Option<String>,
-        default: &str,
-    ) -> String {
-        positional.unwrap_or_else(|| flag.unwrap_or_else(|| default.to_string()))
-    }
-
     /// Check if file has the expected extension
     pub fn has_extension(path: &str, expected_ext: &str) -> bool {
         Path::new(path).extension().map_or(false, |ext| {

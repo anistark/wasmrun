@@ -1,16 +1,549 @@
-use crate::compiler::builder::{
-    BuildConfig, BuildResult, OptimizationLevel, TargetType, WasmBuilder,
-};
+use crate::compiler::builder::{BuildConfig, BuildResult, OptimizationLevel, WasmBuilder};
 use crate::error::{CompilationError, CompilationResult};
+use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
 use crate::utils::PathResolver;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
-pub struct RustBuilder;
+pub struct RustPlugin {
+    info: PluginInfo,
+    #[allow(dead_code)]
+    builder: Arc<RustBuilder>,
+}
+
+impl RustPlugin {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        let builder = Arc::new(RustBuilder::new());
+
+        let info = PluginInfo {
+            name: "rust".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            description: "Rust WebAssembly compiler with wasm-bindgen and web application support"
+                .to_string(),
+            author: "Chakra Team".to_string(),
+            extensions: vec!["rs".to_string()],
+            entry_files: vec!["Cargo.toml".to_string()],
+            plugin_type: PluginType::Builtin,
+            source: None,
+            dependencies: vec![],
+            capabilities: PluginCapabilities {
+                compile_wasm: true,
+                compile_webapp: true,
+                live_reload: true,
+                optimization: true,
+                custom_targets: vec!["wasm32-unknown-unknown".to_string(), "web".to_string()],
+            },
+        };
+
+        Self { info, builder }
+    }
+}
+
+impl Plugin for RustPlugin {
+    fn info(&self) -> &PluginInfo {
+        &self.info
+    }
+
+    fn can_handle_project(&self, project_path: &str) -> bool {
+        let cargo_toml_path = PathResolver::join_paths(project_path, "Cargo.toml");
+        Path::new(&cargo_toml_path).exists()
+    }
+
+    fn get_builder(&self) -> Box<dyn WasmBuilder> {
+        Box::new(RustBuilder::new())
+    }
+}
+
+pub struct RustBuilder {
+    // Internal state if needed
+}
 
 impl RustBuilder {
     pub fn new() -> Self {
-        Self
+        Self {}
+    }
+
+    /// Check if a Rust project uses wasm-bindgen
+    pub fn uses_wasm_bindgen(&self, project_path: &str) -> bool {
+        let cargo_toml_path = PathResolver::join_paths(project_path, "Cargo.toml");
+
+        if let Ok(cargo_toml) = fs::read_to_string(cargo_toml_path) {
+            cargo_toml.contains("wasm-bindgen")
+                || cargo_toml.contains("web-sys")
+                || cargo_toml.contains("js-sys")
+        } else {
+            false
+        }
+    }
+
+    /// Check if a project is a Rust web application
+    pub fn is_rust_web_application(&self, project_path: &str) -> bool {
+        let cargo_toml_path = PathResolver::join_paths(project_path, "Cargo.toml");
+
+        if let Ok(cargo_toml) = fs::read_to_string(cargo_toml_path) {
+            let uses_wasm_bindgen = self.uses_wasm_bindgen(project_path);
+
+            if !uses_wasm_bindgen {
+                return false;
+            }
+
+            // Look for web framework dependencies
+            let web_frameworks = [
+                "yew", "leptos", "dioxus", "sycamore", "mogwai", "seed", "percy", "iced", "dodrio",
+                "smithy", "trunk",
+            ];
+
+            for framework in web_frameworks {
+                if cargo_toml.contains(framework) {
+                    return true;
+                }
+            }
+
+            // Check for lib target with cdylib
+            if cargo_toml.contains("[lib]") && cargo_toml.contains("cdylib") {
+                // Check if there's an index.html in the project
+                if Path::new(project_path).join("index.html").exists() {
+                    return true;
+                }
+
+                // Check for static directories that might indicate a web app
+                let potential_static_dirs = ["public", "static", "assets", "dist", "www"];
+                for dir in potential_static_dirs {
+                    if Path::new(project_path).join(dir).exists() {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Build standard WASM without wasm-bindgen
+    fn build_standard_wasm(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        // Ensure wasm32 target is installed
+        self.ensure_wasm32_target()?;
+
+        // Determine build args based on optimization level
+        let mut args = vec!["build", "--target", "wasm32-unknown-unknown"];
+
+        match config.optimization_level {
+            OptimizationLevel::Release => args.push("--release"),
+            OptimizationLevel::Size => {
+                args.push("--release");
+                // TODO: Add size optimization flags
+            }
+            OptimizationLevel::Debug => {} // Default debug build
+        }
+
+        // Execute cargo build
+        let output = if config.verbose {
+            self.execute_command_with_output("cargo", &args, &config.project_path)?;
+            true
+        } else {
+            let output = self.execute_command("cargo", &args, &config.project_path, false)?;
+            output.status.success()
+        };
+
+        if !output {
+            return Err(CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: "Cargo build failed".to_string(),
+            });
+        }
+
+        // Find the generated WASM file
+        let build_type = match config.optimization_level {
+            OptimizationLevel::Debug => "debug",
+            _ => "release",
+        };
+
+        let target_dir = PathResolver::join_paths(
+            &config.project_path,
+            &format!("target/wasm32-unknown-unknown/{}", build_type),
+        );
+
+        let wasm_files =
+            PathResolver::find_files_with_extension(&target_dir, "wasm").map_err(|e| {
+                CompilationError::BuildFailed {
+                    language: "Rust".to_string(),
+                    reason: format!("Failed to find WASM files: {}", e),
+                }
+            })?;
+
+        if wasm_files.is_empty() {
+            return Err(CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: "No WASM file found in target directory".to_string(),
+            });
+        }
+
+        let wasm_file = &wasm_files[0]; // Take the first one
+        let output_path = self.copy_to_output(wasm_file, &config.output_dir)?;
+
+        Ok(BuildResult {
+            wasm_path: output_path,
+            js_path: None,
+            additional_files: vec![],
+            is_wasm_bindgen: false,
+        })
+    }
+
+    /// Build wasm-bindgen project
+    fn build_wasm_bindgen(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        // Check if wasm-pack is installed
+        if !self.is_tool_installed("wasm-pack") {
+            return Err(CompilationError::BuildToolNotFound {
+                tool: "wasm-pack".to_string(),
+                language: "Rust".to_string(),
+            });
+        }
+
+        // Ensure wasm32 target is installed
+        self.ensure_wasm32_target()?;
+
+        // Determine wasm-pack args
+        let mut args = vec!["build", "--target", "web"];
+
+        match config.optimization_level {
+            OptimizationLevel::Debug => args.push("--dev"),
+            OptimizationLevel::Release => {} // Default is release
+            OptimizationLevel::Size => {
+                // TODO: Add size optimization flags for wasm-pack
+            }
+        }
+
+        // Add no-typescript flag to simplify output
+        args.push("--no-typescript");
+
+        // Execute wasm-pack build
+        let output = if config.verbose {
+            self.execute_command_with_output("wasm-pack", &args, &config.project_path)?;
+            true
+        } else {
+            let output = self.execute_command("wasm-pack", &args, &config.project_path, false)?;
+            output.status.success()
+        };
+
+        if !output {
+            return Err(CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: "wasm-pack build failed".to_string(),
+            });
+        }
+
+        // Find generated files in pkg directory
+        let pkg_dir = PathResolver::join_paths(&config.project_path, "pkg");
+
+        let wasm_files =
+            PathResolver::find_files_with_extension(&pkg_dir, "wasm").map_err(|e| {
+                CompilationError::BuildFailed {
+                    language: "Rust".to_string(),
+                    reason: format!("Failed to find WASM files in pkg directory: {}", e),
+                }
+            })?;
+        let js_files = PathResolver::find_files_with_extension(&pkg_dir, "js").map_err(|e| {
+            CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: format!("Failed to find JS files in pkg directory: {}", e),
+            }
+        })?;
+
+        if wasm_files.is_empty() {
+            return Err(CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: "No WASM file found in pkg directory".to_string(),
+            });
+        }
+
+        // Find the main JS file (not .d.js files)
+        let main_js_file = js_files
+            .iter()
+            .find(|path| !path.contains(".d.js"))
+            .ok_or_else(|| CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: "No main JS file found in pkg directory".to_string(),
+            })?;
+
+        // Copy files to output directory
+        let wasm_output = self.copy_to_output(&wasm_files[0], &config.output_dir)?;
+        let js_output = self.copy_to_output(main_js_file, &config.output_dir)?;
+
+        // Copy any additional files (.d.ts, etc.)
+        let mut additional_files = Vec::new();
+        let all_pkg_files = fs::read_dir(&pkg_dir).map_err(|e| CompilationError::BuildFailed {
+            language: "Rust".to_string(),
+            reason: format!("Failed to read pkg directory: {}", e),
+        })?;
+
+        for entry in all_pkg_files.flatten() {
+            let path = entry.path();
+            if let Some(ext) = path.extension() {
+                let ext_str = ext.to_string_lossy();
+                if ext_str == "ts" || ext_str == "json" {
+                    let copied_file =
+                        self.copy_to_output(&path.to_string_lossy(), &config.output_dir)?;
+                    additional_files.push(copied_file);
+                }
+            }
+        }
+
+        Ok(BuildResult {
+            wasm_path: wasm_output,
+            js_path: Some(js_output),
+            additional_files,
+            is_wasm_bindgen: true,
+        })
+    }
+
+    /// Build Rust web application (like Yew, Leptos, etc.)
+    fn build_web_application(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        // Check if this project uses Trunk
+        let uses_trunk = Path::new(&config.project_path).join("Trunk.toml").exists()
+            || Path::new(&config.project_path).join("trunk.toml").exists();
+
+        if uses_trunk {
+            self.build_with_trunk(config)
+        } else {
+            // Fall back to wasm-pack
+            self.build_wasm_bindgen(config)
+        }
+    }
+
+    /// Install wasm32 target if not present
+    fn ensure_wasm32_target(&self) -> CompilationResult<()> {
+        let check_target = std::process::Command::new("rustup")
+            .args(["target", "list", "--installed"])
+            .output()
+            .map_err(|e| CompilationError::ToolExecutionFailed {
+                tool: "rustup".to_string(),
+                reason: e.to_string(),
+            })?;
+
+        let target_output = String::from_utf8_lossy(&check_target.stdout);
+
+        if !target_output.contains("wasm32-unknown-unknown") {
+            println!("⚙️ Installing wasm32-unknown-unknown target...");
+            let install_output = std::process::Command::new("rustup")
+                .args(["target", "add", "wasm32-unknown-unknown"])
+                .output()
+                .map_err(|e| CompilationError::ToolExecutionFailed {
+                    tool: "rustup".to_string(),
+                    reason: e.to_string(),
+                })?;
+
+            if !install_output.status.success() {
+                return Err(CompilationError::ToolExecutionFailed {
+                    tool: "rustup".to_string(),
+                    reason: String::from_utf8_lossy(&install_output.stderr).to_string(),
+                });
+            }
+
+            println!("✅ wasm32-unknown-unknown target installed");
+        }
+
+        Ok(())
+    }
+
+    /// Copy a file to the output directory
+    fn copy_to_output(&self, source: &str, output_dir: &str) -> CompilationResult<String> {
+        let source_path = Path::new(source);
+        let filename =
+            PathResolver::get_filename(source).map_err(|_| CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: format!("Invalid source file path: {}", source),
+            })?;
+        let output_path = PathResolver::join_paths(output_dir, &filename);
+
+        fs::copy(source_path, &output_path).map_err(|e| CompilationError::BuildFailed {
+            language: "Rust".to_string(),
+            reason: format!("Failed to copy {} to {}: {}", source, output_path, e),
+        })?;
+
+        Ok(output_path)
+    }
+
+    /// Execute a command and return the result
+    fn execute_command(
+        &self,
+        command: &str,
+        args: &[&str],
+        working_dir: &str,
+        verbose: bool,
+    ) -> CompilationResult<std::process::Output> {
+        if verbose {
+            println!("🔧 Executing: {} {}", command, args.join(" "));
+        }
+
+        std::process::Command::new(command)
+            .args(args)
+            .current_dir(working_dir)
+            .output()
+            .map_err(|e| CompilationError::ToolExecutionFailed {
+                tool: command.to_string(),
+                reason: e.to_string(),
+            })
+    }
+
+    /// Execute a command with live output (for verbose builds)
+    fn execute_command_with_output(
+        &self,
+        command: &str,
+        args: &[&str],
+        working_dir: &str,
+    ) -> CompilationResult<()> {
+        println!("🔧 Executing: {} {}", command, args.join(" "));
+
+        let status = std::process::Command::new(command)
+            .args(args)
+            .current_dir(working_dir)
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status()
+            .map_err(|e| CompilationError::ToolExecutionFailed {
+                tool: command.to_string(),
+                reason: e.to_string(),
+            })?;
+
+        if !status.success() {
+            return Err(CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: format!(
+                    "Command '{}' failed with exit code: {:?}",
+                    command,
+                    status.code()
+                ),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Build with Trunk (for web frameworks like Yew)
+    fn build_with_trunk(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        if !self.is_tool_installed("trunk") {
+            return Err(CompilationError::BuildToolNotFound {
+                tool: "trunk".to_string(),
+                language: "Rust".to_string(),
+            });
+        }
+
+        // Determine trunk args
+        let mut args = vec!["build"];
+
+        match config.optimization_level {
+            OptimizationLevel::Release => args.push("--release"),
+            OptimizationLevel::Debug => {} // Default debug build
+            OptimizationLevel::Size => {
+                args.push("--release");
+                // TODO: Add size optimization flags
+            }
+        }
+
+        // Execute trunk build
+        let output = if config.verbose {
+            self.execute_command_with_output("trunk", &args, &config.project_path)?;
+            true
+        } else {
+            let output = self.execute_command("trunk", &args, &config.project_path, false)?;
+            output.status.success()
+        };
+
+        if !output {
+            return Err(CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: "Trunk build failed".to_string(),
+            });
+        }
+
+        // Copy the dist directory to output
+        let trunk_dist = PathResolver::join_paths(&config.project_path, "dist");
+        if !Path::new(&trunk_dist).exists() {
+            return Err(CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: "Trunk build completed but dist directory was not created".to_string(),
+            });
+        }
+
+        // Find the main files
+        let wasm_files =
+            PathResolver::find_files_with_extension(&trunk_dist, "wasm").map_err(|e| {
+                CompilationError::BuildFailed {
+                    language: "Rust".to_string(),
+                    reason: format!("Failed to find WASM files in trunk dist: {}", e),
+                }
+            })?;
+        let js_files = PathResolver::find_files_with_extension(&trunk_dist, "js").map_err(|e| {
+            CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: format!("Failed to find JS files in trunk dist: {}", e),
+            }
+        })?;
+
+        if wasm_files.is_empty() {
+            return Err(CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: "No WASM file found in trunk dist directory".to_string(),
+            });
+        }
+
+        // Copy dist directory contents to output
+        copy_directory_recursively(&trunk_dist, &config.output_dir).map_err(|e| {
+            CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: format!("Failed to copy trunk dist directory: {}", e),
+            }
+        })?;
+
+        // Return relative paths within the output directory
+        let wasm_filename = PathResolver::get_filename(&wasm_files[0]).map_err(|e| {
+            CompilationError::BuildFailed {
+                language: "Rust".to_string(),
+                reason: format!("Failed to get WASM filename: {}", e),
+            }
+        })?;
+        let js_filename = if !js_files.is_empty() {
+            Some(PathResolver::get_filename(&js_files[0]).map_err(|e| {
+                CompilationError::BuildFailed {
+                    language: "Rust".to_string(),
+                    reason: format!("Failed to get JS filename: {}", e),
+                }
+            })?)
+        } else {
+            None
+        };
+
+        Ok(BuildResult {
+            wasm_path: PathResolver::join_paths(&config.output_dir, &wasm_filename),
+            js_path: js_filename.map(|name| PathResolver::join_paths(&config.output_dir, &name)),
+            additional_files: vec![], // TODO: Track all copied files
+            is_wasm_bindgen: true,
+        })
+    }
+
+    /// Check if a tool is installed on the system
+    fn is_tool_installed(&self, tool_name: &str) -> bool {
+        let command = if cfg!(target_os = "windows") {
+            format!("where {}", tool_name)
+        } else {
+            format!("which {}", tool_name)
+        };
+
+        std::process::Command::new(if cfg!(target_os = "windows") {
+            "cmd"
+        } else {
+            "sh"
+        })
+        .args(if cfg!(target_os = "windows") {
+            ["/c", &command]
+        } else {
+            ["-c", &command]
+        })
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
     }
 }
 
@@ -82,386 +615,66 @@ impl WasmBuilder for RustBuilder {
     fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
         // Check if this is a wasm-bindgen project
         if self.uses_wasm_bindgen(&config.project_path) {
-            self.build_wasm_bindgen(config)
-        } else if self.is_rust_web_application(&config.project_path) {
-            self.build_web_application(config)
+            if self.is_rust_web_application(&config.project_path) {
+                self.build_web_application(config)
+            } else {
+                self.build_wasm_bindgen(config)
+            }
         } else {
             self.build_standard_wasm(config)
         }
     }
-}
 
-impl RustBuilder {
-    /// Check if a Rust project uses wasm-bindgen
-    fn uses_wasm_bindgen(&self, project_path: &str) -> bool {
-        let cargo_toml_path = PathResolver::join_paths(project_path, "Cargo.toml");
-
-        if let Ok(cargo_toml) = fs::read_to_string(cargo_toml_path) {
-            cargo_toml.contains("wasm-bindgen")
-                || cargo_toml.contains("web-sys")
-                || cargo_toml.contains("js-sys")
-        } else {
-            false
-        }
-    }
-
-    /// Check if a project is a Rust web application
-    fn is_rust_web_application(&self, project_path: &str) -> bool {
-        let cargo_toml_path = PathResolver::join_paths(project_path, "Cargo.toml");
-
-        if let Ok(cargo_toml) = fs::read_to_string(cargo_toml_path) {
-            let uses_wasm_bindgen = self.uses_wasm_bindgen(project_path);
-
-            if !uses_wasm_bindgen {
-                return false;
-            }
-
-            // Look for web framework dependencies
-            let web_frameworks = [
-                "yew", "leptos", "dioxus", "sycamore", "mogwai", "seed", "percy", "iced", "dodrio",
-                "smithy", "trunk",
-            ];
-
-            for framework in web_frameworks {
-                if cargo_toml.contains(framework) {
-                    return true;
-                }
-            }
-
-            // Check for lib target with cdylib
-            if cargo_toml.contains("[lib]") && cargo_toml.contains("cdylib") {
-                // Check if there's an index.html in the project
-                if Path::new(project_path).join("index.html").exists() {
-                    return true;
-                }
-
-                // Check for static directories that might indicate a web app
-                let potential_static_dirs = ["public", "static", "assets", "dist", "www"];
-                for dir in potential_static_dirs {
-                    if Path::new(project_path).join(dir).exists() {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
-    }
-
-    /// Install wasm32 target if not present
-    fn ensure_wasm32_target(&self) -> CompilationResult<()> {
-        let check_target =
-            self.execute_command("rustup", &["target", "list", "--installed"], ".", false)?;
-        let target_output = String::from_utf8_lossy(&check_target.stdout);
-
-        if !target_output.contains("wasm32-unknown-unknown") {
-            println!("⚙️ Installing wasm32-unknown-unknown target...");
-            self.execute_command_with_output(
-                "rustup",
-                &["target", "add", "wasm32-unknown-unknown"],
-                ".",
-            )?;
-            println!("✅ wasm32-unknown-unknown target installed");
-        }
-
-        Ok(())
-    }
-
-    /// Build standard WASM without wasm-bindgen
-    fn build_standard_wasm(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        // Ensure wasm32 target is installed
-        self.ensure_wasm32_target()?;
-
-        // Determine build args based on optimization level
-        let mut args = vec!["build", "--target", "wasm32-unknown-unknown"];
-
-        match config.optimization_level {
-            OptimizationLevel::Release => args.push("--release"),
-            OptimizationLevel::Size => {
-                args.push("--release");
-                // TODO: Add size optimization flags
-            }
-            OptimizationLevel::Debug => {} // Default debug build
-        }
-
-        // Execute cargo build
-        if config.verbose {
-            self.execute_command_with_output("cargo", &args, &config.project_path)?;
-        } else {
-            let output = self.execute_command("cargo", &args, &config.project_path, false)?;
-            if !output.status.success() {
-                return Err(CompilationError::BuildFailed {
-                    language: self.language_name().to_string(),
-                    reason: format!(
-                        "Cargo build failed: {}",
-                        String::from_utf8_lossy(&output.stderr)
-                    ),
-                });
-            }
-        }
-
-        // Find the generated WASM file
-        let build_type = match config.optimization_level {
-            OptimizationLevel::Debug => "debug",
-            _ => "release",
-        };
-
-        let target_dir = PathResolver::join_paths(
-            &config.project_path,
-            &format!("target/wasm32-unknown-unknown/{}", build_type),
+    fn build_verbose(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        println!(
+            "🔨 Building {} project at: {}",
+            self.language_name(),
+            config.project_path
         );
 
-        let wasm_files =
-            PathResolver::find_files_with_extension(&target_dir, "wasm").map_err(|e| {
-                CompilationError::BuildFailed {
-                    language: self.language_name().to_string(),
-                    reason: format!("Failed to find WASM files: {}", e),
-                }
-            })?;
-
-        if wasm_files.is_empty() {
-            return Err(CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: "No WASM file found in target directory".to_string(),
-            });
-        }
-
-        let wasm_file = &wasm_files[0]; // Take the first one
-        let output_path = self.copy_to_output(wasm_file, &config.output_dir)?;
-
-        Ok(BuildResult {
-            wasm_path: output_path,
-            js_path: None,
-            additional_files: vec![],
-            is_wasm_bindgen: false,
-        })
-    }
-
-    /// Build wasm-bindgen project
-    fn build_wasm_bindgen(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        // Check if wasm-pack is installed
-        if !self.is_tool_installed("wasm-pack") {
+        // Check dependencies first
+        let missing_tools = self.check_dependencies();
+        if !missing_tools.is_empty() {
             return Err(CompilationError::BuildToolNotFound {
-                tool: "wasm-pack".to_string(),
+                tool: missing_tools.join(", "),
                 language: self.language_name().to_string(),
             });
         }
 
-        // Ensure wasm32 target is installed
-        self.ensure_wasm32_target()?;
+        // Validate project structure
+        self.validate_project(&config.project_path)?;
 
-        // Determine wasm-pack args
-        let mut args = vec!["build", "--target", "web"];
-
-        match config.optimization_level {
-            OptimizationLevel::Debug => args.push("--dev"),
-            OptimizationLevel::Release => {} // Default is release
-            OptimizationLevel::Size => {
-                // TODO: Add size optimization flags for wasm-pack
-            }
-        }
-
-        // Add no-typescript flag to simplify output
-        args.push("--no-typescript");
-
-        // Execute wasm-pack build
-        if config.verbose {
-            self.execute_command_with_output("wasm-pack", &args, &config.project_path)?;
-        } else {
-            let output = self.execute_command("wasm-pack", &args, &config.project_path, false)?;
-            if !output.status.success() {
-                return Err(CompilationError::BuildFailed {
-                    language: self.language_name().to_string(),
-                    reason: format!(
-                        "wasm-pack build failed: {}",
-                        String::from_utf8_lossy(&output.stderr)
-                    ),
-                });
-            }
-        }
-
-        // Find generated files in pkg directory
-        let pkg_dir = PathResolver::join_paths(&config.project_path, "pkg");
-
-        let wasm_files =
-            PathResolver::find_files_with_extension(&pkg_dir, "wasm").map_err(|e| {
-                CompilationError::BuildFailed {
-                    language: self.language_name().to_string(),
-                    reason: format!("Failed to find WASM files in pkg directory: {}", e),
-                }
-            })?;
-        let js_files = PathResolver::find_files_with_extension(&pkg_dir, "js").map_err(|e| {
-            CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: format!("Failed to find JS files in pkg directory: {}", e),
+        // Ensure output directory exists
+        PathResolver::ensure_output_directory(&config.output_dir).map_err(|_| {
+            CompilationError::OutputDirectoryCreationFailed {
+                path: config.output_dir.clone(),
             }
         })?;
 
-        if wasm_files.is_empty() {
-            return Err(CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: "No WASM file found in pkg directory".to_string(),
-            });
+        println!("✅ All dependencies found");
+        println!("📂 Output directory: {}", config.output_dir);
+
+        let result = self.build(config)?;
+
+        println!("✅ {} build completed successfully", self.language_name());
+        println!("📦 WASM file: {}", result.wasm_path);
+
+        if let Some(js_path) = &result.js_path {
+            println!("📝 JS file: {}", js_path);
         }
 
-        // Find the main JS file (not .d.js files)
-        let main_js_file = js_files
-            .iter()
-            .find(|path| !path.contains(".d.js"))
-            .ok_or_else(|| CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: "No main JS file found in pkg directory".to_string(),
-            })?;
-
-        // Copy files to output directory
-        let wasm_output = self.copy_to_output(&wasm_files[0], &config.output_dir)?;
-        let js_output = self.copy_to_output(main_js_file, &config.output_dir)?;
-
-        // Copy any additional files (.d.ts, etc.)
-        let mut additional_files = Vec::new();
-        let all_pkg_files = fs::read_dir(&pkg_dir).map_err(|e| CompilationError::BuildFailed {
-            language: self.language_name().to_string(),
-            reason: format!("Failed to read pkg directory: {}", e),
-        })?;
-
-        for entry in all_pkg_files.flatten() {
-            let path = entry.path();
-            if let Some(ext) = path.extension() {
-                let ext_str = ext.to_string_lossy();
-                if ext_str == "ts" || ext_str == "json" {
-                    let copied_file =
-                        self.copy_to_output(&path.to_string_lossy(), &config.output_dir)?;
-                    additional_files.push(copied_file);
-                }
-            }
+        if !result.additional_files.is_empty() {
+            println!(
+                "📄 Additional files: {}",
+                result.additional_files.join(", ")
+            );
         }
 
-        Ok(BuildResult {
-            wasm_path: wasm_output,
-            js_path: Some(js_output),
-            additional_files,
-            is_wasm_bindgen: true,
-        })
-    }
-
-    /// Build Rust web application (like Yew, Leptos, etc.)
-    fn build_web_application(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        // Check if this project uses Trunk
-        let uses_trunk = Path::new(&config.project_path).join("Trunk.toml").exists()
-            || Path::new(&config.project_path).join("trunk.toml").exists();
-
-        if uses_trunk {
-            self.build_with_trunk(config)
-        } else {
-            // Fall back to wasm-pack
-            self.build_wasm_bindgen(config)
-        }
-    }
-
-    /// Build with Trunk (for web frameworks like Yew)
-    fn build_with_trunk(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        if !self.is_tool_installed("trunk") {
-            return Err(CompilationError::BuildToolNotFound {
-                tool: "trunk".to_string(),
-                language: self.language_name().to_string(),
-            });
-        }
-
-        // Determine trunk args
-        let mut args = vec!["build"];
-
-        match config.optimization_level {
-            OptimizationLevel::Release => args.push("--release"),
-            OptimizationLevel::Debug => {} // Default debug build
-            OptimizationLevel::Size => {
-                args.push("--release");
-                // TODO: Add size optimization flags
-            }
-        }
-
-        // Execute trunk build
-        if config.verbose {
-            self.execute_command_with_output("trunk", &args, &config.project_path)?;
-        } else {
-            let output = self.execute_command("trunk", &args, &config.project_path, false)?;
-            if !output.status.success() {
-                return Err(CompilationError::BuildFailed {
-                    language: self.language_name().to_string(),
-                    reason: format!(
-                        "Trunk build failed: {}",
-                        String::from_utf8_lossy(&output.stderr)
-                    ),
-                });
-            }
-        }
-
-        // Copy the dist directory to output
-        let trunk_dist = PathResolver::join_paths(&config.project_path, "dist");
-        if !Path::new(&trunk_dist).exists() {
-            return Err(CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: "Trunk build completed but dist directory was not created".to_string(),
-            });
-        }
-
-        // Find the main files
-        let wasm_files =
-            PathResolver::find_files_with_extension(&trunk_dist, "wasm").map_err(|e| {
-                CompilationError::BuildFailed {
-                    language: self.language_name().to_string(),
-                    reason: format!("Failed to find WASM files in trunk dist: {}", e),
-                }
-            })?;
-        let js_files = PathResolver::find_files_with_extension(&trunk_dist, "js").map_err(|e| {
-            CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: format!("Failed to find JS files in trunk dist: {}", e),
-            }
-        })?;
-
-        if wasm_files.is_empty() {
-            return Err(CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: "No WASM file found in trunk dist directory".to_string(),
-            });
-        }
-
-        // Copy dist directory contents to output
-        copy_directory_recursively(&trunk_dist, &config.output_dir).map_err(|e| {
-            CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: format!("Failed to copy trunk dist directory: {}", e),
-            }
-        })?;
-
-        // Return relative paths within the output directory
-        let wasm_filename = PathResolver::get_filename(&wasm_files[0]).map_err(|e| {
-            CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: format!("Failed to get WASM filename: {}", e),
-            }
-        })?;
-        let js_filename = if !js_files.is_empty() {
-            Some(PathResolver::get_filename(&js_files[0]).map_err(|e| {
-                CompilationError::BuildFailed {
-                    language: self.language_name().to_string(),
-                    reason: format!("Failed to get JS filename: {}", e),
-                }
-            })?)
-        } else {
-            None
-        };
-
-        Ok(BuildResult {
-            wasm_path: PathResolver::join_paths(&config.output_dir, &wasm_filename),
-            js_path: js_filename.map(|name| PathResolver::join_paths(&config.output_dir, &name)),
-            additional_files: vec![], // TODO: Track all copied files
-            is_wasm_bindgen: true,
-        })
+        Ok(result)
     }
 }
 
-/// Copy directory recursively (standalone function to avoid clippy warning)
+/// Copy directory recursively
 fn copy_directory_recursively(source: &str, destination: &str) -> Result<(), String> {
     PathResolver::ensure_output_directory(destination)
         .map_err(|e| format!("Failed to create destination directory: {}", e))?;
@@ -488,33 +701,4 @@ fn copy_directory_recursively(source: &str, destination: &str) -> Result<(), Str
     }
 
     Ok(())
-}
-
-/// Check if a Rust project uses wasm-bindgen
-pub fn uses_wasm_bindgen(project_path: &str) -> bool {
-    RustBuilder::new().uses_wasm_bindgen(project_path)
-}
-
-/// Check if a project is a Rust web application
-pub fn is_rust_web_application(project_path: &str) -> bool {
-    RustBuilder::new().is_rust_web_application(project_path)
-}
-
-/// Build a web application from a Rust project
-pub fn build_rust_web_application(project_path: &str, output_dir: &str) -> Result<String, String> {
-    let config = BuildConfig {
-        project_path: project_path.to_string(),
-        output_dir: output_dir.to_string(),
-        verbose: true,
-        optimization_level: OptimizationLevel::Release,
-        target_type: TargetType::WebApp,
-    };
-
-    let builder = RustBuilder::new();
-    let result = builder
-        .build(&config)
-        .map_err(|e| format!("Build failed: {}", e))?;
-
-    // Return the JS file path for web applications, or WASM path if no JS
-    Ok(result.js_path.unwrap_or(result.wasm_path))
 }

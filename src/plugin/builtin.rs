@@ -4,6 +4,10 @@
 
 use crate::compiler::builder::WasmBuilder;
 use crate::error::Result;
+use crate::plugin::languages::{
+    assemblyscript_plugin::AssemblyScriptBuilder, c_plugin::CBuilder, go_plugin::GoBuilder,
+    python_plugin::PythonBuilder, rust_plugin::RustBuilder,
+};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginRegistry, PluginType};
 use std::sync::Arc;
 
@@ -155,7 +159,7 @@ fn create_rust_plugin() -> BuiltinPlugin {
         vec!["rs".to_string()],
         vec!["Cargo.toml".to_string()],
         capabilities,
-        Arc::new(crate::compiler::language::rust::RustBuilder::new()),
+        Arc::new(RustBuilder::new()),
     )
 }
 
@@ -176,7 +180,7 @@ fn create_go_plugin() -> BuiltinPlugin {
         vec!["go".to_string()],
         vec!["go.mod".to_string(), "main.go".to_string()],
         capabilities,
-        Arc::new(crate::compiler::language::go::GoBuilder::new()),
+        Arc::new(GoBuilder::new()),
     )
 }
 
@@ -202,7 +206,7 @@ fn create_c_plugin() -> BuiltinPlugin {
         ],
         vec!["main.c".to_string(), "Makefile".to_string()],
         capabilities,
-        Arc::new(crate::compiler::language::c::CBuilder::new()),
+        Arc::new(CBuilder::new()),
     )
 }
 
@@ -223,7 +227,7 @@ fn create_assemblyscript_plugin() -> BuiltinPlugin {
         vec!["ts".to_string()],
         vec!["package.json".to_string(), "asconfig.json".to_string()],
         capabilities,
-        Arc::new(crate::compiler::language::asc::AssemblyScriptBuilder::new()),
+        Arc::new(AssemblyScriptBuilder::new()),
     )
 }
 
@@ -244,7 +248,7 @@ fn create_python_plugin() -> BuiltinPlugin {
         vec!["py".to_string()],
         vec!["main.py".to_string(), "pyproject.toml".to_string()],
         capabilities,
-        Arc::new(crate::compiler::language::python::PythonBuilder::new()),
+        Arc::new(PythonBuilder::new()),
     )
 }
 

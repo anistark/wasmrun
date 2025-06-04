@@ -1,15 +1,16 @@
 pub mod builder;
 mod detect;
-pub mod language;
 
 pub use builder::build_wasm_project;
 pub use detect::{
     detect_operating_system, detect_project_language, get_missing_tools, print_system_info,
     OperatingSystem, ProjectLanguage,
 };
-pub use language::rust::{build_rust_web_application, is_rust_web_application};
 
+// Import the plugin-based functions
+use crate::compiler::builder::WasmBuilder;
 use crate::error::{ChakraError, Result};
+use crate::plugin::languages::rust_plugin::RustBuilder;
 use crate::utils::PathResolver;
 
 /// Compile a WASM file from a project directory (legacy function)
@@ -20,7 +21,7 @@ pub fn create_wasm_from_project(project_path: &str, output_dir: &str) -> Result<
     // Create output directory if it doesn't exist
     PathResolver::ensure_output_directory(output_dir)?;
 
-    // Use the new builder system - Fix redundant closure
+    // Use the builder system
     let result = build_wasm_project(project_path, output_dir, &language_type, false)
         .map_err(ChakraError::Compilation)?;
     Ok(result.wasm_path)
@@ -40,11 +41,33 @@ pub fn compile_for_execution(project_path: &str, output_dir: &str) -> Result<Str
     // Create output directory if it doesn't exist
     PathResolver::ensure_output_directory(output_dir)?;
 
-    // Use the new builder system with verbose output
+    // Use the builder system with verbose output
     let result = build_wasm_project(project_path, output_dir, &language_type, true)
         .map_err(ChakraError::Compilation)?;
 
     // For legacy compatibility, return the JS path if available (for wasm-bindgen), otherwise WASM path
-    // TODO: Remove legacy JS path handling in future versions
     Ok(result.js_path.unwrap_or(result.wasm_path))
+}
+
+/// Build a web application from a Rust project
+pub fn build_rust_web_application(project_path: &str, output_dir: &str) -> Result<String> {
+    let config = builder::BuildConfig {
+        project_path: project_path.to_string(),
+        output_dir: output_dir.to_string(),
+        verbose: true,
+        optimization_level: builder::OptimizationLevel::Release,
+        target_type: builder::TargetType::WebApp,
+    };
+
+    let builder = RustBuilder::new();
+    let result = builder.build(&config).map_err(ChakraError::Compilation)?;
+
+    // Return the JS file path for web applications, or WASM path if no JS
+    Ok(result.js_path.unwrap_or(result.wasm_path))
+}
+
+/// Check if a project is a Rust web application
+pub fn is_rust_web_application(project_path: &str) -> bool {
+    let builder = RustBuilder::new();
+    builder.is_rust_web_application(project_path)
 }
