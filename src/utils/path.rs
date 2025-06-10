@@ -158,7 +158,7 @@ impl PathResolver {
         None
     }
 
-    /// Check if a path is safe to use (no directory traversal)
+    /// Check if a path is safe to use
     pub fn is_safe_path(path: &str) -> bool {
         let path = Path::new(path);
 
@@ -170,7 +170,7 @@ impl PathResolver {
                     let name_str = name.to_string_lossy();
                     // Check for potentially dangerous names
                     if name_str.starts_with('.') && name_str.len() > 1 {
-                        continue; // Allow normal hidden files
+                        continue;
                     }
                 }
                 _ => {}
@@ -202,14 +202,14 @@ impl PathResolver {
         }
     }
 
-    /// Remove file with error handling
+    /// Remove file
     pub fn remove_file(path: &str) -> Result<()> {
         fs::remove_file(path)
             .map_err(|e| ChakraError::add_context(format!("Removing file {}", path), e))?;
         Ok(())
     }
 
-    /// Remove directory recursively with error handling
+    /// Remove directory recursively
     pub fn remove_dir_all(path: &str) -> Result<()> {
         fs::remove_dir_all(path)
             .map_err(|e| ChakraError::add_context(format!("Removing directory {}", path), e))?;

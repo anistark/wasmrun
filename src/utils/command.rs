@@ -48,7 +48,7 @@ impl CommandExecutor {
             })
     }
 
-    /// Execute a command with live output (for verbose builds)
+    /// Execute a command with live output
     pub fn execute_command_with_output(
         command: &str,
         args: &[&str],

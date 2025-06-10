@@ -1,94 +1,29 @@
-//! Plugin system for Chakra
-//!
-//! This module provides a plugin architecture that supports both built-in and external plugins.
-//! Built-in plugins are compiled into the binary, while external plugins are loaded at runtime.
-
 use crate::compiler::builder::WasmBuilder;
-use crate::error::{ChakraError, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 
-pub mod builtin;
 pub mod config;
-pub mod external;
 pub mod languages;
 pub mod manager;
 pub mod registry;
+// TODO: Dynamic plugin loading - will be implemented when we add support
+// for loading plugins from external .so/.dll/.dylib files at runtime
+// Currently plugins are statically compiled, but this infrastructure
+// is kept for future dynamic loading capability
+pub mod external;
 
-/// Plugin metadata and information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginInfo {
-    /// Plugin name (e.g., "rust", "go", "python")
-    pub name: String,
-    /// Plugin version
-    pub version: String,
-    /// Plugin description
-    pub description: String,
-    /// Plugin author
-    pub author: String,
-    /// Supported file extensions
-    pub extensions: Vec<String>,
-    /// Entry file candidates for project detection
-    pub entry_files: Vec<String>,
-    /// Plugin type (builtin or external)
-    pub plugin_type: PluginType,
-    /// Installation source (for external plugins)
-    pub source: Option<PluginSource>,
-    /// Plugin dependencies (other plugins or system tools)
-    pub dependencies: Vec<String>,
-    /// Plugin capabilities
-    pub capabilities: PluginCapabilities,
-}
-
-/// Plugin type enumeration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum PluginType {
-    /// Built-in plugin (shipped with Chakra)
-    Builtin,
-    /// External plugin (installed at runtime)
-    External,
-}
-
-/// Plugin installation source
+/// Plugin source information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PluginSource {
-    /// Crates.io package
+    /// from crates.io
     CratesIo { name: String, version: String },
-    /// Git repository
+    /// from Git repository
     Git { url: String, branch: Option<String> },
-    /// Local path
+    /// from local directory
     Local { path: PathBuf },
 }
 
-/// Plugin capabilities
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginCapabilities {
-    /// Can compile to WebAssembly
-    pub compile_wasm: bool,
-    /// Can compile to web applications
-    pub compile_webapp: bool,
-    /// Supports live reload
-    pub live_reload: bool,
-    /// Supports optimization levels
-    pub optimization: bool,
-    /// Custom build targets
-    pub custom_targets: Vec<String>,
-}
-
-impl Default for PluginCapabilities {
-    fn default() -> Self {
-        Self {
-            compile_wasm: true,
-            compile_webapp: false,
-            live_reload: true,
-            optimization: true,
-            custom_targets: Vec::new(),
-        }
-    }
-}
-
-/// Plugin trait that all plugins must implement
+/// Core trait that all plugins must implement
 pub trait Plugin: Send + Sync {
     /// Get plugin information
     fn info(&self) -> &PluginInfo;
@@ -97,325 +32,343 @@ pub trait Plugin: Send + Sync {
     #[allow(dead_code)]
     fn can_handle_project(&self, project_path: &str) -> bool;
 
-    /// Get the underlying WASM builder
+    /// Get a builder instance for compilation. TODO: Remove this in future.
     #[allow(dead_code)]
     fn get_builder(&self) -> Box<dyn WasmBuilder>;
-
-    /// Initialize the plugin (called once when loaded)
-    #[allow(dead_code)]
-    fn initialize(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    /// Cleanup plugin resources (called when unloading)
-    fn cleanup(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    /// Get plugin-specific commands (optional)
-    #[allow(dead_code)]
-    fn get_commands(&self) -> Vec<PluginCommand> {
-        Vec::new()
-    }
 }
 
-/// Plugin command definition
-#[derive(Debug, Clone)]
-pub struct PluginCommand {
-    /// Command name
-    #[allow(dead_code)]
+/// Plugin metadata and capabilities
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginInfo {
     pub name: String,
-    /// Command description
-    #[allow(dead_code)]
+    pub version: String,
     pub description: String,
-    /// Command handler
-    #[allow(dead_code)]
-    pub handler: fn(&[String]) -> Result<()>,
+    pub author: String,
+    pub extensions: Vec<String>,
+    pub entry_files: Vec<String>,
+    pub plugin_type: PluginType,
+    pub source: Option<PluginSource>,
+    pub dependencies: Vec<String>,
+    pub capabilities: PluginCapabilities,
 }
 
-/// Plugin registry for managing all plugins
-pub struct PluginRegistry {
-    /// All registered plugins
-    plugins: HashMap<String, Box<dyn Plugin>>,
-    /// Plugin load order for dependency resolution
-    load_order: Vec<String>,
+/// Type of plugin
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PluginType {
+    Builtin,
+    External,
+    Registry,
 }
 
-impl PluginRegistry {
-    /// Create a new plugin registry
-    pub fn new() -> Self {
-        Self {
-            plugins: HashMap::new(),
-            load_order: Vec::new(),
-        }
-    }
-
-    /// Register a plugin
-    pub fn register_plugin(&mut self, plugin: Box<dyn Plugin>) -> Result<()> {
-        let name = plugin.info().name.clone();
-
-        // Check for conflicts
-        if self.plugins.contains_key(&name) {
-            return Err(ChakraError::from(format!(
-                "Plugin '{}' is already registered",
-                name
-            )));
-        }
-
-        // Add to load order
-        self.load_order.push(name.clone());
-
-        // Register the plugin
-        self.plugins.insert(name, plugin);
-
-        Ok(())
-    }
-
-    /// Get a plugin by name
-    pub fn get_plugin(&self, name: &str) -> Option<&dyn Plugin> {
-        self.plugins.get(name).map(|p| p.as_ref())
-    }
-
-    /// Get all plugins
-    #[allow(dead_code)]
-    pub fn get_all_plugins(&self) -> &HashMap<String, Box<dyn Plugin>> {
-        &self.plugins
-    }
-
-    /// Find plugin that can handle a project
-    #[allow(dead_code)]
-    pub fn find_plugin_for_project(&self, project_path: &str) -> Option<&dyn Plugin> {
-        // Check plugins in load order for deterministic behavior
-        for plugin_name in &self.load_order {
-            if let Some(plugin) = self.plugins.get(plugin_name) {
-                if plugin.can_handle_project(project_path) {
-                    return Some(plugin.as_ref());
-                }
-            }
-        }
-        None
-    }
-
-    /// List all registered plugins
-    pub fn list_plugins(&self) -> Vec<&PluginInfo> {
-        self.plugins.values().map(|p| p.info()).collect()
-    }
-
-    /// Remove a plugin
-    pub fn unregister_plugin(&mut self, name: &str) -> Result<()> {
-        if let Some(mut plugin) = self.plugins.remove(name) {
-            plugin.cleanup()?;
-            self.load_order.retain(|n| n != name);
-            Ok(())
-        } else {
-            Err(ChakraError::from(format!("Plugin '{}' not found", name)))
-        }
-    }
+/// Plugin capabilities
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginCapabilities {
+    pub compile_wasm: bool,
+    pub compile_webapp: bool,
+    pub live_reload: bool,
+    pub optimization: bool,
+    pub custom_targets: Vec<String>,
 }
 
-impl Default for PluginRegistry {
+impl Default for PluginCapabilities {
     fn default() -> Self {
-        Self::new()
+        Self {
+            compile_wasm: true,
+            compile_webapp: false,
+            live_reload: false,
+            optimization: false,
+            custom_targets: vec![],
+        }
     }
 }
 
-/// Plugin manager for high-level plugin operations
+/// Plugin manager for handling all available plugins
 pub struct PluginManager {
-    /// Plugin registry
-    registry: PluginRegistry,
-    /// Configuration
-    config: config::PluginConfig,
+    plugins: Vec<Box<dyn Plugin>>,
 }
 
 impl PluginManager {
-    /// Create a new plugin manager
-    pub fn new() -> Result<Self> {
-        let config = config::PluginConfig::load()?;
-        let mut manager = Self {
-            registry: PluginRegistry::new(),
-            config,
-        };
+    /// Create a new plugin manager with default builtin plugins
+    pub fn new() -> crate::error::Result<Self> {
+        // Register all builtin plugins
+        let plugins: Vec<Box<dyn Plugin>> = vec![
+            Box::new(languages::rust_plugin::RustPlugin::new()),
+            Box::new(languages::go_plugin::GoPlugin::new()),
+            Box::new(languages::c_plugin::CPlugin::new()),
+            Box::new(languages::assemblyscript_plugin::AssemblyScriptPlugin::new()),
+            Box::new(languages::python_plugin::PythonPlugin::new()),
+        ];
 
-        // Load built-in plugins
-        manager.load_builtin_plugins()?;
-
-        // Load external plugins
-        manager.load_external_plugins()?;
-
-        Ok(manager)
+        Ok(Self { plugins })
     }
 
-    /// Get the plugin registry
-    pub fn registry(&self) -> &PluginRegistry {
-        &self.registry
-    }
-
-    /// Get mutable access to the plugin registry
+    /// Get all available plugins
     #[allow(dead_code)]
-    pub fn registry_mut(&mut self) -> &mut PluginRegistry {
-        &mut self.registry
+    pub fn get_plugins(&self) -> &[Box<dyn Plugin>] {
+        &self.plugins
     }
 
-    /// Get the configuration
-    #[allow(dead_code)]
-    pub fn config(&self) -> &config::PluginConfig {
-        &self.config
-    }
-
-    /// Load all built-in plugins
-    fn load_builtin_plugins(&mut self) -> Result<()> {
-        // Load built-in plugins (will be implemented in Stage 2)
-        builtin::load_all_builtin_plugins(&mut self.registry)?;
-        Ok(())
-    }
-
-    /// Load all external plugins
-    fn load_external_plugins(&mut self) -> Result<()> {
-        // Collect plugin configs to avoid borrowing issues
-        let plugin_configs = self.config.external_plugins.to_vec();
-
-        for plugin_config in plugin_configs {
-            if plugin_config.enabled {
-                match external::load_external_plugin(&plugin_config) {
-                    Ok(plugin) => {
-                        println!("Loaded external plugin: {}", plugin.info().name);
-                        if let Err(e) = self.registry.register_plugin(plugin) {
-                            eprintln!("Failed to register external plugin: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Failed to load external plugin {}: {}",
-                            plugin_config.name, e
-                        );
-                    }
-                }
-            }
-        }
-
-        // Save config after loading all plugins
-        self.config.save()?;
-        Ok(())
-    }
-
-    /// Install an external plugin
-    pub fn install_plugin(&mut self, source: PluginSource) -> Result<()> {
-        let plugin = external::install_plugin(source)?;
-        let plugin_name = plugin.info().name.clone();
-
-        // Update configuration
-        let external_config = external::ExternalPluginConfig {
-            name: plugin_name.clone(),
-            source: plugin.info().source.clone().unwrap(),
-            enabled: true,
-            config: HashMap::new(),
-        };
-
-        self.config.external_plugins.push(external_config);
-        self.config.save()?;
-
-        // Register the plugin
-        self.registry.register_plugin(plugin)?;
-
-        println!("Successfully installed plugin: {}", plugin_name);
-        Ok(())
-    }
-
-    /// Uninstall an external plugin
-    pub fn uninstall_plugin(&mut self, name: &str) -> Result<()> {
-        // Check if it's a built-in plugin
-        if let Some(plugin) = self.registry.get_plugin(name) {
-            if plugin.info().plugin_type == PluginType::Builtin {
-                return Err(ChakraError::from(format!(
-                    "Cannot uninstall built-in plugin: {}",
-                    name
-                )));
-            }
-        }
-
-        // Remove from registry
-        self.registry.unregister_plugin(name)?;
-
-        // Remove from configuration
-        self.config.external_plugins.retain(|p| p.name != name);
-        self.config.save()?;
-
-        // Clean up plugin files
-        external::uninstall_plugin(name)?;
-
-        println!("Successfully uninstalled plugin: {}", name);
-        Ok(())
-    }
-
-    /// List all plugins
-    pub fn list_plugins(&self) -> Vec<&PluginInfo> {
-        self.registry.list_plugins()
-    }
-
-    /// Find the best plugin for a project
+    // TODO: Remove this in future
     #[allow(dead_code)]
     pub fn find_plugin_for_project(&self, project_path: &str) -> Option<&dyn Plugin> {
-        self.registry.find_plugin_for_project(project_path)
+        self.plugins
+            .iter()
+            .find(|plugin| plugin.can_handle_project(project_path))
+            .map(|boxed| boxed.as_ref())
     }
 
-    /// Enable/disable a plugin
-    pub fn set_plugin_enabled(&mut self, name: &str, enabled: bool) -> Result<()> {
-        // Clone the plugin configs to avoid borrowing issues
-        let mut plugin_configs = self.config.external_plugins.clone();
-        let mut found = false;
+    /// Get a plugin by name
+    pub fn get_plugin_by_name(&self, name: &str) -> Option<&dyn Plugin> {
+        self.plugins
+            .iter()
+            .find(|plugin| plugin.info().name == name)
+            .map(|boxed| boxed.as_ref())
+    }
 
-        // Update the specific plugin config
-        for plugin_config in &mut plugin_configs {
-            if plugin_config.name == name {
-                plugin_config.enabled = enabled;
-                found = true;
+    /// Add an external plugin
+    #[allow(dead_code)]
+    pub fn add_plugin(&mut self, plugin: Box<dyn Plugin>) {
+        self.plugins.push(plugin);
+    }
 
-                if !enabled {
-                    self.registry.unregister_plugin(name)?;
-                } else {
-                    // Reload the plugin
-                    let plugin = external::load_external_plugin(plugin_config)?;
-                    self.registry.register_plugin(plugin)?;
-                }
-                break;
+    /// List all plugin names and descriptions
+    pub fn list_plugins(&self) -> Vec<&PluginInfo> {
+        self.plugins.iter().map(|plugin| plugin.info()).collect()
+    }
+
+    /// Get detailed information about a specific plugin
+    pub fn get_plugin_info(&self, name: &str) -> Option<&PluginInfo> {
+        self.get_plugin_by_name(name).map(|plugin| plugin.info())
+    }
+
+    /// Check dependencies for all plugins
+    #[allow(dead_code)]
+    pub fn check_all_dependencies(&self) -> Vec<(String, Vec<String>)> {
+        self.plugins
+            .iter()
+            .map(|plugin| {
+                let info = plugin.info();
+                let builder = plugin.get_builder();
+                let missing = builder.check_dependencies();
+                (info.name.clone(), missing)
+            })
+            .filter(|(_, missing)| !missing.is_empty())
+            .collect()
+    }
+
+    /// Check dependencies for a specific plugin
+    #[allow(dead_code)]
+    pub fn check_plugin_dependencies(&self, plugin_name: &str) -> Option<Vec<String>> {
+        self.get_plugin_by_name(plugin_name)
+            .map(|plugin| plugin.get_builder().check_dependencies())
+    }
+
+    /// Get all plugins that support web applications
+    #[allow(dead_code)]
+    pub fn get_webapp_plugins(&self) -> Vec<&dyn Plugin> {
+        self.plugins
+            .iter()
+            .filter(|plugin| plugin.info().capabilities.compile_webapp)
+            .map(|boxed| boxed.as_ref())
+            .collect()
+    }
+
+    /// Get all plugins that support optimization
+    #[allow(dead_code)]
+    pub fn get_optimization_plugins(&self) -> Vec<&dyn Plugin> {
+        self.plugins
+            .iter()
+            .filter(|plugin| plugin.info().capabilities.optimization)
+            .map(|boxed| boxed.as_ref())
+            .collect()
+    }
+
+    /// Get plugins that can handle a specific file extension
+    #[allow(dead_code)]
+    pub fn get_plugins_for_extension(&self, extension: &str) -> Vec<&dyn Plugin> {
+        self.plugins
+            .iter()
+            .filter(|plugin| plugin.info().extensions.iter().any(|ext| ext == extension))
+            .map(|boxed| boxed.as_ref())
+            .collect()
+    }
+
+    /// Get the number of available plugins
+    #[allow(dead_code)]
+    pub fn plugin_count(&self) -> usize {
+        self.plugins.len()
+    }
+
+    /// Get plugin stats
+    #[allow(dead_code)]
+    pub fn get_plugin_stats(&self) -> PluginStats {
+        let total = self.plugins.len();
+        let webapp_count = self.get_webapp_plugins().len();
+        let optimization_count = self.get_optimization_plugins().len();
+        let live_reload_count = self
+            .plugins
+            .iter()
+            .filter(|plugin| plugin.info().capabilities.live_reload)
+            .count();
+
+        let mut extension_count = std::collections::HashMap::new();
+        for plugin in &self.plugins {
+            for ext in &plugin.info().extensions {
+                *extension_count.entry(ext.clone()).or_insert(0) += 1;
             }
         }
 
-        if found {
-            // Update the config with the modified versions
-            self.config.external_plugins = plugin_configs;
-            self.config.save()?;
-            Ok(())
-        } else {
-            Err(ChakraError::from(format!("Plugin '{}' not found", name)))
+        PluginStats {
+            total_plugins: total,
+            webapp_plugins: webapp_count,
+            optimization_plugins: optimization_count,
+            live_reload_plugins: live_reload_count,
+            supported_extensions: extension_count.keys().cloned().collect(),
         }
+    }
+
+    /// Validate that all required plugins are available
+    #[allow(dead_code)]
+    pub fn validate_plugin_availability(&self) -> crate::error::Result<()> {
+        let required_plugins = ["rust", "go", "c", "assemblyscript", "python"];
+        let missing: Vec<_> = required_plugins
+            .iter()
+            .filter(|name| self.get_plugin_by_name(name).is_none())
+            .collect();
+
+        if !missing.is_empty() {
+            let missing_names: Vec<&str> = missing.into_iter().cloned().collect();
+            return Err(crate::error::ChakraError::from(format!(
+                "Missing required plugins: {}",
+                missing_names.join(", ")
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Get all plugins that support live reload
+    #[allow(dead_code)]
+    pub fn get_live_reload_plugins(&self) -> Vec<&dyn Plugin> {
+        self.plugins
+            .iter()
+            .filter(|plugin| plugin.info().capabilities.live_reload)
+            .map(|boxed| boxed.as_ref())
+            .collect()
+    }
+
+    /// Find the best plugin for a project based on scoring
+    #[allow(dead_code)]
+    pub fn find_best_plugin_for_project(&self, project_path: &str) -> Option<(&dyn Plugin, f32)> {
+        let mut best_plugin = None;
+        let mut best_score = 0.0;
+
+        for plugin in &self.plugins {
+            if plugin.can_handle_project(project_path) {
+                let score = self.calculate_plugin_score(plugin.as_ref(), project_path);
+                if score > best_score {
+                    best_score = score;
+                    best_plugin = Some(plugin.as_ref());
+                }
+            }
+        }
+
+        best_plugin.map(|plugin| (plugin, best_score))
+    }
+
+    /// Calculate a score for how well a plugin matches a project
+    fn calculate_plugin_score(&self, plugin: &dyn Plugin, project_path: &str) -> f32 {
+        let info = plugin.info();
+        let mut score = 1.0; // Base score for can_handle_project returning true
+
+        // Check for entry files
+        for entry_file in &info.entry_files {
+            let entry_path = std::path::Path::new(project_path).join(entry_file);
+            if entry_path.exists() {
+                score += 2.0;
+            }
+        }
+
+        // Check for file extensions in the project
+        if let Ok(entries) = std::fs::read_dir(project_path) {
+            for entry in entries.flatten() {
+                if let Some(extension) = entry.path().extension() {
+                    let ext_str = extension.to_string_lossy().to_lowercase();
+                    if info.extensions.contains(&ext_str) {
+                        score += 0.5;
+                    }
+                }
+            }
+        }
+
+        score
+    }
+
+    /// Install a plugin
+    pub fn install_plugin(&mut self, source: PluginSource) -> crate::error::Result<()> {
+        // TODO: Implement external plugin installation
+        let _plugin = external::install_plugin(source)?;
+        // self.add_plugin(plugin);
+        Ok(())
+    }
+
+    /// Uninstall a plugin
+    pub fn uninstall_plugin(&mut self, name: &str) -> crate::error::Result<()> {
+        // TODO: Implement external plugin uninstallation
+        external::uninstall_plugin(name)?;
+        self.plugins.retain(|p| p.info().name != name);
+        Ok(())
     }
 
     /// Update a plugin
-    pub fn update_plugin(&mut self, name: &str) -> Result<()> {
-        // Find the plugin config
-        let plugin_config = self
-            .config
-            .external_plugins
-            .iter()
-            .find(|p| p.name == name)
-            .ok_or_else(|| ChakraError::from(format!("Plugin '{}' not found", name)))?
-            .clone();
-
-        // Uninstall current version
-        self.registry.unregister_plugin(name)?;
-
-        // Reinstall latest version
-        let plugin = external::install_plugin(plugin_config.source)?;
-        self.registry.register_plugin(plugin)?;
-
-        println!("Successfully updated plugin: {}", name);
+    pub fn update_plugin(&mut self, _name: &str) -> crate::error::Result<()> {
+        // TODO: Implement external plugin updates
         Ok(())
+    }
+
+    /// Enable or disable a plugin
+    pub fn set_plugin_enabled(&mut self, _name: &str, _enabled: bool) -> crate::error::Result<()> {
+        // TODO: Implement plugin enable/disable
+        Ok(())
+    }
+
+    /// Get the plugin registry
+    pub fn registry(&self) -> PluginRegistry {
+        PluginRegistry::new()
     }
 }
 
 impl Default for PluginManager {
     fn default() -> Self {
-        Self::new().expect("Failed to create plugin manager")
+        Self::new().unwrap_or_else(|_| Self {
+            plugins: Vec::new(),
+        })
+    }
+}
+
+/// Available plugins stats
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct PluginStats {
+    pub total_plugins: usize,
+    pub webapp_plugins: usize,
+    pub optimization_plugins: usize,
+    pub live_reload_plugins: usize,
+    pub supported_extensions: Vec<String>,
+}
+
+/// Simplified plugin registry for manager compatibility
+pub struct PluginRegistry;
+
+impl PluginRegistry {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn get_plugin(&self, name: &str) -> Option<&PluginInfo> {
+        // TODO: Implement registry lookup
+        // For now, return None as external plugins aren't fully implemented
+        let _ = name;
+        None
     }
 }

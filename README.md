@@ -4,7 +4,7 @@
 
 ![Chakra Logo](./assets/banner.png)
 
-> Chakra is a powerful WebAssembly (WASM) runtime CLI tool with full WASI support.
+> Chakra is a powerful WebAssembly (WASM) runtime CLI tool with full WASI support and modular plugin architecture.
 
 ## ✨ Features
 
@@ -12,8 +12,9 @@
 - 🌐 **Browser Integration** - Automatically opens your default browser with interactive console and debugging tools
 - 💻 **Interactive Console** - View execution results and logs in a beautiful web interface
 - 🔍 **Smart Detection** - Automatically identifies entry points and module types (standard WASM vs wasm-bindgen)
-- 📦 **Multi-Language Support** - Compile Rust, Go, C/C++, and AssemblyScript projects to WASM
-- 🔧 **Built-in Compilation** - Integrated build system
+- 🔌 **Plugin Architecture** - Modular language support through a flexible plugin system
+- 📦 **Multi-Language Support** - Built-in plugins for Rust, Go, C/C++, AssemblyScript, and Python
+- 🔧 **Built-in Compilation** - Integrated build system with plugin-based compilation
 - 🔍 **WASM Inspection** - Verify and analyze WASM files with detailed module information and binary analysis
 - 👀 **Live Reload** - Watch mode for automatic recompilation and browser refresh during development
 - 🌟 **Full WASI Support** - Complete WebAssembly System Interface implementation with virtual filesystem
@@ -70,12 +71,25 @@ chakra run ./my-project --port 3000 --language rust
 
 #### Compilation
 
-Compile a project to WebAssembly:
+Compile a project to WebAssembly using the appropriate plugin:
 
 ```sh
 chakra compile ./my-project
 chakra compile ./my-project --output ./build --optimization release
 chakra compile ./my-project --optimization size --verbose
+```
+
+#### Plugin Management
+
+List available plugins and check dependencies:
+
+```sh
+# List all available plugins
+chakra plugins list
+
+# Get detailed plugin information
+chakra plugins info rust
+chakra plugins info go
 ```
 
 #### Verification & Inspection
@@ -112,21 +126,41 @@ Stop any running Chakra server:
 chakra stop
 ```
 
-## 🛠️ Supported Languages & Frameworks
+## 🔌 Plugin Architecture
 
-### Programming Languages
+Chakra uses a modular plugin system where each programming language is supported through dedicated plugins. This architecture provides:
 
-| Language | Status | Compiler | Notes |
-|----------|--------|----------|-------|
-| ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white) | ✅ Full Support | `cargo` + `rustc` | Standard WASM, wasm-bindgen, and web apps |
-| ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white) | ✅ Full Support | `tinygo` | Lightweight Go runtime |
-| ![C](https://img.shields.io/badge/c-%2300599C.svg?style=for-the-badge&logo=c&logoColor=white) ![C++](https://img.shields.io/badge/c++-%2300599C.svg?style=for-the-badge&logo=c%2B%2B&logoColor=white) | ✅ Full Support | `emscripten` | Complete toolchain support |
-| ![AssemblyScript](https://img.shields.io/badge/assembly%20script-%23000000.svg?style=for-the-badge&logo=assemblyscript&logoColor=white) | ✅ Full Support | `asc` | TypeScript-like syntax |
-| ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54) | 🚧 Coming Soon | `py2wasm` / `waspy` | In development |
+- **Extensibility** - Easy to add new language support
+- **Maintainability** - Each plugin is self-contained
+- **Consistency** - Unified interface across all languages
+- **Flexibility** - Plugin-specific optimizations and features
 
-### Web Frameworks (Rust)
+### Built-in Plugins
 
-Chakra automatically detects and supports Rust web frameworks with specialized web application mode:
+| Plugin | Status | Compiler/Runtime | Capabilities |
+|--------|--------|------------------|--------------|
+| ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white) | ✅ Full Support | `cargo` + `rustc` | Standard WASM, wasm-bindgen, web apps, optimization |
+| ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white) | ✅ Full Support | `tinygo` | Lightweight runtime, optimization |
+| ![C](https://img.shields.io/badge/c-%2300599C.svg?style=for-the-badge&logo=c&logoColor=white) ![C++](https://img.shields.io/badge/c++-%2300599C.svg?style=for-the-badge&logo=c%2B%2B&logoColor=white) | ✅ Full Support | `emscripten` | Complete toolchain, Makefile support |
+| ![AssemblyScript](https://img.shields.io/badge/assembly%20script-%23000000.svg?style=for-the-badge&logo=assemblyscript&logoColor=white) | ✅ Full Support | `asc` + npm/yarn | TypeScript-like syntax, optimization |
+| ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54) | ✅ Beta Support | `pyodide` | Runtime integration, bundle creation |
+
+### Plugin Capabilities
+
+Each plugin provides specific capabilities:
+
+| Feature | Rust | Go | C/C++ | AssemblyScript | Python |
+|---------|------|----|----|---------------|--------|
+| **Compile to WASM** | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **Web Applications** | ✅ | ❌ | ✅ | ❌ | ❌ |
+| **Live Reload** | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **Optimization** | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **Custom Targets** | Multiple | wasm | web | wasm | TBD |
+
+
+### Web Frameworks (Rust Plugin)
+
+The Rust plugin automatically detects and supports web frameworks with specialized web application mode:
 
 - **Yew** - Modern Rust / Wasm framework
 - **Leptos** - Full-stack, compile-time optimal Rust framework  
@@ -138,6 +172,13 @@ Chakra automatically detects and supports Rust web frameworks with specialized w
 
 ## 🌟 How It Works
 
+### Plugin-Based Compilation
+
+1. **Project Detection** - Chakra analyzes the project and selects the appropriate plugin
+2. **Dependency Verification** - The plugin checks for required tools and dependencies
+3. **Compilation** - Plugin-specific build process with optimizations
+4. **Output Generation** - WASM file creation with plugin-specific features
+
 ### For WASM Files
 
 1. Chakra server with WASI support starts running
@@ -147,34 +188,15 @@ Chakra automatically detects and supports Rust web frameworks with specialized w
 
 ### For Projects
 
-1. **Language Detection** - Automatically identifies project type (Rust, Go, C, AssemblyScript)
-2. **Dependency Checking** - Verifies required tools are installed
-3. **Compilation** - Builds optimized WASM with proper flags and optimizations
+1. **Plugin Selection** - Automatically identifies and loads the appropriate language plugin
+2. **Dependency Checking** - Plugin verifies required tools are installed
+3. **Compilation** - Plugin builds optimized WASM with proper flags and optimizations
 4. **Serving** - Runs development server with live reload
-5. **Experimental Web App Mode** - Special handling for web applications with framework detection
+5. **Framework Detection** - Special handling for web applications (Rust plugin)
 
 ## 🔍 WASI Support
 
-Chakra includes a complete WebAssembly System Interface (WASI) implementation in the browser:
-
-### Supported Features ✅
-
-- **Virtual Filesystem** - Complete file system with directories, file creation, and manipulation
-- **Standard I/O** - stdout, stderr with console integration and real-time display
-- **Environment Variables** - Full environment variable support
-- **Command Arguments** - Access to command-line arguments
-- **File Operations** - Read, write, seek, and comprehensive file management
-- **Random Number Generation** - Secure random numbers via Web Crypto API
-- **Time Functions** - System time and high-precision timers
-- **Pre-opened Directories** - Filesystem sandboxing and security
-- **Interactive Console** - Real-time output and error display
-- **File Explorer** - Browse and edit virtual filesystem contents
-
-### Coming Soon 🚧
-
-- **Network Sockets** - TCP/UDP socket support for networking
-- **Threading** - Multi-threading and shared memory support
-- **Advanced I/O** - Async I/O operations and streaming
+Chakra intends to provide support for complete WebAssembly System Interface (WASI) implementation in the browser. It's a work in progress. Some features might work, but it's highly experimental.
 
 ## 🎯 Use Cases
 
@@ -184,11 +206,21 @@ Chakra includes a complete WebAssembly System Interface (WASI) implementation in
 # Quick WASM testing with instant feedback
 chakra test.wasm
 
-# Project development with live reload
+# Project development with live reload (plugin auto-detected)
 chakra run ./my-rust-project --watch
 
-# Build and optimize for production
+# Build and optimize for production (plugin-specific optimizations)
 chakra compile ./my-project --optimization size
+```
+
+### Plugin Management
+
+```sh
+# List available plugins and their capabilities
+chakra plugins list
+
+# Get detailed information about a specific plugin
+chakra plugins info rust
 ```
 
 ### Learning & Education
@@ -199,27 +231,37 @@ chakra inspect ./complex-module.wasm
 
 # Verify WASM compliance and format
 chakra verify ./student-submission.wasm --detailed
+
+# See which plugin would handle a project
+chakra run ./unknown-project --dry-run
 ```
 
 ### Web Application Development
 
 ```sh
-# Rust web app with hot reload
+# Rust web app with hot reload (Rust plugin auto-detects frameworks)
 chakra run ./my-yew-app --watch
 
 # Multi-framework support
 chakra run ./leptos-project
 chakra run ./dioxus-app
+
+# Python web app with Pyodide
+chakra run ./my-python-web-app
 ```
 
 ### Performance Analysis
 
 ```sh
-# Size-optimized builds
+# Size-optimized builds with plugin-specific optimizations
 chakra compile ./my-project --optimization size
 
 # Debug builds with full symbols
 chakra compile ./my-project --optimization debug --verbose
+
+# Compare different plugin optimizations
+chakra compile ./rust-project --optimization size
+chakra compile ./go-project --optimization size
 ```
 
 ## 🔧 Configuration
@@ -232,60 +274,52 @@ chakra compile ./my-project --optimization debug --verbose
 - `CHAKRA_DEBUG` - Enable debug output
 - `RUST_BACKTRACE` - Show stack traces for errors
 
-### Project Detection
+### Plugin Detection
 
-Chakra automatically detects project types based on files:
+Chakra automatically selects plugins based on project structure:
 
-- **Rust**: `Cargo.toml` present
-- **Go**: `go.mod` or `.go` files present
-- **C/C++**: `.c`, `.cpp`, or `.h` files present
-- **AssemblyScript**: `package.json` with AssemblyScript dependency
-- **Python**: 🚧 Coming Soon
+- **Rust Plugin**: `Cargo.toml` present
+- **Go Plugin**: `go.mod` or `.go` files present
+- **C/C++ Plugin**: `.c`, `.cpp`, `.h` files, or `Makefile` present
+- **AssemblyScript Plugin**: `package.json` with AssemblyScript dependency or `assembly/` directory
+- **Python Plugin**: `.py` files or `requirements.txt` present
 
 ### Optimization Levels
 
+Plugin-specific optimization levels:
+
 - **`debug`** - Fast compilation, full symbols, no optimization
 - **`release`** - Optimized for performance (default)
-- **`size`** - Optimized for minimal file size
-
-## 🚀 Examples
-
-### Rust Examples
-
-```sh
-# Standard Rust WASM
-cargo new --bin my-wasm-app
-cd my-wasm-app
-# Add your Rust code
-chakra run .
-
-# Rust web application with live reload
-cargo new --bin my-web-app
-cd my-web-app
-# Add Yew/Leptos dependencies to Cargo.toml
-chakra run . --watch
-```
-
-### C Examples
-
-```sh
-# Simple C program
-echo 'int main() { printf("Hello WASI!"); return 42; }' > hello.c
-emcc hello.c -o hello.wasm
-chakra hello.wasm
-```
-
-### Go Examples
-
-```sh
-# TinyGo project
-echo 'package main
-import "fmt"
-func main() { fmt.Println("Hello from TinyGo!") }' > main.go
-chakra run .
-```
+- **`size`** - Optimized for minimal file size (plugin-dependent implementation)
 
 ## 🔍 Troubleshooting
+
+### Plugin-Related Issues
+
+**"No plugin found for project"**
+```sh
+# Check what files are in your project
+ls -la
+# Ensure proper entry files exist (Cargo.toml, go.mod, etc.)
+# Use chakra plugins list to see available plugins
+```
+🚨 Open an [issue](https://github.com/anistark/chakra/issues) and let us know about it.
+
+**"Plugin dependencies missing"**
+```sh
+# Install missing tools for specific plugins:
+rustup target add wasm32-unknown-unknown  # Rust plugin
+# Install emcc for C/C++ plugin
+# Install tinygo for Go plugin  
+# Install asc for AssemblyScript plugin
+```
+
+**"Wrong plugin selected"**
+```sh
+# Force a specific plugin
+chakra --language rust
+chakra --language go
+```
 
 ### Common Issues
 
@@ -298,23 +332,19 @@ chakra --port 3001  # Use different port
 **"No entry point found"**
 - Ensure your WASM has `main()`, `_start()`, or exported functions
 - Use `chakra inspect` to see available exports
-
-**"Missing compilation tools"**
-```sh
-# Install required compilers
-rustup target add wasm32-unknown-unknown  # For Rust
-# Install emcc for C/C++
-# Install tinygo for Go
-chakra compile --help  # See tool requirements
-```
+- Check plugin-specific entry file requirements
 
 **"wasm-bindgen module detected"**
-- Use the `.js` file instead of the `.wasm` file directly
+- Use the `.js` file instead of the `.wasm` file directly (Rust plugin)
 - Run `chakra project-dir` instead of individual files
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines.
+We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines, including how to add new plugins and extend existing ones.
+
+### Adding New Plugins
+
+The modular architecture makes it easy to add support for new languages. See the [plugin development guide](./CONTRIBUTING.md#adding-new-plugins) for details.
 
 ## 📄 License
 

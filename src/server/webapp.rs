@@ -28,9 +28,8 @@ pub fn run_webapp(path: &str, port: u16, watch_mode: bool) -> Result<(), String>
         println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mEnabled\x1b[0m");
     }
 
-    // Check if we're already running a server on this port
+    // Check if server already running on this port
     if !utils::is_port_available(port) {
-        // Try to stop any existing server
         if super::is_server_running() {
             match super::stop_existing_server() {
                 Ok(_) => println!("  💀 \x1b[1;34mStopped existing server\x1b[0m"),
@@ -48,12 +47,8 @@ pub fn run_webapp(path: &str, port: u16, watch_mode: bool) -> Result<(), String>
             return Err(format!("Port {} is already in use", port));
         }
     }
-
-    // Create a temporary directory for the build output
     let temp_dir = std::env::temp_dir().join("chakra_webapp_temp");
     let temp_output_dir = temp_dir.to_str().unwrap_or("/tmp").to_string();
-
-    // Create temp directory if it doesn't exist
     if !temp_dir.exists() {
         if let Err(e) = std::fs::create_dir_all(&temp_dir) {
             println!(
@@ -70,8 +65,6 @@ pub fn run_webapp(path: &str, port: u16, watch_mode: bool) -> Result<(), String>
         temp_output_dir
     );
     println!("\x1b[1;34m╰\x1b[0m\n");
-
-    // Build the web application
     println!("Building Rust web application...");
     let app_name = get_app_name(path);
 
@@ -94,13 +87,8 @@ pub fn run_webapp(path: &str, port: u16, watch_mode: bool) -> Result<(), String>
             return Err(format!("Build failed: {}", e));
         }
     };
-
-    // Generate the web app HTML
     let html = generate_webapp_html(&app_name, &js_entrypoint);
-
-    // Run the server
     run_webapp_server(path, &temp_output_dir, port, &html, watch_mode)?;
-
     Ok(())
 }
 
@@ -175,11 +163,11 @@ fn run_webapp_server_with_watch(
     port: u16,
     html: &str,
 ) -> Result<(), String> {
-    // Create channels for communication
+    // Channels for communication
     let (tx, rx) = std::sync::mpsc::channel();
     let reload_flag = Arc::new(AtomicBool::new(false));
 
-    // Clone values for server thread
+    // Need to clone values for server thread
     let html_content = html.to_string();
     let output_path = output_dir.to_string();
     let reload_flag_clone = Arc::clone(&reload_flag);
@@ -192,14 +180,12 @@ fn run_webapp_server_with_watch(
             // Track connected clients for live reload
             let mut clients_to_reload = Vec::new();
 
-            // Handle requests
             for request in server.incoming_requests() {
                 // Check for shutdown signal
                 if rx.try_recv().is_ok() {
                     break;
                 }
 
-                // Handle the request
                 handler::handle_webapp_request(
                     request,
                     &html_content,
@@ -272,7 +258,6 @@ fn run_webapp_server_without_watch(html: &str, output_dir: &str, port: u16) -> R
     // Create a reload flag that will never be set in non-watch mode
     let reload_flag = Arc::new(AtomicBool::new(false));
 
-    // Handle requests
     for request in server.incoming_requests() {
         handler::handle_webapp_request(
             request,

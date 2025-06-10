@@ -14,10 +14,8 @@ pub fn handle_run_command(
     let (project_path, validated_port) =
         CommandValidator::validate_run_args(path, positional_path, port)?;
 
-    // Print initial status
     println!("\n🚀 \x1b[1;36mInitializing Chakra...\x1b[0m");
 
-    // Detect what we're running and show preview
     let path_obj = std::path::Path::new(&project_path);
 
     if path_obj.is_file() {
@@ -26,7 +24,6 @@ pub fn handle_run_command(
                 Some("wasm") => {
                     println!("📦 \x1b[1;34mDetected:\x1b[0m WebAssembly file");
 
-                    // Quick preview without full analysis
                     if let Ok(metadata) = std::fs::metadata(&project_path) {
                         let size = CommandExecutor::format_file_size(metadata.len());
                         println!("💾 \x1b[1;34mSize:\x1b[0m {}", size);
@@ -43,7 +40,6 @@ pub fn handle_run_command(
     } else if path_obj.is_dir() {
         println!("📁 \x1b[1;34mDetected:\x1b[0m Project directory");
 
-        // Quick language detection
         let language = crate::compiler::detect_project_language(&project_path);
         let language_icon = match language {
             crate::compiler::ProjectLanguage::Rust => "🦀",
@@ -72,10 +68,9 @@ pub fn handle_run_command(
         println!("❌ \x1b[1;31mPath not found:\x1b[0m {}", project_path);
     }
 
-    // Add a small delay for user to see the preview
+    // TODO: Remove delay when server is ready
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    // Run the actual server with full analysis
     server::run_project(&project_path, validated_port, language.clone(), watch)?;
     Ok(())
 }

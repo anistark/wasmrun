@@ -123,15 +123,11 @@ impl ServerInfo {
         })
     }
 
-    /// Print comprehensive server startup information
+    /// Print comprehensive server startup details
     pub fn print_server_startup(&self) {
-        // Clear screen for better presentation
         print!("\x1b[2J\x1b[H");
-
-        // Print the main header
         self.print_header();
 
-        // Print content-specific analysis
         match &self.content_type {
             ContentType::WasmFile(analysis) => {
                 analysis.print_analysis();
@@ -278,11 +274,6 @@ impl ServerInfo {
         } else {
             println!("✅ \x1b[1;32mBrowser opened successfully!\x1b[0m");
         }
-
-        // Add some breathing room before server logs
-        // println!("\n\x1b[1;34m" + "─".repeat(67).as_str() + "\x1b[0m");
-        // println!("📝 \x1b[1;36mServer logs will appear below:\x1b[0m");
-        // println!("\x1b[1;34m" + "─".repeat(67).as_str() + "\x1b[0m\n");
     }
 }
 
@@ -290,7 +281,6 @@ impl ServerInfo {
 pub struct ServerUtils;
 
 impl ServerUtils {
-    /// Get comprehensive file information for display
     #[allow(dead_code)]
     pub fn get_file_info(path: &str) -> Result<FileInfo> {
         let path_obj = Path::new(path);
@@ -317,7 +307,7 @@ impl ServerUtils {
         })
     }
 
-    /// Check if a port is available and suggest alternatives if not
+    /// Check if a port is available
     pub fn check_port_availability(port: u16) -> PortStatus {
         if is_port_available(port) {
             PortStatus::Available
@@ -374,7 +364,7 @@ pub enum PortStatus {
     Unavailable { alternative: Option<u16> },
 }
 
-/// Legacy function for backward compatibility
+/// Get Server Info
 pub fn print_server_info(
     url: &str,
     port: u16,
@@ -383,11 +373,10 @@ pub fn print_server_info(
     absolute_path: &str,
     watch_mode: bool,
 ) {
-    // Server info and fall back to basic if needed
     if let Ok(server_info) = ServerInfo::for_wasm_file(absolute_path, port, watch_mode) {
         server_info.print_server_startup();
     } else {
-        // Fallback to basic output if analysis fails
+        // Basic output if analysis fails
         print_basic_server_info(
             url,
             port,
@@ -399,7 +388,7 @@ pub fn print_server_info(
     }
 }
 
-/// Basic server info printing (fallback)
+/// Basic server info printing
 fn print_basic_server_info(
     url: &str,
     port: u16,
@@ -439,12 +428,4 @@ fn print_basic_server_info(
     println!("\n  \x1b[0;90mPress Ctrl+C to stop the server\x1b[0m");
     println!("\x1b[1;34m╰\x1b[0m");
     println!("\n🌐 Opening browser...");
-}
-
-/// Print an error message in a formatted box
-#[allow(dead_code)]
-pub fn print_error(message: String) {
-    eprintln!("\n\x1b[1;34m╭\x1b[0m");
-    eprintln!("  ❌ \x1b[1;31m{}\x1b[0m", message);
-    eprintln!("\x1b[1;34m╰\x1b[0m");
 }

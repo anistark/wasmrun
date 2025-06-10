@@ -48,7 +48,6 @@ pub fn handle_verify_command(
 
     print_verification_results(&wasm_path, &result, detailed);
 
-    // Return appropriate status based on verification result
     if !result.valid_magic {
         return Err(ChakraError::Wasm(WasmError::InvalidMagicBytes {
             path: wasm_path,
@@ -72,7 +71,6 @@ pub fn handle_inspect_command(
     let resolved_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
     println!("Resolved path: {:?}", resolved_path);
 
-    // Validate using CommandValidator for consistency
     let wasm_path = CommandValidator::validate_verify_args(path, positional_path)?;
 
     PathResolver::validate_wasm_file(&wasm_path)?;
@@ -88,19 +86,16 @@ pub fn handle_inspect_command(
 
 /// Verify a WebAssembly file
 pub fn verify_wasm(path: &str) -> std::result::Result<VerificationResult, String> {
-    // Check if the file exists
     if !Path::new(path).exists() {
         return Err(format!("File not found: {}", path));
     }
 
-    // Read file
     let wasm_bytes = fs::read(path).map_err(|e| format!("Error reading file: {}", e))?;
 
     if wasm_bytes.len() < 8 {
         return Err("File is too small to be a valid WASM module".to_string());
     }
 
-    // Check magic bytes
     let valid_magic = wasm_bytes.starts_with(&WASM_MAGIC_BYTES);
 
     if !valid_magic {
@@ -122,7 +117,6 @@ pub fn verify_wasm(path: &str) -> std::result::Result<VerificationResult, String
 
     let mut reader = Cursor::new(wasm_bytes.clone());
 
-    // Skip magic bytes and version (first 8 bytes)
     reader.set_position(8);
 
     let mut sections = Vec::new();
@@ -136,6 +130,7 @@ pub fn verify_wasm(path: &str) -> std::result::Result<VerificationResult, String
     let mut function_count = 0;
 
     // Section names
+    // TODO: Move to a constant or config
     let section_names = [
         "Custom",    // 0
         "Type",      // 1
@@ -152,27 +147,23 @@ pub fn verify_wasm(path: &str) -> std::result::Result<VerificationResult, String
         "DataCount", // 12
     ];
 
-    // Parse all WASM sections
     while reader.position() < wasm_bytes.len() as u64 {
         if let Ok(section_id) = read_leb128_u32(&mut reader) {
             let section_size = read_leb128_u32(&mut reader).unwrap_or(0);
             let section_start = reader.position();
 
-            // Get section name
             let section_name = if section_id < section_names.len() as u32 {
                 section_names[section_id as usize].to_string()
             } else {
                 format!("Unknown ({})", section_id)
             };
 
-            // Add section to list
             sections.push(WasmSection {
                 id: section_id,
                 size: section_size as usize,
                 name: section_name,
             });
 
-            // Parse section
             match section_id {
                 3 => {
                     // Function section
@@ -192,7 +183,6 @@ pub fn verify_wasm(path: &str) -> std::result::Result<VerificationResult, String
                     // Memory section
                     has_memory_section = true;
 
-                    // Read memory limits
                     if let Ok(memory_count) = read_leb128_u32(&mut reader) {
                         if memory_count > 0 {
                             if let Ok(flags) = reader.read_u8() {
@@ -483,7 +473,6 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
 }
 
 pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String> {
-    // Read file
     let wasm_bytes = fs::read(path).map_err(|e| format!("Error reading file: {}", e))?;
 
     println!("\n\x1b[1;34m╭\x1b[0m");
@@ -500,7 +489,6 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
         wasm_bytes.len()
     );
 
-    // Check magic bytes
     if wasm_bytes.len() < 8 {
         println!("  ❌ \x1b[1;31mFile too small to be a valid WASM module\x1b[0m");
         println!("\x1b[1;34m╰\x1b[0m");
@@ -521,7 +509,6 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
         return Err("Invalid magic bytes".to_string());
     }
 
-    // Check version
     let version = u32::from_le_bytes([wasm_bytes[4], wasm_bytes[5], wasm_bytes[6], wasm_bytes[7]]);
     println!(
         "  📊 \x1b[1;34mWASM version:\x1b[0m \x1b[1;33m{}\x1b[0m",
@@ -532,14 +519,14 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
         println!("  ⚠️ \x1b[1;33mUnexpected WASM version (expected 1)\x1b[0m");
     }
 
-    // Analyze sections
-    let mut _offset = 8; // Start after header
+    let mut _offset = 8;
     let _view = std::io::Cursor::new(&wasm_bytes);
 
     println!("\n  📋 \x1b[1;34mSection analysis:\x1b[0m");
     let mut section_count = 0;
 
     // Known section types
+    // TODO: Move to a constant or config and read from there.
     let section_names = [
         "Custom",
         "Type",
@@ -579,13 +566,10 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
             println!("  \x1b[1;36m{:2}.\x1b[0m \x1b[1;37m{:10}\x1b[0m ID: {:2}, Size: {:6} bytes, Offset: 0x{:08X}-0x{:08X}",
                 section_count, section_name, section_id, section_size, section_start_offset, section_end - 1);
 
-            // Special handling for memory section - check if it's around offset 128
             if section_start_offset <= 130 && section_end > 126 {
                 println!("     \x1b[1;31m⚠️  WARNING: This section contains offset 128 where errors commonly occur!\x1b[0m");
 
-                // For Memory sections, add extra detail
                 if section_id == 5 {
-                    // Memory section
                     println!("     \x1b[1;33mChecking Memory section details:\x1b[0m");
                     let current_pos = reader.position();
                     if section_size >= 1 && (current_pos as usize) < wasm_bytes.len() {
@@ -597,7 +581,7 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
                 }
             }
 
-            // Skip this section's data
+            // Skip. Revisit.
             reader.set_position((section_start + section_size as usize) as u64);
         } else {
             break;
@@ -615,7 +599,7 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
         println!("  ❌ \x1b[1;31mNo sections found in WASM file\x1b[0m");
     }
 
-    // Offer diagnostic advice
+    // Diagnostic advice.
     println!("\n  🔍 \x1b[1;34mPossible Issues:\x1b[0m");
     println!("     \x1b[0;37m• Sections in incorrect order (browsers require specific section ordering)\x1b[0m");
     println!("     \x1b[0;37m• Memory section with invalid configuration\x1b[0m");
@@ -680,22 +664,17 @@ fn resolve_and_validate_wasm_path(
     path: &Option<String>,
     positional_path: &Option<String>,
 ) -> Result<String> {
-    // First resolve the path
     let resolved_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
 
-    // Validate using CommandValidator for consistency
     CommandValidator::validate_verify_args(path, positional_path)?;
 
-    // Additional validation
     PathResolver::validate_wasm_file(&resolved_path)?;
 
-    // Check file size (warn if very large)
     match PathResolver::get_file_size_human(&resolved_path) {
         Ok(size) => {
             if let Ok(metadata) = std::fs::metadata(&resolved_path) {
                 let size_bytes = metadata.len();
                 if size_bytes > 100 * 1024 * 1024 {
-                    // 100MB
                     println!(
                         "⚠️  Warning: Large WASM file ({}) - verification may take time",
                         size

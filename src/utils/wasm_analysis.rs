@@ -47,7 +47,6 @@ impl std::fmt::Display for ModuleType {
 }
 
 impl WasmAnalysis {
-    /// Perform comprehensive analysis of a WASM file
     pub fn analyze(path: &str) -> Result<Self> {
         let path_obj = Path::new(path);
 
@@ -61,7 +60,7 @@ impl WasmAnalysis {
 
         let file_size = CommandExecutor::format_file_size(file_size_bytes);
 
-        // Perform verification analysis
+        // Verify wasm
         let verification = match verify_wasm(path) {
             Ok(result) => Some(result),
             Err(_) => None,
@@ -178,7 +177,7 @@ impl WasmAnalysis {
         );
     }
 
-    /// Get a brief one-line summary for compact display
+    /// Get summary of WASM Module
     pub fn get_summary(&self) -> String {
         if !self.is_valid {
             return format!("❌ Invalid WASM file ({})", self.file_size);
@@ -232,12 +231,11 @@ impl ProjectAnalysis {
         let is_web_app = language == crate::compiler::ProjectLanguage::Rust
             && crate::compiler::is_rust_web_application(path);
 
-        // Detect important files
         let mut entry_files = Vec::new();
         let mut build_files = Vec::new();
         let mut has_cargo_toml = false;
 
-        // Check for common files
+        // Common files
         let important_files = [
             ("Cargo.toml", true),
             ("package.json", true),
@@ -306,7 +304,6 @@ impl ProjectAnalysis {
             println!("\x1b[1;34m│\x1b[0m  🌐 \x1b[1;32mWeb Application Detected\x1b[0m                              \x1b[1;34m│\x1b[0m");
         }
 
-        // Show important files
         if !self.build_files.is_empty() {
             println!("\x1b[1;34m│\x1b[0m  🔧 \x1b[1;34mBuild Files:\x1b[0m \x1b[1;33m{:<45}\x1b[0m \x1b[1;34m│\x1b[0m", 
                      self.build_files.join(", "));

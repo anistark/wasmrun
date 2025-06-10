@@ -5,7 +5,7 @@ use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
 use std::path::Path;
 
-/// Rust WebAssembly plugin - handles both plugin management and building
+/// Rust WebAssembly plugin
 pub struct RustPlugin {
     info: PluginInfo,
 }
@@ -105,7 +105,7 @@ impl RustPlugin {
                 args.push("--release");
                 // TODO: Add size optimization flags
             }
-            OptimizationLevel::Debug => {} // Default debug build
+            OptimizationLevel::Debug => {}
         }
 
         // Execute cargo build
@@ -151,7 +151,7 @@ impl RustPlugin {
             });
         }
 
-        let wasm_file = &wasm_files[0]; // Take the first one
+        let wasm_file = &wasm_files[0];
         let output_path = CommandExecutor::copy_to_output(wasm_file, &config.output_dir, "Rust")?;
 
         Ok(BuildResult {
@@ -180,7 +180,7 @@ impl RustPlugin {
 
         match config.optimization_level {
             OptimizationLevel::Debug => args.push("--dev"),
-            OptimizationLevel::Release => {} // Default is release
+            OptimizationLevel::Release => {} // Default
             OptimizationLevel::Size => {
                 // TODO: Add size optimization flags for wasm-pack
             }
@@ -206,7 +206,7 @@ impl RustPlugin {
             });
         }
 
-        // Find generated files in pkg directory
+        // Generated files in pkg
         let pkg_dir = PathResolver::join_paths(&config.project_path, "pkg");
 
         let wasm_files =
@@ -230,7 +230,6 @@ impl RustPlugin {
             });
         }
 
-        // Find the main JS file (not .d.js files)
         let main_js_file = js_files
             .iter()
             .find(|path| !path.contains(".d.js"))
@@ -337,7 +336,7 @@ impl RustPlugin {
 
         match config.optimization_level {
             OptimizationLevel::Release => args.push("--release"),
-            OptimizationLevel::Debug => {} // Default debug build
+            OptimizationLevel::Debug => {} // Default
             OptimizationLevel::Size => {
                 args.push("--release");
                 // TODO: Add size optimization flags
@@ -370,7 +369,6 @@ impl RustPlugin {
             });
         }
 
-        // Find the main files
         let wasm_files =
             PathResolver::find_files_with_extension(&trunk_dist, "wasm").map_err(|e| {
                 CompilationError::BuildFailed {
@@ -467,7 +465,6 @@ impl Plugin for RustPlugin {
     }
 
     fn get_builder(&self) -> Box<dyn WasmBuilder> {
-        // Return a clone of self since we implement both traits
         Box::new(RustPlugin::new())
     }
 }
@@ -508,7 +505,7 @@ impl WasmBuilder for RustPlugin {
             }
         }
 
-        // Check for wasm-pack if this looks like a wasm-bindgen project
+        // Check for wasm-pack
         if self.uses_wasm_bindgen(&BuildConfig::default().project_path)
             && !CommandExecutor::is_tool_installed("wasm-pack")
         {
@@ -538,7 +535,7 @@ impl WasmBuilder for RustPlugin {
     }
 
     fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        // Check if this is a wasm-bindgen project
+        // Check if wasm-bindgen project
         if self.uses_wasm_bindgen(&config.project_path) {
             if self.is_rust_web_application(&config.project_path) {
                 self.build_web_application(config)
@@ -557,7 +554,6 @@ impl WasmBuilder for RustPlugin {
             config.project_path
         );
 
-        // Check dependencies first
         let missing_tools = self.check_dependencies();
         if !missing_tools.is_empty() {
             return Err(CompilationError::BuildToolNotFound {
@@ -569,7 +565,6 @@ impl WasmBuilder for RustPlugin {
         // Validate project structure
         self.validate_project(&config.project_path)?;
 
-        // Ensure output directory exists
         PathResolver::ensure_output_directory(&config.output_dir).map_err(|_| {
             CompilationError::OutputDirectoryCreationFailed {
                 path: config.output_dir.clone(),

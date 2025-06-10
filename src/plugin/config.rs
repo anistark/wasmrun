@@ -1,6 +1,4 @@
 //! Plugin configuration management
-//!
-//! Handles reading and writing the ~/.chakra configuration file in TOML format
 
 use crate::error::{ChakraError, Result};
 use crate::plugin::{external::ExternalPluginConfig, PluginSource};
@@ -9,10 +7,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-/// Main plugin configuration structure
+/// Plugin configuration defines the structure for managing Chakra's plugin settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginConfig {
-    /// Configuration version for future migrations
+    /// Configuration version
     pub version: String,
     /// Global plugin settings
     pub settings: GlobalSettings,
@@ -29,7 +27,7 @@ pub struct GlobalSettings {
     pub auto_update: bool,
     /// Default plugin registry URL
     pub registry_url: String,
-    /// Maximum number of concurrent plugin operations
+    /// Maximum number of allowed concurrent plugin operations
     pub max_concurrent_ops: usize,
     /// Plugin cache directory
     pub cache_dir: Option<PathBuf>,
@@ -63,7 +61,6 @@ impl Default for PluginConfig {
 impl PluginConfig {
     /// Get the configuration file path
     pub fn config_path() -> Result<PathBuf> {
-        // Check for test override first
         if let Ok(test_path) = std::env::var("CHAKRA_CONFIG_PATH") {
             return Ok(PathBuf::from(test_path));
         }
@@ -91,17 +88,16 @@ impl PluginConfig {
     }
 
     /// Load configuration from file
+    #[allow(dead_code)]
     pub fn load() -> Result<Self> {
         let config_path = Self::config_path()?;
 
         if !config_path.exists() {
-            // Create default configuration
             let config = Self::default();
             config.save()?;
             return Ok(config);
         }
 
-        // Make sure we're reading a file, not a directory
         if config_path.is_dir() {
             return Err(ChakraError::from(format!(
                 "Config path is a directory, not a file: {}",
@@ -115,7 +111,6 @@ impl PluginConfig {
         let config: Self = toml::from_str(&config_content)
             .map_err(|e| ChakraError::from(format!("Failed to parse TOML config file: {}", e)))?;
 
-        // Validate and migrate if necessary
         config.validate_and_migrate()
     }
 
@@ -123,7 +118,6 @@ impl PluginConfig {
     pub fn save(&self) -> Result<()> {
         let config_path = Self::config_path()?;
 
-        // Ensure parent directory exists
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
                 ChakraError::from(format!("Failed to create config directory: {}", e))
@@ -144,7 +138,6 @@ impl PluginConfig {
     pub fn create_initial_config() -> Result<()> {
         let config_path = Self::config_path()?;
 
-        // Don't overwrite existing config
         if config_path.exists() {
             println!(
                 "Configuration file already exists at: {}",
@@ -153,7 +146,6 @@ impl PluginConfig {
             return Ok(());
         }
 
-        // Create the default configuration
         let config = Self::default();
         config.save()?;
 
@@ -168,7 +160,6 @@ impl PluginConfig {
 
     /// Validate configuration and migrate if necessary
     fn validate_and_migrate(mut self) -> Result<Self> {
-        // Ensure directories exist
         let plugin_dir = self
             .settings
             .install_dir
@@ -181,24 +172,21 @@ impl PluginConfig {
             .clone()
             .unwrap_or_else(|| Self::cache_dir().unwrap());
 
-        // Create directories if they don't exist
         fs::create_dir_all(&plugin_dir)
             .map_err(|e| ChakraError::from(format!("Failed to create plugin directory: {}", e)))?;
 
         fs::create_dir_all(&cache_dir)
             .map_err(|e| ChakraError::from(format!("Failed to create cache directory: {}", e)))?;
 
-        // Update paths in config
         self.settings.install_dir = Some(plugin_dir);
         self.settings.cache_dir = Some(cache_dir);
 
-        // Validate version and migrate if necessary
         match self.version.as_str() {
             "1.0.0" => {
                 // Current version, no migration needed
             }
             _ => {
-                // Future versions can implement migration logic here
+                // TODO: Implement migration for future versions
                 return Err(ChakraError::from(format!(
                     "Unsupported config version: {}",
                     self.version
@@ -212,7 +200,6 @@ impl PluginConfig {
     /// Add a new external plugin configuration
     #[allow(dead_code)]
     pub fn add_external_plugin(&mut self, config: ExternalPluginConfig) -> Result<()> {
-        // Check for duplicates
         if self.external_plugins.iter().any(|p| p.name == config.name) {
             return Err(ChakraError::from(format!(
                 "Plugin '{}' is already configured",
@@ -321,7 +308,7 @@ impl PluginConfig {
     }
 }
 
-/// Configuration validation utilities
+// TODO: Implement a validator for the configuration [wip]
 #[allow(dead_code)]
 pub struct ConfigValidator;
 
@@ -342,7 +329,6 @@ impl ConfigValidator {
                 if url.is_empty() {
                     return Err(ChakraError::from("Git URL cannot be empty"));
                 }
-                // Basic URL validation
                 if !url.starts_with("http://")
                     && !url.starts_with("https://")
                     && !url.starts_with("git://")

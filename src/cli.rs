@@ -32,6 +32,7 @@ pub struct Args {
     pub positional_path: Option<String>,
 
     /// Port to serve (default: 8420)
+    // TODO: Apply to web server as well if provided.
     #[arg(
         short = 'P',
         long,
@@ -425,8 +426,6 @@ impl CommandValidator {
     ) -> Result<(String, u16)> {
         let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
 
-        // Port validation is now handled by clap's value_parser
-        // Just validate the path exists
         if !std::path::Path::new(&project_path).exists() {
             return Err(ChakraError::path(format!(
                 "Path not found: {}",
@@ -448,7 +447,6 @@ impl CommandValidator {
             .unwrap_or_else(|| "my-chakra-project".to_string());
         let target_dir = directory.clone().unwrap_or_else(|| project_name.clone());
 
-        // Validate template
         let valid_templates = ["rust", "go", "c", "assemblyscript", "python"];
         if !valid_templates.contains(&template) {
             return Err(ChakraError::from(format!(
@@ -458,7 +456,6 @@ impl CommandValidator {
             )));
         }
 
-        // Check if target directory already exists
         if std::path::Path::new(&target_dir).exists() {
             return Err(ChakraError::path(format!(
                 "Directory '{}' already exists",
@@ -483,7 +480,6 @@ pub fn get_args() -> Args {
 
     let mut args = Args::parse();
 
-    // Handle legacy behavior: if positional path is provided, use it as the main path
     if let Some(pos_path) = args.positional_path.take() {
         args.path = pos_path;
     }

@@ -12,7 +12,6 @@ pub fn handle_clean_command(path: &Option<String>, positional_path: &Option<Stri
 
     let language = compiler::detect_project_language(&project_path);
 
-    // Clean based on project type
     match language {
         compiler::ProjectLanguage::Rust => clean_rust_project(&project_path),
         compiler::ProjectLanguage::Go => clean_go_project(&project_path),
@@ -29,7 +28,6 @@ pub fn handle_clean_command(path: &Option<String>, positional_path: &Option<Stri
     }
 }
 
-// Clean functions for different project types
 fn clean_rust_project(project_path: &str) -> Result<()> {
     let target_dir = PathResolver::join_paths(project_path, "target");
     let pkg_dir = PathResolver::join_paths(project_path, "pkg");
@@ -56,7 +54,6 @@ fn clean_rust_project(project_path: &str) -> Result<()> {
 }
 
 fn clean_go_project(project_path: &str) -> Result<()> {
-    // Clean Go build cache and binaries
     let output = std::process::Command::new("go")
         .args(["clean", "-cache", "-modcache"])
         .current_dir(project_path)
@@ -73,10 +70,8 @@ fn clean_go_project(project_path: &str) -> Result<()> {
 }
 
 fn clean_c_project(project_path: &str) -> Result<()> {
-    // Look for common C build artifacts
     let mut cleaned = Vec::new();
 
-    // Clean WASM files
     let wasm_files = PathResolver::find_files_with_extension(project_path, "wasm")?;
     for file in wasm_files {
         PathResolver::remove_file(&file)?;

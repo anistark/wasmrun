@@ -20,12 +20,13 @@ pub enum OptimizationLevel {
     Size,
 }
 
+/// Type of WASM target
 #[derive(Debug, Clone)]
 pub enum TargetType {
-    Standard, // Regular WASM
+    Standard,
     #[allow(dead_code)]
-    WasmBindgen, // WASM with JS bindings
-    WebApp,   // Full web application
+    WasmBindgen,
+    WebApp,
 }
 
 impl Default for BuildConfig {
@@ -44,31 +45,25 @@ impl Default for BuildConfig {
 #[derive(Debug)]
 pub struct BuildResult {
     pub wasm_path: String,
-    pub js_path: Option<String>,       // For wasm-bindgen projects
-    pub additional_files: Vec<String>, // .d.ts, .map files, etc.
+    pub js_path: Option<String>,
+    pub additional_files: Vec<String>,
     #[allow(dead_code)]
     pub is_wasm_bindgen: bool,
 }
 
 /// Common interface for all WASM builders
 pub trait WasmBuilder: Send + Sync {
-    /// Get the human-readable name of this language
     fn language_name(&self) -> &str;
 
-    /// Get common entry file names for this language
     fn entry_file_candidates(&self) -> &[&str];
 
-    /// Get file extensions that this builder can handle
     #[allow(dead_code)]
     fn supported_extensions(&self) -> &[&str];
 
-    /// Check if all required tools are installed
     fn check_dependencies(&self) -> Vec<String>;
 
-    /// Build the project with the given configuration
     fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult>;
 
-    /// Default verbose build implementation
     fn build_verbose(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
         println!(
             "🔨 Building {} project at: {}",
@@ -76,7 +71,6 @@ pub trait WasmBuilder: Send + Sync {
             config.project_path
         );
 
-        // Check dependencies first
         let missing_tools = self.check_dependencies();
         if !missing_tools.is_empty() {
             return Err(CompilationError::BuildToolNotFound {
@@ -85,10 +79,8 @@ pub trait WasmBuilder: Send + Sync {
             });
         }
 
-        // Validate project structure
         self.validate_project(&config.project_path)?;
 
-        // Ensure output directory exists
         PathResolver::ensure_output_directory(&config.output_dir).map_err(|_| {
             CompilationError::OutputDirectoryCreationFailed {
                 path: config.output_dir.clone(),
@@ -126,7 +118,6 @@ pub trait WasmBuilder: Send + Sync {
             }
         })?;
 
-        // Check for entry files
         let entry_file = PathResolver::find_entry_file(project_path, self.entry_file_candidates());
         if entry_file.is_none() {
             return Err(CompilationError::MissingEntryFile {
@@ -189,7 +180,6 @@ pub trait WasmBuilder: Send + Sync {
             })
     }
 
-    /// Execute a command with live output (for verbose builds)
     #[allow(dead_code)]
     fn execute_command_with_output(
         &self,
@@ -243,14 +233,14 @@ pub trait WasmBuilder: Send + Sync {
         Ok(output_path)
     }
 
-    /// Check if a specific target is available (allow dead code for future use)
+    /// Check if a specific target is available
     #[allow(dead_code)]
     fn check_target_availability(&self, _target: &str) -> CompilationResult<()> {
-        // Default implementation - can be overridden by specific builders
+        // TODO: Implement target availability check
         Ok(())
     }
 
-    /// Get installation instructions for missing tools (allow dead code for future use)
+    /// Get installation instructions for missing tools
     #[allow(dead_code)]
     fn get_install_instructions(&self, tool: &str) -> String {
         match tool {
@@ -272,7 +262,6 @@ pub trait WasmBuilder: Send + Sync {
 
     /// Validate build configuration
     fn validate_config(&self, config: &BuildConfig) -> CompilationResult<()> {
-        // Validate project path
         if config.project_path.is_empty() {
             return Err(CompilationError::InvalidProjectStructure {
                 language: self.language_name().to_string(),
@@ -280,14 +269,12 @@ pub trait WasmBuilder: Send + Sync {
             });
         }
 
-        // Validate output directory
         if config.output_dir.is_empty() {
             return Err(CompilationError::OutputDirectoryCreationFailed {
                 path: "Output directory cannot be empty".to_string(),
             });
         }
 
-        // Check if paths are safe
         if !PathResolver::is_safe_path(&config.project_path) {
             return Err(CompilationError::InvalidProjectStructure {
                 language: self.language_name().to_string(),
@@ -312,20 +299,17 @@ impl BuilderFactory {
     pub fn create_builder(language: &crate::compiler::ProjectLanguage) -> Box<dyn WasmBuilder> {
         use crate::compiler::ProjectLanguage;
         use crate::plugin::languages::{
-            assemblyscript_plugin::AssemblyScriptBuilder, c_plugin::CBuilder, go_plugin::GoBuilder,
-            python_plugin::PythonBuilder, rust_plugin::RustPlugin,
+            assemblyscript_plugin::AssemblyScriptPlugin, c_plugin::CPlugin, go_plugin::GoPlugin,
+            python_plugin::PythonPlugin, rust_plugin::RustPlugin,
         };
 
         match language {
             ProjectLanguage::Rust => Box::new(RustPlugin::new()),
-            ProjectLanguage::Go => Box::new(GoBuilder::new()),
-            ProjectLanguage::C => Box::new(CBuilder::new()),
-            ProjectLanguage::AssemblyScript => Box::new(AssemblyScriptBuilder::new()),
-            ProjectLanguage::Python => Box::new(PythonBuilder::new()),
-            ProjectLanguage::Unknown => {
-                // Return a dummy builder that always fails
-                Box::new(UnknownBuilder)
-            }
+            ProjectLanguage::Go => Box::new(GoPlugin::new()),
+            ProjectLanguage::C => Box::new(CPlugin::new()),
+            ProjectLanguage::AssemblyScript => Box::new(AssemblyScriptPlugin::new()),
+            ProjectLanguage::Python => Box::new(PythonPlugin::new()),
+            ProjectLanguage::Unknown => Box::new(UnknownBuilder),
         }
     }
 
@@ -340,7 +324,7 @@ impl BuilderFactory {
     }
 }
 
-/// Dummy builder for unknown languages
+/// TODO: Unknown language. Maybe we ask to open an issue
 struct UnknownBuilder;
 
 impl WasmBuilder for UnknownBuilder {
@@ -367,7 +351,7 @@ impl WasmBuilder for UnknownBuilder {
     }
 }
 
-/// Unified build function that replaces the individual build functions
+/// Build WASM project
 pub fn build_wasm_project(
     project_path: &str,
     output_dir: &str,
@@ -384,7 +368,6 @@ pub fn build_wasm_project(
 
     let builder = BuilderFactory::create_builder(language);
 
-    // Validate configuration
     builder.validate_config(&config)?;
 
     if verbose {
@@ -394,7 +377,7 @@ pub fn build_wasm_project(
     }
 }
 
-/// Helper function to convert build errors to user-friendly messages (allow dead code for future use)
+/// Format build error for user-friendly output
 #[allow(dead_code)]
 pub fn format_build_error(error: &CompilationError) -> String {
     match error {

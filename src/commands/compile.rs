@@ -17,7 +17,6 @@ pub fn handle_compile_command(
         CommandValidator::validate_compile_args(path, positional_path, output)
             .map_err(|e| ChakraError::from(e.to_string()))?;
 
-    // Parse optimization level
     let optimization_level = match optimization.to_lowercase().as_str() {
         "debug" => OptimizationLevel::Debug,
         "release" => OptimizationLevel::Release,
@@ -36,7 +35,6 @@ pub fn handle_compile_command(
         }
     };
 
-    // Detect project language and get system info
     let language = compiler::detect_project_language(&project_path);
 
     if language == compiler::ProjectLanguage::Unknown {
@@ -58,7 +56,6 @@ pub fn handle_compile_command(
         verbose,
     );
 
-    // Check for missing tools
     let builder = BuilderFactory::create_builder(&language);
     let missing_tools = builder.check_dependencies();
 
@@ -67,7 +64,6 @@ pub fn handle_compile_command(
         return Err(ChakraError::missing_tools(missing_tools));
     }
 
-    // Create build configuration
     let config = BuildConfig {
         project_path,
         output_dir: output_dir.clone(),
@@ -76,7 +72,6 @@ pub fn handle_compile_command(
         target_type: compiler::builder::TargetType::Standard,
     };
 
-    // Compile WASM - Fix redundant closures
     let result = if verbose {
         builder
             .build_verbose(&config)

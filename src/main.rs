@@ -15,7 +15,6 @@ use std::error::Error;
 use ui::print_webapp_detected;
 
 fn main() {
-    // Set up better panic handling
     std::panic::set_hook(Box::new(|panic_info| {
         eprintln!("\n🔥 Chakra encountered an unexpected error:");
         eprintln!("{}", panic_info);
@@ -24,10 +23,8 @@ fn main() {
         eprintln!("\n📋 Include your command, WASM file, and this error message.");
     }));
 
-    // Parse command line arguments (without validation here)
     let args = cli::get_args();
 
-    // Handle commands and convert errors to proper error types
     let result = match &args.command {
         Some(Commands::Stop) => commands::handle_stop_command(),
 
@@ -104,16 +101,12 @@ fn main() {
             _ => e,
         }),
 
-        None => {
-            // For the default command, we need to resolve and validate args
-            match cli::ResolvedArgs::from_args(args) {
-                Ok(resolved_args) => handle_default_command(&resolved_args),
-                Err(e) => Err(e),
-            }
-        }
+        None => match cli::ResolvedArgs::from_args(args) {
+            Ok(resolved_args) => handle_default_command(&resolved_args),
+            Err(e) => Err(e),
+        },
     };
 
-    // Handle result with improved error reporting
     if let Err(error) = result {
         handle_error(error);
         std::process::exit(1);
@@ -125,12 +118,10 @@ fn handle_default_command(args: &cli::ResolvedArgs) -> Result<()> {
         println!("🎯 \x1b[1;34mMode:\x1b[0m Direct WASM execution");
         println!("📦 \x1b[1;34mFile:\x1b[0m {}", args.path);
 
-        // Add a preview delay
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         server::run_wasm_file(&args.path, args.port)?;
     } else {
-        // Check if it's a Rust web application
         let path_obj = std::path::Path::new(&args.path);
 
         if path_obj.exists() && path_obj.is_dir() {
@@ -141,15 +132,14 @@ fn handle_default_command(args: &cli::ResolvedArgs) -> Result<()> {
             {
                 print_webapp_detected(3000);
 
-                // Add a preview delay
                 std::thread::sleep(std::time::Duration::from_millis(300));
 
                 // Run as a web application on port 3000
+                // TODO: Make port configurable
                 server::run_webapp(&args.path, 3000, args.watch)?;
             } else {
                 println!("🎯 \x1b[1;34mMode:\x1b[0m Project compilation and execution");
 
-                // Quick language preview
                 let language_icon = match detected_language {
                     compiler::ProjectLanguage::Rust => "🦀",
                     compiler::ProjectLanguage::Go => "🐹",
@@ -168,10 +158,8 @@ fn handle_default_command(args: &cli::ResolvedArgs) -> Result<()> {
                     println!("👀 \x1b[1;34mWatch Mode:\x1b[0m Enabled");
                 }
 
-                // Add a preview delay
                 std::thread::sleep(std::time::Duration::from_millis(300));
 
-                // Default to compile and run project
                 server::run_project(&args.path, args.port, None, args.watch)?;
             }
         } else if path_obj.is_file() {
@@ -207,10 +195,8 @@ fn handle_default_command(args: &cli::ResolvedArgs) -> Result<()> {
 
 /// Error handling with better context
 fn handle_error(error: ChakraError) {
-    // Clear any loading animations or partial output
     println!();
 
-    // Print the main error message with formatting
     eprintln!(
         "\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m"
     );
@@ -219,7 +205,6 @@ fn handle_error(error: ChakraError) {
         "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
     );
 
-    // Format the error message to fit within the box
     let user_message = error.user_message();
     let lines = wrap_text(&user_message, 61);
 
@@ -227,7 +212,6 @@ fn handle_error(error: ChakraError) {
         eprintln!("\x1b[1;34m│\x1b[0m  {:<61} \x1b[1;34m│\x1b[0m", line);
     }
 
-    // Print suggestions if available
     let suggestions = error.suggestions();
     if !suggestions.is_empty() {
         eprintln!(
@@ -236,7 +220,6 @@ fn handle_error(error: ChakraError) {
         eprintln!("\x1b[1;34m│\x1b[0m  💡 \x1b[1;36mSuggestions:\x1b[0m                                        \x1b[1;34m│\x1b[0m");
 
         for suggestion in suggestions.iter().take(3) {
-            // Limit to 3 suggestions to fit
             let suggestion_lines = wrap_text(&format!("• {}", suggestion), 59);
             for line in suggestion_lines {
                 eprintln!("\x1b[1;34m│\x1b[0m    {:<59} \x1b[1;34m│\x1b[0m", line);
@@ -248,12 +231,11 @@ fn handle_error(error: ChakraError) {
         "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
     );
 
-    // Print additional context for debugging if requested
+    // Additional debug information
     if std::env::var("CHAKRA_DEBUG").is_ok() || std::env::var("RUST_BACKTRACE").is_ok() {
         eprintln!("\n\x1b[1;34m🔍 Debug Information:\x1b[0m");
         eprintln!("\x1b[0;37m{:?}\x1b[0m", error);
 
-        // Walk the error chain
         let mut source = error.source();
         let mut level = 1;
         while let Some(err) = source {
@@ -270,17 +252,15 @@ fn handle_error(error: ChakraError) {
         eprintln!("   \x1b[1;37mRUST_BACKTRACE=1 chakra [your command]\x1b[0m");
     }
 
-    // Print recovery information if the error is recoverable
     if error.is_recoverable() {
         eprintln!(
             "\n🔄 \x1b[1;32mThis error might be recoverable.\x1b[0m Try the suggestions above."
         );
     }
 
-    eprintln!(); // Add some spacing at the end
+    eprintln!();
 }
 
-/// Helper function to wrap text to a specific width
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let words: Vec<&str> = text.split_whitespace().collect();

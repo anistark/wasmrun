@@ -6,18 +6,14 @@ use super::handler;
 
 /// Simple server for non-watching mode
 pub fn serve_wasm_file(wasm_path: &str, port: u16, wasm_filename: &str) -> Result<(), String> {
-    // Create HTTP server
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {}", e))?;
 
-    // Track connected clients for live reload
     let mut clients_to_reload = Vec::new();
-
-    // Handle requests
     for request in server.incoming_requests() {
         handler::handle_request(
             request,
-            None, // No JS file for standard WASM
+            None,
             wasm_filename,
             wasm_path,
             false,
@@ -35,11 +31,9 @@ pub fn serve_wasm_bindgen_files(
     port: u16,
     wasm_filename: &str,
 ) -> Result<(), String> {
-    // Create HTTP server
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {}", e))?;
 
-    // Get the JS filename
     let js_path_obj = Path::new(js_path);
     let js_filename = js_path_obj
         .file_name()
@@ -47,10 +41,8 @@ pub fn serve_wasm_bindgen_files(
         .to_string_lossy()
         .to_string();
 
-    // Track connected clients for live reload
     let mut clients_to_reload = Vec::new();
 
-    // Handle requests
     for request in server.incoming_requests() {
         handler::handle_request(
             request,
@@ -97,13 +89,11 @@ fn check_for_wasm_bindgen_patterns(wasm_bytes: &[u8]) -> bool {
 /// Look for a corresponding JS file for a WASM file
 #[allow(dead_code)]
 fn find_corresponding_js_file(wasm_path: &Path) -> Option<String> {
-    // First try with the same base name
     let js_path = wasm_path.with_extension("js");
     if js_path.exists() {
         return Some(js_path.to_string_lossy().to_string());
     }
 
-    // For _bg.wasm files, try finding the matching JS
     let file_name = wasm_path.file_name()?.to_string_lossy();
     if file_name.ends_with("_bg.wasm") {
         let stem = file_name.replace("_bg.wasm", "");
@@ -116,13 +106,11 @@ fn find_corresponding_js_file(wasm_path: &Path) -> Option<String> {
         }
     }
 
-    // Check directory for any JS files that might be related
     if let Some(dir) = wasm_path.parent() {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().map_or(false, |ext| ext == "js") {
-                    // Read the file and check if it references the WASM file
                     if let Ok(content) = fs::read_to_string(&path) {
                         if content.contains("wasm_bindgen") || content.contains("__wbindgen") {
                             return Some(path.to_string_lossy().to_string());

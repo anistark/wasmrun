@@ -6,7 +6,6 @@ use std::time::Duration;
 
 pub struct ProjectWatcher {
     debounced_receiver: Option<Receiver<Result<Vec<DebouncedEvent>, Vec<notify::Error>>>>,
-    // We need to keep the watcher alive
     #[allow(dead_code)]
     watcher: Option<notify_debouncer_mini::Debouncer<RecommendedWatcher>>,
 }
@@ -23,14 +22,12 @@ impl ProjectWatcher {
             return Err(format!("Path is not a directory: {}", project_path));
         }
 
-        // Create channel to receive events
+        // Channel for events
         let (tx, rx) = channel();
 
-        // Create debouncer
         let mut debouncer = new_debouncer(Duration::from_millis(500), None, tx)
             .map_err(|e| format!("Failed to create file watcher: {}", e))?;
 
-        // Start watching the path
         debouncer
             .watcher()
             .watch(path, RecursiveMode::Recursive)
@@ -56,12 +53,10 @@ impl ProjectWatcher {
     }
 
     pub fn should_recompile(&self, events: &[DebouncedEvent]) -> bool {
-        // Skip changes in target directory and hidden files
         for event in events {
             if event.kind == DebouncedEventKind::Any {
                 let path = &event.path;
 
-                // Skip target directory and hidden files/dirs
                 if path.components().any(|c| {
                     let s = c.as_os_str().to_string_lossy();
                     s == "target" || s.starts_with(".")
@@ -69,11 +64,9 @@ impl ProjectWatcher {
                     continue;
                 }
 
-                // Skip non-relevant files
                 if let Some(ext) = path.extension() {
                     let ext = ext.to_string_lossy().to_lowercase();
 
-                    // File extensions that should trigger recompilation
                     if [
                         "rs", "go", "c", "cpp", "h", "hpp", "ts", "js", "toml", "py", "mod",
                     ]

@@ -82,7 +82,6 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
         .unwrap()
         .to_string_lossy();
 
-    // Improved HTML template for wasm-bindgen based applications
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -262,13 +261,11 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
     </footer>
     
     <script>
-    // Console logging setup
     const originalConsoleLog = console.log;
     const originalConsoleError = console.error;
     const originalConsoleWarn = console.warn;
     const originalConsoleInfo = console.info;
 
-    // Function to add log to the console tab
     function addLogToConsole(message, type = 'info') {{
         const consoleTab = document.getElementById('console-tab');
         if (consoleTab) {{
@@ -280,7 +277,6 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
         }}
     }}
 
-    // Override console functions
     console.log = function(...args) {{
         originalConsoleLog.apply(console, args);
         addLogToConsole(args.join(' '), 'info');
@@ -301,7 +297,6 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
         addLogToConsole(args.join(' '), 'info');
     }};
 
-    // Console toggle functionality
     document.getElementById('console-toggle').addEventListener('click', function() {{
         const consoleTab = document.getElementById('console-tab');
         if (consoleTab.style.display === 'block') {{
@@ -319,18 +314,15 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
     async function runWasmBindgen() {{
         try {{
             console.log("Initializing wasm-bindgen module...");
-            // Check if the init function takes an argument (some frameworks require this)
             const initFn = init;
             const argCount = initFn.length;
             
             let result;
             if (argCount > 0) {{
-                // The init function expects options or arguments, provide a target element
                 result = await initFn({{
                     root: document.getElementById('wasm-bindgen-app')
                 }});
             }} else {{
-                // Standard init with no arguments
                 result = await initFn();
             }}
             
@@ -338,7 +330,6 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
             document.getElementById('status').innerHTML = "✅ WASM Module loaded successfully!";
             document.getElementById('status').className = "success";
             
-            // If the module returned something, log it
             if (result) {{
                 console.log("Module initialization returned:", result);
             }}
@@ -347,7 +338,6 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
             document.getElementById('status').textContent = "❌ Error initializing WASM module";
             document.getElementById('status').className = "error";
             
-            // Show a more detailed error
             document.getElementById('wasm-bindgen-app').innerHTML = `
                 <div style="padding: 2rem; border: 2px solid #ff5555; border-radius: 8px; margin: 2rem;">
                     <h2 style="color: #ff5555; margin-bottom: 1rem;">Error Loading WASM Module</h2>

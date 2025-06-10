@@ -126,7 +126,6 @@ async function loadWasmWithRetries(retries = 5) {
             }
             
             try {
-                // Create the appropriate import object based on module type
                 let importObject = {
                     env: {
                         memory: new WebAssembly.Memory({ initial: 256 }),
@@ -139,7 +138,6 @@ async function loadWasmWithRetries(retries = 5) {
                 // Add WASI support if needed
                 let wasi = null;
                 if (isWasiModule) {
-                    // Create a new WASI instance with a virtual filesystem
                     wasi = new window.WASI.WASIImplementation({
                         args: ['$FILENAME$'],
                         env: {
@@ -159,13 +157,10 @@ async function loadWasmWithRetries(retries = 5) {
                         }
                     });
                     
-                    // Set up the virtual filesystem
                     setupVirtualFileSystem(wasi);
                     
-                    // Get the import object for the WASI instance
                     const wasiImports = wasi.getImportObject();
                     
-                    // Merge the WASI imports with our existing imports
                     importObject = {
                         ...importObject,
                         ...wasiImports
@@ -183,7 +178,6 @@ async function loadWasmWithRetries(retries = 5) {
                 log('✅ WASM Module loaded successfully!', 'success');
                 updateStatus('✅ WASM Module loaded successfully!');
                 
-                // Update module info tab
                 updateModuleInfo(module, isWasiModule);
                 
                 // For WASI modules, initialize and run
@@ -193,18 +187,16 @@ async function loadWasmWithRetries(retries = 5) {
                         wasi.initialize(instance);
                         log('WASI instance initialized', 'success');
                         
-                        // Show available exports
+                        // Available exports
                         const exports = Object.keys(instance.exports);
                         // log(`Available exports: ${exports.join(', ')}`, 'info');
                         
-                        // Special handling for WASI _start function
                         if (typeof instance.exports._start === 'function') {
                             log('Calling WASI _start() function...', 'info');
                             try {
                                 instance.exports._start();
                                 log('WASI _start() completed successfully', 'success');
                             } catch (e) {
-                                // WASI modules often exit via trap, which is normal
                                 if (e.message.includes('unreachable') || e.message.includes('exit')) {
                                     log('WASI program completed execution (via exit)', 'success');
                                 } else {
@@ -219,7 +211,6 @@ async function loadWasmWithRetries(retries = 5) {
                             log('No _start or main function found in WASI module', 'info');
                         }
                         
-                        // Display filesystem content after execution
                         try {
                             const files = wasi.fs.readdir('/');
                             log(`Files in root directory: ${files.join(', ')}`, 'info');
@@ -227,23 +218,19 @@ async function loadWasmWithRetries(retries = 5) {
                             log(`Error reading filesystem: ${e.message}`, 'error');
                         }
                         
-                        // Create UI elements for interacting with WASI
                         createWasiUI(wasi, instance);
                     } catch (wasiError) {
                         log(`WASI error: ${wasiError.message}`, 'error');
                     }
                 } else {
-                    // For standard modules, try the normal approach
                     if (typeof instance.exports.main === 'function') {
                         log('Calling main() function...', 'info');
                         const result = instance.exports.main();
                         log(`main() returned: ${result}`, 'success');
                     } else {
-                        // List available exports
                         const exports = Object.keys(instance.exports);
                         log(`No main() function found. Available exports: ${exports.join(', ')}`, 'info');
                         
-                        // Try to find a likely entry point
                         const likelyEntryPoints = ['_start', 'start', 'init', 'run', 'execute'];
                         for (const entryPoint of likelyEntryPoints) {
                             if (typeof instance.exports[entryPoint] === 'function') {
@@ -260,7 +247,6 @@ async function loadWasmWithRetries(retries = 5) {
                     }
                 }
                 
-                // Make the instance available globally for debugging
                 window.wasmInstance = instance;
                 if (wasi) {
                     window.wasi = wasi;
@@ -341,7 +327,7 @@ async function loadWasmWithRetries(retries = 5) {
     }
 }
 
-// Update the Module Info tab with details about the WebAssembly module
+// Update the Module Info tab with details about the Wasm module
 function updateModuleInfo(module, isWasi) {
     const moduleDetails = document.getElementById('module-details');
     if (!moduleDetails) return;
@@ -389,7 +375,6 @@ function updateModuleInfo(module, isWasi) {
         }
     }
     
-    // Create module info HTML
     moduleDetails.innerHTML = `
         <div class="module-section">
             <h4>Module Type</h4>
@@ -413,7 +398,7 @@ function updateModuleInfo(module, isWasi) {
     `;
 }
 
-// Determine the likely entry point of a module
+// Get module entry point
 function getEntryPoint(exports) {
     const exportNames = exports.map(exp => exp.name);
     
@@ -434,14 +419,12 @@ function getEntryPoint(exports) {
 
 // Create UI elements for interacting with the WASI filesystem
 function createWasiUI(wasi, instance) {
-    // Check if filesystem tab exists
     const fsTab = document.getElementById('filesystem-tab');
     if (!fsTab) return;
     
-    // Clear any existing content
     fsTab.innerHTML = '';
     
-    // Create the file explorer UI
+    // File Explorer UI
     const explorer = document.createElement('div');
     explorer.className = 'wasi-explorer';
     explorer.innerHTML = `
@@ -470,10 +453,8 @@ function createWasiUI(wasi, instance) {
     
     fsTab.appendChild(explorer);
     
-    // Initialize file tree
     updateFileTree(wasi);
     
-    // Setup event handlers
     document.getElementById('wasi-new-file').addEventListener('click', () => {
         const filename = prompt('Enter file name:');
         if (!filename) return;
@@ -505,7 +486,7 @@ function createWasiUI(wasi, instance) {
     document.getElementById('wasi-run-file').addEventListener('click', () => {
         const filename = document.getElementById('wasi-file-name').textContent;
         log(`Running file ${filename} is not implemented yet`, 'info');
-        // Future implementation could compile and run script files
+        // TODO: [TOL] Future implementation could compile and run script files
     });
 }
 
@@ -533,13 +514,11 @@ function updateFileTree(wasi) {
                     <span class="wasi-file-name">${file}</span>
                 `;
                 
-                if (fileInfo.type === 3) { // Directory
-                    // Add expand/collapse functionality
+                if (fileInfo.type === 3) {
                     fileElement.addEventListener('click', (e) => {
                         e.stopPropagation();
                         fileElement.classList.toggle('expanded');
                         
-                        // Only add children if not already added
                         const childContainer = fileElement.querySelector('.wasi-file-children');
                         if (!childContainer) {
                             const children = document.createElement('div');
@@ -548,7 +527,7 @@ function updateFileTree(wasi) {
                             addDirectoryToTree(filePath, children);
                         }
                     });
-                } else { // File
+                } else {
                     fileElement.addEventListener('click', (e) => {
                         e.stopPropagation();
                         openFile(wasi, filePath);
@@ -616,7 +595,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Add this function to scripts.js
 async function analyzeWasmBinary(wasmBytes) {
     log("Starting detailed WASM binary analysis...", "info");
     
@@ -644,9 +622,8 @@ async function analyzeWasmBinary(wasmBytes) {
         log(`Warning: Unexpected WASM version. Expected 1, got ${version}`, "error");
     }
     
-    // Now try to analyze the sections
     try {
-        let offset = 8; // Start after header
+        let offset = 8;
         const view = new DataView(wasmBytes);
         
         log("Analyzing WASM sections:", "info");
@@ -685,18 +662,15 @@ async function analyzeWasmBinary(wasmBytes) {
             const sectionName = sectionId < sectionTypes.length ? sectionTypes[sectionId] : `Unknown(${sectionId})`;
             log(`Section ${sectionCount}: ${sectionName} (ID: ${sectionId}, Size: ${sectionSize} bytes, Offset: 0x${(offset - 1).toString(16)})`, "info");
             
-            // Check if this is where the error occurs (offset ~= 128)
             if (offset - 1 <= 130 && offset - 1 + sectionSize >= 126) {
                 log(`⚠️ The error might be in this section! Check if the Memory section is out of order.`, "error");
             }
             
-            // Move to the next section
             offset += sectionSize;
         }
         
         log(`Total sections found: ${sectionCount}`, "info");
         
-        // Additional checks
         try {
             const module = new WebAssembly.Module(wasmBytes);
             const imports = WebAssembly.Module.imports(module);
@@ -715,7 +689,6 @@ async function analyzeWasmBinary(wasmBytes) {
     }
 }
 
-// FIXED: Improved live reload support with better detection
 function setupLiveReload() {
     // Only set up live reload if we detect we're in a watch mode environment
     // Check if the page was loaded with watch mode indicators
@@ -757,11 +730,11 @@ function setupLiveReload() {
                     lastReloadTime = now;
                     log("🔄 Change detected - reloading WASM module...", "info");
                     
-                    // Stop polling during reload
+                    // No polling during reload.
+                    // TODO: Consider a more graceful reload mechanism like reloading only the WASM module without a full page reload
                     clearInterval(reloadInterval);
                     reloadInterval = null;
                     
-                    // Reload the page after a short delay
                     setTimeout(() => {
                         window.location.reload();
                     }, 500);
@@ -773,7 +746,6 @@ function setupLiveReload() {
             .catch(e => {
                 consecutiveErrors++;
                 
-                // If we get too many consecutive errors, the server might be down
                 if (consecutiveErrors > 5) {
                     log("Live reload: Server appears to be down, stopping polling", "info");
                     clearInterval(reloadInterval);

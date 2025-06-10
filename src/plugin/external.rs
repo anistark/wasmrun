@@ -1,6 +1,4 @@
 //! External plugin loading and management
-//!
-//! Handles installation, loading, and management of external plugins
 
 use crate::error::{ChakraError, Result};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
@@ -154,7 +152,7 @@ impl PluginInstaller {
         let target_dir = clone_dir.join("target").join("release");
         Self::copy_plugin_artifacts(&target_dir, &plugin_dir)?;
 
-        // Copy plugin metadata if it exists
+        // TODO: Figure out plugin metadata. Currently assuming plugin.toml
         let metadata_file = clone_dir.join("plugin.toml");
         if metadata_file.exists() {
             let dest_metadata = plugin_dir.join("plugin.toml");
@@ -200,7 +198,6 @@ impl PluginInstaller {
         let target_dir = path.join("target").join("release");
         Self::copy_plugin_artifacts(&target_dir, &plugin_dir)?;
 
-        // Copy plugin metadata if it exists
         let metadata_file = path.join("plugin.toml");
         if metadata_file.exists() {
             let dest_metadata = plugin_dir.join("plugin.toml");
@@ -257,7 +254,7 @@ impl PluginInstaller {
                     copied_files += 1;
                 }
             } else if Self::is_executable(&path) {
-                // Copy executable files (Unix systems)
+                // Copy executable files (for Unix systems)
                 let dest_path = dest_dir.join(path.file_name().unwrap());
                 std::fs::copy(&path, &dest_path)
                     .map_err(|e| ChakraError::from(format!("Failed to copy artifact: {}", e)))?;
@@ -272,7 +269,7 @@ impl PluginInstaller {
         Ok(())
     }
 
-    /// Check if a file is executable (Unix-like systems)
+    /// Check if a file is executable (for Unix-like systems)
     #[cfg(unix)]
     fn is_executable(path: &std::path::Path) -> bool {
         use std::os::unix::fs::PermissionsExt;
@@ -284,7 +281,7 @@ impl PluginInstaller {
         }
     }
 
-    /// Check if a file is executable (Windows systems)
+    /// Check if a file is executable (for Windows systems)
     #[cfg(windows)]
     fn is_executable(path: &std::path::Path) -> bool {
         if let Some(extension) = path.extension() {
@@ -295,13 +292,13 @@ impl PluginInstaller {
         }
     }
 
-    /// Check if a file is executable (other systems)
+    /// Check if a file is executable
     #[cfg(not(any(unix, windows)))]
     fn is_executable(_path: &std::path::Path) -> bool {
         false
     }
 
-    /// Uninstall a plugin
+    /// Uninstall plugin
     pub fn uninstall(plugin_name: &str) -> Result<()> {
         let install_dir = crate::plugin::config::PluginConfig::plugin_dir()?;
         let plugin_dir = install_dir.join(plugin_name);
@@ -313,7 +310,7 @@ impl PluginInstaller {
             println!("Removed plugin directory: {}", plugin_dir.display());
         }
 
-        // Also clean up cache if it exists
+        // Clean cache
         let cache_dir = crate::plugin::config::PluginConfig::cache_dir()?;
         let cache_plugin_dir = cache_dir.join(format!("git-{}", plugin_name));
         if cache_plugin_dir.exists() {
@@ -480,18 +477,6 @@ impl Plugin for ExternalPluginWrapper {
             plugin_dir: self.plugin_dir.clone(),
         })
     }
-
-    fn initialize(&mut self) -> Result<()> {
-        // TODO: this would call the plugin's initialize function
-        println!("Initializing external plugin: {}", self.info.name);
-        Ok(())
-    }
-
-    fn cleanup(&mut self) -> Result<()> {
-        // TODO: this would call the plugin's cleanup function
-        println!("Cleaning up external plugin: {}", self.info.name);
-        Ok(())
-    }
 }
 
 /// Proxy builder for external plugins
@@ -554,16 +539,18 @@ pub fn install_plugin(source: PluginSource) -> Result<Box<dyn Plugin>> {
 }
 
 /// Load an external plugin from configuration
+#[allow(dead_code)]
 pub fn load_external_plugin(config: &ExternalPluginConfig) -> Result<Box<dyn Plugin>> {
     ExternalPluginLoader::load(config)
 }
 
-/// Uninstall an external plugin
+/// Uninstall external plugin
 pub fn uninstall_plugin(name: &str) -> Result<()> {
     PluginInstaller::uninstall(name)
 }
 
 /// Validate external plugin
+// TODO: Plugin validation - will be used when dynamic loading is implemented to verify plugin compatibility and security before loading
 #[allow(dead_code)]
 pub fn validate_plugin(plugin_dir: &PathBuf) -> Result<()> {
     // Check if plugin directory exists

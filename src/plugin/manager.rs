@@ -29,18 +29,20 @@ impl PluginCommands {
         // Group plugins by type
         let mut builtin_plugins = Vec::new();
         let mut external_plugins = Vec::new();
+        let mut registry_plugins = Vec::new();
 
         for plugin in plugins {
             match plugin.plugin_type {
                 PluginType::Builtin => builtin_plugins.push(plugin),
                 PluginType::External => external_plugins.push(plugin),
+                PluginType::Registry => registry_plugins.push(plugin),
             }
         }
 
         // Display built-in plugins
         if !builtin_plugins.is_empty() {
             println!("🔧 \x1b[1;36mBuilt-in Plugins:\x1b[0m");
-            for plugin in builtin_plugins {
+            for plugin in &builtin_plugins {
                 let status = if plugin.capabilities.compile_wasm {
                     "\x1b[1;32m✓ Ready\x1b[0m"
                 } else {
@@ -70,7 +72,7 @@ impl PluginCommands {
         // Display external plugins
         if !external_plugins.is_empty() {
             println!("🔌 \x1b[1;36mExternal Plugins:\x1b[0m");
-            for plugin in external_plugins {
+            for plugin in &external_plugins {
                 let status = if plugin.capabilities.compile_wasm {
                     "\x1b[1;32m✓ Ready\x1b[0m"
                 } else {
@@ -106,7 +108,50 @@ impl PluginCommands {
                     println!();
                 }
             }
-        } else if show_all {
+        }
+
+        // Display registry plugins
+        if !registry_plugins.is_empty() {
+            println!("📦 \x1b[1;36mRegistry Plugins:\x1b[0m");
+            for plugin in &registry_plugins {
+                let status = if plugin.capabilities.compile_wasm {
+                    "\x1b[1;32m✓ Ready\x1b[0m"
+                } else {
+                    "\x1b[1;33m⚠ Limited\x1b[0m"
+                };
+
+                println!(
+                    "  • \x1b[1;37m{:<15}\x1b[0m v{:<8} - {} [{}]",
+                    plugin.name, plugin.version, plugin.description, status
+                );
+
+                if show_all {
+                    if let Some(source) = &plugin.source {
+                        match source {
+                            PluginSource::CratesIo { name, version } => {
+                                println!("    Source: crates.io ({} v{})", name, version);
+                            }
+                            PluginSource::Git { url, branch } => {
+                                let branch_info = if let Some(b) = branch {
+                                    format!(" (branch: {})", b)
+                                } else {
+                                    String::new()
+                                };
+                                println!("    Source: Git ({}{})", url, branch_info);
+                            }
+                            PluginSource::Local { path } => {
+                                println!("    Source: Local ({})", path.display());
+                            }
+                        }
+                    }
+                    println!("    Extensions: {}", plugin.extensions.join(", "));
+                    println!("    Entry files: {}", plugin.entry_files.join(", "));
+                    println!();
+                }
+            }
+        }
+
+        if external_plugins.is_empty() && registry_plugins.is_empty() && show_all {
             println!("🔌 \x1b[1;36mExternal Plugins:\x1b[0m");
             println!("  No external plugins installed.");
             println!("  Use 'chakra plugin install <plugin-name>' to install external plugins.");
@@ -128,7 +173,7 @@ impl PluginCommands {
 
         // Check if plugin is already installed
         if let Some(existing) = self.manager.registry().get_plugin(plugin_spec) {
-            if existing.info().plugin_type == PluginType::Builtin {
+            if existing.plugin_type == PluginType::Builtin {
                 return Err(ChakraError::from(format!(
                     "Plugin '{}' is a built-in plugin and cannot be installed",
                     plugin_spec
@@ -141,7 +186,6 @@ impl PluginCommands {
             )));
         }
 
-        // Install the plugin
         self.manager.install_plugin(source)?;
 
         println!("✅ Plugin '{}' installed successfully!", plugin_spec);
@@ -152,11 +196,10 @@ impl PluginCommands {
     pub fn uninstall(&mut self, plugin_name: &str) -> Result<()> {
         println!("Uninstalling plugin: {}", plugin_name);
 
-        // Check if plugin exists
+        // Check if plugin exists using our internal plugin list
         let plugin = self
             .manager
-            .registry()
-            .get_plugin(plugin_name)
+            .get_plugin_by_name(plugin_name)
             .ok_or_else(|| ChakraError::from(format!("Plugin '{}' not found", plugin_name)))?;
 
         if plugin.info().plugin_type == PluginType::Builtin {
@@ -166,7 +209,6 @@ impl PluginCommands {
             )));
         }
 
-        // Uninstall the plugin
         self.manager.uninstall_plugin(plugin_name)?;
 
         println!("✅ Plugin '{}' uninstalled successfully!", plugin_name);
@@ -177,11 +219,10 @@ impl PluginCommands {
     pub fn update(&mut self, plugin_name: &str) -> Result<()> {
         println!("Updating plugin: {}", plugin_name);
 
-        // Check if plugin exists
+        // Check if plugin exists using our internal plugin list
         let plugin = self
             .manager
-            .registry()
-            .get_plugin(plugin_name)
+            .get_plugin_by_name(plugin_name)
             .ok_or_else(|| ChakraError::from(format!("Plugin '{}' not found", plugin_name)))?;
 
         if plugin.info().plugin_type == PluginType::Builtin {
@@ -191,7 +232,6 @@ impl PluginCommands {
             )));
         }
 
-        // Update the plugin
         self.manager.update_plugin(plugin_name)?;
 
         println!("✅ Plugin '{}' updated successfully!", plugin_name);
@@ -203,11 +243,10 @@ impl PluginCommands {
         let action = if enabled { "Enabling" } else { "Disabling" };
         println!("{} plugin: {}", action, plugin_name);
 
-        // Check if plugin exists
+        // Check if plugin exists using our internal plugin list
         let plugin = self
             .manager
-            .registry()
-            .get_plugin(plugin_name)
+            .get_plugin_by_name(plugin_name)
             .ok_or_else(|| ChakraError::from(format!("Plugin '{}' not found", plugin_name)))?;
 
         if plugin.info().plugin_type == PluginType::Builtin {
@@ -217,7 +256,6 @@ impl PluginCommands {
             )));
         }
 
-        // Enable/disable the plugin
         self.manager.set_plugin_enabled(plugin_name, enabled)?;
 
         let status = if enabled { "enabled" } else { "disabled" };
@@ -227,18 +265,15 @@ impl PluginCommands {
 
     /// Show detailed information about a plugin
     pub fn info(&self, plugin_name: &str) -> Result<()> {
-        let plugin = self
+        let plugin_info = self
             .manager
-            .registry()
-            .get_plugin(plugin_name)
+            .get_plugin_info(plugin_name)
             .ok_or_else(|| ChakraError::from(format!("Plugin '{}' not found", plugin_name)))?;
-
-        let info = plugin.info();
 
         println!("\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m");
         println!(
             "\x1b[1;34m│\x1b[0m  📦 \x1b[1;36mPlugin Information: {:<42}\x1b[0m \x1b[1;34m│\x1b[0m",
-            info.name
+            plugin_info.name
         );
         println!(
             "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
@@ -246,26 +281,26 @@ impl PluginCommands {
 
         println!(
             "\x1b[1;34m│\x1b[0m  \x1b[1;37mName:\x1b[0m {:<55} \x1b[1;34m│\x1b[0m",
-            info.name
+            plugin_info.name
         );
         println!(
             "\x1b[1;34m│\x1b[0m  \x1b[1;37mVersion:\x1b[0m {:<52} \x1b[1;34m│\x1b[0m",
-            info.version
+            plugin_info.version
         );
         println!(
             "\x1b[1;34m│\x1b[0m  \x1b[1;37mAuthor:\x1b[0m {:<53} \x1b[1;34m│\x1b[0m",
-            info.author
+            plugin_info.author
         );
         println!(
             "\x1b[1;34m│\x1b[0m  \x1b[1;37mType:\x1b[0m {:<55} \x1b[1;34m│\x1b[0m",
-            match info.plugin_type {
+            match plugin_info.plugin_type {
                 PluginType::Builtin => "Built-in",
                 PluginType::External => "External",
+                PluginType::Registry => "Registry",
             }
         );
 
-        // Description (might be long, so wrap it)
-        let desc_lines = self.wrap_text(&info.description, 57);
+        let desc_lines = self.wrap_text(&plugin_info.description, 57);
         for (i, line) in desc_lines.iter().enumerate() {
             if i == 0 {
                 println!(
@@ -281,16 +316,16 @@ impl PluginCommands {
         }
 
         // Extensions
-        if !info.extensions.is_empty() {
+        if !plugin_info.extensions.is_empty() {
             println!(
                 "\x1b[1;34m│\x1b[0m  \x1b[1;37mExtensions:\x1b[0m {:<48} \x1b[1;34m│\x1b[0m",
-                info.extensions.join(", ")
+                plugin_info.extensions.join(", ")
             );
         }
 
         // Entry files
-        if !info.entry_files.is_empty() {
-            let entry_text = info.entry_files.join(", ");
+        if !plugin_info.entry_files.is_empty() {
+            let entry_text = plugin_info.entry_files.join(", ");
             let entry_lines = self.wrap_text(&entry_text, 48);
             for (i, line) in entry_lines.iter().enumerate() {
                 if i == 0 {
@@ -314,24 +349,24 @@ impl PluginCommands {
         let color = |enabled: bool| if enabled { "\x1b[1;32m" } else { "\x1b[1;31m" };
 
         println!("\x1b[1;34m│\x1b[0m    {}{} WASM Compilation\x1b[0m                                    \x1b[1;34m│\x1b[0m", 
-                 color(info.capabilities.compile_wasm), check_mark(info.capabilities.compile_wasm));
+                 color(plugin_info.capabilities.compile_wasm), check_mark(plugin_info.capabilities.compile_wasm));
         println!("\x1b[1;34m│\x1b[0m    {}{} Web Application Support\x1b[0m                            \x1b[1;34m│\x1b[0m", 
-                 color(info.capabilities.compile_webapp), check_mark(info.capabilities.compile_webapp));
+                 color(plugin_info.capabilities.compile_webapp), check_mark(plugin_info.capabilities.compile_webapp));
         println!("\x1b[1;34m│\x1b[0m    {}{} Live Reload\x1b[0m                                         \x1b[1;34m│\x1b[0m", 
-                 color(info.capabilities.live_reload), check_mark(info.capabilities.live_reload));
+                 color(plugin_info.capabilities.live_reload), check_mark(plugin_info.capabilities.live_reload));
         println!("\x1b[1;34m│\x1b[0m    {}{} Optimization Support\x1b[0m                                \x1b[1;34m│\x1b[0m", 
-                 color(info.capabilities.optimization), check_mark(info.capabilities.optimization));
+                 color(plugin_info.capabilities.optimization), check_mark(plugin_info.capabilities.optimization));
 
         // Custom targets
-        if !info.capabilities.custom_targets.is_empty() {
+        if !plugin_info.capabilities.custom_targets.is_empty() {
             println!(
                 "\x1b[1;34m│\x1b[0m    \x1b[1;37mTargets:\x1b[0m {:<50} \x1b[1;34m│\x1b[0m",
-                info.capabilities.custom_targets.join(", ")
+                plugin_info.capabilities.custom_targets.join(", ")
             );
         }
 
         // Source information for external plugins
-        if let Some(source) = &info.source {
+        if let Some(source) = &plugin_info.source {
             println!("\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m");
             println!("\x1b[1;34m│\x1b[0m  📦 \x1b[1;36mSource Information:\x1b[0m                                     \x1b[1;34m│\x1b[0m");
 
@@ -380,10 +415,10 @@ impl PluginCommands {
         }
 
         // Dependencies
-        if !info.dependencies.is_empty() {
+        if !plugin_info.dependencies.is_empty() {
             println!("\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m");
             println!("\x1b[1;34m│\x1b[0m  🔗 \x1b[1;36mDependencies:\x1b[0m                                           \x1b[1;34m│\x1b[0m");
-            for dep in &info.dependencies {
+            for dep in &plugin_info.dependencies {
                 println!("\x1b[1;34m│\x1b[0m    • {:<56} \x1b[1;34m│\x1b[0m", dep);
             }
         }
@@ -435,7 +470,8 @@ impl PluginCommands {
         Ok(())
     }
 
-    /// Search for available plugins (placeholder for future implementation)
+    /// Search for available plugins
+    // TODO: To implement when we have an external plugin registry
     pub fn search(&self, query: &str) -> Result<()> {
         println!("Searching for plugins matching '{}'...", query);
         println!("Plugin search functionality is not yet implemented.");

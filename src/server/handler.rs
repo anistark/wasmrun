@@ -17,7 +17,6 @@ pub fn handle_request(
     clients_to_reload: &mut Vec<String>,
 ) {
     let url = request.url().to_string();
-    // Get client address safely
     let client_addr = match request.remote_addr() {
         Some(addr) => addr.to_string(),
         None => "unknown".to_string(),
@@ -28,10 +27,10 @@ pub fn handle_request(
     if url == "/" {
         // Serve the main HTML page
         let html = if let Some(js_file) = js_filename {
-            // This is a wasm-bindgen project, use the wasm-bindgen template
+            // This is a wasm-bindgen project
             generate_html_wasm_bindgen(js_file, wasm_filename)
         } else {
-            // Regular wasm file, use standard template
+            // Regular wasm file
             generate_html(wasm_filename)
         };
 
@@ -40,25 +39,19 @@ pub fn handle_request(
             eprintln!("❗ Error sending HTML response: {}", e);
         }
 
-        // Track this client for reload notifications
         if watch_mode && !clients_to_reload.contains(&client_addr) {
             clients_to_reload.push(client_addr);
         }
     } else if url == format!("/{}", wasm_filename) {
-        // Serve the WASM file
         serve_file(request, wasm_path, "application/wasm");
     } else if let Some(js_file) = js_filename {
-        // Handle JS file requests for wasm-bindgen
         if url == format!("/{}", js_file) {
             let js_path = Path::new(wasm_path).parent().unwrap().join(js_file);
             serve_file(request, js_path.to_str().unwrap(), "application/javascript");
         }
     } else if url == "/reload" {
-        // FIXED: Only send reload signal if we're actually in watch mode and there's a change
-        // For now, when watch mode is not active, just return a normal response
         if watch_mode {
-            // In the future, this should check if there was an actual file change
-            // For now, we'll make it not auto-reload by default
+            // TODO: check if there was an actual file change
             println!("🔄 Handling reload request in watch mode");
 
             let response =
@@ -68,7 +61,6 @@ pub fn handle_request(
                 eprintln!("❗ Error sending reload response: {}", e);
             }
         } else {
-            // Not in watch mode, return normal response without reload header
             let response = Response::from_string("not-watching")
                 .with_header(content_type_header("text/plain"));
 
@@ -79,26 +71,20 @@ pub fn handle_request(
     } else if url.starts_with("/assets/") {
         serve_asset(request, &url);
     } else {
-        // For any other files, try to serve them from the same directory as the wasm file
         let base_dir = Path::new(wasm_path).parent().unwrap();
         let requested_file = base_dir.join(url.trim_start_matches('/'));
 
         if requested_file.exists() && requested_file.is_file() {
-            // Determine content type based on extension
             let content_type = determine_content_type(&requested_file);
             serve_file(request, requested_file.to_str().unwrap(), content_type);
         } else {
-            // Special handling for _bg.wasm and other common patterns
             if url.ends_with("_bg.wasm") {
-                // The URL might be requesting a _bg.wasm file directly
-                // Check if there's a file matching this pattern in the directory
                 if let Ok(entries) = fs::read_dir(base_dir) {
                     for entry in entries.flatten() {
                         let entry_path = entry.path();
                         if let Some(name) = entry_path.file_name() {
                             if name.to_string_lossy().ends_with("_bg.wasm") && entry_path.is_file()
                             {
-                                // Found a _bg.wasm file, serve it
                                 serve_file(
                                     request,
                                     entry_path.to_str().unwrap(),
@@ -114,7 +100,6 @@ pub fn handle_request(
             // Check for common file patterns (js, css, etc.)
             for ext in &["js", "css", "json", "wasm"] {
                 if url.ends_with(&format!(".{}", ext)) {
-                    // Look for any file with this name in the directory
                     let filename = url.split('/').last().unwrap_or("");
                     if let Ok(entries) = fs::read_dir(base_dir) {
                         for entry in entries.flatten() {
@@ -159,34 +144,27 @@ pub fn handle_webapp_request(
 ) {
     let url = request.url().to_string();
 
-    // Get client address safely
     let client_addr = match request.remote_addr() {
         Some(addr) => addr.to_string(),
         None => "unknown".to_string(),
     };
 
-    // Log request to console
     if !url.contains("reload-check") {
-        // Don't log polling requests
         println!("📝 Request: {}", url);
     }
 
     if url == "/" {
-        // Serve the main HTML page
         let response = Response::from_string(html).with_header(content_type_header("text/html"));
         if let Err(e) = request.respond(response) {
             eprintln!("❗ Error sending HTML response: {}", e);
         }
 
-        // Track this client for reload notifications
         if !clients_to_reload.contains(&client_addr) {
             clients_to_reload.push(client_addr);
         }
     } else if url == "/reload-check" {
-        // This is a polling endpoint specifically for reload checks
         let mut response = Response::from_string("");
 
-        // Add cache control headers
         response = response.with_header(
             Header::from_bytes(
                 &b"Cache-Control"[..],
@@ -195,12 +173,11 @@ pub fn handle_webapp_request(
             .unwrap(),
         );
 
-        // If reload flag is set, tell browser to reload
         if reload_flag.load(Ordering::SeqCst) {
             response = response
                 .with_header(Header::from_bytes(&b"X-Reload-Needed"[..], &b"true"[..]).unwrap());
 
-            // Reset the flag after sending the reload signal
+            // Reset reload flag
             reload_flag.store(false, Ordering::SeqCst);
             println!("🔄 Sent reload signal to browser");
         }
@@ -214,7 +191,7 @@ pub fn handle_webapp_request(
     } else if url.starts_with("/assets/") {
         serve_asset(request, &url);
     } else {
-        // For any other files, try to serve them from the output directory
+        // serve from the output directory
         let file_path = Path::new(output_dir).join(url.trim_start_matches('/'));
 
         if file_path.exists() && file_path.is_file() {
@@ -222,8 +199,7 @@ pub fn handle_webapp_request(
             let content_type = determine_content_type(&file_path);
             serve_file(request, file_path.to_str().unwrap(), content_type);
         } else {
-            // If the file doesn't exist, serve the main HTML page for SPA routing
-            // This allows SPA-style navigation to work
+            // If the file doesn't exist, serve the main HTML page
             let response =
                 Response::from_string(html).with_header(content_type_header("text/html"));
             if let Err(e) = request.respond(response) {

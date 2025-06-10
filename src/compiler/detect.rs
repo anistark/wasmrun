@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-/// Enum for supported project languages
+/// Supported project languages
 #[derive(Debug, PartialEq)]
 pub enum ProjectLanguage {
     Rust,
@@ -12,7 +12,7 @@ pub enum ProjectLanguage {
     Unknown,
 }
 
-/// Enum for supported operating systems
+/// Supported OS
 #[derive(Debug, PartialEq)]
 #[allow(dead_code)]
 pub enum OperatingSystem {
@@ -22,11 +22,10 @@ pub enum OperatingSystem {
     Other,
 }
 
-/// Detect the project language
+/// Detect project language
 pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
     let path = Path::new(project_path);
 
-    // Check if the path exists and is a directory
     if !path.exists() || !path.is_dir() {
         eprintln!(
             "❌ Project path does not exist or is not a directory: {}",
@@ -35,53 +34,42 @@ pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
         return ProjectLanguage::Unknown;
     }
 
-    // Check for Rust project (Cargo.toml)
     if path.join("Cargo.toml").exists() {
         return ProjectLanguage::Rust;
     }
 
-    // Check for Go project (go.mod or .go files)
     if path.join("go.mod").exists() {
         return ProjectLanguage::Go;
-    } else {
-        // Look for .go files
-        if let Ok(entries) = fs::read_dir(path) {
-            for entry in entries.flatten() {
-                if let Some(extension) = entry.path().extension() {
-                    let ext = extension.to_string_lossy().to_lowercase();
-                    if ext == "go" {
-                        return ProjectLanguage::Go;
-                    }
+    } else if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Some(extension) = entry.path().extension() {
+                let ext = extension.to_string_lossy().to_lowercase();
+                if ext == "go" {
+                    return ProjectLanguage::Go;
                 }
             }
         }
     }
 
-    // Check for Python project (pyproject.toml, setup.py, or .py files)
     if path.join("pyproject.toml").exists() || path.join("setup.py").exists() {
         return ProjectLanguage::Python;
-    } else {
-        // Look for .py files
-        if let Ok(entries) = fs::read_dir(path) {
-            for entry in entries.flatten() {
-                if let Some(extension) = entry.path().extension() {
-                    let ext = extension.to_string_lossy().to_lowercase();
-                    if ext == "py" {
-                        return ProjectLanguage::Python;
-                    }
+    } else if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Some(extension) = entry.path().extension() {
+                let ext = extension.to_string_lossy().to_lowercase();
+                if ext == "py" {
+                    return ProjectLanguage::Python;
                 }
             }
         }
     }
 
-    // Check for AssemblyScript project (package.json with assemblyscript dependency)
     if let Ok(package_json) = fs::read_to_string(path.join("package.json")) {
         if package_json.contains("\"assemblyscript\"") {
             return ProjectLanguage::AssemblyScript;
         }
     }
 
-    // Check for C project (.c files)
     let mut has_c_files = false;
 
     if let Ok(entries) = fs::read_dir(path) {
@@ -100,7 +88,6 @@ pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
         return ProjectLanguage::C;
     }
 
-    // Default to unknown
     ProjectLanguage::Unknown
 }
 
@@ -126,7 +113,6 @@ pub fn detect_operating_system() -> OperatingSystem {
         OperatingSystem::Other
     }
 
-    // Fallback to Other if no specific OS is detected
     #[allow(unreachable_code)]
     OperatingSystem::Other
 }
@@ -135,22 +121,18 @@ pub fn detect_operating_system() -> OperatingSystem {
 pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -> Vec<String> {
     let recommended_tools = match (language, os) {
         (ProjectLanguage::Rust, _) => {
-            // Start with basic Rust tools
             let mut tools = vec!["rustup".to_string(), "cargo".to_string()];
 
-            // If this is a Rust project path that exists, check for wasm-bindgen
             if let Ok(current_dir) = std::env::current_dir() {
                 let current_dir_str = current_dir.to_str().unwrap_or(".");
                 let builder = crate::plugin::languages::rust_plugin::RustPlugin::new();
                 if builder.uses_wasm_bindgen(current_dir_str) {
-                    // Add wasm-pack for wasm-bindgen projects
                     tools.push("wasm-pack".to_string());
                 }
             }
 
             tools
         }
-        // Other language cases remain unchanged
         (ProjectLanguage::Go, _) => {
             vec!["tinygo".to_string(), "go".to_string()]
         }
@@ -175,7 +157,6 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
         (ProjectLanguage::Unknown, _) => Vec::new(),
     };
 
-    // Filter installed tools
     recommended_tools
         .into_iter()
         .filter(|tool| !is_tool_installed(tool))
@@ -184,7 +165,6 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
 
 /// Check if a tool is installed and available in the system path
 pub fn is_tool_installed(tool_name: &str) -> bool {
-    // Special handling for wasm-pack
     if tool_name == "wasm-pack" {
         let check_command = if cfg!(target_os = "windows") {
             "where wasm-pack"
@@ -206,7 +186,6 @@ pub fn is_tool_installed(tool_name: &str) -> bool {
         .map(|output| output.status.success())
         .unwrap_or(false);
 
-        // If wasm-pack is not found, provide installation instructions
         if !wasm_pack_installed {
             println!("⚠️ wasm-pack is not installed. It's required for wasm-bindgen projects.");
             println!("  To install wasm-pack, run: cargo install wasm-pack");
@@ -215,7 +194,6 @@ pub fn is_tool_installed(tool_name: &str) -> bool {
         return wasm_pack_installed;
     }
 
-    // Original implementation for other tools
     let command = if cfg!(target_os = "windows") {
         format!("where {}", tool_name)
     } else {
@@ -259,10 +237,8 @@ pub fn print_system_info() {
         os
     );
 
-    // Print additional system info
     #[cfg(target_os = "windows")]
     {
-        // Check if we're running in MSYS, Cygwin, or WSL
         let is_msys = std::env::var("MSYSTEM").is_ok();
         let is_cygwin = std::env::var("CYGWIN").is_ok();
         let is_wsl = std::fs::read_to_string("/proc/version")
@@ -284,7 +260,6 @@ pub fn print_system_info() {
 
     #[cfg(target_os = "macos")]
     {
-        // Get macOS version
         if let Ok(output) = std::process::Command::new("sw_vers")
             .arg("-productVersion")
             .output()
@@ -300,7 +275,6 @@ pub fn print_system_info() {
 
     #[cfg(target_os = "linux")]
     {
-        // Try to get Linux distribution info
         if let Ok(output) = std::fs::read_to_string("/etc/os-release") {
             if let Some(name_line) = output.lines().find(|l| l.starts_with("PRETTY_NAME=")) {
                 if let Some(name) = name_line.strip_prefix("PRETTY_NAME=") {

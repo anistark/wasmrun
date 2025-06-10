@@ -3,21 +3,15 @@ use crate::error::{CompilationError, CompilationResult};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
 use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 
+/// Go WebAssembly plugin
 pub struct GoPlugin {
     info: PluginInfo,
-    #[allow(dead_code)]
-    builder: Arc<GoBuilder>,
 }
 
 impl GoPlugin {
-    #[allow(dead_code)]
     pub fn new() -> Self {
-        let builder = Arc::new(GoBuilder::new());
-
         let info = PluginInfo {
             name: "go".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -37,47 +31,7 @@ impl GoPlugin {
             },
         };
 
-        Self { info, builder }
-    }
-}
-
-impl Plugin for GoPlugin {
-    fn info(&self) -> &PluginInfo {
-        &self.info
-    }
-
-    fn can_handle_project(&self, project_path: &str) -> bool {
-        // Check for go.mod file
-        let go_mod_path = PathResolver::join_paths(project_path, "go.mod");
-        if Path::new(&go_mod_path).exists() {
-            return true;
-        }
-
-        // Look for .go files
-        if let Ok(entries) = fs::read_dir(project_path) {
-            for entry in entries.flatten() {
-                if let Some(extension) = entry.path().extension() {
-                    let ext = extension.to_string_lossy().to_lowercase();
-                    if ext == "go" {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
-    }
-
-    fn get_builder(&self) -> Box<dyn WasmBuilder> {
-        Box::new(GoBuilder::new())
-    }
-}
-
-pub struct GoBuilder;
-
-impl GoBuilder {
-    pub fn new() -> Self {
-        Self
+        Self { info }
     }
 
     /// Find main.go or similar entry point
@@ -113,7 +67,37 @@ impl GoBuilder {
     }
 }
 
-impl WasmBuilder for GoBuilder {
+impl Plugin for GoPlugin {
+    fn info(&self) -> &PluginInfo {
+        &self.info
+    }
+
+    fn can_handle_project(&self, project_path: &str) -> bool {
+        let go_mod_path = PathResolver::join_paths(project_path, "go.mod");
+        if Path::new(&go_mod_path).exists() {
+            return true;
+        }
+
+        if let Ok(entries) = fs::read_dir(project_path) {
+            for entry in entries.flatten() {
+                if let Some(extension) = entry.path().extension() {
+                    let ext = extension.to_string_lossy().to_lowercase();
+                    if ext == "go" {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    fn get_builder(&self) -> Box<dyn WasmBuilder> {
+        Box::new(GoPlugin::new())
+    }
+}
+
+impl WasmBuilder for GoPlugin {
     fn language_name(&self) -> &str {
         "Go"
     }
@@ -148,7 +132,6 @@ impl WasmBuilder for GoBuilder {
             }
         })?;
 
-        // Try to find a Go entry file
         let _ = self.find_entry_file(project_path)?;
 
         Ok(())
@@ -163,17 +146,14 @@ impl WasmBuilder for GoBuilder {
             });
         }
 
-        // Find entry file
         let entry_path = self.find_entry_file(&config.project_path)?;
 
-        // Create output directory if it doesn't exist
         PathResolver::ensure_output_directory(&config.output_dir).map_err(|_| {
             CompilationError::OutputDirectoryCreationFailed {
                 path: config.output_dir.clone(),
             }
         })?;
 
-        // Get the output filename
         let output_name = entry_path
             .file_stem()
             .unwrap()
@@ -214,5 +194,11 @@ impl WasmBuilder for GoBuilder {
             additional_files: vec![],
             is_wasm_bindgen: false,
         })
+    }
+}
+
+impl Default for GoPlugin {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -1,4 +1,4 @@
-// Export language plugins
+// Export built-in language plugins
 pub mod assemblyscript_plugin;
 pub mod c_plugin;
 pub mod go_plugin;

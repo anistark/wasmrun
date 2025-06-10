@@ -149,7 +149,6 @@ pub enum CommandError {
 /// Configuration errors
 #[derive(Error, Debug)]
 pub enum ConfigError {
-    /// Placeholder - no config errors currently implemented
     #[error("Configuration error")]
     _Placeholder,
 }
@@ -161,24 +160,24 @@ pub type Result<T> = std::result::Result<T, ChakraError>;
 pub type CompilationResult<T> = std::result::Result<T, CompilationError>;
 
 impl ChakraError {
-    /// Create a new path error
+    /// new path error
     pub fn path(message: impl Into<String>) -> Self {
         Self::Path {
             message: message.into(),
         }
     }
 
-    /// Create a file not found error
+    /// file not found error
     pub fn file_not_found(path: impl Into<String>) -> Self {
         Self::FileNotFound { path: path.into() }
     }
 
-    /// Create a directory not found error
+    /// directory not found error
     pub fn directory_not_found(path: impl Into<String>) -> Self {
         Self::DirectoryNotFound { path: path.into() }
     }
 
-    /// Create an invalid file format error
+    /// Invalid file format error
     pub fn invalid_file_format(path: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::InvalidFileFormat {
             path: path.into(),
@@ -186,14 +185,14 @@ impl ChakraError {
         }
     }
 
-    /// Create a language detection error
+    /// language detection error
     pub fn language_detection(message: impl Into<String>) -> Self {
         Self::LanguageDetection {
             message: message.into(),
         }
     }
 
-    /// Create a missing tools error
+    /// missing tools error
     pub fn missing_tools(tools: Vec<String>) -> Self {
         Self::MissingTools { tools }
     }
@@ -261,7 +260,7 @@ impl ChakraError {
 }
 
 impl WasmError {
-    /// Create a new validation failed error
+    /// new validation failed error
     pub fn validation_failed(reason: impl Into<String>) -> Self {
         Self::ValidationFailed {
             reason: reason.into(),
@@ -270,7 +269,7 @@ impl WasmError {
 }
 
 impl CompilationError {
-    /// Create a new build failed error
+    /// new build failed error
     pub fn build_failed(language: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::BuildFailed {
             language: language.into(),
@@ -280,7 +279,7 @@ impl CompilationError {
 }
 
 impl ServerError {
-    /// Create a new startup failed error
+    /// new startup failed error
     pub fn startup_failed(port: u16, reason: impl Into<String>) -> Self {
         Self::StartupFailed {
             port,
@@ -290,7 +289,7 @@ impl ServerError {
 }
 
 impl CommandError {
-    /// Create a new invalid arguments error
+    /// new invalid arguments error
     pub fn invalid_arguments(message: impl Into<String>) -> Self {
         Self::InvalidArguments {
             message: message.into(),

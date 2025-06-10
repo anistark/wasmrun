@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct RegistryEntry {
     /// Plugin information
     pub info: PluginInfo,
-    /// Download count (for popularity)
+    /// Download count
     pub downloads: u64,
     /// Last updated timestamp
     pub updated_at: u64,
@@ -192,7 +192,7 @@ impl PluginRegistry for CratesIoRegistry {
     fn list_plugins(&self, limit: Option<usize>) -> Result<Vec<RegistryEntry>> {
         let mut plugins = self.search_crates("")?;
 
-        // Sort by downloads (popularity)
+        // Sort by downloads (popular plugins first)
         plugins.sort_by(|a, b| b.downloads.cmp(&a.downloads));
 
         if let Some(limit) = limit {
@@ -291,7 +291,7 @@ impl GitHubRegistry {
 
             let entry = RegistryEntry {
                 info,
-                downloads: 50, // GitHub doesn't track downloads like crates.io
+                downloads: 0, // GitHub doesn't have download counts like crates.io
                 updated_at: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
@@ -332,7 +332,7 @@ impl PluginRegistry for GitHubRegistry {
 
     fn get_versions(&self, _name: &str) -> Result<Vec<String>> {
         // GitHub repositories typically use branches/tags for versions
-        Ok(vec!["main".to_string(), "develop".to_string()])
+        Ok(vec!["main".to_string(), "dev".to_string()])
     }
 
     fn is_available(&self) -> bool {
@@ -349,7 +349,7 @@ impl PluginRegistry for GitHubRegistry {
 pub struct RegistryManager {
     /// All registered registries
     registries: Vec<Box<dyn PluginRegistry>>,
-    /// Cache for combined search results
+    /// Cache for search results
     #[allow(dead_code)]
     search_cache: HashMap<String, Vec<RegistryEntry>>,
 }
@@ -404,7 +404,7 @@ impl RegistryManager {
             }
         }
 
-        // Sort by downloads (popularity)
+        // Sort by downloads (popular plugins first)
         all_results.sort_by(|a, b| b.downloads.cmp(&a.downloads));
 
         Ok(all_results)
@@ -579,7 +579,7 @@ pub fn apply_filters(entries: Vec<RegistryEntry>, filters: &SearchFilters) -> Ve
             filtered.sort_by(|a, b| a.info.name.cmp(&b.info.name));
         }
         SortBy::Relevance => {
-            // For relevance, we'd need the original query - for now, use popularity
+            // TODO: Implement relevance. For now, using popularity
             filtered.sort_by(|a, b| b.downloads.cmp(&a.downloads));
         }
     }

@@ -1,9 +1,7 @@
-// Modified section to add debugging for CSS loading issues
 async function initializeApp() {
     try {
         console.log("Chakra: Loading app from $JS_ENTRYPOINT$");
         
-        // Debug CSS loading - log all stylesheets that are loaded in the document
         console.log("Current stylesheets loaded:", Array.from(document.styleSheets).map(sheet => {
             try {
                 return sheet.href || 'inline stylesheet';
@@ -12,26 +10,22 @@ async function initializeApp() {
             }
         }));
         
-        // Get references to elements
         const appElement = document.getElementById('app');
         const loadingElement = document.getElementById('chakra-loading');
         
         let module;
         try {
-            // Try with absolute path first
             module = await import('/$JS_ENTRYPOINT$');
         } catch (error) {
             console.warn("Failed to load module with absolute path, trying relative path...");
             try {
                 module = await import('./$JS_ENTRYPOINT$');
             } catch (secondError) {
-                // Try one more time without the leading dot
                 console.warn("Failed with relative path, trying plain import...");
                 module = await import('$JS_ENTRYPOINT$');
             }
         }
         
-        // Get the initialization function (different frameworks export differently)
         const init = module.default || module.init || module;
         
         if (typeof init !== 'function') {
@@ -40,10 +34,9 @@ async function initializeApp() {
         
         console.log("Chakra: Initializing web application...");
         
-        // Different initialization strategies
         let initialized = false;
         
-        // Strategy 1: Try with target option
+        // with target option
         if (!initialized) {
             try {
                 await init({ target: appElement });
@@ -54,7 +47,7 @@ async function initializeApp() {
             }
         }
         
-        // Strategy 2: Try with root element instead of target (some frameworks use this)
+        // with root element instead of target (some frameworks use this)
         if (!initialized) {
             try {
                 await init({ root: appElement });
@@ -65,7 +58,7 @@ async function initializeApp() {
             }
         }
         
-        // Strategy 3: Try with DOM element directly
+        // with DOM element directly
         if (!initialized) {
             try {
                 await init(appElement);
@@ -76,7 +69,7 @@ async function initializeApp() {
             }
         }
         
-        // Strategy 4: Try with no arguments
+        // with no arguments
         if (!initialized) {
             try {
                 await init();
@@ -88,27 +81,21 @@ async function initializeApp() {
             }
         }
         
-        // Correct any container issues that might have occurred
-        // Some frameworks might create their own containers with classes like 'app'
         setTimeout(() => {
-            // Look for a div with class="app" that might have been created outside our container
             const appClassElements = document.querySelectorAll('.app');
             const appContainerExists = document.querySelector('#app');
             
             if (appClassElements.length > 0 && appContainerExists) {
-                // Check if the .app element is not inside #app
                 appClassElements.forEach(element => {
                     const isOutside = !appContainerExists.contains(element);
                     if (isOutside) {
                         console.log("Chakra: Found app element outside container, moving it inside");
-                        // If the framework created a container outside our app div, move it inside
                         appContainerExists.innerHTML = '';
                         appContainerExists.appendChild(element);
                     }
                 });
             }
             
-            // Debug CSS loading - log all stylesheets again after initialization
             console.log("Stylesheets after app initialization:", Array.from(document.styleSheets).map(sheet => {
                 try {
                     return sheet.href || 'inline stylesheet';
@@ -117,13 +104,12 @@ async function initializeApp() {
                 }
             }));
             
-            // Check if there are links for CSS that might need to be loaded
+            // Check if links for CSS exists
             const cssLinks = document.querySelectorAll('link[rel="stylesheet"]');
             console.log(`Found ${cssLinks.length} CSS links in the document`);
             cssLinks.forEach(link => {
                 console.log(`CSS link: ${link.href}`);
                 
-                // Force reload CSS that might not have been loaded correctly
                 if (link.href) {
                     const originalHref = link.href;
                     link.href = '';
@@ -138,11 +124,8 @@ async function initializeApp() {
             console.log(`Found ${styles.length} style elements in the document`);
         }, 100);
         
-        // Remove loading indicator
         if (loadingElement) {
-            // First fade it out with a CSS transition
             loadingElement.classList.add('hidden');
-            // Then remove it completely after animation completes
             setTimeout(() => {
                 if (loadingElement.parentNode) {
                     loadingElement.parentNode.removeChild(loadingElement);

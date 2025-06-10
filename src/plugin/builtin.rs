@@ -1,6 +1,4 @@
 //! Built-in plugin implementations
-//!
-//! This module contains all the built-in plugins that ship with Chakra
 
 use crate::compiler::builder::WasmBuilder;
 use crate::error::Result;
@@ -51,7 +49,6 @@ impl Plugin for BuiltinPlugin {
     }
 
     fn can_handle_project(&self, project_path: &str) -> bool {
-        // Check if project contains any of the entry files
         for entry_file in &self.info.entry_files {
             let entry_path = std::path::Path::new(project_path).join(entry_file);
             if entry_path.exists() {
@@ -59,7 +56,6 @@ impl Plugin for BuiltinPlugin {
             }
         }
 
-        // Check if project contains files with supported extensions
         if let Ok(entries) = std::fs::read_dir(project_path) {
             for entry in entries.flatten() {
                 if let Some(extension) = entry.path().extension() {
@@ -75,14 +71,12 @@ impl Plugin for BuiltinPlugin {
     }
 
     fn get_builder(&self) -> Box<dyn WasmBuilder> {
-        // Clone the Arc to create a new instance
         Box::new(BuiltinBuilderWrapper {
             builder: Arc::clone(&self.builder),
         })
     }
 }
 
-/// Wrapper to make Arc<dyn WasmBuilder> implement WasmBuilder
 struct BuiltinBuilderWrapper {
     builder: Arc<dyn WasmBuilder>,
 }
@@ -133,10 +127,6 @@ pub fn load_all_builtin_plugins(registry: &mut PluginRegistry) -> Result<()> {
     // AssemblyScript plugin
     let asc_plugin = create_assemblyscript_plugin();
     registry.register_plugin(Box::new(asc_plugin))?;
-
-    // Python plugin (placeholder for future implementation)
-    let python_plugin = create_python_plugin();
-    registry.register_plugin(Box::new(python_plugin))?;
 
     println!("Loaded {} built-in plugins", 5);
     Ok(())
@@ -231,28 +221,7 @@ fn create_assemblyscript_plugin() -> BuiltinPlugin {
     )
 }
 
-/// Create the Python built-in plugin (placeholder)
-fn create_python_plugin() -> BuiltinPlugin {
-    let capabilities = PluginCapabilities {
-        compile_wasm: false, // Not yet implemented
-        compile_webapp: false,
-        live_reload: false,
-        optimization: false,
-        custom_targets: vec![],
-    };
-
-    BuiltinPlugin::new(
-        "python".to_string(),
-        env!("CARGO_PKG_VERSION").to_string(),
-        "Python WebAssembly compiler (coming soon)".to_string(),
-        vec!["py".to_string()],
-        vec!["main.py".to_string(), "pyproject.toml".to_string()],
-        capabilities,
-        Arc::new(PythonBuilder::new()),
-    )
-}
-
-/// Get information about all built-in plugins without loading them
+/// Get information about all built-in plugins
 #[allow(dead_code)]
 pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
     vec![

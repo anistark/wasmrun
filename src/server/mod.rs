@@ -368,14 +368,12 @@ fn search_for_js_files(
 ) -> Result<bool> {
     println!("  ⚠️ \x1b[1;33mWarning: Could not find corresponding JS file\x1b[0m");
     println!("  \x1b[0;37mLooking for other JS files in the same directory...\x1b[0m");
-
-    // Search for any JS file in the same directory
     if let Some(dir) = path_obj.parent() {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let entry_path = entry.path();
                 if entry_path.extension().map_or(false, |ext| ext == "js") {
-                    // Check if this might be a wasm-bindgen JS by reading its content
+                    // Check if this might be a wasm-bindgen JS
                     if let Ok(js_content) = std::fs::read_to_string(&entry_path) {
                         if js_content.contains("wasm_bindgen") || js_content.contains("__wbindgen")
                         {
@@ -389,8 +387,6 @@ fn search_for_js_files(
                             if cfg!(test) {
                                 return Ok(true);
                             }
-
-                            // Run with this JS file
                             config::run_server(ServerConfig {
                                 wasm_path: path.to_string(),
                                 js_path: Some(entry_path.to_str().unwrap().to_string()),

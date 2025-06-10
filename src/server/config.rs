@@ -26,9 +26,9 @@ pub struct ServerConfig {
     pub output_dir: Option<String>,
 }
 
-/// Combined server function
+/// Run server
 pub fn run_server(config: ServerConfig) -> Result<(), String> {
-    // Check if a server is already running
+    // Check if server is running
     if super::is_server_running() {
         match super::stop_existing_server() {
             Ok(_) => println!("💀 Existing server stopped successfully."),
@@ -36,7 +36,7 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
         }
     }
 
-    // Check if the port is available
+    // Check if port is available
     if !utils::is_port_available(config.port) {
         return Err(format!(
             "❗ Port {} is already in use, please choose a different port.",
@@ -49,7 +49,7 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
         return Err(format!("❗ Path not found: {}", config.wasm_path));
     }
 
-    // If it's a directory, look for WASM files
+    // If directory, look for WASM files
     if path_obj.is_dir() {
         let wasm_files = utils::find_wasm_files(path_obj);
         if wasm_files.is_empty() {
@@ -151,7 +151,7 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
     fs::write(super::PID_FILE, pid.to_string())
         .map_err(|e| format!("Failed to write PID to {}: {}", super::PID_FILE, e))?;
 
-    // Setup for watch mode if needed
+    // Setup for watch mode
     if config.watch_mode && config.project_path.is_some() && config.output_dir.is_some() {
         // Create channels for communication
         let (tx, rx) = channel();
@@ -168,25 +168,20 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
                 let reload_flag_clone = Arc::clone(&reload_flag);
 
                 let server_thread = thread::spawn(move || {
-                    // Create HTTP server
                     if let Ok(server) = Server::http(format!("0.0.0.0:{port}")) {
-                        // Track connected clients for live reload
                         let mut clients_to_reload = Vec::new();
 
-                        // Handle requests
                         for request in server.incoming_requests() {
-                            // Check for shutdown signal
                             if rx.try_recv().is_ok() {
                                 break;
                             }
 
-                            // Handle the request with proper reload flag checking
                             handle_request_with_reload_flag(
                                 request,
                                 js_filename.as_deref(),
                                 &wasm_filename,
                                 &wasm_path_clone,
-                                true, // watch_mode is true
+                                true,
                                 &mut clients_to_reload,
                                 &reload_flag_clone,
                             );
@@ -194,14 +189,10 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
                     }
                 });
 
-                // Let the server start up
                 thread::sleep(Duration::from_millis(500));
-
-                // Watch for file changes in the main thread
                 println!("👀 Watching project directory for changes...");
 
                 loop {
-                    // Wait for file changes
                     if let Some(Ok(events)) = watcher.wait_for_change() {
                         if watcher.should_recompile(&events) {
                             println!("\n📝 File change detected. Recompiling...");
@@ -222,7 +213,6 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
                         }
                     }
 
-                    // Check for server exit
                     if server_thread.is_finished() {
                         println!("Server stopped. Exiting watch mode.");
                         break;
@@ -232,7 +222,7 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
                     thread::sleep(Duration::from_millis(100));
                 }
 
-                // Signal the server to stop if still running
+                // Stop server if still running
                 let _ = tx.send(());
 
                 // Wait for server thread to finish
@@ -294,13 +284,11 @@ fn handle_request_with_reload_flag(
 ) {
     let url = request.url().to_string();
 
-    // Handle the special reload endpoint for watch mode
     if url == "/reload" && watch_mode {
         println!("🔄 Handling reload request in watch mode");
 
         // Check if there's a reload pending
         if reload_flag.load(Ordering::SeqCst) {
-            // Send reload signal
             let response = tiny_http::Response::from_string("reload")
                 .with_header(tiny_http::Header::from_bytes(&b"X-Reload"[..], &b"true"[..]).unwrap())
                 .with_header(utils::content_type_header("text/plain"));
@@ -335,7 +323,7 @@ fn handle_request_with_reload_flag(
     );
 }
 
-/// Set up project compilation environment and detect language
+/// Set up project compilation environment
 pub fn setup_project_compilation(
     path: &str,
     language_override: Option<String>,
@@ -361,23 +349,20 @@ pub fn setup_project_compilation(
 
     // Use language from command if provided
     let lang = match language_override {
-        Some(lang_str) => {
-            // Convert string to ProjectLanguage enum
-            match lang_str.to_lowercase().as_str() {
-                "rust" => compiler::ProjectLanguage::Rust,
-                "go" => compiler::ProjectLanguage::Go,
-                "c" => compiler::ProjectLanguage::C,
-                "assemblyscript" => compiler::ProjectLanguage::AssemblyScript,
-                "python" => compiler::ProjectLanguage::Python,
-                _ => {
-                    println!(
-                        "  ⚠️ \x1b[1;33mUnknown language '{}', using auto-detected\x1b[0m",
-                        lang_str
-                    );
-                    detected_language
-                }
+        Some(lang_str) => match lang_str.to_lowercase().as_str() {
+            "rust" => compiler::ProjectLanguage::Rust,
+            "go" => compiler::ProjectLanguage::Go,
+            "c" => compiler::ProjectLanguage::C,
+            "assemblyscript" => compiler::ProjectLanguage::AssemblyScript,
+            "python" => compiler::ProjectLanguage::Python,
+            _ => {
+                println!(
+                    "  ⚠️ \x1b[1;33mUnknown language '{}', using auto-detected\x1b[0m",
+                    lang_str
+                );
+                detected_language
             }
-        }
+        },
         None => detected_language,
     };
 
@@ -389,11 +374,9 @@ pub fn setup_project_compilation(
         return None;
     }
 
-    // Create a temporary directory for output
     let temp_dir = std::env::temp_dir().join("chakra_temp");
     let temp_output_dir = temp_dir.to_str().unwrap_or("/tmp").to_string();
 
-    // Create temp directory if it doesn't exist
     if !temp_dir.exists() {
         if let Err(e) = std::fs::create_dir_all(&temp_dir) {
             println!(
@@ -410,11 +393,7 @@ pub fn setup_project_compilation(
         temp_output_dir
     );
     println!("\x1b[1;34m╰\x1b[0m\n");
-
-    // Get system information
     compiler::print_system_info();
-
-    // Check for missing tools
     let os = compiler::detect_operating_system();
     let missing_tools = compiler::get_missing_tools(&lang, &os);
     if !missing_tools.is_empty() {
@@ -428,7 +407,6 @@ pub fn setup_project_compilation(
         return None;
     }
 
-    // Check if this language is supported for compilation
     if lang == compiler::ProjectLanguage::Python {
         println!("\n\x1b[1;34m╭\x1b[0m");
         println!("  ⚠️  \x1b[1;33mPython WebAssembly compilation coming soon!\x1b[0m");
@@ -440,24 +418,22 @@ pub fn setup_project_compilation(
     Some((lang, temp_output_dir))
 }
 
-/// Compile a project and return the path to the WASM file
+/// Compile a project
 pub fn compile_project(
     path: &str,
     output_dir: &str,
     _lang: compiler::ProjectLanguage,
     watch: bool,
 ) -> Option<(String, bool, Option<String>)> {
-    // Compile the project
     match compiler::compile_for_execution(path, output_dir) {
         Ok(output_path) => {
             println!("\n\x1b[1;34m╭\x1b[0m");
             println!("  ✅ \x1b[1;36mCompilation Successful\x1b[0m\n");
 
-            // Check if this is a JS file (indicating wasm-bindgen output)
+            // Check if this is a JS file (for wasm-bindgen)
             let is_wasm_bindgen = output_path.ends_with(".js");
 
             if is_wasm_bindgen {
-                // For wasm-bindgen, output_path is the JS file path
                 println!(
                     "  📦 \x1b[1;34mJS File:\x1b[0m \x1b[1;32m{}\x1b[0m",
                     output_path

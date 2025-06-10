@@ -1,6 +1,6 @@
 use crate::compiler::builder::OptimizationLevel;
 
-/// Print a success message with title and details
+/// Print a success message
 pub fn print_success(title: &str, message: &str) {
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  ✅ \x1b[1;36m{}\x1b[0m", title);

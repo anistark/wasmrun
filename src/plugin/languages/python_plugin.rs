@@ -1,43 +1,43 @@
 use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
 use crate::error::{CompilationError, CompilationResult};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
-use crate::utils::{CommandExecutor, PathResolver};
+use crate::utils::CommandExecutor;
 use std::fs;
-use std::path::Path;
-use std::sync::Arc;
 
+/// Python WebAssembly plugin
 pub struct PythonPlugin {
     info: PluginInfo,
-    #[allow(dead_code)]
-    builder: Arc<PythonBuilder>,
 }
 
 impl PythonPlugin {
-    #[allow(dead_code)]
     pub fn new() -> Self {
-        let builder = Arc::new(PythonBuilder::new());
-
         let info = PluginInfo {
             name: "python".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
-            description: "Python WebAssembly compiler (coming soon)".to_string(),
+            description: "Python WebAssembly compiler".to_string(),
             author: "Chakra Team".to_string(),
             extensions: vec!["py".to_string()],
-            entry_files: vec!["main.py".to_string(), "pyproject.toml".to_string()],
+            entry_files: vec![
+                "main.py".to_string(),
+                "app.py".to_string(),
+                "requirements.txt".to_string(),
+            ],
             plugin_type: PluginType::Builtin,
             source: None,
             dependencies: vec![],
             capabilities: PluginCapabilities {
-                compile_wasm: false, // Not yet implemented
-                compile_webapp: false,
-                live_reload: false,
+                compile_wasm: true,
+                compile_webapp: true,
+                live_reload: true,
                 optimization: false,
-                custom_targets: vec![],
+                custom_targets: vec!["wasm".to_string(), "web".to_string()],
             },
         };
 
-        Self { info, builder }
+        Self { info }
     }
+
+    // TODO: Python to WebAssembly compilation methods
 }
 
 impl Plugin for PythonPlugin {
@@ -46,49 +46,38 @@ impl Plugin for PythonPlugin {
     }
 
     fn can_handle_project(&self, project_path: &str) -> bool {
-        // Check for pyproject.toml or setup.py
-        let pyproject_path = PathResolver::join_paths(project_path, "pyproject.toml");
-        let setup_path = PathResolver::join_paths(project_path, "setup.py");
+        // TODO: Detect project
 
-        if Path::new(&pyproject_path).exists() || Path::new(&setup_path).exists() {
-            return true;
-        }
-
-        // Look for .py files
         if let Ok(entries) = fs::read_dir(project_path) {
             for entry in entries.flatten() {
                 if let Some(extension) = entry.path().extension() {
-                    let ext = extension.to_string_lossy().to_lowercase();
-                    if ext == "py" {
+                    if extension == "py" {
                         return true;
                     }
                 }
             }
         }
-
         false
     }
 
     fn get_builder(&self) -> Box<dyn WasmBuilder> {
-        Box::new(PythonBuilder::new())
+        Box::new(PythonPlugin::new())
     }
 }
 
-pub struct PythonBuilder;
-
-impl PythonBuilder {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl WasmBuilder for PythonBuilder {
+impl WasmBuilder for PythonPlugin {
     fn language_name(&self) -> &str {
         "Python"
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
-        &["main.py", "app.py", "setup.py", "pyproject.toml"]
+        &[
+            "main.py",
+            "app.py",
+            "index.py",
+            "src/main.py",
+            "requirements.txt",
+        ]
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -96,21 +85,45 @@ impl WasmBuilder for PythonBuilder {
     }
 
     fn check_dependencies(&self) -> Vec<String> {
+        // TODO: Dependency checking
+
         let mut missing = Vec::new();
 
-        if !CommandExecutor::is_tool_installed("python") {
-            missing.push("python (Python interpreter)".to_string());
+        if !CommandExecutor::is_tool_installed("python")
+            && !CommandExecutor::is_tool_installed("python3")
+        {
+            missing.push("python or python3 (Python interpreter)".to_string());
         }
-
-        // Python WASM compilation is not yet implemented
-        missing.push("Python WebAssembly compilation is coming soon".to_string());
 
         missing
     }
 
+    fn validate_project(&self, project_path: &str) -> CompilationResult<()> {
+        // TODO: Project validation
+
+        if !std::path::Path::new(project_path).exists() {
+            return Err(CompilationError::InvalidProjectStructure {
+                language: self.language_name().to_string(),
+                reason: "Project directory does not exist".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
     fn build(&self, _config: &BuildConfig) -> CompilationResult<BuildResult> {
-        Err(CompilationError::UnsupportedLanguage {
-            language: "Python".to_string(),
+        // TODO: Implement Python WebAssembly build
+        println!("🔨 Python WebAssembly compilation - TBD");
+
+        Err(CompilationError::BuildFailed {
+            language: self.language_name().to_string(),
+            reason: "Python WebAssembly compilation not yet implemented".to_string(),
         })
+    }
+}
+
+impl Default for PythonPlugin {
+    fn default() -> Self {
+        Self::new()
     }
 }
