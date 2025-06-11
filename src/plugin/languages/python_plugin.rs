@@ -12,16 +12,12 @@ pub struct PythonPlugin {
 impl PythonPlugin {
     pub fn new() -> Self {
         let info = PluginInfo {
-            name: "python".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            description: "Python WebAssembly compiler".to_string(),
-            author: "Chakra Team".to_string(),
-            extensions: vec!["py".to_string()],
-            entry_files: vec![
-                "main.py".to_string(),
-                "app.py".to_string(),
-                "requirements.txt".to_string(),
-            ],
+            name: "python".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            description: "Python WebAssembly compiler".into(),
+            author: "Chakra Team".into(),
+            extensions: vec!["py".into()],
+            entry_files: vec!["main.py".into(), "app.py".into(), "requirements.txt".into()],
             plugin_type: PluginType::Builtin,
             source: None,
             dependencies: vec![],
@@ -30,7 +26,7 @@ impl PythonPlugin {
                 compile_webapp: true,
                 live_reload: true,
                 optimization: false,
-                custom_targets: vec!["wasm".to_string(), "web".to_string()],
+                custom_targets: vec!["wasm".into(), "web".into()],
             },
         };
 
