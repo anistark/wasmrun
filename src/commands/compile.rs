@@ -90,7 +90,7 @@ impl fmt::Display for compiler::ProjectLanguage {
             compiler::ProjectLanguage::Rust => "Rust",
             compiler::ProjectLanguage::Go => "Go",
             compiler::ProjectLanguage::C => "C",
-            compiler::ProjectLanguage::AssemblyScript => "AssemblyScript",
+            compiler::ProjectLanguage::Asc => "Asc",
             compiler::ProjectLanguage::Python => "Python",
             compiler::ProjectLanguage::Unknown => "Unknown",
         };

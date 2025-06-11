@@ -144,7 +144,7 @@ fn handle_default_command(args: &cli::ResolvedArgs) -> Result<()> {
                     compiler::ProjectLanguage::Rust => "🦀",
                     compiler::ProjectLanguage::Go => "🐹",
                     compiler::ProjectLanguage::C => "🔧",
-                    compiler::ProjectLanguage::AssemblyScript => "📜",
+                    compiler::ProjectLanguage::Asc => "📜",
                     compiler::ProjectLanguage::Python => "🐍",
                     _ => "❓",
                 };

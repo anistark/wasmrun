@@ -7,7 +7,7 @@ pub enum ProjectLanguage {
     Rust,
     Go,
     C,
-    AssemblyScript,
+    Asc,
     Python,
     Unknown,
 }
@@ -65,8 +65,8 @@ pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
     }
 
     if let Ok(package_json) = fs::read_to_string(path.join("package.json")) {
-        if package_json.contains("\"assemblyscript\"") {
-            return ProjectLanguage::AssemblyScript;
+        if package_json.contains("\"asc\"") {
+            return ProjectLanguage::Asc;
         }
     }
 
@@ -150,7 +150,7 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
                 "gcc".to_string(),
             ]
         }
-        (ProjectLanguage::AssemblyScript, _) => {
+        (ProjectLanguage::Asc, _) => {
             vec!["node.js".to_string(), "npm".to_string(), "asc".to_string()]
         }
         (ProjectLanguage::Python, _) => Vec::new(),

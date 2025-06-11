@@ -6,14 +6,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// AssemblyScript WebAssembly plugin
-pub struct AssemblyScriptPlugin {
+pub struct AscPlugin {
     info: PluginInfo,
 }
 
-impl AssemblyScriptPlugin {
+impl AscPlugin {
     pub fn new() -> Self {
         let info = PluginInfo {
-            name: "assemblyscript".to_string(),
+            name: "asc".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             description: "AssemblyScript WebAssembly compiler".to_string(),
             author: "Chakra Team".to_string(),
@@ -39,12 +39,12 @@ impl AssemblyScriptPlugin {
     }
 
     /// Check if this is an AssemblyScript project
-    fn is_assemblyscript_project(&self, project_path: &str) -> bool {
+    fn is_asc_project(&self, project_path: &str) -> bool {
         let package_json_path = PathResolver::join_paths(project_path, "package.json");
 
         if let Ok(package_json) = fs::read_to_string(package_json_path) {
             // Check for AssemblyScript dependencies
-            package_json.contains("assemblyscript") || package_json.contains("@assemblyscript")
+            package_json.contains("asc") || package_json.contains("@asc")
         } else {
             false
         }
@@ -249,14 +249,14 @@ impl AssemblyScriptPlugin {
     }
 }
 
-impl Plugin for AssemblyScriptPlugin {
+impl Plugin for AscPlugin {
     fn info(&self) -> &PluginInfo {
         &self.info
     }
 
     fn can_handle_project(&self, project_path: &str) -> bool {
         // Check if it's an AssemblyScript project
-        if self.is_assemblyscript_project(project_path) {
+        if self.is_asc_project(project_path) {
             return true;
         }
 
@@ -274,13 +274,13 @@ impl Plugin for AssemblyScriptPlugin {
     }
 
     fn get_builder(&self) -> Box<dyn WasmBuilder> {
-        Box::new(AssemblyScriptPlugin::new())
+        Box::new(AscPlugin::new())
     }
 }
 
-impl WasmBuilder for AssemblyScriptPlugin {
+impl WasmBuilder for AscPlugin {
     fn language_name(&self) -> &str {
-        "AssemblyScript"
+        "Asc"
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
@@ -303,8 +303,7 @@ impl WasmBuilder for AssemblyScriptPlugin {
         // Check for AssemblyScript compiler
         if !CommandExecutor::is_tool_installed("asc") {
             missing.push(
-                "asc (AssemblyScript compiler - install with: npm install -g assemblyscript)"
-                    .to_string(),
+                "asc (AssemblyScript compiler - install with: npm install -g asc)".to_string(),
             );
         }
 
@@ -358,7 +357,7 @@ impl WasmBuilder for AssemblyScriptPlugin {
     }
 }
 
-impl Default for AssemblyScriptPlugin {
+impl Default for AscPlugin {
     fn default() -> Self {
         Self::new()
     }

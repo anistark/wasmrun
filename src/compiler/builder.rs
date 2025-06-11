@@ -299,7 +299,7 @@ impl BuilderFactory {
     pub fn create_builder(language: &crate::compiler::ProjectLanguage) -> Box<dyn WasmBuilder> {
         use crate::compiler::ProjectLanguage;
         use crate::plugin::languages::{
-            assemblyscript_plugin::AssemblyScriptPlugin, c_plugin::CPlugin, go_plugin::GoPlugin,
+            asc_plugin::AscPlugin, c_plugin::CPlugin, go_plugin::GoPlugin,
             python_plugin::PythonPlugin, rust_plugin::RustPlugin,
         };
 
@@ -307,7 +307,7 @@ impl BuilderFactory {
             ProjectLanguage::Rust => Box::new(RustPlugin::new()),
             ProjectLanguage::Go => Box::new(GoPlugin::new()),
             ProjectLanguage::C => Box::new(CPlugin::new()),
-            ProjectLanguage::AssemblyScript => Box::new(AssemblyScriptPlugin::new()),
+            ProjectLanguage::Asc => Box::new(AscPlugin::new()),
             ProjectLanguage::Python => Box::new(PythonPlugin::new()),
             ProjectLanguage::Unknown => Box::new(UnknownBuilder),
         }
@@ -318,7 +318,7 @@ impl BuilderFactory {
             "Rust".to_string(),
             "Go".to_string(),
             "C".to_string(),
-            "AssemblyScript".to_string(),
+            "Asc".to_string(),
             "Python".to_string(),
         ]
     }
@@ -393,7 +393,7 @@ pub fn format_build_error(error: &CompilationError) -> String {
                 "Rust" => crate::compiler::ProjectLanguage::Rust,
                 "Go" => crate::compiler::ProjectLanguage::Go,
                 "C" => crate::compiler::ProjectLanguage::C,
-                "AssemblyScript" => crate::compiler::ProjectLanguage::AssemblyScript,
+                "Asc" => crate::compiler::ProjectLanguage::Asc,
                 "Python" => crate::compiler::ProjectLanguage::Python,
                 _ => crate::compiler::ProjectLanguage::Unknown,
             });

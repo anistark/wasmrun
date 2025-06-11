@@ -353,7 +353,7 @@ pub fn setup_project_compilation(
             "rust" => compiler::ProjectLanguage::Rust,
             "go" => compiler::ProjectLanguage::Go,
             "c" => compiler::ProjectLanguage::C,
-            "assemblyscript" => compiler::ProjectLanguage::AssemblyScript,
+            "asc" => compiler::ProjectLanguage::Asc,
             "python" => compiler::ProjectLanguage::Python,
             _ => {
                 println!(

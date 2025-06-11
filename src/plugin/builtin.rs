@@ -3,7 +3,7 @@
 use crate::compiler::builder::WasmBuilder;
 use crate::error::Result;
 use crate::plugin::languages::{
-    assemblyscript_plugin::AssemblyScriptBuilder, c_plugin::CBuilder, go_plugin::GoBuilder,
+    asc_plugin::AscBuilder, c_plugin::CBuilder, go_plugin::GoBuilder,
     python_plugin::PythonBuilder, rust_plugin::RustPlugin,
 };
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginRegistry, PluginType};
@@ -124,8 +124,8 @@ pub fn load_all_builtin_plugins(registry: &mut PluginRegistry) -> Result<()> {
     let c_plugin = create_c_plugin();
     registry.register_plugin(Box::new(c_plugin))?;
 
-    // AssemblyScript plugin
-    let asc_plugin = create_assemblyscript_plugin();
+    // Asc plugin
+    let asc_plugin = create_asc_plugin();
     registry.register_plugin(Box::new(asc_plugin))?;
 
     println!("Loaded {} built-in plugins", 5);
@@ -200,8 +200,8 @@ fn create_c_plugin() -> BuiltinPlugin {
     )
 }
 
-/// Create the AssemblyScript built-in plugin
-fn create_assemblyscript_plugin() -> BuiltinPlugin {
+/// Create the Asc built-in plugin
+fn create_asc_plugin() -> BuiltinPlugin {
     let capabilities = PluginCapabilities {
         compile_wasm: true,
         compile_webapp: false,
@@ -211,13 +211,13 @@ fn create_assemblyscript_plugin() -> BuiltinPlugin {
     };
 
     BuiltinPlugin::new(
-        "assemblyscript".to_string(),
+        "asc".to_string(),
         env!("CARGO_PKG_VERSION").to_string(),
-        "AssemblyScript WebAssembly compiler".to_string(),
+        "Asc WebAssembly compiler".to_string(),
         vec!["ts".to_string()],
         vec!["package.json".to_string(), "asconfig.json".to_string()],
         capabilities,
-        Arc::new(AssemblyScriptBuilder::new()),
+        Arc::new(AscBuilder::new()),
     )
 }
 
@@ -228,7 +228,7 @@ pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
         create_rust_plugin().info().clone(),
         create_go_plugin().info().clone(),
         create_c_plugin().info().clone(),
-        create_assemblyscript_plugin().info().clone(),
+        create_asc_plugin().info().clone(),
         create_python_plugin().info().clone(),
     ]
 }
@@ -236,7 +236,7 @@ pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
 /// Check if a plugin name is a built-in plugin
 #[allow(dead_code)]
 pub fn is_builtin_plugin(name: &str) -> bool {
-    matches!(name, "rust" | "go" | "c" | "assemblyscript" | "python")
+    matches!(name, "rust" | "go" | "c" | "asc" | "python")
 }
 
 /// Get specific built-in plugin info by name
@@ -246,7 +246,7 @@ pub fn get_builtin_plugin_by_name(name: &str) -> Option<PluginInfo> {
         "rust" => Some(create_rust_plugin().info().clone()),
         "go" => Some(create_go_plugin().info().clone()),
         "c" => Some(create_c_plugin().info().clone()),
-        "assemblyscript" => Some(create_assemblyscript_plugin().info().clone()),
+        "asc" => Some(create_asc_plugin().info().clone()),
         "python" => Some(create_python_plugin().info().clone()),
         _ => None,
     }

@@ -162,7 +162,7 @@ pub enum Commands {
         #[arg(
             short = 'l',
             long,
-            value_parser = ["rust", "go", "c", "assemblyscript", "python"],
+            value_parser = ["rust", "go", "c", "asc", "python"],
             help = "Force specific language for compilation"
         )]
         language: Option<String>,
@@ -188,12 +188,12 @@ pub enum Commands {
     //     #[arg(index = 1, help = "Name of the new project")]
     //     name: Option<String>,
 
-    //     /// Template to use (rust, go, c, assemblyscript)
+    //     /// Template to use (rust, go, c, asc)
     //     #[arg(
     //         short = 't',
     //         long,
     //         default_value = "rust",
-    //         value_parser = ["rust", "go", "c", "assemblyscript", "python"],
+    //         value_parser = ["rust", "go", "c", "asc", "python"],
     //         help = "Project template to use"
     //     )]
     //     template: String,
@@ -447,7 +447,7 @@ impl CommandValidator {
             .unwrap_or_else(|| "my-chakra-project".to_string());
         let target_dir = directory.clone().unwrap_or_else(|| project_name.clone());
 
-        let valid_templates = ["rust", "go", "c", "assemblyscript", "python"];
+        let valid_templates = ["rust", "go", "c", "asc", "python"];
         if !valid_templates.contains(&template) {
             return Err(ChakraError::from(format!(
                 "Invalid template '{}'. Valid templates: {}",

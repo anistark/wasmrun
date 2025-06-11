@@ -95,7 +95,7 @@ impl PluginManager {
             Box::new(languages::rust_plugin::RustPlugin::new()),
             Box::new(languages::go_plugin::GoPlugin::new()),
             Box::new(languages::c_plugin::CPlugin::new()),
-            Box::new(languages::assemblyscript_plugin::AssemblyScriptPlugin::new()),
+            Box::new(languages::asc_plugin::AscPlugin::new()),
             Box::new(languages::python_plugin::PythonPlugin::new()),
         ];
 
@@ -230,7 +230,7 @@ impl PluginManager {
     /// Validate that all required plugins are available
     #[allow(dead_code)]
     pub fn validate_plugin_availability(&self) -> crate::error::Result<()> {
-        let required_plugins = ["rust", "go", "c", "assemblyscript", "python"];
+        let required_plugins = ["rust", "go", "c", "asc", "python"];
         let missing: Vec<_> = required_plugins
             .iter()
             .filter(|name| self.get_plugin_by_name(name).is_none())

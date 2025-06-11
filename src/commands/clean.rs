@@ -16,7 +16,7 @@ pub fn handle_clean_command(path: &Option<String>, positional_path: &Option<Stri
         compiler::ProjectLanguage::Rust => clean_rust_project(&project_path),
         compiler::ProjectLanguage::Go => clean_go_project(&project_path),
         compiler::ProjectLanguage::C => clean_c_project(&project_path),
-        compiler::ProjectLanguage::AssemblyScript => clean_assemblyscript_project(&project_path),
+        compiler::ProjectLanguage::Asc => clean_asc_project(&project_path),
         _ => {
             println!(
                 "⚠️ Clean operation not specifically implemented for {:?}",
@@ -87,7 +87,7 @@ fn clean_c_project(project_path: &str) -> Result<()> {
     Ok(())
 }
 
-fn clean_assemblyscript_project(project_path: &str) -> Result<()> {
+fn clean_asc_project(project_path: &str) -> Result<()> {
     let build_dir = PathResolver::join_paths(project_path, "build");
     let dist_dir = PathResolver::join_paths(project_path, "dist");
 

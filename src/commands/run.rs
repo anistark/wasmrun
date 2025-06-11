@@ -45,7 +45,7 @@ pub fn handle_run_command(
             crate::compiler::ProjectLanguage::Rust => "🦀",
             crate::compiler::ProjectLanguage::Go => "🐹",
             crate::compiler::ProjectLanguage::C => "🔧",
-            crate::compiler::ProjectLanguage::AssemblyScript => "📜",
+            crate::compiler::ProjectLanguage::Asc => "📜",
             crate::compiler::ProjectLanguage::Python => "🐍",
             _ => "❓",
         };

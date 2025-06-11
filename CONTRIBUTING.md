@@ -20,20 +20,20 @@ src/
 │   ├── compile.rs      # Project compilation with optimization options
 │   ├── run.rs          # Development server and project execution
 │   ├── clean.rs        # Build artifact cleanup
-│   ├── init.rs         # Project initialization (planned)
+│   ├── init.rs         # Project initialization (TODO)
 │   └── stop.rs         # Server management
 ├── compiler/           # Legacy compilation system (being phased out)
 │   ├── builder.rs      # Build configuration and result types
 │   └── detect.rs       # Project type detection utilities
-├── plugin/             # 🔌 Plugin system (NEW ARCHITECTURE)
+├── plugin/             # 🔌 Plugin system
 │   ├── mod.rs          # Plugin manager and core traits
 │   ├── registry.rs     # Plugin registry and discovery
-│   ├── external.rs     # External plugin loading (planned)
+│   ├── external.rs     # External plugin loading (TODO)
 │   └── languages/      # Built-in language plugins
-│       ├── rust_plugin.rs      # Rust plugin (merged Plugin + Builder)
+│       ├── rust_plugin.rs      # Rust plugin
 │       ├── go_plugin.rs        # Go plugin with TinyGo support
 │       ├── c_plugin.rs         # C/C++ plugin with Emscripten
-│       ├── assemblyscript_plugin.rs # AssemblyScript plugin
+│       ├── asc_plugin.rs       # AssemblyScript plugin
 │       └── python_plugin.rs    # Python plugin with Pyodide
 ├── server/             # HTTP server and web interface
 │   ├── config.rs       # Server configuration and setup
@@ -46,7 +46,7 @@ src/
 │   └── webapp/         # Web application templates
 └── utils/              # Shared utilities and helpers
     ├── path.rs         # Path resolution and validation
-    └── command.rs      # 🆕 Shared command execution utilities
+    └── command.rs      # Shared command execution utilities
 ```
 
 ## 🔌 Plugin Architecture Overview
