@@ -18,7 +18,7 @@ impl PythonPlugin {
             description: "Python WebAssembly compiler".into(),
             author: "Chakra Team".into(),
             extensions: vec!["py".into()],
-            entry_files: vec!["main.py".into(), "app.py".into(), "requirements.txt".into()],
+            entry_files: vec!["main.py".into(), "app.py".into()],
             plugin_type: PluginType::Builtin,
             source: None,
             dependencies: vec![],
@@ -58,11 +58,7 @@ impl PythonPlugin {
 
         Err(CompilationError::MissingEntryFile {
             language: self.language_name().to_string(),
-            candidates: vec![
-                "main.py".to_string(),
-                "app.py".to_string(),
-                "requirements.txt".to_string(),
-            ],
+            candidates: vec!["main.py".to_string(), "app.py".to_string()],
         })
     }
 }
@@ -98,13 +94,7 @@ impl WasmBuilder for PythonPlugin {
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
-        &[
-            "main.py",
-            "app.py",
-            "index.py",
-            "src/main.py",
-            "requirements.txt",
-        ]
+        &["main.py", "app.py", "index.py", "src/main.py"]
     }
 
     fn supported_extensions(&self) -> &[&str] {
