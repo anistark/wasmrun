@@ -9,7 +9,7 @@ mod ui;
 mod utils;
 mod watcher;
 
-use cli::Commands;
+use cli::{get_args, Commands, ResolvedArgs};
 use error::{ChakraError, Result};
 use std::error::Error;
 use ui::print_webapp_detected;
@@ -23,7 +23,7 @@ fn main() {
         eprintln!("\n📋 Include your command, WASM file, and this error message.");
     }));
 
-    let args = cli::get_args();
+    let args = get_args();
 
     let result = match &args.command {
         Some(Commands::Stop) => commands::handle_stop_command(),
@@ -101,7 +101,7 @@ fn main() {
             _ => e,
         }),
 
-        None => match cli::ResolvedArgs::from_args(args) {
+        None => match ResolvedArgs::from_args(args) {
             Ok(resolved_args) => handle_default_command(&resolved_args),
             Err(e) => Err(e),
         },
@@ -113,7 +113,7 @@ fn main() {
     }
 }
 
-fn handle_default_command(args: &cli::ResolvedArgs) -> Result<()> {
+fn handle_default_command(args: &ResolvedArgs) -> Result<()> {
     if args.wasm {
         println!("🎯 \x1b[1;34mMode:\x1b[0m Direct WASM execution");
         println!("📦 \x1b[1;34mFile:\x1b[0m {}", args.path);

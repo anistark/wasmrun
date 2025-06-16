@@ -1,8 +1,9 @@
 use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
 use crate::error::{CompilationError, CompilationResult};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
-use crate::utils::CommandExecutor;
+use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Python WebAssembly plugin
 pub struct PythonPlugin {
@@ -12,16 +13,12 @@ pub struct PythonPlugin {
 impl PythonPlugin {
     pub fn new() -> Self {
         let info = PluginInfo {
-            name: "python".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            description: "Python WebAssembly compiler".to_string(),
-            author: "Chakra Team".to_string(),
-            extensions: vec!["py".to_string()],
-            entry_files: vec![
-                "main.py".to_string(),
-                "app.py".to_string(),
-                "requirements.txt".to_string(),
-            ],
+            name: "python".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            description: "Python WebAssembly compiler".into(),
+            author: "Chakra Team".into(),
+            extensions: vec!["py".into()],
+            entry_files: vec!["main.py".into(), "app.py".into()],
             plugin_type: PluginType::Builtin,
             source: None,
             dependencies: vec![],
@@ -30,14 +27,40 @@ impl PythonPlugin {
                 compile_webapp: true,
                 live_reload: true,
                 optimization: false,
-                custom_targets: vec!["wasm".to_string(), "web".to_string()],
+                custom_targets: vec!["wasm".into(), "web".into()],
             },
         };
 
         Self { info }
     }
 
-    // TODO: Python to WebAssembly compilation methods
+    /// Find the entry point of the project
+    fn find_entry_file(&self, project_path: &str) -> CompilationResult<PathBuf> {
+        let common_entry_files = &self.info.entry_files;
+
+        for entry_name in common_entry_files.iter() {
+            let entry_path = Path::new(project_path).join(entry_name);
+            if entry_path.exists() {
+                return Ok(entry_path);
+            }
+        }
+
+        // If no common entry file found, look for any .go file
+        if let Ok(entries) = fs::read_dir(project_path) {
+            for entry in entries.flatten() {
+                if let Some(extension) = entry.path().extension() {
+                    if extension == "py" {
+                        return Ok(entry.path());
+                    }
+                }
+            }
+        }
+
+        Err(CompilationError::MissingEntryFile {
+            language: self.language_name().to_string(),
+            candidates: vec!["main.py".to_string(), "app.py".to_string()],
+        })
+    }
 }
 
 impl Plugin for PythonPlugin {
@@ -71,13 +94,7 @@ impl WasmBuilder for PythonPlugin {
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
-        &[
-            "main.py",
-            "app.py",
-            "index.py",
-            "src/main.py",
-            "requirements.txt",
-        ]
+        &["main.py", "app.py", "index.py", "src/main.py"]
     }
 
     fn supported_extensions(&self) -> &[&str] {
@@ -85,14 +102,31 @@ impl WasmBuilder for PythonPlugin {
     }
 
     fn check_dependencies(&self) -> Vec<String> {
-        // TODO: Dependency checking
+        // Checking if Python3.11.0 is present
 
         let mut missing = Vec::new();
 
         if !CommandExecutor::is_tool_installed("python")
             && !CommandExecutor::is_tool_installed("python3")
         {
-            missing.push("python or python3 (Python interpreter)".to_string());
+            missing.push("python or python3 (Python interpreter)".into());
+        } else {
+            let version = CommandExecutor::execute_command(
+                "python3".into(),
+                &["--version".into()],
+                ".".into(),
+                true,
+            )
+            .unwrap();
+            if version.status.success() {
+                let version_number: String = String::from_utf8(version.stdout).unwrap();
+                if !version_number.contains("3.11.0") {
+                    missing.push("Python 3.11.0 is required for py2wasm to work!".into());
+                }
+            }
+        }
+        if !CommandExecutor::is_tool_installed("py2wasm") {
+            missing.push("py2wasm is not installed, try running pip install py2wasm".into());
         }
 
         missing
@@ -112,12 +146,47 @@ impl WasmBuilder for PythonPlugin {
     }
 
     fn build(&self, _config: &BuildConfig) -> CompilationResult<BuildResult> {
-        // TODO: Implement Python WebAssembly build
-        println!("🔨 Python WebAssembly compilation - TBD");
+        let project_entry = self.find_entry_file(&_config.project_path).unwrap();
+        PathResolver::ensure_output_directory(&_config.output_dir).map_err(|_| {
+            CompilationError::OutputDirectoryCreationFailed {
+                path: _config.output_dir.clone(),
+            }
+        })?;
 
-        Err(CompilationError::BuildFailed {
-            language: self.language_name().to_string(),
-            reason: "Python WebAssembly compilation not yet implemented".to_string(),
+        let output_name = project_entry
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+            + ".wasm";
+        let output_file = Path::new(&_config.output_dir).join(&output_name);
+
+        let build_result = CommandExecutor::execute_command(
+            "py2wasm",
+            &[
+                project_entry.to_str().unwrap(),
+                "-o".into(),
+                output_file.to_str().unwrap(),
+            ],
+            &_config.project_path,
+            _config.verbose,
+        )
+        .unwrap();
+        if !build_result.status.success() {
+            return Err(CompilationError::BuildFailed {
+                language: self.language_name().to_string(),
+                reason: format!(
+                    "Build failed: {}",
+                    String::from_utf8_lossy(&build_result.stderr)
+                ),
+            });
+        }
+
+        Ok(BuildResult {
+            wasm_path: output_file.to_string_lossy().to_string(),
+            js_path: None,
+            additional_files: vec![],
+            is_wasm_bindgen: false,
         })
     }
 }
