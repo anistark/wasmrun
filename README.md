@@ -143,7 +143,7 @@ Chakra uses a modular plugin system where each programming language is supported
 | ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white) | ✅ Full Support | `tinygo` | Lightweight runtime, optimization |
 | ![C](https://img.shields.io/badge/c-%2300599C.svg?style=for-the-badge&logo=c&logoColor=white) ![C++](https://img.shields.io/badge/c++-%2300599C.svg?style=for-the-badge&logo=c%2B%2B&logoColor=white) | ✅ Full Support | `emscripten` | Complete toolchain, Makefile support |
 | ![AssemblyScript](https://img.shields.io/badge/assembly%20script-%23000000.svg?style=for-the-badge&logo=assemblyscript&logoColor=white) | ✅ Full Support | `asc` + npm/yarn | TypeScript-like syntax, optimization |
-| ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54) | ✅ Beta Support | `pyodide` | Runtime integration, bundle creation |
+| ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54) | ✅ Beta Support | `py2wasm` | Runtime integration, bundle creation |
 
 ### Plugin Capabilities
 
@@ -151,8 +151,8 @@ Each plugin provides specific capabilities:
 
 | Feature | Rust | Go | C/C++ | AssemblyScript | Python |
 |---------|------|----|----|---------------|--------|
-| **Compile to WASM** | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **Web Applications** | ✅ | ❌ | ✅ | ❌ | ❌ |
+| **Compile to WASM** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Web Applications** | ✅ | ❌ | ✅ | ❌ | ✅ |
 | **Live Reload** | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **Optimization** | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **Custom Targets** | Multiple | wasm | web | wasm | TBD |
@@ -320,6 +320,18 @@ rustup target add wasm32-unknown-unknown  # Rust plugin
 chakra --language rust
 chakra --language go
 ```
+### Configuring py2wasm
+
+- Make sure that you have python3.11.0 is installed and configured. We recommend
+  using [mise](https://mise.jdx.dev/getting-started.html).
+  ```sh
+  mise use python@3.11.0
+  ```
+- Now install py2wasm, you can use a virtual environment or not.
+```sh
+pip install py2wasm
+```
+- Make sure that you have named the entry file as main.py or app.py.
 
 ### Common Issues
 
