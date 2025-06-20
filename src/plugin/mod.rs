@@ -1,4 +1,4 @@
-//! Plugin system for Chakra
+//! Plugin system for Chakra - Built-in and External plugins
 
 use crate::compiler::builder::WasmBuilder;
 use serde::{Deserialize, Serialize};
@@ -45,7 +45,6 @@ pub struct PluginInfo {
 pub enum PluginType {
     Builtin,
     External,
-    Registry,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +84,6 @@ impl PluginManager {
         Ok(Self { plugins })
     }
 
-    // TODO: Future plugin discovery methods
     #[allow(dead_code)]
     pub fn get_plugins(&self) -> &[Box<dyn Plugin>] {
         &self.plugins
@@ -119,7 +117,6 @@ impl PluginManager {
         self.get_plugin_by_name(name).map(|plugin| plugin.info())
     }
 
-    // TODO: Future dependency management
     #[allow(dead_code)]
     pub fn check_all_dependencies(&self) -> Vec<(String, Vec<String>)> {
         self.plugins

@@ -424,7 +424,6 @@ impl PluginCommands {
             match plugin_info.plugin_type {
                 PluginType::Builtin => "Built-in",
                 PluginType::External => "External",
-                PluginType::Registry => "Registry",
             }
         );
 

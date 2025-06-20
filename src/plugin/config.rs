@@ -11,9 +11,8 @@ use std::path::PathBuf;
 pub struct ChakraConfig {
     pub version: String,
     pub settings: GlobalSettings,
-    pub external_plugins: Vec<ExternalPluginConfig>,
     pub plugin_configs: HashMap<String, toml::Value>,
-    pub installed_plugins: HashMap<String, InstalledPluginEntry>,
+    pub external_plugins: HashMap<String, ExternalPluginEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,15 +27,7 @@ pub struct GlobalSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExternalPluginConfig {
-    pub name: String,
-    pub source: PluginSource,
-    pub enabled: bool,
-    pub config: HashMap<String, toml::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InstalledPluginEntry {
+pub struct ExternalPluginEntry {
     pub info: PluginInfo,
     pub source: PluginSource,
     pub installed_at: String,
@@ -64,9 +55,8 @@ impl Default for ChakraConfig {
         Self {
             version: "1.0.0".to_string(),
             settings: GlobalSettings::default(),
-            external_plugins: Vec::new(),
             plugin_configs: HashMap::new(),
-            installed_plugins: HashMap::new(),
+            external_plugins: HashMap::new(),
         }
     }
 }
@@ -224,8 +214,9 @@ impl ChakraConfig {
         Ok(self)
     }
 
-    pub fn add_installed_plugin(&mut self, name: String, info: PluginInfo, source: PluginSource, install_path: String) -> Result<()> {
-        let entry = InstalledPluginEntry {
+    // External plugin management
+    pub fn add_external_plugin(&mut self, name: String, info: PluginInfo, source: PluginSource, install_path: String) -> Result<()> {
+        let entry = ExternalPluginEntry {
             info,
             source,
             installed_at: chrono::Utc::now().to_rfc3339(),
@@ -234,57 +225,57 @@ impl ChakraConfig {
             executable_path: None,
         };
 
-        self.installed_plugins.insert(name, entry);
+        self.external_plugins.insert(name, entry);
         self.save()?;
         Ok(())
     }
 
-    pub fn remove_installed_plugin(&mut self, name: &str) -> Result<()> {
-        self.installed_plugins.remove(name);
+    pub fn remove_external_plugin(&mut self, name: &str) -> Result<()> {
+        self.external_plugins.remove(name);
         self.save()?;
         Ok(())
     }
 
-    pub fn is_plugin_installed(&self, name: &str) -> bool {
-        self.installed_plugins.contains_key(name)
+    pub fn is_external_plugin_installed(&self, name: &str) -> bool {
+        self.external_plugins.contains_key(name)
     }
 
-    pub fn get_installed_plugin(&self, name: &str) -> Option<&InstalledPluginEntry> {
-        self.installed_plugins.get(name)
+    pub fn get_external_plugin(&self, name: &str) -> Option<&ExternalPluginEntry> {
+        self.external_plugins.get(name)
     }
 
-    pub fn get_installed_plugins(&self) -> Vec<&PluginInfo> {
-        self.installed_plugins.values().map(|entry| &entry.info).collect()
+    pub fn get_external_plugins(&self) -> Vec<&PluginInfo> {
+        self.external_plugins.values().map(|entry| &entry.info).collect()
     }
 
-    pub fn set_plugin_enabled(&mut self, name: &str, enabled: bool) -> Result<()> {
-        if let Some(entry) = self.installed_plugins.get_mut(name) {
+    pub fn set_external_plugin_enabled(&mut self, name: &str, enabled: bool) -> Result<()> {
+        if let Some(entry) = self.external_plugins.get_mut(name) {
             entry.enabled = enabled;
             self.save()?;
             Ok(())
         } else {
-            Err(ChakraError::from(format!("Plugin '{}' not found in registry", name)))
+            Err(ChakraError::from(format!("External plugin '{}' not found", name)))
         }
     }
 
-    pub fn update_plugin_metadata(&mut self, name: &str, info: PluginInfo) -> Result<()> {
-        if let Some(entry) = self.installed_plugins.get_mut(name) {
+    pub fn update_external_plugin_metadata(&mut self, name: &str, info: PluginInfo) -> Result<()> {
+        if let Some(entry) = self.external_plugins.get_mut(name) {
             entry.info = info;
             self.save()?;
             Ok(())
         } else {
-            Err(ChakraError::from(format!("Plugin '{}' not found in registry", name)))
+            Err(ChakraError::from(format!("External plugin '{}' not found", name)))
         }
     }
 
     #[allow(dead_code)]
-    pub fn validate_plugin_installations(&mut self) -> Result<Vec<String>> {
+    pub fn validate_external_plugins(&mut self) -> Result<Vec<String>> {
         let mut missing_plugins = Vec::new();
         let plugin_dir = Self::plugin_dir()?;
 
         let mut plugins_to_remove = Vec::new();
         
-        for (name, entry) in &self.installed_plugins {
+        for (name, entry) in &self.external_plugins {
             let install_path = plugin_dir.join(&entry.install_path);
             if !install_path.exists() {
                 missing_plugins.push(name.clone());
@@ -293,7 +284,7 @@ impl ChakraConfig {
         }
 
         for name in plugins_to_remove {
-            self.installed_plugins.remove(&name);
+            self.external_plugins.remove(&name);
         }
 
         if !missing_plugins.is_empty() {
@@ -304,13 +295,13 @@ impl ChakraConfig {
     }
 
     #[allow(dead_code)]
-    pub fn get_plugin_stats(&self) -> (usize, usize, usize, Vec<String>) {
-        let total = self.installed_plugins.len();
-        let enabled = self.installed_plugins.values().filter(|e| e.enabled).count();
+    pub fn get_external_plugin_stats(&self) -> (usize, usize, usize, Vec<String>) {
+        let total = self.external_plugins.len();
+        let enabled = self.external_plugins.values().filter(|e| e.enabled).count();
         let disabled = total - enabled;
         
         let mut languages = Vec::new();
-        for entry in self.installed_plugins.values() {
+        for entry in self.external_plugins.values() {
             for ext in &entry.info.extensions {
                 if !languages.contains(ext) {
                     languages.push(ext.clone());
@@ -322,43 +313,7 @@ impl ChakraConfig {
         (total, enabled, disabled, languages)
     }
 
-    // TODO: External plugin configuration management
-    #[allow(dead_code)]
-    pub fn add_external_plugin(&mut self, config: ExternalPluginConfig) -> Result<()> {
-        if self.external_plugins.iter().any(|p| p.name == config.name) {
-            return Err(ChakraError::from(format!(
-                "Plugin '{}' is already configured",
-                config.name
-            )));
-        }
-
-        self.external_plugins.push(config);
-        self.save()?;
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn remove_external_plugin(&mut self, name: &str) -> Result<()> {
-        let initial_len = self.external_plugins.len();
-        self.external_plugins.retain(|p| p.name != name);
-
-        if self.external_plugins.len() == initial_len {
-            return Err(ChakraError::from(format!(
-                "Plugin '{}' not found in configuration",
-                name
-            )));
-        }
-
-        self.save()?;
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn get_enabled_external_plugins(&self) -> Vec<&ExternalPluginConfig> {
-        self.external_plugins.iter().filter(|p| p.enabled).collect()
-    }
-
-    // TODO: Plugin-specific configuration
+    // Plugin-specific configuration
     #[allow(dead_code)]
     pub fn get_plugin_config(&self, plugin_name: &str) -> Option<&toml::Value> {
         self.plugin_configs.get(plugin_name)

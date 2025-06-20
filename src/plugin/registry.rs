@@ -2,7 +2,7 @@
 
 use crate::error::{ChakraError, Result};
 use crate::plugin::{Plugin, PluginInfo, PluginSource, PluginType, PluginCapabilities};
-use crate::plugin::config::{ChakraConfig, InstalledPluginEntry};
+use crate::plugin::config::{ChakraConfig, ExternalPluginEntry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -25,7 +25,6 @@ pub struct RegistryMetadata {
     pub categories: Vec<String>,
 }
 
-// TODO: Future comprehensive plugin statistics
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PluginStats {
@@ -61,43 +60,43 @@ impl LocalPluginRegistry {
     }
 
     pub fn add_plugin(&mut self, name: String, info: PluginInfo, source: PluginSource, install_path: String) -> Result<()> {
-        self.config.add_installed_plugin(name, info, source, install_path)?;
+        self.config.add_external_plugin(name, info, source, install_path)?;
         Ok(())
     }
 
     pub fn remove_plugin(&mut self, name: &str) -> Result<()> {
-        self.config.remove_installed_plugin(name)?;
+        self.config.remove_external_plugin(name)?;
         Ok(())
     }
 
     pub fn is_installed(&self, name: &str) -> bool {
-        self.config.is_plugin_installed(name)
+        self.config.is_external_plugin_installed(name)
     }
 
-    pub fn get_installed_plugin(&self, name: &str) -> Option<&InstalledPluginEntry> {
-        self.config.get_installed_plugin(name)
+    pub fn get_installed_plugin(&self, name: &str) -> Option<&ExternalPluginEntry> {
+        self.config.get_external_plugin(name)
     }
 
     pub fn get_installed_plugins(&self) -> Vec<&PluginInfo> {
-        self.config.get_installed_plugins()
+        self.config.get_external_plugins()
     }
 
     pub fn set_plugin_enabled(&mut self, name: &str, enabled: bool) -> Result<()> {
-        self.config.set_plugin_enabled(name, enabled)
+        self.config.set_external_plugin_enabled(name, enabled)
     }
 
     pub fn update_plugin_metadata(&mut self, name: &str, info: PluginInfo) -> Result<()> {
-        self.config.update_plugin_metadata(name, info)
+        self.config.update_external_plugin_metadata(name, info)
     }
 
     #[allow(dead_code)]
     pub fn validate_installations(&mut self) -> Result<Vec<String>> {
-        self.config.validate_plugin_installations()
+        self.config.validate_external_plugins()
     }
 
     #[allow(dead_code)]
     pub fn get_stats(&self) -> ExternalPluginStats {
-        let (total_installed, enabled_count, disabled_count, supported_languages) = self.config.get_plugin_stats();
+        let (total_installed, enabled_count, disabled_count, supported_languages) = self.config.get_external_plugin_stats();
         
         ExternalPluginStats {
             total_installed,
@@ -109,7 +108,7 @@ impl LocalPluginRegistry {
 
     #[allow(dead_code)]
     pub fn get_external_stats(&self) -> (usize, usize, usize, Vec<String>) {
-        self.config.get_plugin_stats()
+        self.config.get_external_plugin_stats()
     }
 
     #[allow(dead_code)]
@@ -346,47 +345,6 @@ pub fn detect_plugin_metadata(
             dependencies: vec![],
             capabilities: PluginCapabilities::default(),
         })
-    }
-}
-
-// TODO: Future legacy compatibility layer
-#[allow(dead_code)]
-pub struct PluginRegistry {
-    #[allow(dead_code)]
-    manager: RegistryManager,
-}
-
-#[allow(dead_code)]
-impl PluginRegistry {
-    pub fn new() -> Self {
-        Self {
-            manager: RegistryManager::new(),
-        }
-    }
-
-    pub fn get_plugin(&self, name: &str) -> Option<PluginInfo> {
-        self.manager.find_plugin(name)
-    }
-
-    pub fn list_all(&self) -> Vec<PluginInfo> {
-        let (builtin, external) = self.manager.list_all_plugins();
-        let mut all_plugins = builtin;
-        all_plugins.extend(external.into_iter().cloned());
-        all_plugins
-    }
-
-    pub fn exists(&self, name: &str) -> bool {
-        self.manager.plugin_exists(name)
-    }
-
-    pub fn get_stats(&self) -> PluginStats {
-        self.manager.get_comprehensive_stats()
-    }
-}
-
-impl Default for PluginRegistry {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

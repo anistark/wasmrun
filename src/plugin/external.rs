@@ -2,11 +2,10 @@
 
 use crate::error::{ChakraError, Result};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
-use crate::plugin::config::{ChakraConfig, ExternalPluginConfig};
+use crate::plugin::config::{ChakraConfig, ExternalPluginEntry};
 use crate::compiler::builder::{WasmBuilder, BuildConfig, BuildResult};
 use crate::error::CompilationResult;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -244,25 +243,25 @@ pub struct ExternalPluginLoader;
 
 #[allow(dead_code)]
 impl ExternalPluginLoader {
-    pub fn load(config: &ExternalPluginConfig) -> Result<Box<dyn Plugin>> {
-        if !config.enabled {
+    pub fn load(entry: &ExternalPluginEntry) -> Result<Box<dyn Plugin>> {
+        if !entry.enabled {
             return Err(ChakraError::from(format!(
                 "Plugin '{}' is disabled",
-                config.name
+                entry.info.name
             )));
         }
 
         let install_dir = ChakraConfig::plugin_dir()?;
-        let plugin_dir = install_dir.join(&config.name);
+        let plugin_dir = install_dir.join(&entry.install_path);
 
         if !plugin_dir.exists() {
             return Err(ChakraError::from(format!(
                 "Plugin '{}' is not installed. Run 'chakra plugin install {}'",
-                config.name, config.name
+                entry.info.name, entry.info.name
             )));
         }
 
-        let plugin = ExternalPluginWrapper::new(plugin_dir, config.clone())?;
+        let plugin = ExternalPluginWrapper::new(plugin_dir, entry.clone())?;
         Ok(Box::new(plugin))
     }
 }
@@ -271,7 +270,7 @@ impl ExternalPluginLoader {
 pub struct ExternalPluginWrapper {
     info: PluginInfo,
     #[allow(dead_code)]
-    config: ExternalPluginConfig,
+    entry: ExternalPluginEntry,
     #[allow(dead_code)]
     plugin_dir: PathBuf,
     plugin_name: String,
@@ -279,43 +278,30 @@ pub struct ExternalPluginWrapper {
 
 #[allow(dead_code)]
 impl ExternalPluginWrapper {
-    pub fn new(plugin_dir: PathBuf, config: ExternalPluginConfig) -> Result<Self> {
-        let info = Self::load_plugin_info(&plugin_dir, &config)?;
-        let plugin_name = config.name.clone();
+    pub fn new(plugin_dir: PathBuf, entry: ExternalPluginEntry) -> Result<Self> {
+        let info = Self::load_plugin_info(&plugin_dir, &entry)?;
+        let plugin_name = entry.info.name.clone();
 
         Ok(Self {
             info,
-            config,
+            entry,
             plugin_dir,
             plugin_name,
         })
     }
 
-    fn load_plugin_info(plugin_dir: &Path, config: &ExternalPluginConfig) -> Result<PluginInfo> {
+    fn load_plugin_info(plugin_dir: &Path, entry: &ExternalPluginEntry) -> Result<PluginInfo> {
         let toml_metadata_file = plugin_dir.join("plugin.toml");
         if toml_metadata_file.exists() {
-            return Self::load_info_from_toml_metadata(&toml_metadata_file, config);
+            return Self::load_info_from_toml_metadata(&toml_metadata_file, entry);
         }
 
-        let info = PluginInfo {
-            name: config.name.clone(),
-            version: "1.0.0".to_string(),
-            description: format!("External plugin: {}", config.name),
-            author: "Unknown".to_string(),
-            extensions: vec![],
-            entry_files: vec![],
-            plugin_type: PluginType::External,
-            source: Some(config.source.clone()),
-            dependencies: vec![],
-            capabilities: PluginCapabilities::default(),
-        };
-
-        Ok(info)
+        Ok(entry.info.clone())
     }
 
     fn load_info_from_toml_metadata(
         metadata_file: &Path,
-        config: &ExternalPluginConfig,
+        entry: &ExternalPluginEntry,
     ) -> Result<PluginInfo> {
         let content = std::fs::read_to_string(metadata_file)
             .map_err(|e| ChakraError::from(format!("Failed to read plugin metadata: {}", e)))?;
@@ -344,7 +330,7 @@ impl ExternalPluginWrapper {
             extensions: metadata.extensions.unwrap_or_default(),
             entry_files: metadata.entry_files.unwrap_or_default(),
             plugin_type: PluginType::External,
-            source: Some(config.source.clone()),
+            source: Some(entry.source.clone()),
             dependencies: metadata.dependencies.unwrap_or_default(),
             capabilities: metadata.capabilities.unwrap_or_default(),
         })
@@ -414,7 +400,7 @@ impl WasmBuilder for ExternalPluginBuilder {
     }
 }
 
-// TODO: Future plugin utilities
+// TODO: Future plugin utilities - These will be used when dynamic loading is implemented
 #[allow(dead_code)]
 pub fn install_plugin(source: PluginSource) -> Result<Box<dyn Plugin>> {
     let plugin_dir = PluginInstaller::install(source.clone())?;
@@ -425,19 +411,32 @@ pub fn install_plugin(source: PluginSource) -> Result<Box<dyn Plugin>> {
         .to_string_lossy()
         .to_string();
 
-    let config = ExternalPluginConfig {
-        name: plugin_name,
-        source,
+    let entry = ExternalPluginEntry {
+        info: PluginInfo {
+            name: plugin_name,
+            version: "1.0.0".to_string(),
+            description: "External plugin".to_string(),
+            author: "Unknown".to_string(),
+            extensions: vec![],
+            entry_files: vec![],
+            plugin_type: PluginType::External,
+            source: Some(source),
+            dependencies: vec![],
+            capabilities: PluginCapabilities::default(),
+        },
+        source: PluginSource::Local { path: plugin_dir.clone() },
+        installed_at: chrono::Utc::now().to_rfc3339(),
         enabled: true,
-        config: HashMap::new(),
+        install_path: plugin_dir.file_name().unwrap().to_string_lossy().to_string(),
+        executable_path: None,
     };
 
-    ExternalPluginLoader::load(&config)
+    ExternalPluginLoader::load(&entry)
 }
 
 #[allow(dead_code)]
-pub fn load_external_plugin(config: &ExternalPluginConfig) -> Result<Box<dyn Plugin>> {
-    ExternalPluginLoader::load(config)
+pub fn load_external_plugin(entry: &ExternalPluginEntry) -> Result<Box<dyn Plugin>> {
+    ExternalPluginLoader::load(entry)
 }
 
 #[allow(dead_code)]
