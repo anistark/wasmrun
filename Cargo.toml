@@ -1,6 +1,6 @@
 [package]
 name = "chakra"
-version = "0.9.5"
+version = "0.10.0"
 edition = "2021"
 description = "A WebAssembly Runtime"
 license = "MIT"
@@ -25,6 +25,7 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 dirs = "5.0"
 serde_json = "1.0.140"
+chrono = "0.4.41"
 
 [dev-dependencies]
 tempfile = "3.8"

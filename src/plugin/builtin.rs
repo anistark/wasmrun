@@ -3,7 +3,7 @@
 use crate::compiler::builder::WasmBuilder;
 use crate::error::Result;
 use crate::plugin::languages::{
-    asc_plugin::AscBuilder, c_plugin::CBuilder, go_plugin::GoBuilder,
+    asc_plugin::AscBuilder, c_plugin::CBuilder, 
     python_plugin::PythonBuilder, rust_plugin::RustPlugin,
 };
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginRegistry, PluginType};
@@ -116,10 +116,6 @@ pub fn load_all_builtin_plugins(registry: &mut PluginRegistry) -> Result<()> {
     let rust_plugin = create_rust_plugin();
     registry.register_plugin(Box::new(rust_plugin))?;
 
-    // Go plugin
-    let go_plugin = create_go_plugin();
-    registry.register_plugin(Box::new(go_plugin))?;
-
     // C plugin
     let c_plugin = create_c_plugin();
     registry.register_plugin(Box::new(c_plugin))?;
@@ -150,27 +146,6 @@ fn create_rust_plugin() -> BuiltinPlugin {
         vec!["Cargo.toml".to_string()],
         capabilities,
         Arc::new(RustPlugin::new()),
-    )
-}
-
-/// Create the Go built-in plugin
-fn create_go_plugin() -> BuiltinPlugin {
-    let capabilities = PluginCapabilities {
-        compile_wasm: true,
-        compile_webapp: false,
-        live_reload: true,
-        optimization: true,
-        custom_targets: vec!["wasm".to_string()],
-    };
-
-    BuiltinPlugin::new(
-        "go".to_string(),
-        env!("CARGO_PKG_VERSION").to_string(),
-        "Go WebAssembly compiler using TinyGo".to_string(),
-        vec!["go".to_string()],
-        vec!["go.mod".to_string(), "main.go".to_string()],
-        capabilities,
-        Arc::new(GoBuilder::new()),
     )
 }
 
@@ -226,7 +201,6 @@ fn create_asc_plugin() -> BuiltinPlugin {
 pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
     vec![
         create_rust_plugin().info().clone(),
-        create_go_plugin().info().clone(),
         create_c_plugin().info().clone(),
         create_asc_plugin().info().clone(),
         create_python_plugin().info().clone(),
@@ -236,7 +210,7 @@ pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
 /// Check if a plugin name is a built-in plugin
 #[allow(dead_code)]
 pub fn is_builtin_plugin(name: &str) -> bool {
-    matches!(name, "rust" | "go" | "c" | "asc" | "python")
+    matches!(name, "rust" | "c" | "asc" | "python")
 }
 
 /// Get specific built-in plugin info by name
@@ -244,7 +218,6 @@ pub fn is_builtin_plugin(name: &str) -> bool {
 pub fn get_builtin_plugin_by_name(name: &str) -> Option<PluginInfo> {
     match name {
         "rust" => Some(create_rust_plugin().info().clone()),
-        "go" => Some(create_go_plugin().info().clone()),
         "c" => Some(create_c_plugin().info().clone()),
         "asc" => Some(create_asc_plugin().info().clone()),
         "python" => Some(create_python_plugin().info().clone()),

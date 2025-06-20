@@ -299,13 +299,13 @@ impl BuilderFactory {
     pub fn create_builder(language: &crate::compiler::ProjectLanguage) -> Box<dyn WasmBuilder> {
         use crate::compiler::ProjectLanguage;
         use crate::plugin::languages::{
-            asc_plugin::AscPlugin, c_plugin::CPlugin, go_plugin::GoPlugin,
+            asc_plugin::AscPlugin, c_plugin::CPlugin, 
             python_plugin::PythonPlugin, rust_plugin::RustPlugin,
         };
 
         match language {
             ProjectLanguage::Rust => Box::new(RustPlugin::new()),
-            ProjectLanguage::Go => Box::new(GoPlugin::new()),
+            ProjectLanguage::Go => Box::new(UnknownBuilder),
             ProjectLanguage::C => Box::new(CPlugin::new()),
             ProjectLanguage::Asc => Box::new(AscPlugin::new()),
             ProjectLanguage::Python => Box::new(PythonPlugin::new()),
@@ -316,7 +316,6 @@ impl BuilderFactory {
     pub fn supported_languages() -> Vec<String> {
         vec![
             "Rust".to_string(),
-            "Go".to_string(),
             "C".to_string(),
             "Asc".to_string(),
             "Python".to_string(),

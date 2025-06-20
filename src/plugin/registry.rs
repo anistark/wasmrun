@@ -1,488 +1,303 @@
-//! Plugin registry for discovering and managing available plugins
-//!
-//! This module handles plugin discovery, metadata caching, and registry operations
+//! Plugin registry for managing built-in and external plugins
 
 use crate::error::{ChakraError, Result};
-use crate::plugin::{PluginInfo, PluginSource, PluginType};
+use crate::plugin::{Plugin, PluginInfo, PluginSource, PluginType, PluginCapabilities};
+use crate::plugin::config::{ChakraConfig, InstalledPluginEntry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Plugin registry entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryEntry {
-    /// Plugin information
     pub info: PluginInfo,
-    /// Download count
     pub downloads: u64,
-    /// Last updated timestamp
     pub updated_at: u64,
-    /// Registry-specific metadata
     pub registry_metadata: RegistryMetadata,
 }
 
-/// Registry-specific metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryMetadata {
-    /// Available versions
     pub versions: Vec<String>,
-    /// Documentation URL
     pub documentation: Option<String>,
-    /// Homepage URL
     pub homepage: Option<String>,
-    /// Repository URL
     pub repository: Option<String>,
-    /// License information
     pub license: Option<String>,
-    /// Keywords for search
     pub keywords: Vec<String>,
-    /// Categories
     pub categories: Vec<String>,
 }
 
-/// Plugin registry interface
-pub trait PluginRegistry {
-    /// Search for plugins matching a query
-    fn search(&self, query: &str) -> Result<Vec<RegistryEntry>>;
+// TODO: Future comprehensive plugin statistics
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct PluginStats {
+    pub total_builtin: usize,
+    pub total_external: usize,
+    pub enabled_external: usize,
+    pub disabled_external: usize,
+    pub supported_languages: Vec<String>,
+}
 
-    /// Get plugin information by name
-    fn get_plugin(&self, name: &str) -> Result<Option<RegistryEntry>>;
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct ExternalPluginStats {
+    pub total_installed: usize,
+    pub enabled_count: usize,
+    pub disabled_count: usize,
+    pub supported_languages: Vec<String>,
+}
 
-    /// List all available plugins
-    fn list_plugins(&self, limit: Option<usize>) -> Result<Vec<RegistryEntry>>;
+pub struct LocalPluginRegistry {
+    config: ChakraConfig,
+}
 
-    /// Get plugin versions
+impl LocalPluginRegistry {
+    pub fn load() -> Result<Self> {
+        let config = ChakraConfig::load_or_default()?;
+        Ok(Self { config })
+    }
+
     #[allow(dead_code)]
-    fn get_versions(&self, name: &str) -> Result<Vec<String>>;
+    pub fn save(&self) -> Result<()> {
+        self.config.save()
+    }
 
-    /// Check if registry is available
-    fn is_available(&self) -> bool;
+    pub fn add_plugin(&mut self, name: String, info: PluginInfo, source: PluginSource, install_path: String) -> Result<()> {
+        self.config.add_installed_plugin(name, info, source, install_path)?;
+        Ok(())
+    }
 
-    /// Get registry name
-    fn name(&self) -> &str;
-}
+    pub fn remove_plugin(&mut self, name: &str) -> Result<()> {
+        self.config.remove_installed_plugin(name)?;
+        Ok(())
+    }
 
-/// Crates.io registry implementation
-pub struct CratesIoRegistry {
-    /// Base URL for the registry
+    pub fn is_installed(&self, name: &str) -> bool {
+        self.config.is_plugin_installed(name)
+    }
+
+    pub fn get_installed_plugin(&self, name: &str) -> Option<&InstalledPluginEntry> {
+        self.config.get_installed_plugin(name)
+    }
+
+    pub fn get_installed_plugins(&self) -> Vec<&PluginInfo> {
+        self.config.get_installed_plugins()
+    }
+
+    pub fn set_plugin_enabled(&mut self, name: &str, enabled: bool) -> Result<()> {
+        self.config.set_plugin_enabled(name, enabled)
+    }
+
+    pub fn update_plugin_metadata(&mut self, name: &str, info: PluginInfo) -> Result<()> {
+        self.config.update_plugin_metadata(name, info)
+    }
+
     #[allow(dead_code)]
-    base_url: String,
-    /// Cache for registry entries
-    cache: HashMap<String, RegistryEntry>,
-    /// Cache expiry time (in seconds)
-    cache_ttl: u64,
-}
-
-impl CratesIoRegistry {
-    /// Create a new crates.io registry
-    pub fn new() -> Self {
-        Self {
-            base_url: "https://crates.io/api/v1".to_string(),
-            cache: HashMap::new(),
-            cache_ttl: 3600, // 1 hour
-        }
+    pub fn validate_installations(&mut self) -> Result<Vec<String>> {
+        self.config.validate_plugin_installations()
     }
 
-    /// Create a registry with custom base URL
     #[allow(dead_code)]
-    pub fn with_url(url: String) -> Self {
-        Self {
-            base_url: url,
-            cache: HashMap::new(),
-            cache_ttl: 3600,
+    pub fn get_stats(&self) -> ExternalPluginStats {
+        let (total_installed, enabled_count, disabled_count, supported_languages) = self.config.get_plugin_stats();
+        
+        ExternalPluginStats {
+            total_installed,
+            enabled_count,
+            disabled_count,
+            supported_languages,
         }
     }
 
-    /// Fetch plugin data from crates.io API
-    fn fetch_crate_info(&self, name: &str) -> Result<RegistryEntry> {
-        // TODO: Make HTTP requests to crates.io API. For now, return a placeholder
-        let info = PluginInfo {
-            name: name.to_string(),
-            version: "1.0.0".to_string(),
-            description: format!("Plugin from crates.io: {}", name),
-            author: "Unknown".to_string(),
-            extensions: vec![],
-            entry_files: vec![],
-            plugin_type: PluginType::External,
-            source: Some(PluginSource::CratesIo {
-                name: name.to_string(),
-                version: "1.0.0".to_string(),
-            }),
-            dependencies: vec![],
-            capabilities: crate::plugin::PluginCapabilities::default(),
-        };
-
-        let metadata = RegistryMetadata {
-            versions: vec!["1.0.0".to_string()],
-            documentation: None,
-            homepage: None,
-            repository: None,
-            license: Some("MIT".to_string()),
-            keywords: vec!["wasm".to_string(), "chakra".to_string()],
-            categories: vec!["development-tools".to_string()],
-        };
-
-        let entry = RegistryEntry {
-            info,
-            downloads: 100,
-            updated_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            registry_metadata: metadata,
-        };
-
-        Ok(entry)
-    }
-
-    /// Search crates.io for Chakra plugins
-    fn search_crates(&self, query: &str) -> Result<Vec<RegistryEntry>> {
-        // TODO: search the crates.io API
-        // Look for crates with "chakra-plugin" or similar keywords
-
-        // Placeholder implementation
-        let known_plugins = vec!["chakra-zig-plugin"];
-
-        let mut results = Vec::new();
-
-        for plugin_name in known_plugins {
-            if plugin_name.contains(query) || query.is_empty() {
-                if let Ok(entry) = self.fetch_crate_info(plugin_name) {
-                    results.push(entry);
-                }
-            }
-        }
-
-        Ok(results)
-    }
-}
-
-impl Default for CratesIoRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl PluginRegistry for CratesIoRegistry {
-    fn search(&self, query: &str) -> Result<Vec<RegistryEntry>> {
-        println!("Searching crates.io for plugins matching '{}'...", query);
-        self.search_crates(query)
-    }
-
-    fn get_plugin(&self, name: &str) -> Result<Option<RegistryEntry>> {
-        // Check cache first
-        if let Some(entry) = self.cache.get(name) {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-
-            if now - entry.updated_at < self.cache_ttl {
-                return Ok(Some(entry.clone()));
-            }
-        }
-
-        // Fetch from registry
-        match self.fetch_crate_info(name) {
-            Ok(entry) => Ok(Some(entry)),
-            Err(_) => Ok(None),
-        }
-    }
-
-    fn list_plugins(&self, limit: Option<usize>) -> Result<Vec<RegistryEntry>> {
-        let mut plugins = self.search_crates("")?;
-
-        // Sort by downloads (popular plugins first)
-        plugins.sort_by(|a, b| b.downloads.cmp(&a.downloads));
-
-        if let Some(limit) = limit {
-            plugins.truncate(limit);
-        }
-
-        Ok(plugins)
-    }
-
-    fn get_versions(&self, name: &str) -> Result<Vec<String>> {
-        if let Some(entry) = self.get_plugin(name)? {
-            Ok(entry.registry_metadata.versions)
-        } else {
-            Err(ChakraError::from(format!(
-                "Plugin '{}' not found in registry",
-                name
-            )))
-        }
-    }
-
-    fn is_available(&self) -> bool {
-        // TODO: check network connectivity to crates.io
-        true
-    }
-
-    fn name(&self) -> &str {
-        "crates.io"
-    }
-}
-
-/// GitHub registry for Git-based plugins
-pub struct GitHubRegistry {
-    /// Organization or user to search
-    organization: String,
-    /// Cache for registry entries
     #[allow(dead_code)]
-    cache: HashMap<String, RegistryEntry>,
-}
-
-impl GitHubRegistry {
-    /// Create a new GitHub registry
-    pub fn new(organization: String) -> Self {
-        Self {
-            organization,
-            cache: HashMap::new(),
-        }
+    pub fn get_external_stats(&self) -> (usize, usize, usize, Vec<String>) {
+        self.config.get_plugin_stats()
     }
 
-    /// Search GitHub repositories for Chakra plugins
-    fn search_repositories(&self, query: &str) -> Result<Vec<RegistryEntry>> {
-        // TODO: use GitHub API
-        // For now, return placeholder data
+    #[allow(dead_code)]
+    pub fn config_mut(&mut self) -> &mut ChakraConfig {
+        &mut self.config
+    }
 
-        let example_plugins = vec![
-            format!("chakra-{}-plugin", query),
-            format!("{}-chakra-plugin", query),
-        ];
-
-        let mut results = Vec::new();
-
-        for plugin_name in example_plugins {
-            let info = PluginInfo {
-                name: plugin_name.clone(),
-                version: "main".to_string(),
-                description: format!("GitHub plugin: {}", plugin_name),
-                author: self.organization.clone(),
-                extensions: vec![],
-                entry_files: vec![],
-                plugin_type: PluginType::External,
-                source: Some(PluginSource::Git {
-                    url: format!(
-                        "https://github.com/{}/{}.git",
-                        self.organization, plugin_name
-                    ),
-                    branch: Some("main".to_string()),
-                }),
-                dependencies: vec![],
-                capabilities: crate::plugin::PluginCapabilities::default(),
-            };
-
-            let metadata = RegistryMetadata {
-                versions: vec!["main".to_string()],
-                documentation: None,
-                homepage: Some(format!(
-                    "https://github.com/{}/{}",
-                    self.organization, plugin_name
-                )),
-                repository: Some(format!(
-                    "https://github.com/{}/{}",
-                    self.organization, plugin_name
-                )),
-                license: Some("MIT".to_string()),
-                keywords: vec!["wasm".to_string(), "chakra".to_string()],
-                categories: vec!["development-tools".to_string()],
-            };
-
-            let entry = RegistryEntry {
-                info,
-                downloads: 0, // GitHub doesn't have download counts like crates.io
-                updated_at: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-                registry_metadata: metadata,
-            };
-
-            results.push(entry);
-        }
-
-        Ok(results)
+    #[allow(dead_code)]
+    pub fn config(&self) -> &ChakraConfig {
+        &self.config
     }
 }
 
-impl PluginRegistry for GitHubRegistry {
-    fn search(&self, query: &str) -> Result<Vec<RegistryEntry>> {
-        println!(
-            "Searching GitHub ({}) for plugins matching '{}'...",
-            self.organization, query
-        );
-        self.search_repositories(query)
-    }
-
-    fn get_plugin(&self, name: &str) -> Result<Option<RegistryEntry>> {
-        let results = self.search_repositories(name)?;
-        Ok(results.into_iter().find(|entry| entry.info.name == name))
-    }
-
-    fn list_plugins(&self, limit: Option<usize>) -> Result<Vec<RegistryEntry>> {
-        let mut plugins = self.search_repositories("")?;
-
-        if let Some(limit) = limit {
-            plugins.truncate(limit);
-        }
-
-        Ok(plugins)
-    }
-
-    fn get_versions(&self, _name: &str) -> Result<Vec<String>> {
-        // GitHub repositories typically use branches/tags for versions
-        Ok(vec!["main".to_string(), "dev".to_string()])
-    }
-
-    fn is_available(&self) -> bool {
-        // TODO: check GitHub API availability
-        true
-    }
-
-    fn name(&self) -> &str {
-        "github"
-    }
-}
-
-/// Multi-registry manager
 pub struct RegistryManager {
-    /// All registered registries
-    registries: Vec<Box<dyn PluginRegistry>>,
-    /// Cache for search results
+    local_registry: LocalPluginRegistry,
     #[allow(dead_code)]
-    search_cache: HashMap<String, Vec<RegistryEntry>>,
+    remote_cache: HashMap<String, RegistryEntry>,
+    #[allow(dead_code)]
+    cache_updated_at: Option<std::time::SystemTime>,
 }
 
 impl RegistryManager {
-    /// Create a new registry manager
     pub fn new() -> Self {
-        let mut manager = Self {
-            registries: Vec::new(),
-            search_cache: HashMap::new(),
-        };
-
-        // Add default registries
-        manager.add_registry(Box::new(CratesIoRegistry::new()));
-        manager.add_registry(Box::new(GitHubRegistry::new("chakra-plugins".to_string())));
-
-        manager
+        let local_registry = LocalPluginRegistry::load().unwrap_or_else(|_| {
+            LocalPluginRegistry { config: ChakraConfig::default() }
+        });
+        
+        Self {
+            local_registry,
+            remote_cache: HashMap::new(),
+            cache_updated_at: None,
+        }
     }
 
-    /// Add a registry to the manager
-    pub fn add_registry(&mut self, registry: Box<dyn PluginRegistry>) {
-        self.registries.push(registry);
+    pub fn local_registry(&self) -> &LocalPluginRegistry {
+        &self.local_registry
     }
 
-    /// Search all registries for plugins
-    #[allow(dead_code)]
+    pub fn local_registry_mut(&mut self) -> &mut LocalPluginRegistry {
+        &mut self.local_registry
+    }
+
     pub fn search_all(&self, query: &str) -> Result<Vec<RegistryEntry>> {
-        let mut all_results = Vec::new();
-        let mut seen_names = std::collections::HashSet::new();
+        let query_lower = query.to_lowercase();
+        let mut results = Vec::new();
 
-        for registry in &self.registries {
-            if !registry.is_available() {
-                continue;
-            }
-
-            match registry.search(query) {
-                Ok(results) => {
-                    for entry in results {
-                        // Avoid duplicates
-                        if seen_names.insert(entry.info.name.clone()) {
-                            all_results.push(entry);
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to search registry '{}': {}",
-                        registry.name(),
-                        e
-                    );
-                }
-            }
-        }
-
-        // Sort by downloads (popular plugins first)
-        all_results.sort_by(|a, b| b.downloads.cmp(&a.downloads));
-
-        Ok(all_results)
-    }
-
-    /// Get plugin from any registry
-    #[allow(dead_code)]
-    pub fn get_plugin(&self, name: &str) -> Result<Option<RegistryEntry>> {
-        for registry in &self.registries {
-            if !registry.is_available() {
-                continue;
-            }
-
-            match registry.get_plugin(name) {
-                Ok(Some(entry)) => return Ok(Some(entry)),
-                Ok(None) => continue,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to get plugin from registry '{}': {}",
-                        registry.name(),
-                        e
-                    );
-                }
+        let builtin_plugins = self.get_builtin_plugins();
+        for plugin in builtin_plugins {
+            if plugin.name.to_lowercase().contains(&query_lower)
+                || plugin.description.to_lowercase().contains(&query_lower)
+                || plugin.extensions.iter().any(|ext| ext.to_lowercase().contains(&query_lower))
+            {
+                let entry = RegistryEntry {
+                    info: plugin.clone(),
+                    downloads: 0,
+                    updated_at: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    registry_metadata: RegistryMetadata {
+                        versions: vec![plugin.version.clone()],
+                        documentation: None,
+                        homepage: Some("https://github.com/chakra-core/chakra".to_string()),
+                        repository: Some("https://github.com/chakra-core/chakra".to_string()),
+                        license: Some("MIT".to_string()),
+                        keywords: plugin.extensions.clone(),
+                        categories: vec!["builtin".to_string(), "compiler".to_string()],
+                    },
+                };
+                results.push(entry);
             }
         }
 
-        Ok(None)
+        // TODO: Search external registries
+        let external_results = self.search_external_registries(&query_lower)?;
+        results.extend(external_results);
+
+        results.sort_by(|a, b| {
+            let a_exact = a.info.name.to_lowercase() == query_lower;
+            let b_exact = b.info.name.to_lowercase() == query_lower;
+            
+            match (a_exact, b_exact) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => b.downloads.cmp(&a.downloads),
+            }
+        });
+
+        Ok(results)
     }
 
-    /// List plugins from all registries
+    fn search_external_registries(&self, _query: &str) -> Result<Vec<RegistryEntry>> {
+        // TODO: Implement external registry search
+        Ok(Vec::new())
+    }
+
+    pub fn get_builtin_plugins(&self) -> Vec<PluginInfo> {
+        use crate::plugin::languages::{
+            rust_plugin::RustPlugin,
+            c_plugin::CPlugin,
+            asc_plugin::AscPlugin,
+            python_plugin::PythonPlugin,
+        };
+        
+        vec![
+            RustPlugin::new().info().clone(),
+            CPlugin::new().info().clone(),
+            AscPlugin::new().info().clone(),
+            PythonPlugin::new().info().clone(),
+        ]
+    }
+
+    // TODO: Future comprehensive plugin discovery
     #[allow(dead_code)]
-    pub fn list_all(&self, limit: Option<usize>) -> Result<Vec<RegistryEntry>> {
-        let mut all_plugins = Vec::new();
-        let mut seen_names = std::collections::HashSet::new();
-
-        for registry in &self.registries {
-            if !registry.is_available() {
-                continue;
-            }
-
-            match registry.list_plugins(None) {
-                Ok(plugins) => {
-                    for plugin in plugins {
-                        if seen_names.insert(plugin.info.name.clone()) {
-                            all_plugins.push(plugin);
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to list plugins from registry '{}': {}",
-                        registry.name(),
-                        e
-                    );
-                }
+    pub fn find_plugin(&self, name: &str) -> Option<PluginInfo> {
+        for plugin in self.get_builtin_plugins() {
+            if plugin.name == name {
+                return Some(plugin);
             }
         }
 
-        // Sort by downloads
-        all_plugins.sort_by(|a, b| b.downloads.cmp(&a.downloads));
-
-        if let Some(limit) = limit {
-            all_plugins.truncate(limit);
+        if let Some(entry) = self.local_registry.get_installed_plugin(name) {
+            return Some(entry.info.clone());
         }
 
-        Ok(all_plugins)
+        None
     }
 
-    /// Get available registries
     #[allow(dead_code)]
-    pub fn get_registries(&self) -> Vec<&str> {
-        self.registries.iter().map(|r| r.name()).collect()
+    pub fn plugin_exists(&self, name: &str) -> bool {
+        self.find_plugin(name).is_some()
     }
 
-    /// Clear search cache
     #[allow(dead_code)]
-    pub fn clear_cache(&mut self) {
-        self.search_cache.clear();
+    pub fn get_comprehensive_stats(&self) -> PluginStats {
+        let builtin_plugins = self.get_builtin_plugins();
+        let (total_external, enabled_external, disabled_external, external_langs) = 
+            self.local_registry.get_external_stats();
+
+        let mut all_languages = Vec::new();
+        
+        for plugin in &builtin_plugins {
+            for ext in &plugin.extensions {
+                if !all_languages.contains(ext) {
+                    all_languages.push(ext.clone());
+                }
+            }
+        }
+        
+        for lang in external_langs {
+            if !all_languages.contains(&lang) {
+                all_languages.push(lang);
+            }
+        }
+        
+        all_languages.sort();
+
+        PluginStats {
+            total_builtin: builtin_plugins.len(),
+            total_external,
+            enabled_external,
+            disabled_external,
+            supported_languages: all_languages,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn list_all_plugins(&self) -> (Vec<PluginInfo>, Vec<&PluginInfo>) {
+        let builtin_plugins = self.get_builtin_plugins();
+        let external_plugins = self.local_registry.get_installed_plugins();
+        
+        (builtin_plugins, external_plugins)
+    }
+
+    #[allow(dead_code)]
+    pub fn is_builtin_plugin(&self, name: &str) -> bool {
+        self.get_builtin_plugins().iter().any(|p| p.name == name)
+    }
+
+    #[allow(dead_code)]
+    pub fn get_plugin_type(&self, name: &str) -> Option<PluginType> {
+        if self.is_builtin_plugin(name) {
+            Some(PluginType::Builtin)
+        } else if self.local_registry.is_installed(name) {
+            Some(PluginType::External)
+        } else {
+            None
+        }
     }
 }
 
@@ -492,97 +307,97 @@ impl Default for RegistryManager {
     }
 }
 
-/// Registry search filters
-#[derive(Debug, Clone)]
-pub struct SearchFilters {
-    /// Category filter
-    #[allow(dead_code)]
-    pub category: Option<String>,
-    /// Minimum download count
-    #[allow(dead_code)]
-    pub min_downloads: Option<u64>,
-    /// Language/extension filter
-    #[allow(dead_code)]
-    pub language: Option<String>,
-    /// Sort order
-    #[allow(dead_code)]
-    pub sort_by: SortBy,
-}
-
-/// Sort options for search results
-#[derive(Debug, Clone)]
-pub enum SortBy {
-    /// Sort by popularity (download count)
-    Popularity,
-    /// Sort by recent updates
-    #[allow(dead_code)]
-    RecentlyUpdated,
-    /// Sort alphabetically
-    #[allow(dead_code)]
-    Name,
-    /// Sort by relevance to search query
-    #[allow(dead_code)]
-    Relevance,
-}
-
-impl Default for SearchFilters {
-    fn default() -> Self {
-        Self {
-            category: None,
-            min_downloads: None,
-            language: None,
-            sort_by: SortBy::Popularity,
-        }
-    }
-}
-
-/// Apply filters to search results
-#[allow(dead_code)]
-pub fn apply_filters(entries: Vec<RegistryEntry>, filters: &SearchFilters) -> Vec<RegistryEntry> {
-    let mut filtered: Vec<RegistryEntry> = entries
-        .into_iter()
-        .filter(|entry| {
-            // Category filter
-            if let Some(category) = &filters.category {
-                if !entry.registry_metadata.categories.contains(category) {
-                    return false;
-                }
-            }
-
-            // Download count filter
-            if let Some(min_downloads) = filters.min_downloads {
-                if entry.downloads < min_downloads {
-                    return false;
-                }
-            }
-
-            // Language/extension filter
-            if let Some(language) = &filters.language {
-                if !entry.info.extensions.contains(language) {
-                    return false;
-                }
-            }
-
-            true
+pub fn detect_plugin_metadata(
+    plugin_dir: &std::path::Path,
+    plugin_name: &str,
+    source: &PluginSource,
+) -> Result<PluginInfo> {
+    let config_path = plugin_dir.join("chakra-plugin.toml");
+    
+    if config_path.exists() {
+        let config_content = std::fs::read_to_string(&config_path)
+            .map_err(|e| ChakraError::from(format!("Failed to read plugin config: {}", e)))?;
+        
+        let config: PluginConfig = toml::from_str(&config_content)
+            .map_err(|e| ChakraError::from(format!("Failed to parse plugin config: {}", e)))?;
+        
+        Ok(PluginInfo {
+            name: config.name.unwrap_or_else(|| plugin_name.to_string()),
+            version: config.version.unwrap_or_else(|| "0.1.0".to_string()),
+            description: config.description.unwrap_or_else(|| "External plugin".to_string()),
+            author: config.author.unwrap_or_else(|| "Unknown".to_string()),
+            extensions: config.extensions.unwrap_or_default(),
+            entry_files: config.entry_files.unwrap_or_default(),
+            plugin_type: PluginType::External,
+            source: Some(source.clone()),
+            dependencies: config.dependencies.unwrap_or_default(),
+            capabilities: config.capabilities.unwrap_or_default(),
         })
-        .collect();
+    } else {
+        Ok(PluginInfo {
+            name: plugin_name.to_string(),
+            version: "0.1.0".to_string(),
+            description: "External plugin".to_string(),
+            author: "Unknown".to_string(),
+            extensions: vec![],
+            entry_files: vec![],
+            plugin_type: PluginType::External,
+            source: Some(source.clone()),
+            dependencies: vec![],
+            capabilities: PluginCapabilities::default(),
+        })
+    }
+}
 
-    // Apply sorting
-    match filters.sort_by {
-        SortBy::Popularity => {
-            filtered.sort_by(|a, b| b.downloads.cmp(&a.downloads));
-        }
-        SortBy::RecentlyUpdated => {
-            filtered.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-        }
-        SortBy::Name => {
-            filtered.sort_by(|a, b| a.info.name.cmp(&b.info.name));
-        }
-        SortBy::Relevance => {
-            // TODO: Implement relevance. For now, using popularity
-            filtered.sort_by(|a, b| b.downloads.cmp(&a.downloads));
+// TODO: Future legacy compatibility layer
+#[allow(dead_code)]
+pub struct PluginRegistry {
+    #[allow(dead_code)]
+    manager: RegistryManager,
+}
+
+#[allow(dead_code)]
+impl PluginRegistry {
+    pub fn new() -> Self {
+        Self {
+            manager: RegistryManager::new(),
         }
     }
 
-    filtered
+    pub fn get_plugin(&self, name: &str) -> Option<PluginInfo> {
+        self.manager.find_plugin(name)
+    }
+
+    pub fn list_all(&self) -> Vec<PluginInfo> {
+        let (builtin, external) = self.manager.list_all_plugins();
+        let mut all_plugins = builtin;
+        all_plugins.extend(external.into_iter().cloned());
+        all_plugins
+    }
+
+    pub fn exists(&self, name: &str) -> bool {
+        self.manager.plugin_exists(name)
+    }
+
+    pub fn get_stats(&self) -> PluginStats {
+        self.manager.get_comprehensive_stats()
+    }
+}
+
+impl Default for PluginRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PluginConfig {
+    name: Option<String>,
+    version: Option<String>,
+    description: Option<String>,
+    author: Option<String>,
+    extensions: Option<Vec<String>>,
+    entry_files: Option<Vec<String>>,
+    dependencies: Option<Vec<String>>,
+    capabilities: Option<PluginCapabilities>,
 }

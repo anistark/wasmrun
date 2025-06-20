@@ -140,10 +140,15 @@ Chakra uses a modular plugin system where each programming language is supported
 | Plugin | Status | Compiler/Runtime | Capabilities |
 |--------|--------|------------------|--------------|
 | ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white) | ✅ Full Support | `cargo` + `rustc` | Standard WASM, wasm-bindgen, web apps, optimization |
-| ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white) | ✅ Full Support | `tinygo` | Lightweight runtime, optimization |
 | ![C](https://img.shields.io/badge/c-%2300599C.svg?style=for-the-badge&logo=c&logoColor=white) ![C++](https://img.shields.io/badge/c++-%2300599C.svg?style=for-the-badge&logo=c%2B%2B&logoColor=white) | ✅ Full Support | `emscripten` | Complete toolchain, Makefile support |
 | ![AssemblyScript](https://img.shields.io/badge/assembly%20script-%23000000.svg?style=for-the-badge&logo=assemblyscript&logoColor=white) | ✅ Full Support | `asc` + npm/yarn | TypeScript-like syntax, optimization |
 | ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54) | ✅ Beta Support | `py2wasm` | Runtime integration, bundle creation |
+
+### External Plugins
+
+| Plugin | Status | Source | Capabilities |
+|--------|--------|--------|--------------|
+| ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white) | ✅ Full Support | [chakra-go](https://crates.io/crates/chakra-go) | `tinygo` compiler, optimization |
 
 ### Plugin Capabilities
 
