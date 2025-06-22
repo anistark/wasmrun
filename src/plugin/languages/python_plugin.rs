@@ -111,13 +111,8 @@ impl WasmBuilder for PythonPlugin {
         {
             missing.push("python or python3 (Python interpreter)".into());
         } else {
-            let version = CommandExecutor::execute_command(
-                "python3".into(),
-                &["--version".into()],
-                ".".into(),
-                true,
-            )
-            .unwrap();
+            let version =
+                CommandExecutor::execute_command("python3", &["--version"], ".", true).unwrap();
             if version.status.success() {
                 let version_number: String = String::from_utf8(version.stdout).unwrap();
                 if !version_number.contains("3.11.0") {
@@ -165,7 +160,7 @@ impl WasmBuilder for PythonPlugin {
             "py2wasm",
             &[
                 project_entry.to_str().unwrap(),
-                "-o".into(),
+                "-o",
                 output_file.to_str().unwrap(),
             ],
             &_config.project_path,
