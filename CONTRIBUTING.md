@@ -307,7 +307,7 @@ When reporting bugs:
    - Rust version (`rustc --version`)
    - Chakra version (`chakra --version`)
 3. **Include plugin information**:
-   - Which plugin is affected (`chakra plugins list`)
+   - Which plugin is affected (`chakra plugin list`)
 4. **Provide reproduction steps**
 5. **Include relevant output** with `CHAKRA_DEBUG=1` if possible
 6. **Attach example files** if applicable
@@ -319,7 +319,7 @@ For plugin-related issues:
 
 ```sh
 # Get plugin information
-chakra plugins info [plugin-name]
+chakra plugin info [plugin-name]
 
 # Test with verbose output
 CHAKRA_DEBUG=1 chakra run ./project --language [plugin-name] --verbose
