@@ -85,11 +85,11 @@ List available plugins and check dependencies:
 
 ```sh
 # List all available plugins
-chakra plugins list
+chakra plugin list
 
 # Get detailed plugin information
-chakra plugins info rust
-chakra plugins info go
+chakra plugin info rust
+chakra plugin info go
 ```
 
 #### Verification & Inspection
@@ -222,10 +222,10 @@ chakra compile ./my-project --optimization size
 
 ```sh
 # List available plugins and their capabilities
-chakra plugins list
+chakra plugin list
 
 # Get detailed information about a specific plugin
-chakra plugins info rust
+chakra plugin info rust
 ```
 
 ### Learning & Education
@@ -306,7 +306,7 @@ Plugin-specific optimization levels:
 # Check what files are in your project
 ls -la
 # Ensure proper entry files exist (Cargo.toml, go.mod, etc.)
-# Use chakra plugins list to see available plugins
+# Use chakra plugin list to see available plugins
 ```
 🚨 Open an [issue](https://github.com/anistark/chakra/issues) and let us know about it.
 
