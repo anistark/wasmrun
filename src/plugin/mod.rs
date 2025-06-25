@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub mod config;
+pub mod external;
 pub mod languages;
 pub mod manager;
 pub mod registry;
-pub mod external;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PluginSource {
@@ -123,21 +123,15 @@ impl PluginManager {
             .iter()
             .map(|plugin| {
                 let builder = plugin.get_builder();
-                (
-                    plugin.info().name.clone(),
-                    builder.check_dependencies(),
-                )
+                (plugin.info().name.clone(), builder.check_dependencies())
             })
             .collect()
     }
 
     #[allow(dead_code)]
     pub fn verify_dependencies(&self, required_plugins: &[String]) -> crate::error::Result<()> {
-        let available_plugins: Vec<String> = self
-            .plugins
-            .iter()
-            .map(|p| p.info().name.clone())
-            .collect();
+        let available_plugins: Vec<String> =
+            self.plugins.iter().map(|p| p.info().name.clone()).collect();
 
         let missing_plugins: Vec<String> = required_plugins
             .iter()

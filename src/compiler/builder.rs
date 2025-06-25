@@ -299,8 +299,8 @@ impl BuilderFactory {
     pub fn create_builder(language: &crate::compiler::ProjectLanguage) -> Box<dyn WasmBuilder> {
         use crate::compiler::ProjectLanguage;
         use crate::plugin::languages::{
-            asc_plugin::AscPlugin, c_plugin::CPlugin, 
-            python_plugin::PythonPlugin, rust_plugin::RustPlugin,
+            asc_plugin::AscPlugin, c_plugin::CPlugin, python_plugin::PythonPlugin,
+            rust_plugin::RustPlugin,
         };
 
         match language {

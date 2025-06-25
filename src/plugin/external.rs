@@ -1,10 +1,10 @@
 //! External plugin loading and management
 
-use crate::error::{ChakraError, Result};
-use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
-use crate::plugin::config::{ChakraConfig, ExternalPluginEntry};
-use crate::compiler::builder::{WasmBuilder, BuildConfig, BuildResult};
+use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
 use crate::error::CompilationResult;
+use crate::error::{ChakraError, Result};
+use crate::plugin::config::{ChakraConfig, ExternalPluginEntry};
+use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
 use serde::Deserialize;
 use std::path::Path;
 use std::path::PathBuf;
@@ -59,7 +59,7 @@ impl PluginInstaller {
     fn install_from_git(url: &str, branch: Option<&str>) -> Result<PathBuf> {
         let install_dir = ChakraConfig::plugin_dir()?;
         let cache_dir = ChakraConfig::cache_dir()?;
-        
+
         let plugin_name = url
             .split('/')
             .last()
@@ -97,7 +97,10 @@ impl PluginInstaller {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ChakraError::from(format!("Failed to build plugin: {}", stderr)));
+            return Err(ChakraError::from(format!(
+                "Failed to build plugin: {}",
+                stderr
+            )));
         }
 
         std::fs::create_dir_all(&plugin_dir)
@@ -125,7 +128,11 @@ impl PluginInstaller {
             .to_string();
         let plugin_dir = install_dir.join(&plugin_name);
 
-        println!("Installing {} from local path: {}", plugin_name, path.display());
+        println!(
+            "Installing {} from local path: {}",
+            plugin_name,
+            path.display()
+        );
 
         let output = Command::new("cargo")
             .args(["build", "--release"])
@@ -135,7 +142,10 @@ impl PluginInstaller {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ChakraError::from(format!("Failed to build plugin: {}", stderr)));
+            return Err(ChakraError::from(format!(
+                "Failed to build plugin: {}",
+                stderr
+            )));
         }
 
         std::fs::create_dir_all(&plugin_dir)
@@ -149,9 +159,11 @@ impl PluginInstaller {
 
     fn copy_plugin_artifacts(source_dir: &Path, dest_dir: &Path) -> Result<()> {
         let target_dir = source_dir.join("target").join("release");
-        
+
         if !target_dir.exists() {
-            return Err(ChakraError::from("No release build found in target directory"));
+            return Err(ChakraError::from(
+                "No release build found in target directory",
+            ));
         }
 
         let mut copied_files = 0;
@@ -175,8 +187,9 @@ impl PluginInstaller {
                     }
                 } else if Self::is_executable(&path) {
                     let dest_path = dest_dir.join(path.file_name().unwrap());
-                    std::fs::copy(&path, &dest_path)
-                        .map_err(|e| ChakraError::from(format!("Failed to copy artifact: {}", e)))?;
+                    std::fs::copy(&path, &dest_path).map_err(|e| {
+                        ChakraError::from(format!("Failed to copy artifact: {}", e))
+                    })?;
                     copied_files += 1;
                 }
             }
@@ -424,10 +437,16 @@ pub fn install_plugin(source: PluginSource) -> Result<Box<dyn Plugin>> {
             dependencies: vec![],
             capabilities: PluginCapabilities::default(),
         },
-        source: PluginSource::Local { path: plugin_dir.clone() },
+        source: PluginSource::Local {
+            path: plugin_dir.clone(),
+        },
         installed_at: chrono::Utc::now().to_rfc3339(),
         enabled: true,
-        install_path: plugin_dir.file_name().unwrap().to_string_lossy().to_string(),
+        install_path: plugin_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string(),
         executable_path: None,
     };
 

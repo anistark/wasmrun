@@ -1,8 +1,8 @@
 //! Plugin registry for managing built-in and external plugins
 
 use crate::error::{ChakraError, Result};
-use crate::plugin::{Plugin, PluginInfo, PluginSource, PluginType, PluginCapabilities};
 use crate::plugin::config::{ChakraConfig, ExternalPluginEntry};
+use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -59,8 +59,15 @@ impl LocalPluginRegistry {
         self.config.save()
     }
 
-    pub fn add_plugin(&mut self, name: String, info: PluginInfo, source: PluginSource, install_path: String) -> Result<()> {
-        self.config.add_external_plugin(name, info, source, install_path)?;
+    pub fn add_plugin(
+        &mut self,
+        name: String,
+        info: PluginInfo,
+        source: PluginSource,
+        install_path: String,
+    ) -> Result<()> {
+        self.config
+            .add_external_plugin(name, info, source, install_path)?;
         Ok(())
     }
 
@@ -96,8 +103,9 @@ impl LocalPluginRegistry {
 
     #[allow(dead_code)]
     pub fn get_stats(&self) -> ExternalPluginStats {
-        let (total_installed, enabled_count, disabled_count, supported_languages) = self.config.get_external_plugin_stats();
-        
+        let (total_installed, enabled_count, disabled_count, supported_languages) =
+            self.config.get_external_plugin_stats();
+
         ExternalPluginStats {
             total_installed,
             enabled_count,
@@ -132,10 +140,10 @@ pub struct RegistryManager {
 
 impl RegistryManager {
     pub fn new() -> Self {
-        let local_registry = LocalPluginRegistry::load().unwrap_or_else(|_| {
-            LocalPluginRegistry { config: ChakraConfig::default() }
+        let local_registry = LocalPluginRegistry::load().unwrap_or_else(|_| LocalPluginRegistry {
+            config: ChakraConfig::default(),
         });
-        
+
         Self {
             local_registry,
             remote_cache: HashMap::new(),
@@ -159,7 +167,10 @@ impl RegistryManager {
         for plugin in builtin_plugins {
             if plugin.name.to_lowercase().contains(&query_lower)
                 || plugin.description.to_lowercase().contains(&query_lower)
-                || plugin.extensions.iter().any(|ext| ext.to_lowercase().contains(&query_lower))
+                || plugin
+                    .extensions
+                    .iter()
+                    .any(|ext| ext.to_lowercase().contains(&query_lower))
             {
                 let entry = RegistryEntry {
                     info: plugin.clone(),
@@ -189,7 +200,7 @@ impl RegistryManager {
         results.sort_by(|a, b| {
             let a_exact = a.info.name.to_lowercase() == query_lower;
             let b_exact = b.info.name.to_lowercase() == query_lower;
-            
+
             match (a_exact, b_exact) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
@@ -207,12 +218,10 @@ impl RegistryManager {
 
     pub fn get_builtin_plugins(&self) -> Vec<PluginInfo> {
         use crate::plugin::languages::{
+            asc_plugin::AscPlugin, c_plugin::CPlugin, python_plugin::PythonPlugin,
             rust_plugin::RustPlugin,
-            c_plugin::CPlugin,
-            asc_plugin::AscPlugin,
-            python_plugin::PythonPlugin,
         };
-        
+
         vec![
             RustPlugin::new().info().clone(),
             CPlugin::new().info().clone(),
@@ -245,11 +254,11 @@ impl RegistryManager {
     #[allow(dead_code)]
     pub fn get_comprehensive_stats(&self) -> PluginStats {
         let builtin_plugins = self.get_builtin_plugins();
-        let (total_external, enabled_external, disabled_external, external_langs) = 
+        let (total_external, enabled_external, disabled_external, external_langs) =
             self.local_registry.get_external_stats();
 
         let mut all_languages = Vec::new();
-        
+
         for plugin in &builtin_plugins {
             for ext in &plugin.extensions {
                 if !all_languages.contains(ext) {
@@ -257,13 +266,13 @@ impl RegistryManager {
                 }
             }
         }
-        
+
         for lang in external_langs {
             if !all_languages.contains(&lang) {
                 all_languages.push(lang);
             }
         }
-        
+
         all_languages.sort();
 
         PluginStats {
@@ -279,7 +288,7 @@ impl RegistryManager {
     pub fn list_all_plugins(&self) -> (Vec<PluginInfo>, Vec<&PluginInfo>) {
         let builtin_plugins = self.get_builtin_plugins();
         let external_plugins = self.local_registry.get_installed_plugins();
-        
+
         (builtin_plugins, external_plugins)
     }
 
@@ -312,18 +321,20 @@ pub fn detect_plugin_metadata(
     source: &PluginSource,
 ) -> Result<PluginInfo> {
     let config_path = plugin_dir.join("chakra-plugin.toml");
-    
+
     if config_path.exists() {
         let config_content = std::fs::read_to_string(&config_path)
             .map_err(|e| ChakraError::from(format!("Failed to read plugin config: {}", e)))?;
-        
+
         let config: PluginConfig = toml::from_str(&config_content)
             .map_err(|e| ChakraError::from(format!("Failed to parse plugin config: {}", e)))?;
-        
+
         Ok(PluginInfo {
             name: config.name.unwrap_or_else(|| plugin_name.to_string()),
             version: config.version.unwrap_or_else(|| "0.1.0".to_string()),
-            description: config.description.unwrap_or_else(|| "External plugin".to_string()),
+            description: config
+                .description
+                .unwrap_or_else(|| "External plugin".to_string()),
             author: config.author.unwrap_or_else(|| "Unknown".to_string()),
             extensions: config.extensions.unwrap_or_default(),
             entry_files: config.entry_files.unwrap_or_default(),

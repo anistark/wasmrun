@@ -1,8 +1,8 @@
 //! Plugin management commands and operations
 
 use crate::error::{ChakraError, Result};
+use crate::plugin::registry::{detect_plugin_metadata, RegistryManager};
 use crate::plugin::{PluginInfo, PluginManager, PluginSource, PluginType};
-use crate::plugin::registry::{RegistryManager, detect_plugin_metadata};
 
 pub struct PluginCommands {
     manager: PluginManager,
@@ -13,12 +13,18 @@ impl PluginCommands {
     pub fn new() -> Result<Self> {
         let manager = PluginManager::new()?;
         let registry_manager = RegistryManager::new();
-        Ok(Self { manager, registry_manager })
+        Ok(Self {
+            manager,
+            registry_manager,
+        })
     }
 
     pub fn list(&self, show_all: bool) -> Result<()> {
         let builtin_plugins = self.manager.list_plugins();
-        let external_plugins = self.registry_manager.local_registry().get_installed_plugins();
+        let external_plugins = self
+            .registry_manager
+            .local_registry()
+            .get_installed_plugins();
 
         if builtin_plugins.is_empty() && external_plugins.is_empty() {
             println!("No plugins installed.");
@@ -98,7 +104,11 @@ impl PluginCommands {
 
         let source = self.parse_plugin_source(plugin_spec, version)?;
 
-        if self.registry_manager.local_registry().is_installed(plugin_spec) {
+        if self
+            .registry_manager
+            .local_registry()
+            .is_installed(plugin_spec)
+        {
             return Err(ChakraError::from(format!(
                 "Plugin '{}' is already installed. Use 'chakra plugin update {}' to update it.",
                 plugin_spec, plugin_spec
@@ -114,12 +124,16 @@ impl PluginCommands {
 
         let plugin_dir = crate::plugin::external::PluginInstaller::install(source.clone())?;
         let plugin_info = detect_plugin_metadata(&plugin_dir, plugin_spec, &source)?;
-        
+
         self.registry_manager.local_registry_mut().add_plugin(
             plugin_spec.to_string(),
             plugin_info,
             source,
-            plugin_dir.file_name().unwrap().to_string_lossy().to_string(),
+            plugin_dir
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string(),
         )?;
 
         println!("✅ Plugin '{}' installed successfully!", plugin_spec);
@@ -139,7 +153,11 @@ impl PluginCommands {
             }
         }
 
-        if !self.registry_manager.local_registry().is_installed(plugin_name) {
+        if !self
+            .registry_manager
+            .local_registry()
+            .is_installed(plugin_name)
+        {
             return Err(ChakraError::from(format!(
                 "Plugin '{}' is not installed",
                 plugin_name
@@ -147,7 +165,9 @@ impl PluginCommands {
         }
 
         crate::plugin::external::PluginInstaller::uninstall(plugin_name)?;
-        self.registry_manager.local_registry_mut().remove_plugin(plugin_name)?;
+        self.registry_manager
+            .local_registry_mut()
+            .remove_plugin(plugin_name)?;
 
         println!("✅ Plugin '{}' uninstalled successfully!", plugin_name);
         Ok(())
@@ -159,12 +179,19 @@ impl PluginCommands {
             return Ok(());
         }
 
-        if let Some(entry) = self.registry_manager.local_registry().get_installed_plugin(plugin_name) {
+        if let Some(entry) = self
+            .registry_manager
+            .local_registry()
+            .get_installed_plugin(plugin_name)
+        {
             self.print_plugin_info(&entry.info)?;
             return Ok(());
         }
 
-        Err(ChakraError::from(format!("Plugin '{}' not found", plugin_name)))
+        Err(ChakraError::from(format!(
+            "Plugin '{}' not found",
+            plugin_name
+        )))
     }
 
     pub fn set_enabled(&mut self, plugin_name: &str, enabled: bool) -> Result<()> {
@@ -180,7 +207,9 @@ impl PluginCommands {
             }
         }
 
-        self.registry_manager.local_registry_mut().set_plugin_enabled(plugin_name, enabled)?;
+        self.registry_manager
+            .local_registry_mut()
+            .set_plugin_enabled(plugin_name, enabled)?;
 
         let status = if enabled { "enabled" } else { "disabled" };
         println!("✅ Plugin '{}' {} successfully!", plugin_name, status);
@@ -199,14 +228,22 @@ impl PluginCommands {
             }
         }
 
-        if !self.registry_manager.local_registry().is_installed(plugin_name) {
+        if !self
+            .registry_manager
+            .local_registry()
+            .is_installed(plugin_name)
+        {
             return Err(ChakraError::from(format!(
                 "Plugin '{}' is not installed",
                 plugin_name
             )));
         }
 
-        let entry = self.registry_manager.local_registry().get_installed_plugin(plugin_name).unwrap();
+        let entry = self
+            .registry_manager
+            .local_registry()
+            .get_installed_plugin(plugin_name)
+            .unwrap();
         let source = entry.source.clone();
 
         crate::plugin::external::PluginInstaller::uninstall(plugin_name)?;
@@ -214,7 +251,9 @@ impl PluginCommands {
         let plugin_dir = crate::plugin::external::PluginInstaller::install(source.clone())?;
         let plugin_info = detect_plugin_metadata(&plugin_dir, plugin_name, &source)?;
 
-        self.registry_manager.local_registry_mut().update_plugin_metadata(plugin_name, plugin_info)?;
+        self.registry_manager
+            .local_registry_mut()
+            .update_plugin_metadata(plugin_name, plugin_info)?;
 
         println!("✅ Plugin '{}' updated successfully!", plugin_name);
         Ok(())
@@ -223,7 +262,9 @@ impl PluginCommands {
     pub fn update_all(&mut self) -> Result<()> {
         println!("Updating all external plugins...");
 
-        let external_plugins: Vec<String> = self.registry_manager.local_registry()
+        let external_plugins: Vec<String> = self
+            .registry_manager
+            .local_registry()
             .get_installed_plugins()
             .iter()
             .map(|p| p.name.clone())
@@ -261,7 +302,7 @@ impl PluginCommands {
 
     pub fn search(&self, query: &str) -> Result<()> {
         println!("Searching for plugins matching '{}'...", query);
-        
+
         match self.registry_manager.search_all(query) {
             Ok(results) => {
                 if results.is_empty() {
@@ -269,10 +310,9 @@ impl PluginCommands {
                 } else {
                     println!("Found {} plugin(s):", results.len());
                     for entry in results.iter().take(10) {
-                        println!("  • \x1b[1;37m{}\x1b[0m v{} - {}", 
-                            entry.info.name, 
-                            entry.info.version, 
-                            entry.info.description
+                        println!(
+                            "  • \x1b[1;37m{}\x1b[0m v{} - {}",
+                            entry.info.name, entry.info.version, entry.info.description
                         );
                         if let Some(source) = &entry.info.source {
                             match source {
@@ -299,7 +339,7 @@ impl PluginCommands {
                 println!("You can still install plugins directly if you know their name:");
             }
         }
-        
+
         println!("\nTo install a plugin, use: chakra plugin install <plugin-name>");
         Ok(())
     }
@@ -308,9 +348,12 @@ impl PluginCommands {
     #[allow(dead_code)]
     pub fn validate(&mut self) -> Result<()> {
         println!("Validating plugin installations...");
-        
-        let missing = self.registry_manager.local_registry_mut().validate_installations()?;
-        
+
+        let missing = self
+            .registry_manager
+            .local_registry_mut()
+            .validate_installations()?;
+
         if missing.is_empty() {
             println!("✅ All plugins are properly installed.");
         } else {
@@ -320,7 +363,7 @@ impl PluginCommands {
             }
             println!("These plugins have been removed from the registry.");
         }
-        
+
         Ok(())
     }
 
@@ -329,21 +372,28 @@ impl PluginCommands {
     pub fn stats(&self) -> Result<()> {
         let stats = self.registry_manager.local_registry().get_stats();
         let builtin_count = self.manager.list_plugins().len();
-        
+
         println!("📊 \x1b[1;36mPlugin Statistics:\x1b[0m");
         println!("  Built-in plugins: {}", builtin_count);
         println!("  External plugins installed: {}", stats.total_installed);
         println!("  External plugins enabled: {}", stats.enabled_count);
         println!("  External plugins disabled: {}", stats.disabled_count);
-        
+
         if !stats.supported_languages.is_empty() {
-            println!("  Supported languages: {}", stats.supported_languages.join(", "));
+            println!(
+                "  Supported languages: {}",
+                stats.supported_languages.join(", ")
+            );
         }
-        
+
         Ok(())
     }
 
-    fn parse_plugin_source(&self, plugin_spec: &str, version: Option<String>) -> Result<PluginSource> {
+    fn parse_plugin_source(
+        &self,
+        plugin_spec: &str,
+        version: Option<String>,
+    ) -> Result<PluginSource> {
         if plugin_spec.starts_with("http://") || plugin_spec.starts_with("https://") {
             Ok(PluginSource::Git {
                 url: plugin_spec.to_string(),
@@ -351,10 +401,7 @@ impl PluginCommands {
             })
         } else if plugin_spec.starts_with("git+") {
             let url = plugin_spec.strip_prefix("git+").unwrap().to_string();
-            Ok(PluginSource::Git {
-                url,
-                branch: None,
-            })
+            Ok(PluginSource::Git { url, branch: None })
         } else if std::path::Path::new(plugin_spec).exists() {
             Ok(PluginSource::Local {
                 path: std::path::PathBuf::from(plugin_spec),
@@ -373,11 +420,9 @@ impl PluginCommands {
         let mut current_line = String::new();
 
         for word in text.split_whitespace() {
-            if current_line.len() + word.len() + 1 > width {
-                if !current_line.is_empty() {
-                    lines.push(current_line.clone());
-                    current_line.clear();
-                }
+            if current_line.len() + word.len() + 1 > width && !current_line.is_empty() {
+                lines.push(current_line.clone());
+                current_line.clear();
             }
 
             if !current_line.is_empty() {
@@ -427,7 +472,9 @@ impl PluginCommands {
             }
         );
 
-        println!("\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m");
+        println!(
+            "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
+        );
         Ok(())
     }
 }

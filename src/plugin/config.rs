@@ -86,7 +86,7 @@ impl ChakraConfig {
 
     pub fn plugin_dir() -> Result<PathBuf> {
         let config = Self::load_or_default()?;
-        
+
         if let Some(install_dir) = &config.settings.install_dir {
             Ok(install_dir.clone())
         } else {
@@ -96,7 +96,7 @@ impl ChakraConfig {
 
     pub fn cache_dir() -> Result<PathBuf> {
         let config = Self::load_or_default()?;
-        
+
         if let Some(cache_dir) = &config.settings.cache_dir {
             Ok(cache_dir.clone())
         } else {
@@ -168,14 +168,20 @@ impl ChakraConfig {
         let config_path = Self::config_path()?;
 
         if config_path.exists() {
-            println!("Configuration file already exists at: {}", config_path.display());
+            println!(
+                "Configuration file already exists at: {}",
+                config_path.display()
+            );
             return Ok(());
         }
 
         let config = Self::default();
         config.save()?;
 
-        println!("✅ Created configuration file at: {}", config_path.display());
+        println!(
+            "✅ Created configuration file at: {}",
+            config_path.display()
+        );
         Ok(())
     }
 
@@ -202,7 +208,7 @@ impl ChakraConfig {
         self.settings.cache_dir = Some(cache_dir);
 
         match self.version.as_str() {
-            "1.0.0" => {},
+            "1.0.0" => {}
             _ => {
                 return Err(ChakraError::from(format!(
                     "Unsupported config version: {}. Please update Chakra.",
@@ -215,7 +221,13 @@ impl ChakraConfig {
     }
 
     // External plugin management
-    pub fn add_external_plugin(&mut self, name: String, info: PluginInfo, source: PluginSource, install_path: String) -> Result<()> {
+    pub fn add_external_plugin(
+        &mut self,
+        name: String,
+        info: PluginInfo,
+        source: PluginSource,
+        install_path: String,
+    ) -> Result<()> {
         let entry = ExternalPluginEntry {
             info,
             source,
@@ -245,7 +257,10 @@ impl ChakraConfig {
     }
 
     pub fn get_external_plugins(&self) -> Vec<&PluginInfo> {
-        self.external_plugins.values().map(|entry| &entry.info).collect()
+        self.external_plugins
+            .values()
+            .map(|entry| &entry.info)
+            .collect()
     }
 
     pub fn set_external_plugin_enabled(&mut self, name: &str, enabled: bool) -> Result<()> {
@@ -254,7 +269,10 @@ impl ChakraConfig {
             self.save()?;
             Ok(())
         } else {
-            Err(ChakraError::from(format!("External plugin '{}' not found", name)))
+            Err(ChakraError::from(format!(
+                "External plugin '{}' not found",
+                name
+            )))
         }
     }
 
@@ -264,7 +282,10 @@ impl ChakraConfig {
             self.save()?;
             Ok(())
         } else {
-            Err(ChakraError::from(format!("External plugin '{}' not found", name)))
+            Err(ChakraError::from(format!(
+                "External plugin '{}' not found",
+                name
+            )))
         }
     }
 
@@ -274,7 +295,7 @@ impl ChakraConfig {
         let plugin_dir = Self::plugin_dir()?;
 
         let mut plugins_to_remove = Vec::new();
-        
+
         for (name, entry) in &self.external_plugins {
             let install_path = plugin_dir.join(&entry.install_path);
             if !install_path.exists() {
@@ -299,7 +320,7 @@ impl ChakraConfig {
         let total = self.external_plugins.len();
         let enabled = self.external_plugins.values().filter(|e| e.enabled).count();
         let disabled = total - enabled;
-        
+
         let mut languages = Vec::new();
         for entry in self.external_plugins.values() {
             for ext in &entry.info.extensions {
@@ -309,7 +330,7 @@ impl ChakraConfig {
             }
         }
         languages.sort();
-        
+
         (total, enabled, disabled, languages)
     }
 
