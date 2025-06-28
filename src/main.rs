@@ -10,16 +10,16 @@ mod utils;
 mod watcher;
 
 use cli::{get_args, Commands, ResolvedArgs};
-use error::{ChakraError, Result};
+use error::{WasmrunError, Result};
 use std::error::Error;
 use ui::print_webapp_detected;
 
 fn main() {
     std::panic::set_hook(Box::new(|panic_info| {
-        eprintln!("\n🔥 Chakra encountered an unexpected error:");
+        eprintln!("\n🔥 Wasmrun encountered an unexpected error:");
         eprintln!("{}", panic_info);
         eprintln!("\n💡 This is likely a bug. Please report it at:");
-        eprintln!("   https://github.com/anistark/chakra/issues");
+        eprintln!("   https://github.com/anistark/wasmrun/issues");
         eprintln!("\n📋 Include your command, WASM file, and this error message.");
     }));
 
@@ -37,9 +37,9 @@ fn main() {
         }) => {
             commands::handle_compile_command(path, positional_path, output, *verbose, optimization)
                 .map_err(|e| match e {
-                    ChakraError::Command(_)
-                    | ChakraError::Compilation(_)
-                    | ChakraError::Path { .. } => e,
+                    WasmrunError::Command(_)
+                    | WasmrunError::Compilation(_)
+                    | WasmrunError::Path { .. } => e,
                     _ => e,
                 })
         }
@@ -50,7 +50,7 @@ fn main() {
             detailed,
         }) => {
             commands::handle_verify_command(path, positional_path, *detailed).map_err(|e| match e {
-                ChakraError::Command(_) | ChakraError::Wasm(_) | ChakraError::Path { .. } => e,
+                WasmrunError::Command(_) | WasmrunError::Wasm(_) | WasmrunError::Path { .. } => e,
                 _ => e,
             })
         }
@@ -59,7 +59,7 @@ fn main() {
             path,
             positional_path,
         }) => commands::handle_inspect_command(path, positional_path).map_err(|e| match e {
-            ChakraError::Command(_) | ChakraError::Wasm(_) | ChakraError::Path { .. } => e,
+            WasmrunError::Command(_) | WasmrunError::Wasm(_) | WasmrunError::Path { .. } => e,
             _ => e,
         }),
 
@@ -72,32 +72,32 @@ fn main() {
             verbose: _verbose,
         }) => commands::handle_run_command(path, positional_path, *port, language, *watch).map_err(
             |e| match e {
-                ChakraError::Command(_) | ChakraError::Server(_) | ChakraError::Path { .. } => e,
+                WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,
                 _ => e,
             },
         ),
 
         Some(Commands::Plugin(plugin_cmd)) => {
             commands::handle_plugin_command(plugin_cmd).map_err(|e| match e {
-                ChakraError::Command(_) | ChakraError::Path { .. } => e,
+                WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
                 _ => e,
             })
         }
 
-        // TODO: WASM project using Chakra
+        // TODO: WASM project using Wasmrun
         // Some(Commands::Init {
         //     name,
         //     template,
         //     directory,
         // }) => commands::handle_init_command(name, template, directory).map_err(|e| match e {
-        //     ChakraError::Command(_) | ChakraError::Path { .. } => e,
+        //     WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
         //     _ => e,
         // }),
         Some(Commands::Clean {
             path,
             positional_path,
         }) => commands::handle_clean_command(path, positional_path).map_err(|e| match e {
-            ChakraError::Command(_) | ChakraError::Path { .. } => e,
+            WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
             _ => e,
         }),
 
@@ -187,20 +187,20 @@ fn handle_default_command(args: &ResolvedArgs) -> Result<()> {
                 }
             }
         } else {
-            return Err(ChakraError::path(format!("Path not found: {}", args.path)));
+            return Err(WasmrunError::path(format!("Path not found: {}", args.path)));
         }
     }
     Ok(())
 }
 
 /// Error handling with better context
-fn handle_error(error: ChakraError) {
+fn handle_error(error: WasmrunError) {
     println!();
 
     eprintln!(
         "\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m"
     );
-    eprintln!("\x1b[1;34m│\x1b[0m  ❌ \x1b[1;31mChakra Error\x1b[0m                                          \x1b[1;34m│\x1b[0m");
+    eprintln!("\x1b[1;34m│\x1b[0m  ❌ \x1b[1;31mWasmrun Error\x1b[0m                                          \x1b[1;34m│\x1b[0m");
     eprintln!(
         "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
     );
@@ -232,7 +232,7 @@ fn handle_error(error: ChakraError) {
     );
 
     // Additional debug information
-    if std::env::var("CHAKRA_DEBUG").is_ok() || std::env::var("RUST_BACKTRACE").is_ok() {
+    if std::env::var("WASMRUN_DEBUG").is_ok() || std::env::var("RUST_BACKTRACE").is_ok() {
         eprintln!("\n\x1b[1;34m🔍 Debug Information:\x1b[0m");
         eprintln!("\x1b[0;37m{:?}\x1b[0m", error);
 
@@ -248,8 +248,8 @@ fn handle_error(error: ChakraError) {
         }
     } else {
         eprintln!("\n💡 \x1b[1;34mFor detailed debugging information, run with:\x1b[0m");
-        eprintln!("   \x1b[1;37mCHAKRA_DEBUG=1 chakra [your command]\x1b[0m");
-        eprintln!("   \x1b[1;37mRUST_BACKTRACE=1 chakra [your command]\x1b[0m");
+        eprintln!("   \x1b[1;37mWASMRUN_DEBUG=1 wasmrun [your command]\x1b[0m");
+        eprintln!("   \x1b[1;37mRUST_BACKTRACE=1 wasmrun [your command]\x1b[0m");
     }
 
     if error.is_recoverable() {

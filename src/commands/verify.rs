@@ -1,5 +1,5 @@
 use crate::cli::CommandValidator;
-use crate::error::{ChakraError, Result, WasmError};
+use crate::error::{WasmrunError, Result, WasmError};
 use crate::utils::PathResolver;
 use std::fs;
 use std::io::{Cursor, Read};
@@ -44,18 +44,18 @@ pub fn handle_verify_command(
     println!("🔍 Verifying WebAssembly file: {}", wasm_path);
 
     let result =
-        verify_wasm(&wasm_path).map_err(|e| ChakraError::Wasm(WasmError::validation_failed(e)))?;
+        verify_wasm(&wasm_path).map_err(|e| WasmrunError::Wasm(WasmError::validation_failed(e)))?;
 
     print_verification_results(&wasm_path, &result, detailed);
 
     if !result.valid_magic {
-        return Err(ChakraError::Wasm(WasmError::InvalidMagicBytes {
+        return Err(WasmrunError::Wasm(WasmError::InvalidMagicBytes {
             path: wasm_path,
         }));
     }
 
     if result.section_count == 0 {
-        return Err(ChakraError::Wasm(WasmError::validation_failed(
+        return Err(WasmrunError::Wasm(WasmError::validation_failed(
             "No sections found in WASM file",
         )));
     }
@@ -78,7 +78,7 @@ pub fn handle_inspect_command(
     println!("🔍 Inspecting WebAssembly file: {}", wasm_path);
 
     print_detailed_binary_info(&wasm_path)
-        .map_err(|e| ChakraError::Wasm(WasmError::validation_failed(e)))?;
+        .map_err(|e| WasmrunError::Wasm(WasmError::validation_failed(e)))?;
 
     println!("Inspection completed successfully.");
     Ok(())
@@ -417,12 +417,12 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
         }
     }
 
-    println!("\n  📊 \x1b[1;34mChakra Conclusion:\x1b[0m");
+    println!("\n  📊 \x1b[1;34mWasmrun Conclusion:\x1b[0m");
     if results.has_export_section && !results.export_names.is_empty() {
         let has_entry = results.export_names.iter().any(|name| is_entry_point(name));
 
         if has_entry || results.has_start_section {
-            println!("     \x1b[1;32m✓ WASM file should run with Chakra\x1b[0m");
+            println!("     \x1b[1;32m✓ WASM file should run with Wasmrun\x1b[0m");
 
             if results.has_start_section {
                 if let Some(index) = results.start_function_index {
@@ -465,8 +465,8 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
     }
 
     if results.valid_magic && (results.has_export_section || results.has_start_section) {
-        println!("\n  🚀 \x1b[1;33mRun with Chakra:\x1b[0m");
-        println!("     \x1b[1;37mchakra --wasm --path {}\x1b[0m", path);
+        println!("\n  🚀 \x1b[1;33mRun with Wasmrun:\x1b[0m");
+        println!("     \x1b[1;37mwasmrun --wasm --path {}\x1b[0m", path);
     }
 
     println!("\x1b[1;34m╰\x1b[0m");
@@ -680,7 +680,7 @@ fn resolve_and_validate_wasm_path(
                         size
                     );
                 } else if size_bytes == 0 {
-                    return Err(ChakraError::Wasm(WasmError::validation_failed(
+                    return Err(WasmrunError::Wasm(WasmError::validation_failed(
                         "WASM file is empty",
                     )));
                 }

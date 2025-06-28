@@ -1,5 +1,5 @@
 use crate::compiler;
-use crate::error::{ChakraError, Result};
+use crate::error::{WasmrunError, Result};
 use crate::ui::print_clean_info;
 use crate::utils::PathResolver;
 
@@ -58,7 +58,7 @@ fn clean_go_project(project_path: &str) -> Result<()> {
         .args(["clean", "-cache", "-modcache"])
         .current_dir(project_path)
         .output()
-        .map_err(|e| ChakraError::from(format!("Failed to run go clean: {}", e)))?;
+        .map_err(|e| WasmrunError::from(format!("Failed to run go clean: {}", e)))?;
 
     if output.status.success() {
         println!("🧹 Go project cleaned successfully");

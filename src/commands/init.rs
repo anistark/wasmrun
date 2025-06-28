@@ -1,5 +1,5 @@
 use crate::cli::CommandValidator;
-use crate::error::{ChakraError, Result};
+use crate::error::{WasmrunError, Result};
 use crate::ui::print_init_info;
 
 /// Handle init command
@@ -22,7 +22,7 @@ pub fn handle_init_command(
     );
     println!("📂 Target directory: {}", target_dir);
 
-    Err(ChakraError::from(
+    Err(WasmrunError::from(
         "Project initialization is not yet implemented. This will be added in a future version."
             .to_string(),
     ))

@@ -16,7 +16,7 @@ impl PythonPlugin {
             name: "python".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             description: "Python WebAssembly compiler".into(),
-            author: "Chakra Team".into(),
+            author: "Wasmrun Team".into(),
             extensions: vec!["py".into()],
             entry_files: vec!["main.py".into(), "app.py".into()],
             plugin_type: PluginType::Builtin,

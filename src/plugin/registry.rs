@@ -1,7 +1,7 @@
 //! Plugin registry for managing built-in and external plugins
 
-use crate::error::{ChakraError, Result};
-use crate::plugin::config::{ChakraConfig, ExternalPluginEntry};
+use crate::error::{WasmrunError, Result};
+use crate::plugin::config::{WasmrunConfig, ExternalPluginEntry};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -45,12 +45,12 @@ pub struct ExternalPluginStats {
 }
 
 pub struct LocalPluginRegistry {
-    config: ChakraConfig,
+    config: WasmrunConfig,
 }
 
 impl LocalPluginRegistry {
     pub fn load() -> Result<Self> {
-        let config = ChakraConfig::load_or_default()?;
+        let config = WasmrunConfig::load_or_default()?;
         Ok(Self { config })
     }
 
@@ -120,12 +120,12 @@ impl LocalPluginRegistry {
     }
 
     #[allow(dead_code)]
-    pub fn config_mut(&mut self) -> &mut ChakraConfig {
+    pub fn config_mut(&mut self) -> &mut WasmrunConfig {
         &mut self.config
     }
 
     #[allow(dead_code)]
-    pub fn config(&self) -> &ChakraConfig {
+    pub fn config(&self) -> &WasmrunConfig {
         &self.config
     }
 }
@@ -141,7 +141,7 @@ pub struct RegistryManager {
 impl RegistryManager {
     pub fn new() -> Self {
         let local_registry = LocalPluginRegistry::load().unwrap_or_else(|_| LocalPluginRegistry {
-            config: ChakraConfig::default(),
+            config: WasmrunConfig::default(),
         });
 
         Self {
@@ -182,8 +182,8 @@ impl RegistryManager {
                     registry_metadata: RegistryMetadata {
                         versions: vec![plugin.version.clone()],
                         documentation: None,
-                        homepage: Some("https://github.com/chakra-core/chakra".to_string()),
-                        repository: Some("https://github.com/chakra-core/chakra".to_string()),
+                        homepage: Some("https://github.com/wasmrun-core/wasmrun".to_string()),
+                        repository: Some("https://github.com/wasmrun-core/wasmrun".to_string()),
                         license: Some("MIT".to_string()),
                         keywords: plugin.extensions.clone(),
                         categories: vec!["builtin".to_string(), "compiler".to_string()],
@@ -315,19 +315,20 @@ impl Default for RegistryManager {
     }
 }
 
+// TODO: Modify this to use Cargo.toml for package.metadata.wasm-plugin
 pub fn detect_plugin_metadata(
     plugin_dir: &std::path::Path,
     plugin_name: &str,
     source: &PluginSource,
 ) -> Result<PluginInfo> {
-    let config_path = plugin_dir.join("chakra-plugin.toml");
+    let config_path = plugin_dir.join("plugin.toml");
 
     if config_path.exists() {
         let config_content = std::fs::read_to_string(&config_path)
-            .map_err(|e| ChakraError::from(format!("Failed to read plugin config: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to read plugin config: {}", e)))?;
 
         let config: PluginConfig = toml::from_str(&config_content)
-            .map_err(|e| ChakraError::from(format!("Failed to parse plugin config: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to parse plugin config: {}", e)))?;
 
         Ok(PluginInfo {
             name: config.name.unwrap_or_else(|| plugin_name.to_string()),

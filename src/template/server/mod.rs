@@ -4,7 +4,7 @@ use std::path::Path;
 const INDEX_HTML: &str = include_str!("index.html");
 const STYLE_CSS: &str = include_str!("style.css");
 const SCRIPTS_JS: &str = include_str!("scripts.js");
-const WASI_JS: &str = include_str!("chakra_wasi_impl.js");
+const WASI_JS: &str = include_str!("wasmrun_wasi_impl.js");
 
 /// Generate the complete HTML
 pub fn generate_html(filename: &str) -> String {
@@ -14,7 +14,7 @@ pub fn generate_html(filename: &str) -> String {
 /// Generate the complete HTML with watch mode support
 pub fn generate_html_with_watch_mode(filename: &str, watch_mode: bool) -> String {
     let watch_meta = if watch_mode {
-        r#"<meta name="chakra-watch" content="true">"#
+        r#"<meta name="wasmrun-watch" content="true">"#
     } else {
         ""
     };
@@ -28,7 +28,7 @@ pub fn generate_html_with_watch_mode(filename: &str, watch_mode: bool) -> String
         .replace(
             "<!-- @script-placeholder -->",
             &format!(
-                "{}\n<script>\n// Chakra WASI implementation\n{}\n</script>\n<script>\n// Main script\n{}\n</script>",
+                "{}\n<script>\n// Wasmrun WASI implementation\n{}\n</script>\n<script>\n// Main script\n{}\n</script>",
                 watch_meta,
                 WASI_JS,
                 process_scripts(filename)
@@ -57,8 +57,8 @@ pub fn generate_html_dev(filename: &str) -> String {
     let js = fs::read_to_string(template_dir.join("scripts.js"))
         .unwrap_or_else(|_| "// Failed to load scripts.js".to_string());
 
-    let wasi_js = fs::read_to_string(template_dir.join("chakra_wasi_impl.js"))
-        .unwrap_or_else(|_| "// Failed to load chakra_wasi_impl.js".to_string());
+    let wasi_js = fs::read_to_string(template_dir.join("wasmrun_wasi_impl.js"))
+        .unwrap_or_else(|_| "// Failed to load wasmrun_wasi_impl.js".to_string());
 
     html.replace("$FILENAME$", filename)
         .replace(
@@ -88,7 +88,7 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chakra - Running {}</title>
+    <title>Wasmrun - Running {}</title>
     <link rel="icon" href="/assets/logo.png" type="image/png">
     <style>
     * {{
@@ -234,9 +234,9 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
 <body>
     <header>
         <div class="logo">
-            <img src="/assets/logo.png" alt="Chakra Logo" width="40" height="40">
+            <img src="/assets/logo.png" alt="Wasmrun Logo" width="40" height="40">
         </div>
-        <h1>Chakra - Wasm-Bindgen App</h1>
+        <h1>Wasmrun - Wasm-Bindgen App</h1>
     </header>
     
     <main>
@@ -257,7 +257,7 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
     </main>
     
     <footer>
-        Powered by Chakra with wasm-bindgen support
+        Powered by Wasmrun with wasm-bindgen support
     </footer>
     
     <script>

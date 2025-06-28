@@ -1,19 +1,19 @@
-use crate::error::{ChakraError, Result};
+use crate::error::{WasmrunError, Result};
 use crate::utils::PathResolver;
 use clap::{Parser, Subcommand};
 
-/// Chakra - WebAssembly project compiler and runtime 🌟
+/// Wasmrun - WebAssembly project compiler and runtime 🌟
 #[derive(Parser, Debug)]
 #[command(
-    name = "chakra",
+    name = "wasmrun",
     author,
     version = get_version_string(),
     about = "A lightweight WebAssembly runner",
-    long_about = "Chakra is a CLI tool for compiling, running, and debugging WebAssembly modules with full WASI support.",
-    after_help = "If you find Chakra useful, please consider starring the repository on GitHub! ✨\nhttps://github.com/anistark/chakra"
+    long_about = "Wasmrun is a CLI tool for compiling, running, and debugging WebAssembly modules with full WASI support.",
+    after_help = "If you find Wasmrun useful, please consider starring the repository on GitHub! ✨\nhttps://github.com/anistark/wasmrun"
 )]
 pub struct Args {
-    /// Subcommands to control Chakra server
+    /// Subcommands to control Wasmrun server
     #[command(subcommand)]
     pub command: Option<Commands>,
 
@@ -53,7 +53,7 @@ pub struct Args {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Stop any running Chakra server instance
+    /// Stop any running Wasmrun server instance
     #[command(alias = "kill")]
     Stop,
 
@@ -180,8 +180,8 @@ pub enum Commands {
     #[command(subcommand)]
     Plugin(PluginSubcommands),
 
-    // TODO: Implement WASM project using Chakra
-    // /// Initialize a new Chakra project from template
+    // TODO: Implement WASM project using Wasmrun
+    // /// Initialize a new Wasmrun project from template
     // #[command(alias = "new")]
     // Init {
     //     /// Project name
@@ -310,7 +310,7 @@ impl ResolvedArgs {
     pub fn validate(&self) -> Result<()> {
         // Validate port range
         if self.port == 0 {
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Invalid port number: {}. Must be between 1-65535",
                 self.port
             )));
@@ -335,7 +335,7 @@ impl ResolvedArgs {
                 } else {
                     // Could be either file or directory
                     if !std::path::Path::new(&self.path).exists() {
-                        return Err(ChakraError::path(format!("Path not found: {}", self.path)));
+                        return Err(WasmrunError::path(format!("Path not found: {}", self.path)));
                     }
                 }
             }
@@ -384,7 +384,7 @@ impl CommandArgs for Commands {
             //     name, directory, ..
             // } => directory.clone().unwrap_or_else(|| {
             //     name.clone()
-            //         .unwrap_or_else(|| "my-chakra-project".to_string())
+            //         .unwrap_or_else(|| "my-wasmrun-project".to_string())
             // }),
             Commands::Plugin(_) => "./".to_string(),
             Commands::Stop => "./".to_string(),
@@ -427,7 +427,7 @@ impl CommandValidator {
         let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
 
         if !std::path::Path::new(&project_path).exists() {
-            return Err(ChakraError::path(format!(
+            return Err(WasmrunError::path(format!(
                 "Path not found: {}",
                 project_path
             )));
@@ -444,12 +444,12 @@ impl CommandValidator {
     ) -> Result<(String, String, String)> {
         let project_name = name
             .clone()
-            .unwrap_or_else(|| "my-chakra-project".to_string());
+            .unwrap_or_else(|| "my-wasmrun-project".to_string());
         let target_dir = directory.clone().unwrap_or_else(|| project_name.clone());
 
         let valid_templates = ["rust", "go", "c", "asc", "python"];
         if !valid_templates.contains(&template) {
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Invalid template '{}'. Valid templates: {}",
                 template,
                 valid_templates.join(", ")
@@ -457,7 +457,7 @@ impl CommandValidator {
         }
 
         if std::path::Path::new(&target_dir).exists() {
-            return Err(ChakraError::path(format!(
+            return Err(WasmrunError::path(format!(
                 "Directory '{}' already exists",
                 target_dir
             )));
@@ -494,7 +494,7 @@ fn print_styled_version() {
 
     println!(
         "\n\x1b[1;34m╭\x1b[0m\n\
-         \x1b[1;34m│\x1b[0m  🌀 \x1b[1;36m{} v{}\x1b[0m\n\
+         \x1b[1;34m│\x1b[0m  🅦 \x1b[1;36m{} v{}\x1b[0m\n\
          \x1b[1;34m│\x1b[0m  \x1b[0;90mA lightweight WebAssembly runner\x1b[0m\n\
          \x1b[1;34m╰\x1b[0m\n",
         name, version
@@ -511,7 +511,7 @@ pub fn get_validated_args() -> Result<ResolvedArgs> {
 }
 
 // Helper function for error conversion
-impl From<String> for ChakraError {
+impl From<String> for WasmrunError {
     fn from(message: String) -> Self {
         Self::Command(crate::error::CommandError::invalid_arguments(message))
     }

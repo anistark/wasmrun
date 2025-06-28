@@ -29,7 +29,7 @@ function detectWasiModule(wasmBytes) {
         
         // Check if any import is from a WASI namespace
         return imports.some(imp => 
-            imp.module === 'chakra_wasi_impl' || 
+            imp.module === 'wasmrun_wasi_impl' || 
             imp.module === 'wasi_unstable' ||
             imp.module === 'wasi'
         );
@@ -43,17 +43,17 @@ function detectWasiModule(wasmBytes) {
 // Set up virtual file system for WASI
 function setupVirtualFileSystem(wasi) {
     // Create some demo files in the virtual filesystem
-    wasi.createVirtualFile('/hello.txt', 'Hello from Chakra virtual filesystem!');
+    wasi.createVirtualFile('/hello.txt', 'Hello from Wasmrun virtual filesystem!');
     wasi.createVirtualFile('/example.json', JSON.stringify({
-        name: "Chakra",
+        name: "Wasmrun",
         description: "WebAssembly runner with WASI support",
         version: "0.2.0"
     }, null, 2));
     
     // Create a readme file
-    wasi.createVirtualFile('/README.md', `# Chakra WASI Virtual Filesystem
+    wasi.createVirtualFile('/README.md', `# Wasmrun WASI Virtual Filesystem
 
-This is a virtual filesystem created by Chakra for WASI modules.
+This is a virtual filesystem created by Wasmrun for WASI modules.
 You can create, edit, and manipulate files directly in this interface.
 
 ## Usage
@@ -68,7 +68,7 @@ Try running a WASI module that reads or writes files to see it interact with thi
     wasi.createVirtualFile('/examples/hello.c', `#include <stdio.h>
 
 int main() {
-    printf("Hello from WASI in Chakra!\\n");
+    printf("Hello from WASI in Wasmrun!\\n");
     
     // Open and read a file
     FILE *f = fopen("/hello.txt", "r");
@@ -98,7 +98,7 @@ async function loadWasmWithRetries(retries = 5) {
     let attempt = 0;
 
     if (!window.WASI || !window.WASI.WASIImplementation) {
-        log("WASI implementation not found! Make sure chakra_wasi_impl.js is properly loaded.", 'error');
+        log("WASI implementation not found! Make sure wasmrun_wasi_impl.js is properly loaded.", 'error');
         updateStatus("❌ WASI implementation not loaded", true);
         return;
     }
@@ -141,7 +141,7 @@ async function loadWasmWithRetries(retries = 5) {
                     wasi = new window.WASI.WASIImplementation({
                         args: ['$FILENAME$'],
                         env: {
-                            'CHAKRA': '1',
+                            'WASMRUN': '1',
                             'HOME': '/',
                             'PATH': '/bin:/usr/bin'
                         },
@@ -263,7 +263,7 @@ async function loadWasmWithRetries(retries = 5) {
                 }
 
                 // Handle specific WASI-related errors
-                if (err.message.includes('chakra_wasi_impl') || 
+                if (err.message.includes('wasmrun_wasi_impl') || 
                     err.message.includes('WASI') ||
                     err.message.includes('import')) {
                     
@@ -295,13 +295,13 @@ async function loadWasmWithRetries(retries = 5) {
                     infoBox.className = 'info-box';
                     infoBox.innerHTML = `
                         <h3>⚠️ Advanced WASM Module Detected</h3>
-                        <p>This WASM file appears to require JavaScript bindings that Chakra cannot automatically provide.</p>
+                        <p>This WASM file appears to require JavaScript bindings that Wasmrun cannot automatically provide.</p>
                         <p>This is common for modules compiled with wasm-bindgen or similar tools.</p>
                         <h4>Suggestions:</h4>
                         <ul>
                             <li>Use the JavaScript file that was generated alongside this WASM file</li>
                             <li>For Rust wasm-bindgen projects, use <code>wasm-pack</code> to build and run</li>
-                            <li>Simple C/C++ WASM files without JS bindings work best with Chakra</li>
+                            <li>Simple C/C++ WASM files without JS bindings work best with Wasmrun</li>
                         </ul>
                     `;
                     document.body.appendChild(infoBox);
@@ -694,7 +694,7 @@ function setupLiveReload() {
     // Check if the page was loaded with watch mode indicators
     const urlParams = new URLSearchParams(window.location.search);
     const isWatchMode = urlParams.get('watch') === 'true' || 
-                        document.querySelector('meta[name="chakra-watch"]') !== null;
+                        document.querySelector('meta[name="wasmrun-watch"]') !== null;
     
     if (!isWatchMode) {
         log("Live reload not enabled (not in watch mode)", "info");

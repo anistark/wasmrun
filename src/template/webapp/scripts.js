@@ -1,6 +1,6 @@
 async function initializeApp() {
     try {
-        console.log("Chakra: Loading app from $JS_ENTRYPOINT$");
+        console.log("Wasmrun: Loading app from $JS_ENTRYPOINT$");
         
         console.log("Current stylesheets loaded:", Array.from(document.styleSheets).map(sheet => {
             try {
@@ -11,7 +11,7 @@ async function initializeApp() {
         }));
         
         const appElement = document.getElementById('app');
-        const loadingElement = document.getElementById('chakra-loading');
+        const loadingElement = document.getElementById('wasmrun-loading');
         
         let module;
         try {
@@ -32,7 +32,7 @@ async function initializeApp() {
             throw new Error(`Could not find initialization function in the module. Available exports: ${Object.keys(module).join(', ')}`);
         }
         
-        console.log("Chakra: Initializing web application...");
+        console.log("Wasmrun: Initializing web application...");
         
         let initialized = false;
         
@@ -40,7 +40,7 @@ async function initializeApp() {
         if (!initialized) {
             try {
                 await init({ target: appElement });
-                console.log("Chakra: Application initialized with target option");
+                console.log("Wasmrun: Application initialized with target option");
                 initialized = true;
             } catch (error) {
                 console.warn("Target initialization failed, trying alternative methods...", error);
@@ -51,7 +51,7 @@ async function initializeApp() {
         if (!initialized) {
             try {
                 await init({ root: appElement });
-                console.log("Chakra: Application initialized with root option");
+                console.log("Wasmrun: Application initialized with root option");
                 initialized = true;
             } catch (error) {
                 console.warn("Root initialization failed, trying next method...", error);
@@ -62,7 +62,7 @@ async function initializeApp() {
         if (!initialized) {
             try {
                 await init(appElement);
-                console.log("Chakra: Application initialized with direct element");
+                console.log("Wasmrun: Application initialized with direct element");
                 initialized = true;
             } catch (error) {
                 console.warn("Direct element initialization failed, trying next method...", error);
@@ -73,7 +73,7 @@ async function initializeApp() {
         if (!initialized) {
             try {
                 await init();
-                console.log("Chakra: Application initialized without arguments");
+                console.log("Wasmrun: Application initialized without arguments");
                 initialized = true;
             } catch (error) {
                 console.warn("No-argument initialization failed", error);
@@ -89,7 +89,7 @@ async function initializeApp() {
                 appClassElements.forEach(element => {
                     const isOutside = !appContainerExists.contains(element);
                     if (isOutside) {
-                        console.log("Chakra: Found app element outside container, moving it inside");
+                        console.log("Wasmrun: Found app element outside container, moving it inside");
                         appContainerExists.innerHTML = '';
                         appContainerExists.appendChild(element);
                     }
@@ -136,7 +136,7 @@ async function initializeApp() {
         console.error("Failed to initialize application:", error);
         
         // Remove loading indicator
-        const loadingElement = document.getElementById('chakra-loading');
+        const loadingElement = document.getElementById('wasmrun-loading');
         if (loadingElement && loadingElement.parentNode) {
             loadingElement.parentNode.removeChild(loadingElement);
         }
@@ -172,7 +172,7 @@ function checkForReload() {
     fetch('/reload-check?t=' + Date.now(), { cache: 'no-store' })
         .then(response => {
             if (response.headers.get('X-Reload-Needed') === 'true') {
-                console.log("Chakra: Change detected - reloading page");
+                console.log("Wasmrun: Change detected - reloading page");
                 window.location.reload();
                 return;
             }

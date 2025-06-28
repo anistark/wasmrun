@@ -30,7 +30,7 @@ impl BuiltinPlugin {
             name,
             version,
             description,
-            author: "Chakra Team".to_string(),
+            author: "Wasmrun Team".to_string(),
             extensions,
             entry_files,
             plugin_type: PluginType::Builtin,

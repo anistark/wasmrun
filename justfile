@@ -1,11 +1,11 @@
-# Chakra project justfile
+# Wasmrun project justfile
 # Install just: https://github.com/casey/just
 
 # Get version from Cargo.toml
 version := `grep -m 1 'version = ' Cargo.toml | cut -d '"' -f 2`
 
 # Repository information
-repo := `if git remote -v >/dev/null 2>&1; then git remote get-url origin | sed -E 's/.*github.com[:/]([^/]+)\/([^/.]+).*/\1\/\2/'; else echo "anistark/chakra"; fi`
+repo := `if git remote -v >/dev/null 2>&1; then git remote get-url origin | sed -E 's/.*github.com[:/]([^/]+)\/([^/.]+).*/\1\/\2/'; else echo "anistark/wasmrun"; fi`
 
 # Default recipe to display help information
 default:
@@ -30,7 +30,7 @@ run WASM_FILE="./examples/simple.wasm":
 run-port WASM_FILE="./examples/simple.wasm" PORT="3000":
     cargo run -- --path {{WASM_FILE}} --port {{PORT}}
 
-# Stop any running Chakra server
+# Stop any running Wasmrun server
 stop:
     cargo run -- stop
 
@@ -159,7 +159,7 @@ example-wasm:
 check-crates-login:
     @if [ -f ~/.cargo/credentials ]; then \
         echo "Credentials found. You appear to be logged in to crates.io"; \
-        echo "Ready to publish chakra v{{version}}"; \
+        echo "Ready to publish wasmrun v{{version}}"; \
     else \
         echo "No credentials found. Run 'cargo login' with your crates.io token"; \
     fi
@@ -206,7 +206,7 @@ gh-release:
 
     # Create GitHub release with auto-generated release notes
     gh release create "v{{version}}" \
-        "./target/release/chakra"
+        "./target/release/wasmrun"
 
     echo "✓ GitHub release v{{version}} created successfully!"
     echo "View it at: https://github.com/{{repo}}/releases/tag/v{{version}}"

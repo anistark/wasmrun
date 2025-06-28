@@ -236,7 +236,7 @@ impl ServerInfo {
 
     fn print_server_details(&self) {
         println!("\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m");
-        println!("\x1b[1;34m│\x1b[0m  🌀 \x1b[1;36mChakra Server\x1b[0m                                     \x1b[1;34m│\x1b[0m");
+        println!("\x1b[1;34m│\x1b[0m  🅦 \x1b[1;36mWasmrun Server\x1b[0m                                     \x1b[1;34m│\x1b[0m");
         println!(
             "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
         );
@@ -337,7 +337,7 @@ impl ServerUtils {
                         port,
                         port + 10
                     );
-                    Err(crate::error::ChakraError::Server(
+                    Err(crate::error::WasmrunError::Server(
                         crate::error::ServerError::startup_failed(
                             port,
                             format!("Port {} is in use and no alternatives found", port),
@@ -398,7 +398,7 @@ fn print_basic_server_info(
     watch_mode: bool,
 ) {
     println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  🌀 \x1b[1;36mChakra WASM Server\x1b[0m\n");
+    println!("  🅦 \x1b[1;36mWasmrun WASM Server\x1b[0m\n");
     println!("  🚀 \x1b[1;34mServer URL:\x1b[0m \x1b[4;36m{}\x1b[0m", url);
     println!(
         "  🔌 \x1b[1;34mListening on port:\x1b[0m \x1b[1;33m{}\x1b[0m",

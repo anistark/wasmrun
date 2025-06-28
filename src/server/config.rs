@@ -70,7 +70,7 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
                 println!("  {}. \x1b[1;33m{}\x1b[0m", i + 1, file);
             }
             println!("\n  \x1b[1;34mPlease specify which file to run:\x1b[0m");
-            println!("  \x1b[1;37mchakra --wasm --path <filename.wasm>\x1b[0m");
+            println!("  \x1b[1;37mwasmrun --wasm --path <filename.wasm>\x1b[0m");
             println!("\x1b[1;34m╰\x1b[0m");
             return Err("Please select a specific WASM file to run".to_string());
         }
@@ -330,7 +330,7 @@ pub fn setup_project_compilation(
     watch: bool,
 ) -> Option<(compiler::ProjectLanguage, String)> {
     println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  🚀 \x1b[1;36mChakra: Compile and Run\x1b[0m\n");
+    println!("  🚀 \x1b[1;36mWasmrun: Compile and Run\x1b[0m\n");
 
     // Detect project language
     let detected_language = compiler::detect_project_language(path);
@@ -369,12 +369,12 @@ pub fn setup_project_compilation(
     if lang == compiler::ProjectLanguage::Unknown {
         println!("\n  ❓ \x1b[1;33mNo recognizable project detected in this directory\x1b[0m");
         println!("\n  💡 \x1b[1;33mTo run a WASM file directly:\x1b[0m");
-        println!("     \x1b[1;37mchakra --wasm --path /path/to/your/file.wasm\x1b[0m");
+        println!("     \x1b[1;37mwasmrun --wasm --path /path/to/your/file.wasm\x1b[0m");
         println!("\x1b[1;34m╰\x1b[0m");
         return None;
     }
 
-    let temp_dir = std::env::temp_dir().join("chakra_temp");
+    let temp_dir = std::env::temp_dir().join("wasmrun_temp");
     let temp_output_dir = temp_dir.to_str().unwrap_or("/tmp").to_string();
 
     if !temp_dir.exists() {

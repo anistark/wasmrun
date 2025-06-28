@@ -8,7 +8,7 @@ pub use detect::{
 };
 
 use crate::compiler::builder::WasmBuilder;
-use crate::error::{ChakraError, Result};
+use crate::error::{WasmrunError, Result};
 use crate::plugin::languages::rust_plugin::RustPlugin;
 use crate::utils::PathResolver;
 
@@ -21,7 +21,7 @@ pub fn create_wasm_from_project(project_path: &str, output_dir: &str) -> Result<
     PathResolver::ensure_output_directory(output_dir)?;
 
     let result = build_wasm_project(project_path, output_dir, &language_type, false)
-        .map_err(ChakraError::Compilation)?;
+        .map_err(WasmrunError::Compilation)?;
     Ok(result.wasm_path)
 }
 
@@ -32,13 +32,13 @@ pub fn compile_for_execution(project_path: &str, output_dir: &str) -> Result<Str
 
     let missing_tools = get_missing_tools(&language_type, &os);
     if !missing_tools.is_empty() {
-        return Err(ChakraError::missing_tools(missing_tools));
+        return Err(WasmrunError::missing_tools(missing_tools));
     }
 
     PathResolver::ensure_output_directory(output_dir)?;
 
     let result = build_wasm_project(project_path, output_dir, &language_type, true)
-        .map_err(ChakraError::Compilation)?;
+        .map_err(WasmrunError::Compilation)?;
 
     Ok(result.js_path.unwrap_or(result.wasm_path))
 }
@@ -54,7 +54,7 @@ pub fn build_rust_web_application(project_path: &str, output_dir: &str) -> Resul
     };
 
     let builder = RustPlugin::new();
-    let result = builder.build(&config).map_err(ChakraError::Compilation)?;
+    let result = builder.build(&config).map_err(WasmrunError::Compilation)?;
 
     Ok(result.js_path.unwrap_or(result.wasm_path))
 }

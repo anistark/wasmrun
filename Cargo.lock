@@ -131,25 +131,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
 
 [[package]]
-name = "chakra"
-version = "0.10.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "dirs",
- "notify",
- "notify-debouncer-mini",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tiny_http",
- "toml",
- "webbrowser",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1151,6 +1132,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a05d73b933a847d6cccdda8f838a22ff101ad9bf93e33684f39c1f5f0eece3d"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wasmrun"
+version = "0.10.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "dirs",
+ "notify",
+ "notify-debouncer-mini",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tiny_http",
+ "toml",
+ "webbrowser",
 ]
 
 [[package]]

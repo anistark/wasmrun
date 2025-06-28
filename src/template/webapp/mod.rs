@@ -26,7 +26,7 @@ pub fn generate_webapp_html(app_name: &str, js_entrypoint: &str) -> String {
             .replace(
                 "<!-- @style-placeholder -->",
                 &format!(
-                    "<!-- Additional Chakra styles -->\n<style>\n{}\n</style>",
+                    "<!-- Additional Wasmrun styles -->\n<style>\n{}\n</style>",
                     css
                 ),
             )
@@ -44,7 +44,7 @@ pub fn generate_webapp_html(app_name: &str, js_entrypoint: &str) -> String {
         .replace(
             "<!-- @style-placeholder -->",
             &format!(
-                "<!-- Additional Chakra styles -->\n<style>\n{}\n</style>",
+                "<!-- Additional Wasmrun styles -->\n<style>\n{}\n</style>",
                 CSS_TEMPLATE
             ),
         )

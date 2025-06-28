@@ -16,7 +16,7 @@ impl CPlugin {
             name: "c".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             description: "C WebAssembly compiler using Emscripten".to_string(),
-            author: "Chakra Team".to_string(),
+            author: "Wasmrun Team".to_string(),
             extensions: vec!["c".to_string(), "h".to_string()],
             entry_files: vec!["main.c".to_string(), "Makefile".to_string()],
             plugin_type: PluginType::Builtin,

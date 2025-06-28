@@ -2,8 +2,8 @@
 
 use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
 use crate::error::CompilationResult;
-use crate::error::{ChakraError, Result};
-use crate::plugin::config::{ChakraConfig, ExternalPluginEntry};
+use crate::error::{WasmrunError, Result};
+use crate::plugin::config::{WasmrunConfig, ExternalPluginEntry};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
 use serde::Deserialize;
 use std::path::Path;
@@ -24,11 +24,11 @@ impl PluginInstaller {
     }
 
     fn install_from_crates_io(name: &str, version: &str) -> Result<PathBuf> {
-        let install_dir = ChakraConfig::plugin_dir()?;
+        let install_dir = WasmrunConfig::plugin_dir()?;
         let plugin_dir = install_dir.join(name);
 
         std::fs::create_dir_all(&plugin_dir)
-            .map_err(|e| ChakraError::from(format!("Failed to create plugin directory: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {}", e)))?;
 
         println!("Installing {} v{} from crates.io...", name, version);
 
@@ -42,11 +42,11 @@ impl PluginInstaller {
                 name,
             ])
             .output()
-            .map_err(|e| ChakraError::from(format!("Failed to execute cargo install: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to execute cargo install: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Failed to install plugin from crates.io: {}",
                 stderr
             )));
@@ -57,8 +57,8 @@ impl PluginInstaller {
     }
 
     fn install_from_git(url: &str, branch: Option<&str>) -> Result<PathBuf> {
-        let install_dir = ChakraConfig::plugin_dir()?;
-        let cache_dir = ChakraConfig::cache_dir()?;
+        let install_dir = WasmrunConfig::plugin_dir()?;
+        let cache_dir = WasmrunConfig::cache_dir()?;
 
         let plugin_name = url
             .split('/')
@@ -79,11 +79,11 @@ impl PluginInstaller {
         let output = Command::new("git")
             .args(&git_args)
             .output()
-            .map_err(|e| ChakraError::from(format!("Failed to execute git clone: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to execute git clone: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Failed to clone Git repository: {}",
                 stderr
             )));
@@ -93,18 +93,18 @@ impl PluginInstaller {
             .args(["build", "--release"])
             .current_dir(&cache_plugin_dir)
             .output()
-            .map_err(|e| ChakraError::from(format!("Failed to execute cargo build: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to execute cargo build: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Failed to build plugin: {}",
                 stderr
             )));
         }
 
         std::fs::create_dir_all(&plugin_dir)
-            .map_err(|e| ChakraError::from(format!("Failed to create plugin directory: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {}", e)))?;
 
         Self::copy_plugin_artifacts(&cache_plugin_dir, &plugin_dir)?;
 
@@ -114,13 +114,13 @@ impl PluginInstaller {
 
     fn install_from_local(path: &PathBuf) -> Result<PathBuf> {
         if !path.exists() {
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Local plugin path does not exist: {}",
                 path.display()
             )));
         }
 
-        let install_dir = ChakraConfig::plugin_dir()?;
+        let install_dir = WasmrunConfig::plugin_dir()?;
         let plugin_name = path
             .file_name()
             .unwrap_or_default()
@@ -138,18 +138,18 @@ impl PluginInstaller {
             .args(["build", "--release"])
             .current_dir(path)
             .output()
-            .map_err(|e| ChakraError::from(format!("Failed to execute cargo build: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to execute cargo build: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Failed to build plugin: {}",
                 stderr
             )));
         }
 
         std::fs::create_dir_all(&plugin_dir)
-            .map_err(|e| ChakraError::from(format!("Failed to create plugin directory: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {}", e)))?;
 
         Self::copy_plugin_artifacts(path, &plugin_dir)?;
 
@@ -161,7 +161,7 @@ impl PluginInstaller {
         let target_dir = source_dir.join("target").join("release");
 
         if !target_dir.exists() {
-            return Err(ChakraError::from(
+            return Err(WasmrunError::from(
                 "No release build found in target directory",
             ));
         }
@@ -169,10 +169,10 @@ impl PluginInstaller {
         let mut copied_files = 0;
 
         for entry in std::fs::read_dir(&target_dir)
-            .map_err(|e| ChakraError::from(format!("Failed to read target directory: {}", e)))?
+            .map_err(|e| WasmrunError::from(format!("Failed to read target directory: {}", e)))?
         {
             let entry = entry
-                .map_err(|e| ChakraError::from(format!("Failed to read directory entry: {}", e)))?;
+                .map_err(|e| WasmrunError::from(format!("Failed to read directory entry: {}", e)))?;
             let path = entry.path();
 
             if path.is_file() {
@@ -181,14 +181,14 @@ impl PluginInstaller {
                     if ext_str == "so" || ext_str == "dll" || ext_str == "dylib" {
                         let dest_path = dest_dir.join(path.file_name().unwrap());
                         std::fs::copy(&path, &dest_path).map_err(|e| {
-                            ChakraError::from(format!("Failed to copy artifact: {}", e))
+                            WasmrunError::from(format!("Failed to copy artifact: {}", e))
                         })?;
                         copied_files += 1;
                     }
                 } else if Self::is_executable(&path) {
                     let dest_path = dest_dir.join(path.file_name().unwrap());
                     std::fs::copy(&path, &dest_path).map_err(|e| {
-                        ChakraError::from(format!("Failed to copy artifact: {}", e))
+                        WasmrunError::from(format!("Failed to copy artifact: {}", e))
                     })?;
                     copied_files += 1;
                 }
@@ -196,7 +196,7 @@ impl PluginInstaller {
         }
 
         if copied_files == 0 {
-            return Err(ChakraError::from("No plugin artifacts found to copy"));
+            return Err(WasmrunError::from("No plugin artifacts found to copy"));
         }
 
         Ok(())
@@ -229,21 +229,21 @@ impl PluginInstaller {
     }
 
     pub fn uninstall(plugin_name: &str) -> Result<()> {
-        let install_dir = ChakraConfig::plugin_dir()?;
+        let install_dir = WasmrunConfig::plugin_dir()?;
         let plugin_dir = install_dir.join(plugin_name);
 
         if plugin_dir.exists() {
             std::fs::remove_dir_all(&plugin_dir).map_err(|e| {
-                ChakraError::from(format!("Failed to remove plugin directory: {}", e))
+                WasmrunError::from(format!("Failed to remove plugin directory: {}", e))
             })?;
             println!("Removed plugin directory: {}", plugin_dir.display());
         }
 
-        let cache_dir = ChakraConfig::cache_dir()?;
+        let cache_dir = WasmrunConfig::cache_dir()?;
         let cache_plugin_dir = cache_dir.join(format!("git-{}", plugin_name));
         if cache_plugin_dir.exists() {
             std::fs::remove_dir_all(&cache_plugin_dir)
-                .map_err(|e| ChakraError::from(format!("Failed to remove plugin cache: {}", e)))?;
+                .map_err(|e| WasmrunError::from(format!("Failed to remove plugin cache: {}", e)))?;
         }
 
         Ok(())
@@ -258,18 +258,18 @@ pub struct ExternalPluginLoader;
 impl ExternalPluginLoader {
     pub fn load(entry: &ExternalPluginEntry) -> Result<Box<dyn Plugin>> {
         if !entry.enabled {
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Plugin '{}' is disabled",
                 entry.info.name
             )));
         }
 
-        let install_dir = ChakraConfig::plugin_dir()?;
+        let install_dir = WasmrunConfig::plugin_dir()?;
         let plugin_dir = install_dir.join(&entry.install_path);
 
         if !plugin_dir.exists() {
-            return Err(ChakraError::from(format!(
-                "Plugin '{}' is not installed. Run 'chakra plugin install {}'",
+            return Err(WasmrunError::from(format!(
+                "Plugin '{}' is not installed. Run 'wasmrun plugin install {}'",
                 entry.info.name, entry.info.name
             )));
         }
@@ -317,7 +317,7 @@ impl ExternalPluginWrapper {
         entry: &ExternalPluginEntry,
     ) -> Result<PluginInfo> {
         let content = std::fs::read_to_string(metadata_file)
-            .map_err(|e| ChakraError::from(format!("Failed to read plugin metadata: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to read plugin metadata: {}", e)))?;
 
         #[derive(Deserialize)]
         #[allow(dead_code)]
@@ -333,7 +333,7 @@ impl ExternalPluginWrapper {
         }
 
         let metadata: PluginMetadata = toml::from_str(&content)
-            .map_err(|e| ChakraError::from(format!("Failed to parse plugin metadata: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to parse plugin metadata: {}", e)))?;
 
         Ok(PluginInfo {
             name: metadata.name,
@@ -461,7 +461,7 @@ pub fn load_external_plugin(entry: &ExternalPluginEntry) -> Result<Box<dyn Plugi
 #[allow(dead_code)]
 pub fn validate_plugin(plugin_dir: &PathBuf) -> Result<()> {
     if !plugin_dir.exists() {
-        return Err(ChakraError::from("Plugin directory does not exist"));
+        return Err(WasmrunError::from("Plugin directory does not exist"));
     }
 
     let has_executable = std::fs::read_dir(plugin_dir)?
@@ -476,7 +476,7 @@ pub fn validate_plugin(plugin_dir: &PathBuf) -> Result<()> {
         });
 
     if !has_executable {
-        return Err(ChakraError::from(
+        return Err(WasmrunError::from(
             "No executable or library files found in plugin directory",
         ));
     }

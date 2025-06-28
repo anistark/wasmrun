@@ -1,12 +1,12 @@
-# Contributing to Chakra
+# Contributing to Wasmrun
 
 ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white) 
 
-Thank you for considering contributing to Chakra! This guide will help you understand the project structure, development workflow, and how to make meaningful contributions.
+Thank you for considering contributing to Wasmrun! This guide will help you understand the project structure, development workflow, and how to make meaningful contributions.
 
 ## 🏗️ Project Architecture
 
-Chakra is designed with a modular architecture that separates concerns clearly:
+Wasmrun is designed with a modular architecture that separates concerns clearly:
 
 ```sh
 src/
@@ -51,7 +51,7 @@ src/
 
 ## 🔌 Plugin Architecture Overview
 
-Chakra's new plugin system provides:
+Wasmrun's new plugin system provides:
 
 - **Unified Interface** - All plugins implement the same `Plugin` and `WasmBuilder` traits
 - **Self-Contained** - Each plugin handles both metadata and compilation logic
@@ -109,8 +109,8 @@ npm install -g assemblyscript
 
 1. **Clone and build**:
 ```sh
-git clone https://github.com/anistark/chakra.git
-cd chakra
+git clone https://github.com/anistark/wasmrun.git
+cd wasmrun
 just build  # Or: cargo build --release
 ```
 
@@ -126,7 +126,7 @@ cargo test server::tests -- --test-threads=1
 3. **Test plugins**:
 ```sh
 # Test plugin detection and dependencies
-chakra plugin list
+wasmrun plugin list
 
 # Test specific plugins
 just example-wasm-rust    # Test Rust plugin
@@ -146,7 +146,7 @@ just lint          # Run clippy lints
 
 ### Using Just Commands
 
-Chakra uses a `justfile` for common development tasks:
+Wasmrun uses a `justfile` for common development tasks:
 
 ```sh
 # Development commands
@@ -170,7 +170,7 @@ just publish         # Publish to crates.io and GitHub
 
 1. **Formatting**: Use `rustfmt` with default settings (`just format`)
 2. **Linting**: All clippy warnings must be addressed (`just lint`)
-3. **Error Handling**: Use the centralized `ChakraError` types in `src/error.rs`
+3. **Error Handling**: Use the centralized `WasmrunError` types in `src/error.rs`
 4. **Documentation**: Add doc comments for public APIs and complex logic
 5. **Testing**: Add tests for new functionality, ensure they don't hang
 6. **User Experience**: Focus on helpful error messages and clear output
@@ -208,7 +208,7 @@ To modify the WASM runner interface:
 1. **HTML**: Edit `src/template/server/index.html`
 2. **CSS**: Edit `src/template/server/style.css` 
 3. **JavaScript**: Edit `src/template/server/scripts.js`
-4. **Chakra WASI Implementation**: Edit `src/template/server/chakra_wasi_impl.js`
+4. **Wasmrun WASI Implementation**: Edit `src/template/server/wasmrun_wasi_impl.js`
 
 #### Web App Templates (Framework Support)
 
@@ -231,12 +231,12 @@ cargo test my_plugin::tests
 2. **Plugin integration testing**:
 ```sh
 # Test plugin detection
-chakra plugin list
+wasmrun plugin list
 
 # Test specific plugin functionality
 mkdir test-project && cd test-project
 # Create project files for your plugin
-chakra run . --language your-plugin
+wasmrun run . --language your-plugin
 ```
 
 3. **Manual testing**:
@@ -245,12 +245,12 @@ chakra run . --language your-plugin
 mkdir test-rust && cd test-rust
 cargo init --bin
 echo 'fn main() { println!("Hello WASM!"); }' > src/main.rs
-chakra run . --watch
+wasmrun run . --watch
 
 # Test plugin selection
-chakra verify ./examples/rust_example.wasm --detailed
-chakra inspect ./examples/rust_example.wasm
-chakra compile ./test-rust --optimization size
+wasmrun verify ./examples/rust_example.wasm --detailed
+wasmrun inspect ./examples/rust_example.wasm
+wasmrun compile ./test-rust --optimization size
 ```
 
 ## 🤝 Pull Request Process
@@ -305,11 +305,11 @@ When reporting bugs:
 2. **Include system information**:
    - OS and version
    - Rust version (`rustc --version`)
-   - Chakra version (`chakra --version`)
+   - Wasmrun version (`wasmrun --version`)
 3. **Include plugin information**:
-   - Which plugin is affected (`chakra plugin list`)
+   - Which plugin is affected (`wasmrun plugin list`)
 4. **Provide reproduction steps**
-5. **Include relevant output** with `CHAKRA_DEBUG=1` if possible
+5. **Include relevant output** with `WASMRUN_DEBUG=1` if possible
 6. **Attach example files** if applicable
 7. **Attach screenshots** if applicable
 
@@ -319,10 +319,10 @@ For plugin-related issues:
 
 ```sh
 # Get plugin information
-chakra plugin info [plugin-name]
+wasmrun plugin info [plugin-name]
 
 # Test with verbose output
-CHAKRA_DEBUG=1 chakra run ./project --language [plugin-name] --verbose
+WASMRUN_DEBUG=1 wasmrun run ./project --language [plugin-name] --verbose
 ```
 
 ## 💡 Feature Requests
@@ -345,13 +345,13 @@ For plugin-specific features:
 - **Shared utilities** - could it benefit multiple plugins?
 - **Performance impact** - especially for compilation speed
 
-_If you feel unsure about it, feel free to [open a discussion](https://github.com/anistark/chakra/discussions)._
+_If you feel unsure about it, feel free to [open a discussion](https://github.com/anistark/wasmrun/discussions)._
 
 ## 📚 Resources
 
-### About Chakra
+### About Wasmrun
 
-- ✨ [Chakra: A Wasm Runtime](https://blog.anirudha.dev/chakra)
+- ✨ [Wasmrun: A Wasm Runtime](https://blog.anirudha.dev/wasmrun)
 
 ### Learning WebAssembly
 
@@ -381,8 +381,8 @@ _If you feel unsure about it, feel free to [open a discussion](https://github.co
 
 ### Project-Specific
 
-- [Chakra Issues](https://github.com/anistark/chakra/issues)
-- [Chakra Discussions](https://github.com/anistark/chakra/discussions)
+- [Wasmrun Issues](https://github.com/anistark/wasmrun/issues)
+- [Wasmrun Discussions](https://github.com/anistark/wasmrun/discussions)
 
 ## 🧪 Plugin Development Best Practices
 
@@ -428,7 +428,7 @@ let info = PluginInfo {
     name: "language".to_string(),
     version: env!("CARGO_PKG_VERSION").to_string(),
     description: "Clear description of what this plugin does".to_string(),
-    author: "Chakra Team".to_string(),
+    author: "Wasmrun Team".to_string(),
     extensions: vec!["ext1".to_string(), "ext2".to_string()],
     entry_files: vec!["main.ext".to_string(), "build.config".to_string()],
     plugin_type: PluginType::Builtin,
@@ -446,10 +446,10 @@ let info = PluginInfo {
 
 ## 📄 License
 
-By contributing to Chakra, you agree that your contributions will be licensed under the project's [MIT license](./LICENSE).
+By contributing to Wasmrun, you agree that your contributions will be licensed under the project's [MIT license](./LICENSE).
 
 ---
 
-**Thank you for contributing to Chakra! You're helping make WebAssembly development more accessible and enjoyable for everyone! 🚀**
+**Thank you for contributing to Wasmrun! You're helping make WebAssembly development more accessible and enjoyable for everyone! 🚀**
 
 *Remember: Every contribution matters, whether it's code, documentation, bug reports, new plugins, or spreading the word about the project. 🙌*

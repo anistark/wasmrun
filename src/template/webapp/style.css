@@ -13,7 +13,7 @@ html, body {
 }
 
 /* Main application container */
-#app, .chakra-app-container, .app {
+#app, .wasmrun-app-container, .app {
     width: 100%;
     height: 100%;
     display: block;

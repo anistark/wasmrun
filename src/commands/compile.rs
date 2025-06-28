@@ -1,7 +1,7 @@
 use crate::cli::CommandValidator;
 use crate::compiler;
 use crate::compiler::builder::{BuildConfig, BuilderFactory, OptimizationLevel};
-use crate::error::{ChakraError, CompilationError, Result};
+use crate::error::{WasmrunError, CompilationError, Result};
 use crate::ui::{print_compilation_success, print_compile_info, print_missing_tools};
 use std::fmt;
 
@@ -15,14 +15,14 @@ pub fn handle_compile_command(
 ) -> Result<()> {
     let (project_path, output_dir) =
         CommandValidator::validate_compile_args(path, positional_path, output)
-            .map_err(|e| ChakraError::from(e.to_string()))?;
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
 
     let optimization_level = match optimization.to_lowercase().as_str() {
         "debug" => OptimizationLevel::Debug,
         "release" => OptimizationLevel::Release,
         "size" => OptimizationLevel::Size,
         _ => {
-            return Err(ChakraError::Compilation(
+            return Err(WasmrunError::Compilation(
                 CompilationError::InvalidOptimizationLevel {
                     level: optimization.to_string(),
                     valid_options: vec![
@@ -38,7 +38,7 @@ pub fn handle_compile_command(
     let language = compiler::detect_project_language(&project_path);
 
     if language == compiler::ProjectLanguage::Unknown {
-        return Err(ChakraError::language_detection(format!(
+        return Err(WasmrunError::language_detection(format!(
             "Could not detect project language in directory: {}",
             project_path
         )));
@@ -61,7 +61,7 @@ pub fn handle_compile_command(
 
     if !missing_tools.is_empty() {
         print_missing_tools(&missing_tools);
-        return Err(ChakraError::missing_tools(missing_tools));
+        return Err(WasmrunError::missing_tools(missing_tools));
     }
 
     let config = BuildConfig {
@@ -75,9 +75,9 @@ pub fn handle_compile_command(
     let result = if verbose {
         builder
             .build_verbose(&config)
-            .map_err(ChakraError::Compilation)?
+            .map_err(WasmrunError::Compilation)?
     } else {
-        builder.build(&config).map_err(ChakraError::Compilation)?
+        builder.build(&config).map_err(WasmrunError::Compilation)?
     };
 
     print_compilation_success(&result.wasm_path, &result.js_path, &result.additional_files);

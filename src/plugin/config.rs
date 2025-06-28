@@ -1,6 +1,6 @@
-//! Configuration management for Chakra
+//! Configuration management for Wasmrun
 
-use crate::error::{ChakraError, Result};
+use crate::error::{WasmrunError, Result};
 use crate::plugin::{PluginInfo, PluginSource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChakraConfig {
+pub struct WasmrunConfig {
     pub version: String,
     pub settings: GlobalSettings,
     pub plugin_configs: HashMap<String, toml::Value>,
@@ -50,7 +50,7 @@ impl Default for GlobalSettings {
     }
 }
 
-impl Default for ChakraConfig {
+impl Default for WasmrunConfig {
     fn default() -> Self {
         Self {
             version: "1.0.0".to_string(),
@@ -61,27 +61,27 @@ impl Default for ChakraConfig {
     }
 }
 
-impl ChakraConfig {
+impl WasmrunConfig {
     pub fn config_path() -> Result<PathBuf> {
-        if let Ok(test_path) = std::env::var("CHAKRA_CONFIG_PATH") {
+        if let Ok(test_path) = std::env::var("WASMRUN_CONFIG_PATH") {
             return Ok(PathBuf::from(test_path).join("config.toml"));
         }
 
         let home_dir = dirs::home_dir()
-            .ok_or_else(|| ChakraError::from("Could not determine home directory"))?;
+            .ok_or_else(|| WasmrunError::from("Could not determine home directory"))?;
 
-        Ok(home_dir.join(".chakra").join("config.toml"))
+        Ok(home_dir.join(".wasmrun").join("config.toml"))
     }
 
     pub fn config_dir() -> Result<PathBuf> {
-        if let Ok(test_path) = std::env::var("CHAKRA_CONFIG_PATH") {
+        if let Ok(test_path) = std::env::var("WASMRUN_CONFIG_PATH") {
             return Ok(PathBuf::from(test_path));
         }
 
         let home_dir = dirs::home_dir()
-            .ok_or_else(|| ChakraError::from("Could not determine home directory"))?;
+            .ok_or_else(|| WasmrunError::from("Could not determine home directory"))?;
 
-        Ok(home_dir.join(".chakra"))
+        Ok(home_dir.join(".wasmrun"))
     }
 
     pub fn plugin_dir() -> Result<PathBuf> {
@@ -108,24 +108,24 @@ impl ChakraConfig {
         let config_path = Self::config_path()?;
 
         if !config_path.exists() {
-            return Err(ChakraError::from(format!(
-                "Configuration file not found: {}. Run 'chakra init' to create it.",
+            return Err(WasmrunError::from(format!(
+                "Configuration file not found: {}. Run 'wasmrun init' to create it.",
                 config_path.display()
             )));
         }
 
         if config_path.is_dir() {
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Config path is a directory, not a file: {}",
                 config_path.display()
             )));
         }
 
         let config_content = fs::read_to_string(&config_path)
-            .map_err(|e| ChakraError::from(format!("Failed to read config file: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to read config file: {}", e)))?;
 
         let mut config: Self = toml::from_str(&config_content)
-            .map_err(|e| ChakraError::from(format!("Failed to parse TOML config file: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to parse TOML config file: {}", e)))?;
 
         if config.version.is_empty() {
             config.version = "1.0.0".to_string();
@@ -150,15 +150,15 @@ impl ChakraConfig {
 
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                ChakraError::from(format!("Failed to create config directory: {}", e))
+                WasmrunError::from(format!("Failed to create config directory: {}", e))
             })?;
         }
 
         let config_content = toml::to_string_pretty(self)
-            .map_err(|e| ChakraError::from(format!("Failed to serialize config to TOML: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to serialize config to TOML: {}", e)))?;
 
         fs::write(&config_path, config_content)
-            .map_err(|e| ChakraError::from(format!("Failed to write config file: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to write config file: {}", e)))?;
 
         Ok(())
     }
@@ -199,10 +199,10 @@ impl ChakraConfig {
         };
 
         fs::create_dir_all(&plugin_dir)
-            .map_err(|e| ChakraError::from(format!("Failed to create plugin directory: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {}", e)))?;
 
         fs::create_dir_all(&cache_dir)
-            .map_err(|e| ChakraError::from(format!("Failed to create cache directory: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to create cache directory: {}", e)))?;
 
         self.settings.install_dir = Some(plugin_dir);
         self.settings.cache_dir = Some(cache_dir);
@@ -210,8 +210,8 @@ impl ChakraConfig {
         match self.version.as_str() {
             "1.0.0" => {}
             _ => {
-                return Err(ChakraError::from(format!(
-                    "Unsupported config version: {}. Please update Chakra.",
+                return Err(WasmrunError::from(format!(
+                    "Unsupported config version: {}. Please update Wasmrun.",
                     self.version
                 )));
             }
@@ -269,7 +269,7 @@ impl ChakraConfig {
             self.save()?;
             Ok(())
         } else {
-            Err(ChakraError::from(format!(
+            Err(WasmrunError::from(format!(
                 "External plugin '{}' not found",
                 name
             )))
@@ -282,7 +282,7 @@ impl ChakraConfig {
             self.save()?;
             Ok(())
         } else {
-            Err(ChakraError::from(format!(
+            Err(WasmrunError::from(format!(
                 "External plugin '{}' not found",
                 name
             )))
@@ -357,9 +357,9 @@ impl ChakraConfig {
     #[allow(dead_code)]
     pub fn print_config(&self) -> Result<()> {
         let config_toml = toml::to_string_pretty(self)
-            .map_err(|e| ChakraError::from(format!("Failed to serialize config: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to serialize config: {}", e)))?;
 
-        println!("Current Chakra Configuration:");
+        println!("Current Wasmrun Configuration:");
         println!("============================");
         println!("{}", config_toml);
 

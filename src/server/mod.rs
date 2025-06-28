@@ -1,4 +1,4 @@
-use crate::error::{ChakraError, Result, ServerError};
+use crate::error::{WasmrunError, Result, ServerError};
 use std::path::Path;
 
 mod config;
@@ -12,7 +12,7 @@ pub use utils::{ServerInfo, ServerUtils};
 pub use webapp::run_webapp;
 
 // Constants
-const PID_FILE: &str = "/tmp/chakra_server.pid";
+const PID_FILE: &str = "/tmp/wasmrun_server.pid";
 
 /// Run a WebAssembly file directly
 pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
@@ -30,7 +30,7 @@ pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
             return handle_js_file(path, port);
         }
 
-        return Err(ChakraError::Server(ServerError::RequestHandlingFailed {
+        return Err(WasmrunError::Server(ServerError::RequestHandlingFailed {
             reason: format!("Not a WASM file: {}", path),
         }));
     }
@@ -50,12 +50,12 @@ pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
     // Regular WASM file handling
     let wasm_filename = Path::new(path)
         .file_name()
-        .ok_or_else(|| ChakraError::path(format!("Invalid path: {}", path)))?
+        .ok_or_else(|| WasmrunError::path(format!("Invalid path: {}", path)))?
         .to_string_lossy()
         .to_string();
 
     wasm::serve_wasm_file(path, final_port, &wasm_filename)
-        .map_err(|e| ChakraError::Server(ServerError::startup_failed(final_port, e)))
+        .map_err(|e| WasmrunError::Server(ServerError::startup_failed(final_port, e)))
 }
 
 /// Compile and run a project
@@ -95,7 +95,7 @@ pub fn run_project(
             format!("Not a WASM file or project directory: {}", path)
         };
 
-        return Err(ChakraError::path(error_msg));
+        return Err(WasmrunError::path(error_msg));
     }
 
     // Handle port conflicts
@@ -113,7 +113,7 @@ pub fn run_project(
 
         // Run as a web application on port 3000
         return webapp::run_webapp(path, 3000, watch)
-            .map_err(|e| ChakraError::Server(ServerError::startup_failed(3000, e)));
+            .map_err(|e| WasmrunError::Server(ServerError::startup_failed(3000, e)));
     }
 
     // Server info for regular project
@@ -123,7 +123,7 @@ pub fn run_project(
     // Detect project and setup
     let (lang, temp_output_dir) = config::setup_project_compilation(path, language_override, watch)
         .ok_or_else(|| {
-            ChakraError::language_detection(format!(
+            WasmrunError::language_detection(format!(
                 "Failed to setup compilation for project: {}",
                 path
             ))
@@ -131,7 +131,7 @@ pub fn run_project(
 
     // Compile the project
     let result = config::compile_project(path, &temp_output_dir, lang, watch).ok_or_else(|| {
-        ChakraError::Compilation(crate::error::CompilationError::build_failed(
+        WasmrunError::Compilation(crate::error::CompilationError::build_failed(
             "project".to_string(),
             "Compilation failed",
         ))
@@ -161,7 +161,7 @@ pub fn run_project(
     }
 
     config::run_server(server_config)
-        .map_err(|e| ChakraError::Server(ServerError::startup_failed(final_port, e)))
+        .map_err(|e| WasmrunError::Server(ServerError::startup_failed(final_port, e)))
 }
 
 /// Check if a server is currently running
@@ -196,24 +196,24 @@ pub fn stop_existing_server() -> Result<()> {
         // No server is running, clean up any stale PID file
         if std::path::Path::new(PID_FILE).exists() {
             std::fs::remove_file(PID_FILE).map_err(|e| {
-                ChakraError::Server(ServerError::StopFailed {
+                WasmrunError::Server(ServerError::StopFailed {
                     pid: 0,
                     reason: format!("Failed to remove stale PID file: {}", e),
                 })
             })?;
         }
-        return Err(ChakraError::Server(ServerError::NotRunning));
+        return Err(WasmrunError::Server(ServerError::NotRunning));
     }
 
     let pid_str = std::fs::read_to_string(PID_FILE).map_err(|e| {
-        ChakraError::Server(ServerError::StopFailed {
+        WasmrunError::Server(ServerError::StopFailed {
             pid: 0,
             reason: format!("Failed to read PID file: {}", e),
         })
     })?;
 
     let pid = pid_str.trim().parse::<u32>().map_err(|e| {
-        ChakraError::Server(ServerError::StopFailed {
+        WasmrunError::Server(ServerError::StopFailed {
             pid: 0,
             reason: format!("Failed to parse PID '{}': {}", pid_str.trim(), e),
         })
@@ -224,7 +224,7 @@ pub fn stop_existing_server() -> Result<()> {
         .arg(pid.to_string())
         .output()
         .map_err(|e| {
-            ChakraError::Server(ServerError::StopFailed {
+            WasmrunError::Server(ServerError::StopFailed {
                 pid,
                 reason: format!("Failed to kill server process: {}", e),
             })
@@ -232,17 +232,17 @@ pub fn stop_existing_server() -> Result<()> {
 
     if kill_command.status.success() {
         std::fs::remove_file(PID_FILE).map_err(|e| {
-            ChakraError::Server(ServerError::StopFailed {
+            WasmrunError::Server(ServerError::StopFailed {
                 pid,
                 reason: format!("Failed to remove PID file: {}", e),
             })
         })?;
-        println!("💀 Existing Chakra server terminated successfully.");
+        println!("💀 Existing Wasmrun server terminated successfully.");
         Ok(())
     } else {
         // Failed to stop the server
         let error_msg = String::from_utf8_lossy(&kill_command.stderr);
-        Err(ChakraError::Server(ServerError::StopFailed {
+        Err(WasmrunError::Server(ServerError::StopFailed {
             pid,
             reason: error_msg.to_string(),
         }))
@@ -277,7 +277,7 @@ fn handle_js_file(path: &str, port: u16) -> Result<()> {
                 // Get wasm filename
                 let wasm_filename = wasm_path
                     .file_name()
-                    .ok_or_else(|| ChakraError::path("Invalid WASM file path"))?
+                    .ok_or_else(|| WasmrunError::path("Invalid WASM file path"))?
                     .to_string_lossy()
                     .to_string();
 
@@ -292,7 +292,7 @@ fn handle_js_file(path: &str, port: u16) -> Result<()> {
                     port,
                     &wasm_filename,
                 )
-                .map_err(|e| ChakraError::Server(ServerError::startup_failed(port, e)));
+                .map_err(|e| WasmrunError::Server(ServerError::startup_failed(port, e)));
             }
         }
 
@@ -300,7 +300,7 @@ fn handle_js_file(path: &str, port: u16) -> Result<()> {
         return run_wasm_file(wasm_path.to_str().unwrap(), port);
     }
 
-    Err(ChakraError::file_not_found(format!(
+    Err(WasmrunError::file_not_found(format!(
         "Corresponding WASM file not found for JS file: {}",
         path
     )))
@@ -310,7 +310,7 @@ fn handle_js_file(path: &str, port: u16) -> Result<()> {
 fn handle_wasm_bindgen_file(path_obj: &std::path::Path, path: &str, port: u16) -> Result<bool> {
     let file_name = path_obj
         .file_name()
-        .ok_or_else(|| ChakraError::path("Invalid file path"))?
+        .ok_or_else(|| WasmrunError::path("Invalid file path"))?
         .to_string_lossy();
 
     if file_name.ends_with("_bg.wasm") {
@@ -325,7 +325,7 @@ fn handle_wasm_bindgen_file(path_obj: &std::path::Path, path: &str, port: u16) -
         let js_file_name = format!("{}.js", js_base_name);
         let js_path = path_obj
             .parent()
-            .ok_or_else(|| ChakraError::path("Invalid parent directory"))?
+            .ok_or_else(|| WasmrunError::path("Invalid parent directory"))?
             .join(&js_file_name);
 
         if js_path.exists() {
@@ -347,7 +347,7 @@ fn handle_wasm_bindgen_file(path_obj: &std::path::Path, path: &str, port: u16) -
                 port,
                 file_name.as_ref(),
             )
-            .map_err(|e| ChakraError::Server(ServerError::startup_failed(port, e)))?;
+            .map_err(|e| WasmrunError::Server(ServerError::startup_failed(port, e)))?;
 
             return Ok(true);
         } else {
@@ -396,7 +396,7 @@ fn search_for_js_files(
                                 output_dir: None,
                             })
                             .map_err(|e| {
-                                ChakraError::Server(ServerError::startup_failed(port, e))
+                                WasmrunError::Server(ServerError::startup_failed(port, e))
                             })?;
 
                             return Ok(true);
@@ -411,7 +411,7 @@ fn search_for_js_files(
     println!("  \x1b[0;37mTry running the .js file directly instead.\x1b[0m");
     println!("\x1b[1;34m╰\x1b[0m\n");
 
-    Err(ChakraError::Wasm(
+    Err(WasmrunError::Wasm(
         crate::error::WasmError::WasmBindgenJsNotFound,
     ))
 }

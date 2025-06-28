@@ -30,7 +30,7 @@ pub fn print_compile_info(
     verbose: bool,
 ) {
     println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  🌀 \x1b[1;36mChakra WASM Compiler\x1b[0m\n");
+    println!("  🅦 \x1b[1;36mWasmrun WASM Compiler\x1b[0m\n");
     println!(
         "  📂 \x1b[1;34mProject Path:\x1b[0m \x1b[1;33m{}\x1b[0m",
         project_path
@@ -94,7 +94,7 @@ pub fn print_compilation_success(
     }
 
     println!("\n  🚀 \x1b[1;33mRun it with:\x1b[0m");
-    println!("     \x1b[1;37mchakra --wasm --path {}\x1b[0m", wasm_path);
+    println!("     \x1b[1;37mwasmrun --wasm --path {}\x1b[0m", wasm_path);
     println!("\x1b[1;34m╰\x1b[0m");
 }
 
@@ -110,7 +110,7 @@ pub fn print_webapp_detected(port: u16) {
 #[allow(dead_code)]
 pub fn print_init_info(project_name: &str, template: &str, target_dir: &str) {
     println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  🚀 \x1b[1;36mInitializing New Chakra Project\x1b[0m\n");
+    println!("  🚀 \x1b[1;36mInitializing New Wasmrun Project\x1b[0m\n");
     println!(
         "  📦 \x1b[1;34mProject Name:\x1b[0m \x1b[1;33m{}\x1b[0m",
         project_name

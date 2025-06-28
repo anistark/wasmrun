@@ -14,7 +14,7 @@ use super::utils;
 /// Run a Rust web application
 pub fn run_webapp(path: &str, port: u16, watch_mode: bool) -> Result<(), String> {
     println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  🚀 \x1b[1;36mChakra: Running Rust Web Application\x1b[0m\n");
+    println!("  🚀 \x1b[1;36mWasmrun: Running Rust Web Application\x1b[0m\n");
     println!(
         "  📂 \x1b[1;34mProject Path:\x1b[0m \x1b[1;33m{}\x1b[0m",
         path
@@ -47,7 +47,7 @@ pub fn run_webapp(path: &str, port: u16, watch_mode: bool) -> Result<(), String>
             return Err(format!("Port {} is already in use", port));
         }
     }
-    let temp_dir = std::env::temp_dir().join("chakra_webapp_temp");
+    let temp_dir = std::env::temp_dir().join("wasmrun_webapp_temp");
     let temp_output_dir = temp_dir.to_str().unwrap_or("/tmp").to_string();
     if !temp_dir.exists() {
         if let Err(e) = std::fs::create_dir_all(&temp_dir) {

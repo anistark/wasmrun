@@ -91,7 +91,7 @@ pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
     ProjectLanguage::Unknown
 }
 
-/// Detect the OS Chakra is running on
+/// Detect the OS Wasmrun is running on
 pub fn detect_operating_system() -> OperatingSystem {
     #[cfg(target_os = "windows")]
     {

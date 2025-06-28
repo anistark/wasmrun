@@ -17,7 +17,7 @@ impl RustPlugin {
             version: env!("CARGO_PKG_VERSION").to_string(),
             description: "Rust WebAssembly compiler with wasm-bindgen and web application support"
                 .to_string(),
-            author: "Chakra Team".to_string(),
+            author: "Wasmrun Team".to_string(),
             extensions: vec!["rs".to_string()],
             entry_files: vec!["Cargo.toml".to_string()],
             plugin_type: PluginType::Builtin,

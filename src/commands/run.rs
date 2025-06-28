@@ -14,7 +14,7 @@ pub fn handle_run_command(
     let (project_path, validated_port) =
         CommandValidator::validate_run_args(path, positional_path, port)?;
 
-    println!("\n🚀 \x1b[1;36mInitializing Chakra...\x1b[0m");
+    println!("\n🚀 \x1b[1;36mInitializing Wasmrun...\x1b[0m");
 
     let path_obj = std::path::Path::new(&project_path);
 

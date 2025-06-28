@@ -1,8 +1,8 @@
 use thiserror::Error;
 
-/// The main error type for Chakra operations
+/// The main error type for Wasmrun operations
 #[derive(Error, Debug)]
-pub enum ChakraError {
+pub enum WasmrunError {
     /// I/O related errors
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -153,13 +153,13 @@ pub enum ConfigError {
     _Placeholder,
 }
 
-/// Result type alias for Chakra operations
-pub type Result<T> = std::result::Result<T, ChakraError>;
+/// Result type alias for Wasmrun operations
+pub type Result<T> = std::result::Result<T, WasmrunError>;
 
 /// Specialized result types for different modules
 pub type CompilationResult<T> = std::result::Result<T, CompilationError>;
 
-impl ChakraError {
+impl WasmrunError {
     /// new path error
     pub fn path(message: impl Into<String>) -> Self {
         Self::Path {
@@ -211,9 +211,9 @@ impl ChakraError {
     /// Check if this error is recoverable
     pub fn is_recoverable(&self) -> bool {
         match self {
-            ChakraError::FileNotFound { .. } => false,
-            ChakraError::DirectoryNotFound { .. } => false,
-            ChakraError::MissingTools { .. } => false,
+            WasmrunError::FileNotFound { .. } => false,
+            WasmrunError::DirectoryNotFound { .. } => false,
+            WasmrunError::MissingTools { .. } => false,
             _ => false,
         }
     }
@@ -221,19 +221,19 @@ impl ChakraError {
     /// Get user-friendly error message
     pub fn user_message(&self) -> String {
         match self {
-            ChakraError::FileNotFound { path } => {
+            WasmrunError::FileNotFound { path } => {
                 format!("File not found: {}\n💡 Check the file path and try again", path)
             }
-            ChakraError::DirectoryNotFound { path } => {
+            WasmrunError::DirectoryNotFound { path } => {
                 format!("Directory not found: {}\n💡 Check the directory path and try again", path)
             }
-            ChakraError::MissingTools { tools } => {
+            WasmrunError::MissingTools { tools } => {
                 format!(
                     "Missing required tools: {}\n💡 Please install these tools to continue",
                     tools.join(", ")
                 )
             }
-            ChakraError::Wasm(WasmError::WasmBindgenJsNotFound) => {
+            WasmrunError::Wasm(WasmError::WasmBindgenJsNotFound) => {
                 "This appears to be a wasm-bindgen module\n💡 Try running the corresponding .js file instead".to_string()
             }
             _ => self.to_string(),
@@ -243,11 +243,11 @@ impl ChakraError {
     /// Get suggested actions for the error
     pub fn suggestions(&self) -> Vec<String> {
         match self {
-            ChakraError::MissingTools { tools } => tools
+            WasmrunError::MissingTools { tools } => tools
                 .iter()
                 .map(|tool| format!("Install {} using your package manager", tool))
                 .collect(),
-            ChakraError::Compilation(CompilationError::MissingEntryFile { candidates, .. }) => {
+            WasmrunError::Compilation(CompilationError::MissingEntryFile { candidates, .. }) => {
                 vec![
                     format!("Create one of these entry files: {}", candidates.join(", ")),
                     "Check your project structure".to_string(),
@@ -297,9 +297,9 @@ impl CommandError {
     }
 }
 
-impl From<&str> for ChakraError {
+impl From<&str> for WasmrunError {
     fn from(message: &str) -> Self {
-        ChakraError::Path {
+        WasmrunError::Path {
             message: message.to_string(),
         }
     }

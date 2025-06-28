@@ -1,4 +1,4 @@
-//! Plugin system for Chakra - Built-in and External plugins
+//! Plugin system for Wasmrun - Built-in and External plugins
 
 use crate::compiler::builder::WasmBuilder;
 use serde::{Deserialize, Serialize};
@@ -141,7 +141,7 @@ impl PluginManager {
 
         if !missing_plugins.is_empty() {
             let missing_names = missing_plugins.join(", ");
-            return Err(crate::error::ChakraError::from(format!(
+            return Err(crate::error::WasmrunError::from(format!(
                 "Missing required plugins: {}",
                 missing_names
             )));

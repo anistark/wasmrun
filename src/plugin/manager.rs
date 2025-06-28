@@ -1,6 +1,6 @@
 //! Plugin management commands and operations
 
-use crate::error::{ChakraError, Result};
+use crate::error::{WasmrunError, Result};
 use crate::plugin::registry::{detect_plugin_metadata, RegistryManager};
 use crate::plugin::{PluginInfo, PluginManager, PluginSource, PluginType};
 
@@ -88,12 +88,12 @@ impl PluginCommands {
         } else {
             println!("🔌 \x1b[1;36mExternal Plugins:\x1b[0m");
             println!("  No external plugins installed.");
-            println!("  Use 'chakra plugin install <plugin-name>' to install external plugins.");
+            println!("  Use 'wasmrun plugin install <plugin-name>' to install external plugins.");
             println!();
         }
 
         if !show_all {
-            println!("Use 'chakra plugin list --all' to see detailed information.");
+            println!("Use 'wasmrun plugin list --all' to see detailed information.");
         }
 
         Ok(())
@@ -109,14 +109,14 @@ impl PluginCommands {
             .local_registry()
             .is_installed(plugin_spec)
         {
-            return Err(ChakraError::from(format!(
-                "Plugin '{}' is already installed. Use 'chakra plugin update {}' to update it.",
+            return Err(WasmrunError::from(format!(
+                "Plugin '{}' is already installed. Use 'wasmrun plugin update {}' to update it.",
                 plugin_spec, plugin_spec
             )));
         }
 
         if self.manager.get_plugin_by_name(plugin_spec).is_some() {
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Plugin '{}' is a built-in plugin and cannot be installed",
                 plugin_spec
             )));
@@ -146,7 +146,7 @@ impl PluginCommands {
 
         if let Some(plugin) = self.manager.get_plugin_by_name(plugin_name) {
             if plugin.info().plugin_type == PluginType::Builtin {
-                return Err(ChakraError::from(format!(
+                return Err(WasmrunError::from(format!(
                     "Cannot uninstall built-in plugin: {}",
                     plugin_name
                 )));
@@ -158,7 +158,7 @@ impl PluginCommands {
             .local_registry()
             .is_installed(plugin_name)
         {
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Plugin '{}' is not installed",
                 plugin_name
             )));
@@ -188,7 +188,7 @@ impl PluginCommands {
             return Ok(());
         }
 
-        Err(ChakraError::from(format!(
+        Err(WasmrunError::from(format!(
             "Plugin '{}' not found",
             plugin_name
         )))
@@ -200,7 +200,7 @@ impl PluginCommands {
 
         if let Some(plugin) = self.manager.get_plugin_by_name(plugin_name) {
             if plugin.info().plugin_type == PluginType::Builtin {
-                return Err(ChakraError::from(format!(
+                return Err(WasmrunError::from(format!(
                     "Cannot disable built-in plugin: {}",
                     plugin_name
                 )));
@@ -221,8 +221,8 @@ impl PluginCommands {
 
         if let Some(plugin) = self.manager.get_plugin_by_name(plugin_name) {
             if plugin.info().plugin_type == PluginType::Builtin {
-                return Err(ChakraError::from(format!(
-                    "Cannot update built-in plugin: {}. Built-in plugins are updated with Chakra itself.",
+                return Err(WasmrunError::from(format!(
+                    "Cannot update built-in plugin: {}. Built-in plugins are updated with Wasmrun itself.",
                     plugin_name
                 )));
             }
@@ -233,7 +233,7 @@ impl PluginCommands {
             .local_registry()
             .is_installed(plugin_name)
         {
-            return Err(ChakraError::from(format!(
+            return Err(WasmrunError::from(format!(
                 "Plugin '{}' is not installed",
                 plugin_name
             )));
@@ -340,7 +340,7 @@ impl PluginCommands {
             }
         }
 
-        println!("\nTo install a plugin, use: chakra plugin install <plugin-name>");
+        println!("\nTo install a plugin, use: wasmrun plugin install <plugin-name>");
         Ok(())
     }
 

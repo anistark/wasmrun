@@ -1,5 +1,5 @@
 use crate::commands::{verify_wasm, VerificationResult};
-use crate::error::{ChakraError, Result};
+use crate::error::{WasmrunError, Result};
 use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
 use std::path::Path;
@@ -55,7 +55,7 @@ impl WasmAnalysis {
 
         let filename = PathResolver::get_filename(path)?;
         let file_size_bytes = fs::metadata(path)
-            .map_err(|e| ChakraError::add_context(format!("Getting file size for {}", path), e))?
+            .map_err(|e| WasmrunError::add_context(format!("Getting file size for {}", path), e))?
             .len();
 
         let file_size = CommandExecutor::format_file_size(file_size_bytes);

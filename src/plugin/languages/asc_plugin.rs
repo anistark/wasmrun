@@ -16,7 +16,7 @@ impl AscPlugin {
             name: "asc".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
             description: "AssemblyScript WebAssembly compiler".to_string(),
-            author: "Chakra Team".to_string(),
+            author: "Wasmrun Team".to_string(),
             extensions: vec!["ts".to_string()],
             entry_files: vec![
                 "assembly/index.ts".to_string(),
