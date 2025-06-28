@@ -8,7 +8,7 @@ pub use detect::{
 };
 
 use crate::compiler::builder::WasmBuilder;
-use crate::error::{WasmrunError, Result};
+use crate::error::{Result, WasmrunError};
 use crate::plugin::languages::rust_plugin::RustPlugin;
 use crate::utils::PathResolver;
 

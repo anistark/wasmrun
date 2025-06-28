@@ -1,4 +1,4 @@
-use crate::error::{WasmrunError, Result};
+use crate::error::{Result, WasmrunError};
 use crate::utils::PathResolver;
 use clap::{Parser, Subcommand};
 

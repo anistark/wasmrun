@@ -1,5 +1,5 @@
 use crate::compiler;
-use crate::error::{WasmrunError, Result};
+use crate::error::{Result, WasmrunError};
 use crate::ui::print_clean_info;
 use crate::utils::PathResolver;
 

@@ -10,7 +10,7 @@ mod utils;
 mod watcher;
 
 use cli::{get_args, Commands, ResolvedArgs};
-use error::{WasmrunError, Result};
+use error::{Result, WasmrunError};
 use std::error::Error;
 use ui::print_webapp_detected;
 

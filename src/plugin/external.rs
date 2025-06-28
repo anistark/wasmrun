@@ -2,8 +2,8 @@
 
 use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
 use crate::error::CompilationResult;
-use crate::error::{WasmrunError, Result};
-use crate::plugin::config::{WasmrunConfig, ExternalPluginEntry};
+use crate::error::{Result, WasmrunError};
+use crate::plugin::config::{ExternalPluginEntry, WasmrunConfig};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
 use serde::Deserialize;
 use std::path::Path;
@@ -171,8 +171,9 @@ impl PluginInstaller {
         for entry in std::fs::read_dir(&target_dir)
             .map_err(|e| WasmrunError::from(format!("Failed to read target directory: {}", e)))?
         {
-            let entry = entry
-                .map_err(|e| WasmrunError::from(format!("Failed to read directory entry: {}", e)))?;
+            let entry = entry.map_err(|e| {
+                WasmrunError::from(format!("Failed to read directory entry: {}", e))
+            })?;
             let path = entry.path();
 
             if path.is_file() {

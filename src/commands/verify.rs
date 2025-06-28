@@ -1,5 +1,5 @@
 use crate::cli::CommandValidator;
-use crate::error::{WasmrunError, Result, WasmError};
+use crate::error::{Result, WasmError, WasmrunError};
 use crate::utils::PathResolver;
 use std::fs;
 use std::io::{Cursor, Read};

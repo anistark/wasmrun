@@ -247,7 +247,9 @@ impl WasmrunError {
                 .iter()
                 .map(|tool| format!("Install {} using your package manager", tool))
                 .collect(),
-            WasmrunError::Compilation(CompilationError::MissingEntryFile { candidates, .. }) => {
+            WasmrunError::Compilation(CompilationError::MissingEntryFile {
+                candidates, ..
+            }) => {
                 vec![
                     format!("Create one of these entry files: {}", candidates.join(", ")),
                     "Check your project structure".to_string(),

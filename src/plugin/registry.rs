@@ -1,7 +1,7 @@
 //! Plugin registry for managing built-in and external plugins
 
-use crate::error::{WasmrunError, Result};
-use crate::plugin::config::{WasmrunConfig, ExternalPluginEntry};
+use crate::error::{Result, WasmrunError};
+use crate::plugin::config::{ExternalPluginEntry, WasmrunConfig};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

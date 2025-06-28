@@ -1,7 +1,7 @@
 use crate::cli::CommandValidator;
 use crate::compiler;
 use crate::compiler::builder::{BuildConfig, BuilderFactory, OptimizationLevel};
-use crate::error::{WasmrunError, CompilationError, Result};
+use crate::error::{CompilationError, Result, WasmrunError};
 use crate::ui::{print_compilation_success, print_compile_info, print_missing_tools};
 use std::fmt;
 

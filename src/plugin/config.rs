@@ -1,6 +1,6 @@
 //! Configuration management for Wasmrun
 
-use crate::error::{WasmrunError, Result};
+use crate::error::{Result, WasmrunError};
 use crate::plugin::{PluginInfo, PluginSource};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -154,8 +154,9 @@ impl WasmrunConfig {
             })?;
         }
 
-        let config_content = toml::to_string_pretty(self)
-            .map_err(|e| WasmrunError::from(format!("Failed to serialize config to TOML: {}", e)))?;
+        let config_content = toml::to_string_pretty(self).map_err(|e| {
+            WasmrunError::from(format!("Failed to serialize config to TOML: {}", e))
+        })?;
 
         fs::write(&config_path, config_content)
             .map_err(|e| WasmrunError::from(format!("Failed to write config file: {}", e)))?;

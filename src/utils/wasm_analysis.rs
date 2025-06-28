@@ -1,5 +1,5 @@
 use crate::commands::{verify_wasm, VerificationResult};
-use crate::error::{WasmrunError, Result};
+use crate::error::{Result, WasmrunError};
 use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
 use std::path::Path;

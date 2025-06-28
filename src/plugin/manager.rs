@@ -1,6 +1,6 @@
 //! Plugin management commands and operations
 
-use crate::error::{WasmrunError, Result};
+use crate::error::{Result, WasmrunError};
 use crate::plugin::registry::{detect_plugin_metadata, RegistryManager};
 use crate::plugin::{PluginInfo, PluginManager, PluginSource, PluginType};
 

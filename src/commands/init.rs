@@ -1,5 +1,5 @@
 use crate::cli::CommandValidator;
-use crate::error::{WasmrunError, Result};
+use crate::error::{Result, WasmrunError};
 use crate::ui::print_init_info;
 
 /// Handle init command

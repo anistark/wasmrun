@@ -1,4 +1,4 @@
-use crate::error::{WasmrunError, Result, ServerError};
+use crate::error::{Result, ServerError, WasmrunError};
 use std::path::Path;
 
 mod config;

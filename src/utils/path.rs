@@ -1,4 +1,4 @@
-use crate::error::{WasmrunError, Result};
+use crate::error::{Result, WasmrunError};
 use std::fs;
 use std::path::Path;
 
@@ -78,7 +78,9 @@ impl PathResolver {
     pub fn get_absolute_path(path: &str) -> Result<String> {
         fs::canonicalize(path)
             .map(|p| p.to_string_lossy().to_string())
-            .map_err(|e| WasmrunError::add_context(format!("Getting absolute path for {}", path), e))
+            .map_err(|e| {
+                WasmrunError::add_context(format!("Getting absolute path for {}", path), e)
+            })
     }
 
     /// Get filename from path
