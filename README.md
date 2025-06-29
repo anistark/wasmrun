@@ -375,6 +375,7 @@ Wasmrun is built with love using:
 - [clap](https://github.com/clap-rs/clap) - Command line argument parsing
 - [notify](https://github.com/notify-rs/notify) - File system watching for live reload
 - [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) - Web integration
+- Font used for logo is *Pixeled* by [OmegaPC777](https://www.youtube.com/channel/UCc5ROnYDjc4hynqsLFw4Fzg).
 - And the amazing Rust and WebAssembly communities ❤️
 
 **Made with ❤️ for the WebAssembly community**
