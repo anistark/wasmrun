@@ -377,10 +377,6 @@ Wasmrun is built with love using:
 - [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) - Web integration
 - And the amazing Rust and WebAssembly communities ❤️
 
----
-
-![Wasmrun Logo](./assets/loader.svg)
-
 **Made with ❤️ for the WebAssembly community**
 
 *⭐ If you find Wasmrun useful, please consider starring the repository!*
