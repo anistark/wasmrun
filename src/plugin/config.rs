@@ -53,7 +53,7 @@ impl Default for GlobalSettings {
 impl Default for WasmrunConfig {
     fn default() -> Self {
         Self {
-            version: "1.0.0".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             settings: GlobalSettings::default(),
             plugin_configs: HashMap::new(),
             external_plugins: HashMap::new(),
@@ -209,7 +209,7 @@ impl WasmrunConfig {
         self.settings.cache_dir = Some(cache_dir);
 
         match self.version.as_str() {
-            "1.0.0" => {}
+            env!("CARGO_PKG_VERSION") => {}
             _ => {
                 return Err(WasmrunError::from(format!(
                     "Unsupported config version: {}. Please update Wasmrun.",
