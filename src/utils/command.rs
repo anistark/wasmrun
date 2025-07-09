@@ -49,6 +49,7 @@ impl CommandExecutor {
     }
 
     /// Execute a command with live output
+    #[allow(dead_code)]
     pub fn execute_command_with_output(
         command: &str,
         args: &[&str],

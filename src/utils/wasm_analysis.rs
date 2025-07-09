@@ -209,7 +209,7 @@ pub struct ProjectAnalysis {
     pub path: String,
     pub project_name: String,
     pub language: crate::compiler::ProjectLanguage,
-    pub is_web_app: bool,
+    // pub is_web_app: bool,
     #[allow(dead_code)]
     pub has_cargo_toml: bool,
     pub entry_files: Vec<String>,
@@ -228,8 +228,8 @@ impl ProjectAnalysis {
             .to_string();
 
         let language = crate::compiler::detect_project_language(path);
-        let is_web_app = language == crate::compiler::ProjectLanguage::Rust
-            && crate::compiler::is_rust_web_application(path);
+        // let is_web_app = language == crate::compiler::ProjectLanguage::Rust
+        //     && crate::compiler::is_rust_web_application(path);
 
         let mut entry_files = Vec::new();
         let mut build_files = Vec::new();
@@ -268,7 +268,7 @@ impl ProjectAnalysis {
             path: path.to_string(),
             project_name,
             language,
-            is_web_app,
+            // is_web_app,
             has_cargo_toml,
             entry_files,
             build_files,
@@ -289,8 +289,8 @@ impl ProjectAnalysis {
                  truncate_string(&self.path, 51));
 
         let language_icon = match self.language {
-            crate::compiler::ProjectLanguage::Rust => "🦀",
-            crate::compiler::ProjectLanguage::Go => "🐹",
+            // crate::compiler::ProjectLanguage::Rust => "🦀",
+            // crate::compiler::ProjectLanguage::Go => "🐹",
             crate::compiler::ProjectLanguage::C => "🔧",
             crate::compiler::ProjectLanguage::Asc => "📜",
             crate::compiler::ProjectLanguage::Python => "🐍",
@@ -300,9 +300,9 @@ impl ProjectAnalysis {
         println!("\x1b[1;34m│\x1b[0m  {} \x1b[1;34mLanguage:\x1b[0m \x1b[1;32m{:<49}\x1b[0m \x1b[1;34m│\x1b[0m", 
                  language_icon, format!("{:?}", self.language));
 
-        if self.is_web_app {
-            println!("\x1b[1;34m│\x1b[0m  🌐 \x1b[1;32mWeb Application Detected\x1b[0m                              \x1b[1;34m│\x1b[0m");
-        }
+        // if self.is_web_app {
+        //     println!("\x1b[1;34m│\x1b[0m  🌐 \x1b[1;32mWeb Application Detected\x1b[0m                              \x1b[1;34m│\x1b[0m");
+        // }
 
         if !self.build_files.is_empty() {
             println!("\x1b[1;34m│\x1b[0m  🔧 \x1b[1;34mBuild Files:\x1b[0m \x1b[1;33m{:<45}\x1b[0m \x1b[1;34m│\x1b[0m", 
@@ -322,17 +322,17 @@ impl ProjectAnalysis {
     /// Get a brief summary
     pub fn get_summary(&self) -> String {
         let language_icon = match self.language {
-            crate::compiler::ProjectLanguage::Rust => "🦀",
-            crate::compiler::ProjectLanguage::Go => "🐹",
+            // crate::compiler::ProjectLanguage::Rust => "🦀",
+            // crate::compiler::ProjectLanguage::Go => "🐹",
             crate::compiler::ProjectLanguage::C => "🔧",
             crate::compiler::ProjectLanguage::Asc => "📜",
             crate::compiler::ProjectLanguage::Python => "🐍",
             _ => "❓",
         };
 
-        let app_type = if self.is_web_app { " (Web App)" } else { "" };
+        // let app_type = if self.is_web_app { " (Web App)" } else { "" };
 
-        format!("{} {:?} project{}", language_icon, self.language, app_type)
+        format!("{} {:?} project{}", language_icon, self.language, "")
     }
 }
 

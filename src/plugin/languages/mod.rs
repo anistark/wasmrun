@@ -2,4 +2,3 @@
 pub mod asc_plugin;
 pub mod c_plugin;
 pub mod python_plugin;
-pub mod rust_plugin;

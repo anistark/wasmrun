@@ -42,8 +42,8 @@ pub fn handle_run_command(
 
         let language = crate::compiler::detect_project_language(&project_path);
         let language_icon = match language {
-            crate::compiler::ProjectLanguage::Rust => "🦀",
-            crate::compiler::ProjectLanguage::Go => "🐹",
+            // crate::compiler::ProjectLanguage::Rust => "🦀",
+            // crate::compiler::ProjectLanguage::Go => "🐹",
             crate::compiler::ProjectLanguage::C => "🔧",
             crate::compiler::ProjectLanguage::Asc => "📜",
             crate::compiler::ProjectLanguage::Python => "🐍",
@@ -55,11 +55,11 @@ pub fn handle_run_command(
             language_icon, language
         );
 
-        if language == crate::compiler::ProjectLanguage::Rust
-            && crate::compiler::is_rust_web_application(&project_path)
-        {
-            println!("🌐 \x1b[1;32mWeb Application detected\x1b[0m");
-        }
+        // if language == crate::compiler::ProjectLanguage::Rust
+        //     && crate::compiler::is_rust_web_application(&project_path)
+        // {
+        //     println!("🌐 \x1b[1;32mWeb Application detected\x1b[0m");
+        // }
 
         if watch {
             println!("👀 \x1b[1;32mWatch mode enabled\x1b[0m");

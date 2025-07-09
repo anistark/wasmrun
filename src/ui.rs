@@ -98,14 +98,6 @@ pub fn print_compilation_success(
     println!("\x1b[1;34m╰\x1b[0m");
 }
 
-/// Print web app detected message
-pub fn print_webapp_detected(port: u16) {
-    println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  🌐 \x1b[1;36mDetected Rust Web Application\x1b[0m");
-    println!("  \x1b[0;37mRunning as a web app on port {}\x1b[0m", port);
-    println!("\x1b[1;34m╰\x1b[0m\n");
-}
-
 /// Print init command information
 #[allow(dead_code)]
 pub fn print_init_info(project_name: &str, template: &str, target_dir: &str) {

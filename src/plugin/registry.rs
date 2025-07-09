@@ -219,11 +219,9 @@ impl RegistryManager {
     pub fn get_builtin_plugins(&self) -> Vec<PluginInfo> {
         use crate::plugin::languages::{
             asc_plugin::AscPlugin, c_plugin::CPlugin, python_plugin::PythonPlugin,
-            rust_plugin::RustPlugin,
         };
 
         vec![
-            RustPlugin::new().info().clone(),
             CPlugin::new().info().clone(),
             AscPlugin::new().info().clone(),
             PythonPlugin::new().info().clone(),

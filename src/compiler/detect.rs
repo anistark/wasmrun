@@ -4,8 +4,8 @@ use std::path::Path;
 /// Supported project languages
 #[derive(Debug, PartialEq)]
 pub enum ProjectLanguage {
-    Rust,
-    Go,
+    // Rust,
+    // Go,
     C,
     Asc,
     Python,
@@ -34,22 +34,22 @@ pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
         return ProjectLanguage::Unknown;
     }
 
-    if path.join("Cargo.toml").exists() {
-        return ProjectLanguage::Rust;
-    }
+    // if path.join("Cargo.toml").exists() {
+    //     return ProjectLanguage::Rust;
+    // }
 
-    if path.join("go.mod").exists() {
-        return ProjectLanguage::Go;
-    } else if let Ok(entries) = fs::read_dir(path) {
-        for entry in entries.flatten() {
-            if let Some(extension) = entry.path().extension() {
-                let ext = extension.to_string_lossy().to_lowercase();
-                if ext == "go" {
-                    return ProjectLanguage::Go;
-                }
-            }
-        }
-    }
+    // if path.join("go.mod").exists() {
+    //     return ProjectLanguage::Go;
+    // } else if let Ok(entries) = fs::read_dir(path) {
+    //     for entry in entries.flatten() {
+    //         if let Some(extension) = entry.path().extension() {
+    //             let ext = extension.to_string_lossy().to_lowercase();
+    //             if ext == "go" {
+    //                 return ProjectLanguage::Go;
+    //             }
+    //         }
+    //     }
+    // }
 
     if path.join("pyproject.toml").exists() || path.join("setup.py").exists() {
         return ProjectLanguage::Python;
@@ -120,22 +120,22 @@ pub fn detect_operating_system() -> OperatingSystem {
 /// Get recommended compilation tools based on OS and language.
 pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -> Vec<String> {
     let recommended_tools = match (language, os) {
-        (ProjectLanguage::Rust, _) => {
-            let mut tools = vec!["rustup".to_string(), "cargo".to_string()];
+        // (ProjectLanguage::Rust, _) => {
+        //     let mut tools = vec!["rustup".to_string(), "cargo".to_string()];
 
-            if let Ok(current_dir) = std::env::current_dir() {
-                let current_dir_str = current_dir.to_str().unwrap_or(".");
-                let builder = crate::plugin::languages::rust_plugin::RustPlugin::new();
-                if builder.uses_wasm_bindgen(current_dir_str) {
-                    tools.push("wasm-pack".to_string());
-                }
-            }
+        //     if let Ok(current_dir) = std::env::current_dir() {
+        //         let current_dir_str = current_dir.to_str().unwrap_or(".");
+        //         let builder = crate::plugin::languages::rust_plugin::RustPlugin::new();
+        //         if builder.uses_wasm_bindgen(current_dir_str) {
+        //             tools.push("wasm-pack".to_string());
+        //         }
+        //     }
 
-            tools
-        }
-        (ProjectLanguage::Go, _) => {
-            vec!["tinygo".to_string(), "go".to_string()]
-        }
+        //     tools
+        // }
+        // (ProjectLanguage::Go, _) => {
+        //     vec!["wasmgo".to_string(), "tinygo".to_string()]
+        // }
         (ProjectLanguage::C, OperatingSystem::Windows) => {
             vec![
                 "emscripten".to_string(),

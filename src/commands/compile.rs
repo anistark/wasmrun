@@ -87,8 +87,8 @@ pub fn handle_compile_command(
 impl fmt::Display for compiler::ProjectLanguage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let lang_str = match self {
-            compiler::ProjectLanguage::Rust => "Rust",
-            compiler::ProjectLanguage::Go => "Go",
+            // compiler::ProjectLanguage::Rust => "Rust",
+            // compiler::ProjectLanguage::Go => "Go",
             compiler::ProjectLanguage::C => "C",
             compiler::ProjectLanguage::Asc => "Asc",
             compiler::ProjectLanguage::Python => "Python",

@@ -12,7 +12,7 @@ mod watcher;
 use cli::{get_args, Commands, ResolvedArgs};
 use error::{Result, WasmrunError};
 use std::error::Error;
-use ui::print_webapp_detected;
+// use ui::print_webapp_detected;
 
 fn main() {
     std::panic::set_hook(Box::new(|panic_info| {
@@ -127,41 +127,41 @@ fn handle_default_command(args: &ResolvedArgs) -> Result<()> {
         if path_obj.exists() && path_obj.is_dir() {
             let detected_language = compiler::detect_project_language(&args.path);
 
-            if detected_language == compiler::ProjectLanguage::Rust
-                && compiler::is_rust_web_application(&args.path)
-            {
-                print_webapp_detected(3000);
+            // if detected_language == compiler::ProjectLanguage::Rust
+            //     && compiler::is_rust_web_application(&args.path)
+            // {
+            //     print_webapp_detected(3000);
 
-                std::thread::sleep(std::time::Duration::from_millis(300));
+            //     std::thread::sleep(std::time::Duration::from_millis(300));
 
-                // Run as a web application on port 3000
-                // TODO: Make port configurable
-                server::run_webapp(&args.path, 3000, args.watch)?;
-            } else {
-                println!("🎯 \x1b[1;34mMode:\x1b[0m Project compilation and execution");
+            //     // Run as a web application on port 3000
+            //     // TODO: Make port configurable
+            //     server::run_webapp(&args.path, 3000, args.watch)?;
+            // } else {
+            println!("🎯 \x1b[1;34mMode:\x1b[0m Project compilation and execution");
 
-                let language_icon = match detected_language {
-                    compiler::ProjectLanguage::Rust => "🦀",
-                    compiler::ProjectLanguage::Go => "🐹",
-                    compiler::ProjectLanguage::C => "🔧",
-                    compiler::ProjectLanguage::Asc => "📜",
-                    compiler::ProjectLanguage::Python => "🐍",
-                    _ => "❓",
-                };
+            let language_icon = match detected_language {
+                // compiler::ProjectLanguage::Rust => "🦀",
+                // compiler::ProjectLanguage::Go => "🐹",
+                compiler::ProjectLanguage::C => "🔧",
+                compiler::ProjectLanguage::Asc => "📜",
+                compiler::ProjectLanguage::Python => "🐍",
+                _ => "❓",
+            };
 
-                println!(
-                    "{} \x1b[1;34mLanguage:\x1b[0m {:?}",
-                    language_icon, detected_language
-                );
+            println!(
+                "{} \x1b[1;34mLanguage:\x1b[0m {:?}",
+                language_icon, detected_language
+            );
 
-                if args.watch {
-                    println!("👀 \x1b[1;34mWatch Mode:\x1b[0m Enabled");
-                }
-
-                std::thread::sleep(std::time::Duration::from_millis(300));
-
-                server::run_project(&args.path, args.port, None, args.watch)?;
+            if args.watch {
+                println!("👀 \x1b[1;34mWatch Mode:\x1b[0m Enabled");
             }
+
+            std::thread::sleep(std::time::Duration::from_millis(300));
+
+            server::run_project(&args.path, args.port, None, args.watch)?;
+            // }
         } else if path_obj.is_file() {
             println!("🎯 \x1b[1;34mMode:\x1b[0m File execution");
 

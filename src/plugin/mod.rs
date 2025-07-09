@@ -75,7 +75,6 @@ pub struct PluginManager {
 impl PluginManager {
     pub fn new() -> crate::error::Result<Self> {
         let plugins: Vec<Box<dyn Plugin>> = vec![
-            Box::new(languages::rust_plugin::RustPlugin::new()),
             Box::new(languages::c_plugin::CPlugin::new()),
             Box::new(languages::asc_plugin::AscPlugin::new()),
             Box::new(languages::python_plugin::PythonPlugin::new()),

@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tiny_http::{Header, Request, Response};
+// use std::sync::atomic::{AtomicBool, Ordering};
+// use std::sync::Arc;
+use tiny_http::{Request, Response};
 
 use super::utils::{check_assets_directory, content_type_header, determine_content_type};
 use crate::template::{generate_html, generate_html_wasm_bindgen};
@@ -129,81 +129,6 @@ pub fn handle_request(
                 .with_header(content_type_header("text/plain"));
             if let Err(e) = request.respond(response) {
                 eprintln!("❗ Error sending 404 response: {}", e);
-            }
-        }
-    }
-}
-
-/// Handle a request for a web application
-pub fn handle_webapp_request(
-    request: Request,
-    html: &str,
-    output_dir: &str,
-    clients_to_reload: &mut Vec<String>,
-    reload_flag: &Arc<AtomicBool>,
-) {
-    let url = request.url().to_string();
-
-    let client_addr = match request.remote_addr() {
-        Some(addr) => addr.to_string(),
-        None => "unknown".to_string(),
-    };
-
-    if !url.contains("reload-check") {
-        println!("📝 Request: {}", url);
-    }
-
-    if url == "/" {
-        let response = Response::from_string(html).with_header(content_type_header("text/html"));
-        if let Err(e) = request.respond(response) {
-            eprintln!("❗ Error sending HTML response: {}", e);
-        }
-
-        if !clients_to_reload.contains(&client_addr) {
-            clients_to_reload.push(client_addr);
-        }
-    } else if url == "/reload-check" {
-        let mut response = Response::from_string("");
-
-        response = response.with_header(
-            Header::from_bytes(
-                &b"Cache-Control"[..],
-                &b"no-cache, no-store, must-revalidate"[..],
-            )
-            .unwrap(),
-        );
-
-        if reload_flag.load(Ordering::SeqCst) {
-            response = response
-                .with_header(Header::from_bytes(&b"X-Reload-Needed"[..], &b"true"[..]).unwrap());
-
-            // Reset reload flag
-            reload_flag.store(false, Ordering::SeqCst);
-            println!("🔄 Sent reload signal to browser");
-        }
-
-        if let Err(e) = request.respond(response) {
-            if !url.contains("reload-check") {
-                // Don't log polling errors
-                eprintln!("❗ Error sending reload-check response: {}", e);
-            }
-        }
-    } else if url.starts_with("/assets/") {
-        serve_asset(request, &url);
-    } else {
-        // serve from the output directory
-        let file_path = Path::new(output_dir).join(url.trim_start_matches('/'));
-
-        if file_path.exists() && file_path.is_file() {
-            // Determine content type based on extension
-            let content_type = determine_content_type(&file_path);
-            serve_file(request, file_path.to_str().unwrap(), content_type);
-        } else {
-            // If the file doesn't exist, serve the main HTML page
-            let response =
-                Response::from_string(html).with_header(content_type_header("text/html"));
-            if let Err(e) = request.respond(response) {
-                eprintln!("❗ Error sending HTML response for SPA routing: {}", e);
             }
         }
     }

@@ -350,8 +350,8 @@ pub fn setup_project_compilation(
     // Use language from command if provided
     let lang = match language_override {
         Some(lang_str) => match lang_str.to_lowercase().as_str() {
-            "rust" => compiler::ProjectLanguage::Rust,
-            "go" => compiler::ProjectLanguage::Go,
+            // "rust" => compiler::ProjectLanguage::Rust,
+            // "go" => compiler::ProjectLanguage::Go,
             "c" => compiler::ProjectLanguage::C,
             "asc" => compiler::ProjectLanguage::Asc,
             "python" => compiler::ProjectLanguage::Python,

@@ -7,9 +7,7 @@ pub use detect::{
     OperatingSystem, ProjectLanguage,
 };
 
-use crate::compiler::builder::WasmBuilder;
 use crate::error::{Result, WasmrunError};
-use crate::plugin::languages::rust_plugin::RustPlugin;
 use crate::utils::PathResolver;
 
 /// Compile a WASM file from a project directory
@@ -41,26 +39,4 @@ pub fn compile_for_execution(project_path: &str, output_dir: &str) -> Result<Str
         .map_err(WasmrunError::Compilation)?;
 
     Ok(result.js_path.unwrap_or(result.wasm_path))
-}
-
-/// Build a web application from a Rust project
-pub fn build_rust_web_application(project_path: &str, output_dir: &str) -> Result<String> {
-    let config = builder::BuildConfig {
-        project_path: project_path.to_string(),
-        output_dir: output_dir.to_string(),
-        verbose: true,
-        optimization_level: builder::OptimizationLevel::Release,
-        target_type: builder::TargetType::WebApp,
-    };
-
-    let builder = RustPlugin::new();
-    let result = builder.build(&config).map_err(WasmrunError::Compilation)?;
-
-    Ok(result.js_path.unwrap_or(result.wasm_path))
-}
-
-/// Check if a project is a Rust web application
-pub fn is_rust_web_application(project_path: &str) -> bool {
-    let builder = RustPlugin::new();
-    builder.is_rust_web_application(project_path)
 }

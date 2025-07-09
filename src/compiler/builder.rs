@@ -26,7 +26,7 @@ pub enum TargetType {
     Standard,
     #[allow(dead_code)]
     WasmBindgen,
-    WebApp,
+    // WebApp,
 }
 
 impl Default for BuildConfig {
@@ -300,12 +300,11 @@ impl BuilderFactory {
         use crate::compiler::ProjectLanguage;
         use crate::plugin::languages::{
             asc_plugin::AscPlugin, c_plugin::CPlugin, python_plugin::PythonPlugin,
-            rust_plugin::RustPlugin,
         };
 
         match language {
-            ProjectLanguage::Rust => Box::new(RustPlugin::new()),
-            ProjectLanguage::Go => Box::new(UnknownBuilder),
+            // ProjectLanguage::Rust => Box::new(UnknownBuilder),
+            // ProjectLanguage::Go => Box::new(UnknownBuilder),
             ProjectLanguage::C => Box::new(CPlugin::new()),
             ProjectLanguage::Asc => Box::new(AscPlugin::new()),
             ProjectLanguage::Python => Box::new(PythonPlugin::new()),
@@ -314,12 +313,7 @@ impl BuilderFactory {
     }
 
     pub fn supported_languages() -> Vec<String> {
-        vec![
-            "Rust".to_string(),
-            "C".to_string(),
-            "Asc".to_string(),
-            "Python".to_string(),
-        ]
+        vec!["C".to_string(), "Asc".to_string(), "Python".to_string()]
     }
 }
 
@@ -389,8 +383,8 @@ pub fn format_build_error(error: &CompilationError) -> String {
         }
         CompilationError::BuildToolNotFound { tool, language } => {
             let builder = BuilderFactory::create_builder(&match language.as_str() {
-                "Rust" => crate::compiler::ProjectLanguage::Rust,
-                "Go" => crate::compiler::ProjectLanguage::Go,
+                // "Rust" => crate::compiler::ProjectLanguage::Rust,
+                // "Go" => crate::compiler::ProjectLanguage::Go,
                 "C" => crate::compiler::ProjectLanguage::C,
                 "Asc" => crate::compiler::ProjectLanguage::Asc,
                 "Python" => crate::compiler::ProjectLanguage::Python,

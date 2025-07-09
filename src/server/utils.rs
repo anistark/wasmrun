@@ -89,7 +89,7 @@ pub struct ServerInfo {
 pub enum ContentType {
     WasmFile(WasmAnalysis),
     Project(ProjectAnalysis),
-    WebApp(ProjectAnalysis),
+    // WebApp(ProjectAnalysis),
 }
 
 impl ServerInfo {
@@ -108,11 +108,12 @@ impl ServerInfo {
     pub fn for_project(project_path: &str, port: u16, watch_mode: bool) -> Result<Self> {
         let analysis = ProjectAnalysis::analyze(project_path)?;
 
-        let content_type = if analysis.is_web_app {
-            ContentType::WebApp(analysis)
-        } else {
-            ContentType::Project(analysis)
-        };
+        // let content_type = if analysis.is_web_app {
+        //     ContentType::WebApp(analysis)
+        // } else {
+        //     ContentType::Project(analysis)
+        // };
+        let content_type = ContentType::Project(analysis);
 
         Ok(Self {
             url: format!("http://localhost:{}", port),
@@ -136,11 +137,10 @@ impl ServerInfo {
             ContentType::Project(analysis) => {
                 analysis.print_analysis();
                 self.print_project_server_info();
-            }
-            ContentType::WebApp(analysis) => {
-                analysis.print_analysis();
-                self.print_webapp_server_info();
-            }
+            } // ContentType::WebApp(analysis) => {
+              //     analysis.print_analysis();
+              //     self.print_webapp_server_info();
+              // }
         }
 
         // Print server details
@@ -164,9 +164,9 @@ impl ServerInfo {
         let content_description = match &self.content_type {
             ContentType::WasmFile(analysis) => analysis.get_summary(),
             ContentType::Project(analysis) => analysis.get_summary(),
-            ContentType::WebApp(analysis) => {
-                format!("🌐 {} (Web Application)", analysis.get_summary())
-            }
+            // ContentType::WebApp(analysis) => {
+            //     format!("🌐 {} (Web Application)", analysis.get_summary())
+            // }
         };
 
         println!("   \x1b[0;37m{}\x1b[0m\n", content_description);
@@ -211,28 +211,28 @@ impl ServerInfo {
         );
     }
 
-    fn print_webapp_server_info(&self) {
-        println!(
-            "\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m"
-        );
-        println!("\x1b[1;34m│\x1b[0m  🌐 \x1b[1;36mWeb Application Server\x1b[0m                                 \x1b[1;34m│\x1b[0m");
-        println!(
-            "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
-        );
-        println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mServer Mode:\x1b[0m \x1b[1;32mWeb Application\x1b[0m                           \x1b[1;34m│\x1b[0m");
-        println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mFramework:\x1b[0m \x1b[1;33mRust → WASM (wasm-bindgen)\x1b[0m                \x1b[1;34m│\x1b[0m");
+    // fn print_webapp_server_info(&self) {
+    //     println!(
+    //         "\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m"
+    //     );
+    //     println!("\x1b[1;34m│\x1b[0m  🌐 \x1b[1;36mWeb Application Server\x1b[0m                                 \x1b[1;34m│\x1b[0m");
+    //     println!(
+    //         "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
+    //     );
+    //     println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mServer Mode:\x1b[0m \x1b[1;32mWeb Application\x1b[0m                           \x1b[1;34m│\x1b[0m");
+    //     println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mFramework:\x1b[0m \x1b[1;33mRust → WASM (wasm-bindgen)\x1b[0m                \x1b[1;34m│\x1b[0m");
 
-        if self.watch_mode {
-            println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32m✓ Hot reload on source changes\x1b[0m           \x1b[1;34m│\x1b[0m");
-        } else {
-            println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mWatch Mode:\x1b[0m \x1b[0;37mDisabled\x1b[0m                                 \x1b[1;34m│\x1b[0m");
-        }
+    //     if self.watch_mode {
+    //         println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32m✓ Hot reload on source changes\x1b[0m           \x1b[1;34m│\x1b[0m");
+    //     } else {
+    //         println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mWatch Mode:\x1b[0m \x1b[0;37mDisabled\x1b[0m                                 \x1b[1;34m│\x1b[0m");
+    //     }
 
-        println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mFeatures:\x1b[0m \x1b[1;32mSPA routing, Asset serving, Dev tools\x1b[0m       \x1b[1;34m│\x1b[0m");
-        println!(
-            "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
-        );
-    }
+    //     println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mFeatures:\x1b[0m \x1b[1;32mSPA routing, Asset serving, Dev tools\x1b[0m       \x1b[1;34m│\x1b[0m");
+    //     println!(
+    //         "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
+    //     );
+    // }
 
     fn print_server_details(&self) {
         println!("\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m");

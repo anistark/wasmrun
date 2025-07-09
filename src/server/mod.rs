@@ -5,11 +5,11 @@ mod config;
 mod handler;
 mod utils;
 mod wasm;
-mod webapp;
+// mod webapp;
 
 pub use config::ServerConfig;
 pub use utils::{ServerInfo, ServerUtils};
-pub use webapp::run_webapp;
+// pub use webapp::run_webapp;
 
 // Constants
 const PID_FILE: &str = "/tmp/wasmrun_server.pid";
@@ -102,19 +102,19 @@ pub fn run_project(
     let final_port = ServerUtils::handle_port_conflict(port)?;
 
     // Check if it's a Rust web application
-    let detected_language = crate::compiler::detect_project_language(path);
+    // let detected_language = crate::compiler::detect_project_language(path);
 
-    if detected_language == crate::compiler::ProjectLanguage::Rust
-        && crate::compiler::is_rust_web_application(path)
-    {
-        // Server info for web app
-        let server_info = ServerInfo::for_project(path, 3000, watch)?;
-        server_info.print_server_startup();
+    // if detected_language == crate::compiler::ProjectLanguage::Rust
+    //     && crate::compiler::is_rust_web_application(path)
+    // {
+    //     // Server info for web app
+    //     let server_info = ServerInfo::for_project(path, 3000, watch)?;
+    //     server_info.print_server_startup();
 
-        // Run as a web application on port 3000
-        return webapp::run_webapp(path, 3000, watch)
-            .map_err(|e| WasmrunError::Server(ServerError::startup_failed(3000, e)));
-    }
+    //     // Run as a web application on port 3000
+    //     return webapp::run_webapp(path, 3000, watch)
+    //         .map_err(|e| WasmrunError::Server(ServerError::startup_failed(3000, e)));
+    // }
 
     // Server info for regular project
     let server_info = ServerInfo::for_project(path, final_port, watch)?;

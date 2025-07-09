@@ -4,7 +4,7 @@ use crate::compiler::builder::WasmBuilder;
 use crate::error::Result;
 use crate::plugin::languages::{
     asc_plugin::AscBuilder, c_plugin::CBuilder, 
-    python_plugin::PythonBuilder, rust_plugin::RustPlugin,
+    python_plugin::PythonBuilder,
 };
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginRegistry, PluginType};
 use std::sync::Arc;
@@ -112,10 +112,6 @@ impl WasmBuilder for BuiltinBuilderWrapper {
 
 /// Load all built-in plugins into the registry
 pub fn load_all_builtin_plugins(registry: &mut PluginRegistry) -> Result<()> {
-    // Rust plugin
-    let rust_plugin = create_rust_plugin();
-    registry.register_plugin(Box::new(rust_plugin))?;
-
     // C plugin
     let c_plugin = create_c_plugin();
     registry.register_plugin(Box::new(c_plugin))?;
@@ -124,29 +120,8 @@ pub fn load_all_builtin_plugins(registry: &mut PluginRegistry) -> Result<()> {
     let asc_plugin = create_asc_plugin();
     registry.register_plugin(Box::new(asc_plugin))?;
 
-    println!("Loaded {} built-in plugins", 5);
+    println!("Loaded {} built-in plugins", 3);
     Ok(())
-}
-
-/// Create the Rust built-in plugin
-fn create_rust_plugin() -> BuiltinPlugin {
-    let capabilities = PluginCapabilities {
-        compile_wasm: true,
-        compile_webapp: true,
-        live_reload: true,
-        optimization: true,
-        custom_targets: vec!["wasm32-unknown-unknown".to_string(), "web".to_string()],
-    };
-
-    BuiltinPlugin::new(
-        "rust".to_string(),
-        env!("CARGO_PKG_VERSION").to_string(),
-        "Rust WebAssembly compiler with wasm-bindgen and web application support".to_string(),
-        vec!["rs".to_string()],
-        vec!["Cargo.toml".to_string()],
-        capabilities,
-        Arc::new(RustPlugin::new()),
-    )
 }
 
 /// Create the C built-in plugin
@@ -200,7 +175,6 @@ fn create_asc_plugin() -> BuiltinPlugin {
 #[allow(dead_code)]
 pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
     vec![
-        create_rust_plugin().info().clone(),
         create_c_plugin().info().clone(),
         create_asc_plugin().info().clone(),
         create_python_plugin().info().clone(),
@@ -210,14 +184,13 @@ pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
 /// Check if a plugin name is a built-in plugin
 #[allow(dead_code)]
 pub fn is_builtin_plugin(name: &str) -> bool {
-    matches!(name, "rust" | "c" | "asc" | "python")
+    matches!(name, "c" | "asc" | "python")
 }
 
 /// Get specific built-in plugin info by name
 #[allow(dead_code)]
 pub fn get_builtin_plugin_by_name(name: &str) -> Option<PluginInfo> {
     match name {
-        "rust" => Some(create_rust_plugin().info().clone()),
         "c" => Some(create_c_plugin().info().clone()),
         "asc" => Some(create_asc_plugin().info().clone()),
         "python" => Some(create_python_plugin().info().clone()),
