@@ -65,7 +65,37 @@ impl PluginCommands {
         if !external_plugins.is_empty() {
             println!("🔌 \x1b[1;36mExternal Plugins:\x1b[0m");
             for plugin_info in &external_plugins {
-                let status = "\x1b[1;33m⚠ Not Loaded\x1b[0m";
+                let status = if let Some(plugin_entry) = self
+                    .registry_manager
+                    .local_registry()
+                    .get_installed_plugin(&plugin_info.name)
+                {
+                    let install_dir = match crate::plugin::config::WasmrunConfig::plugin_dir() {
+                        Ok(dir) => dir,
+                        Err(_) => {
+                            println!(
+                                "  • \x1b[1;37m{:<15}\x1b[0m v{:<8} - {} [\x1b[1;31m✗ Error\x1b[0m]",
+                                plugin_info.name, plugin_info.version, plugin_info.description
+                            );
+                            continue;
+                        }
+                    };
+                    let plugin_dir = install_dir.join(&plugin_entry.install_path);
+
+                    if !plugin_dir.exists() {
+                        "\x1b[1;31m✗ Missing\x1b[0m"
+                    } else if !plugin_entry.enabled {
+                        "\x1b[1;33m⚠ Disabled\x1b[0m"
+                    } else {
+                        match check_plugin_status(&plugin_dir) {
+                            PluginStatus::Ready => "\x1b[1;32m✓ Ready\x1b[0m",
+                            PluginStatus::NotInstalled => "\x1b[1;31m✗ Not Installed\x1b[0m",
+                            PluginStatus::AccessError => "\x1b[1;31m✗ Access Error\x1b[0m",
+                        }
+                    }
+                } else {
+                    "\x1b[1;31m✗ Registry Error\x1b[0m"
+                };
 
                 println!(
                     "  • \x1b[1;37m{:<15}\x1b[0m v{:<8} - {} [{}]",
@@ -80,6 +110,19 @@ impl PluginCommands {
                             "    Targets: {}",
                             plugin_info.capabilities.custom_targets.join(", ")
                         );
+                    }
+
+                    if let Some(plugin_entry) = self
+                        .registry_manager
+                        .local_registry()
+                        .get_installed_plugin(&plugin_info.name)
+                    {
+                        println!("    Install path: {}", plugin_entry.install_path);
+                        if let Ok(install_dir) = crate::plugin::config::WasmrunConfig::plugin_dir()
+                        {
+                            let full_path = install_dir.join(&plugin_entry.install_path);
+                            println!("    Full path: {}", full_path.display());
+                        }
                     }
                     println!();
                 }
@@ -301,77 +344,49 @@ impl PluginCommands {
     }
 
     pub fn search(&self, query: &str) -> Result<()> {
-        println!("Searching for plugins matching '{}'...", query);
+        println!("🔍 \x1b[1;36mSearching for plugins: {}\x1b[0m\n", query);
 
-        match self.registry_manager.search_all(query) {
-            Ok(results) => {
-                if results.is_empty() {
-                    println!("No plugins found matching '{}'.", query);
-                } else {
-                    println!("Found {} plugin(s):", results.len());
-                    for entry in results.iter().take(10) {
-                        println!(
-                            "  • \x1b[1;37m{}\x1b[0m v{} - {}",
-                            entry.info.name, entry.info.version, entry.info.description
-                        );
-                        if let Some(source) = &entry.info.source {
-                            match source {
-                                PluginSource::CratesIo { name, version } => {
-                                    println!("    📦 crates.io: {} v{}", name, version);
-                                }
-                                PluginSource::Git { url, .. } => {
-                                    println!("    🔗 Git: {}", url);
-                                }
-                                PluginSource::Local { path } => {
-                                    println!("    📁 Local: {}", path.display());
-                                }
-                            }
-                        }
-                        println!("    📊 Downloads: {}", entry.downloads);
-                    }
-                    if results.len() > 10 {
-                        println!("  ... and {} more", results.len() - 10);
-                    }
-                }
-            }
-            Err(e) => {
-                println!("Failed to search plugins: {}", e);
-                println!("You can still install plugins directly if you know their name:");
-            }
+        let results = self.registry_manager.search_all(query)?;
+
+        if results.is_empty() {
+            println!("No plugins found matching '{}'.", query);
+            return Ok(());
         }
 
-        println!("\nTo install a plugin, use: wasmrun plugin install <plugin-name>");
-        Ok(())
-    }
+        println!("Found {} plugin(s):\n", results.len());
 
-    // TODO: Plugin validation
-    #[allow(dead_code)]
-    pub fn validate(&mut self) -> Result<()> {
-        println!("Validating plugin installations...");
+        for (index, result) in results.iter().enumerate() {
+            let status = if self.manager.get_plugin_by_name(&result.info.name).is_some() {
+                "\x1b[1;32m[Built-in]\x1b[0m"
+            } else if self
+                .registry_manager
+                .local_registry()
+                .is_installed(&result.info.name)
+            {
+                "\x1b[1;33m[Installed]\x1b[0m"
+            } else {
+                "\x1b[1;37m[Available]\x1b[0m"
+            };
 
-        let missing = self
-            .registry_manager
-            .local_registry_mut()
-            .validate_installations()?;
+            println!(
+                "{}. \x1b[1;37m{}\x1b[0m v{} {}",
+                index + 1,
+                result.info.name,
+                result.info.version,
+                status
+            );
+            println!("   {}", result.info.description);
 
-        if missing.is_empty() {
-            println!("✅ All plugins are properly installed.");
-        } else {
-            println!("⚠️  Found {} missing plugin(s):", missing.len());
-            for plugin_name in &missing {
-                println!("  • {}", plugin_name);
+            if !result.info.extensions.is_empty() {
+                println!("   Extensions: {}", result.info.extensions.join(", "));
             }
-            println!("These plugins have been removed from the registry.");
+
+            println!("   Downloads: {}", result.downloads);
+            println!();
         }
 
-        Ok(())
-    }
-
-    // TODO: Plugin statistics
-    #[allow(dead_code)]
-    pub fn stats(&self) -> Result<()> {
-        let stats = self.registry_manager.local_registry().get_stats();
         let builtin_count = self.manager.list_plugins().len();
+        let stats = self.registry_manager.local_registry().get_stats();
 
         println!("📊 \x1b[1;36mPlugin Statistics:\x1b[0m");
         println!("  Built-in plugins: {}", builtin_count);
@@ -414,34 +429,6 @@ impl PluginCommands {
         }
     }
 
-    #[allow(dead_code)]
-    fn wrap_text(&self, text: &str, width: usize) -> Vec<String> {
-        let mut lines = Vec::new();
-        let mut current_line = String::new();
-
-        for word in text.split_whitespace() {
-            if current_line.len() + word.len() + 1 > width && !current_line.is_empty() {
-                lines.push(current_line.clone());
-                current_line.clear();
-            }
-
-            if !current_line.is_empty() {
-                current_line.push(' ');
-            }
-            current_line.push_str(word);
-        }
-
-        if !current_line.is_empty() {
-            lines.push(current_line);
-        }
-
-        if lines.is_empty() {
-            lines.push(String::new());
-        }
-
-        lines
-    }
-
     fn print_plugin_info(&self, plugin_info: &PluginInfo) -> Result<()> {
         println!("\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m");
         println!(
@@ -477,4 +464,98 @@ impl PluginCommands {
         );
         Ok(())
     }
+}
+
+// Plugin status
+
+#[derive(Debug)]
+enum PluginStatus {
+    Ready,        // Plugin is properly installed and ready
+    NotInstalled, // Plugin directory missing or installation failed
+    AccessError,  // Cannot access plugin directory
+}
+
+fn check_plugin_status(plugin_dir: &std::path::Path) -> PluginStatus {
+    // For external plugins, verify they're properly installed
+    // Assumption: cargo install creates .crates.toml/.crates2.json on success
+    let crates_toml = plugin_dir.join(".crates.toml");
+    let crates2_json = plugin_dir.join(".crates2.json");
+
+    if crates_toml.exists() || crates2_json.exists() {
+        return PluginStatus::Ready;
+    }
+
+    // Check for any plugin artifacts as fallback
+    let search_paths = vec![
+        plugin_dir.join("bin"),
+        plugin_dir.to_path_buf(),
+        plugin_dir.join("target").join("release"),
+        plugin_dir.join("src"),
+    ];
+
+    for search_path in search_paths {
+        if !search_path.exists() {
+            continue;
+        }
+
+        match std::fs::read_dir(&search_path) {
+            Ok(entries) => {
+                let has_content = entries.filter_map(|entry| entry.ok()).any(|entry| {
+                    let path = entry.path();
+                    if path.is_file() {
+                        is_executable_file(&path)
+                            || is_library_file(&path)
+                            || path.extension().map_or(false, |ext| {
+                                let ext_str = ext.to_string_lossy().to_lowercase();
+                                ext_str == "rs" || ext_str == "toml" || ext_str == "md"
+                            })
+                    } else {
+                        false
+                    }
+                });
+
+                if has_content {
+                    return PluginStatus::Ready;
+                }
+            }
+            Err(_) => return PluginStatus::AccessError,
+        }
+    }
+
+    PluginStatus::NotInstalled
+}
+
+fn is_library_file(path: &std::path::Path) -> bool {
+    if let Some(extension) = path.extension() {
+        let ext_str = extension.to_string_lossy().to_lowercase();
+        ext_str == "so" || ext_str == "dll" || ext_str == "dylib"
+    } else {
+        false
+    }
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let permissions = metadata.permissions();
+        permissions.mode() & 0o111 != 0
+    } else {
+        false
+    }
+}
+
+#[cfg(windows)]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    if let Some(extension) = path.extension() {
+        let ext = extension.to_string_lossy().to_lowercase();
+        ext == "exe" || ext == "bat" || ext == "cmd"
+    } else {
+        false
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn is_executable_file(_path: &std::path::Path) -> bool {
+    false
 }

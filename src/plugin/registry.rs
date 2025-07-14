@@ -5,6 +5,7 @@ use crate::plugin::config::{ExternalPluginEntry, WasmrunConfig};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryEntry {
@@ -25,17 +26,6 @@ pub struct RegistryMetadata {
     pub categories: Vec<String>,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct PluginStats {
-    pub total_builtin: usize,
-    pub total_external: usize,
-    pub enabled_external: usize,
-    pub disabled_external: usize,
-    pub supported_languages: Vec<String>,
-}
-
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ExternalPluginStats {
     pub total_installed: usize,
@@ -52,11 +42,6 @@ impl LocalPluginRegistry {
     pub fn load() -> Result<Self> {
         let config = WasmrunConfig::load_or_default()?;
         Ok(Self { config })
-    }
-
-    #[allow(dead_code)]
-    pub fn save(&self) -> Result<()> {
-        self.config.save()
     }
 
     pub fn add_plugin(
@@ -96,12 +81,6 @@ impl LocalPluginRegistry {
         self.config.update_external_plugin_metadata(name, info)
     }
 
-    #[allow(dead_code)]
-    pub fn validate_installations(&mut self) -> Result<Vec<String>> {
-        self.config.validate_external_plugins()
-    }
-
-    #[allow(dead_code)]
     pub fn get_stats(&self) -> ExternalPluginStats {
         let (total_installed, enabled_count, disabled_count, supported_languages) =
             self.config.get_external_plugin_stats();
@@ -113,28 +92,13 @@ impl LocalPluginRegistry {
             supported_languages,
         }
     }
-
-    #[allow(dead_code)]
-    pub fn get_external_stats(&self) -> (usize, usize, usize, Vec<String>) {
-        self.config.get_external_plugin_stats()
-    }
-
-    #[allow(dead_code)]
-    pub fn config_mut(&mut self) -> &mut WasmrunConfig {
-        &mut self.config
-    }
-
-    #[allow(dead_code)]
-    pub fn config(&self) -> &WasmrunConfig {
-        &self.config
-    }
 }
 
 pub struct RegistryManager {
     local_registry: LocalPluginRegistry,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Use when remote registry caching is implemented
     remote_cache: HashMap<String, RegistryEntry>,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Use when remote registry caching is implemented
     cache_updated_at: Option<std::time::SystemTime>,
 }
 
@@ -193,7 +157,7 @@ impl RegistryManager {
             }
         }
 
-        // TODO: Search external registries
+        // TODO: Search external registries when implemented
         let external_results = self.search_external_registries(&query_lower)?;
         results.extend(external_results);
 
@@ -227,84 +191,6 @@ impl RegistryManager {
             PythonPlugin::new().info().clone(),
         ]
     }
-
-    // TODO: Future comprehensive plugin discovery
-    #[allow(dead_code)]
-    pub fn find_plugin(&self, name: &str) -> Option<PluginInfo> {
-        for plugin in self.get_builtin_plugins() {
-            if plugin.name == name {
-                return Some(plugin);
-            }
-        }
-
-        if let Some(entry) = self.local_registry.get_installed_plugin(name) {
-            return Some(entry.info.clone());
-        }
-
-        None
-    }
-
-    #[allow(dead_code)]
-    pub fn plugin_exists(&self, name: &str) -> bool {
-        self.find_plugin(name).is_some()
-    }
-
-    #[allow(dead_code)]
-    pub fn get_comprehensive_stats(&self) -> PluginStats {
-        let builtin_plugins = self.get_builtin_plugins();
-        let (total_external, enabled_external, disabled_external, external_langs) =
-            self.local_registry.get_external_stats();
-
-        let mut all_languages = Vec::new();
-
-        for plugin in &builtin_plugins {
-            for ext in &plugin.extensions {
-                if !all_languages.contains(ext) {
-                    all_languages.push(ext.clone());
-                }
-            }
-        }
-
-        for lang in external_langs {
-            if !all_languages.contains(&lang) {
-                all_languages.push(lang);
-            }
-        }
-
-        all_languages.sort();
-
-        PluginStats {
-            total_builtin: builtin_plugins.len(),
-            total_external,
-            enabled_external,
-            disabled_external,
-            supported_languages: all_languages,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn list_all_plugins(&self) -> (Vec<PluginInfo>, Vec<&PluginInfo>) {
-        let builtin_plugins = self.get_builtin_plugins();
-        let external_plugins = self.local_registry.get_installed_plugins();
-
-        (builtin_plugins, external_plugins)
-    }
-
-    #[allow(dead_code)]
-    pub fn is_builtin_plugin(&self, name: &str) -> bool {
-        self.get_builtin_plugins().iter().any(|p| p.name == name)
-    }
-
-    #[allow(dead_code)]
-    pub fn get_plugin_type(&self, name: &str) -> Option<PluginType> {
-        if self.is_builtin_plugin(name) {
-            Some(PluginType::Builtin)
-        } else if self.local_registry.is_installed(name) {
-            Some(PluginType::External)
-        } else {
-            None
-        }
-    }
 }
 
 impl Default for RegistryManager {
@@ -313,48 +199,305 @@ impl Default for RegistryManager {
     }
 }
 
-// TODO: Modify this to use Cargo.toml for package.metadata.wasm-plugin
+// Plugin metadata detection
+
 pub fn detect_plugin_metadata(
     plugin_dir: &std::path::Path,
     plugin_name: &str,
     source: &PluginSource,
 ) -> Result<PluginInfo> {
+    // Try plugin.toml first (for Git/local installs)
     let config_path = plugin_dir.join("plugin.toml");
-
     if config_path.exists() {
-        let config_content = std::fs::read_to_string(&config_path)
-            .map_err(|e| WasmrunError::from(format!("Failed to read plugin config: {}", e)))?;
+        return detect_from_plugin_toml(&config_path, plugin_name, source);
+    }
 
-        let config: PluginConfig = toml::from_str(&config_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to parse plugin config: {}", e)))?;
+    // For crates.io plugins, fetch metadata from API
+    if let PluginSource::CratesIo { name, version: _ } = source {
+        if let Ok(metadata) = fetch_crates_io_metadata(name) {
+            return Ok(metadata);
+        }
+    }
 
-        Ok(PluginInfo {
-            name: config.name.unwrap_or_else(|| plugin_name.to_string()),
-            version: config.version.unwrap_or_else(|| "0.1.0".to_string()),
-            description: config
-                .description
-                .unwrap_or_else(|| "External plugin".to_string()),
-            author: config.author.unwrap_or_else(|| "Unknown".to_string()),
-            extensions: config.extensions.unwrap_or_default(),
-            entry_files: config.entry_files.unwrap_or_default(),
-            plugin_type: PluginType::External,
-            source: Some(source.clone()),
-            dependencies: config.dependencies.unwrap_or_default(),
-            capabilities: config.capabilities.unwrap_or_default(),
-        })
-    } else {
-        Ok(PluginInfo {
-            name: plugin_name.to_string(),
-            version: "0.1.0".to_string(),
-            description: "External plugin".to_string(),
-            author: "Unknown".to_string(),
-            extensions: vec![],
-            entry_files: vec![],
-            plugin_type: PluginType::External,
-            source: Some(source.clone()),
-            dependencies: vec![],
-            capabilities: PluginCapabilities::default(),
-        })
+    Ok(PluginInfo {
+        name: plugin_name.to_string(),
+        version: "0.1.0".to_string(),
+        description: "External plugin".to_string(),
+        author: "Unknown".to_string(),
+        extensions: vec![],
+        entry_files: vec![],
+        plugin_type: PluginType::External,
+        source: Some(source.clone()),
+        dependencies: vec![],
+        capabilities: PluginCapabilities::default(),
+    })
+}
+
+fn detect_from_plugin_toml(
+    config_path: &std::path::Path,
+    plugin_name: &str,
+    source: &PluginSource,
+) -> Result<PluginInfo> {
+    let config_content = std::fs::read_to_string(config_path)
+        .map_err(|e| WasmrunError::from(format!("Failed to read plugin config: {}", e)))?;
+
+    let config: PluginConfig = toml::from_str(&config_content)
+        .map_err(|e| WasmrunError::from(format!("Failed to parse plugin config: {}", e)))?;
+
+    Ok(PluginInfo {
+        name: config.name.unwrap_or_else(|| plugin_name.to_string()),
+        version: config.version.unwrap_or_else(|| "0.1.0".to_string()),
+        description: config
+            .description
+            .unwrap_or_else(|| "External plugin".to_string()),
+        author: config.author.unwrap_or_else(|| "Unknown".to_string()),
+        extensions: config.extensions.unwrap_or_default(),
+        entry_files: config.entry_files.unwrap_or_default(),
+        plugin_type: PluginType::External,
+        source: Some(source.clone()),
+        dependencies: config.dependencies.unwrap_or_default(),
+        capabilities: config.capabilities.unwrap_or_default(),
+    })
+}
+
+fn fetch_crates_io_metadata(crate_name: &str) -> Result<PluginInfo> {
+    if let Ok(api_info) = fetch_from_crates_io_api(crate_name) {
+        return Ok(api_info);
+    }
+
+    if let Ok(show_info) = fetch_from_cargo_show(crate_name) {
+        return Ok(show_info);
+    }
+
+    fetch_from_cargo_search(crate_name)
+}
+
+fn fetch_from_cargo_show(crate_name: &str) -> Result<PluginInfo> {
+    let output = Command::new("cargo").args(["show", crate_name]).output();
+
+    if let Ok(output) = output {
+        if output.status.success() {
+            let show_output = String::from_utf8_lossy(&output.stdout);
+            return parse_cargo_show_output(crate_name, &show_output);
+        }
+    }
+
+    Err(WasmrunError::from("cargo show failed"))
+}
+
+fn fetch_from_cargo_search(crate_name: &str) -> Result<PluginInfo> {
+    let output = Command::new("cargo")
+        .args(["search", crate_name, "--limit", "1"])
+        .output()
+        .map_err(|e| WasmrunError::from(format!("Failed to search crates.io: {}", e)))?;
+
+    if !output.status.success() {
+        return Err(WasmrunError::from("Failed to fetch crate metadata"));
+    }
+
+    let search_output = String::from_utf8_lossy(&output.stdout);
+
+    for line in search_output.lines() {
+        if let Some(parts) = line.split_once(" = ") {
+            let name = parts.0.trim();
+            if name == crate_name {
+                let rest = parts.1;
+                if let Some((version_part, description_part)) = rest.split_once("    # ") {
+                    let version = version_part.trim_matches('"').trim();
+                    let description = description_part.trim();
+
+                    return Ok(PluginInfo {
+                        name: crate_name.to_string(),
+                        version: version.to_string(),
+                        description: description.to_string(),
+                        author: "Unknown (from cargo search)".to_string(),
+                        extensions: guess_extensions_from_name(crate_name),
+                        entry_files: guess_entry_files_from_name(crate_name),
+                        plugin_type: PluginType::External,
+                        source: Some(PluginSource::CratesIo {
+                            name: crate_name.to_string(),
+                            version: "*".to_string(),
+                        }),
+                        dependencies: vec![],
+                        capabilities: guess_capabilities_from_name(crate_name),
+                    });
+                }
+            }
+        }
+    }
+
+    Err(WasmrunError::from("Crate not found in search results"))
+}
+
+fn parse_cargo_show_output(crate_name: &str, output: &str) -> Result<PluginInfo> {
+    let mut version = "0.1.0".to_string();
+    let mut description = "External plugin".to_string();
+    let mut author = "Unknown".to_string();
+
+    for line in output.lines() {
+        let line = line.trim();
+        if line.starts_with("version:") {
+            version = line.split(':').nth(1).unwrap_or("0.1.0").trim().to_string();
+        } else if line.starts_with("description:") {
+            description = line
+                .split(':')
+                .nth(1)
+                .unwrap_or("External plugin")
+                .trim()
+                .to_string();
+        } else if line.starts_with("authors:") {
+            author = line
+                .split(':')
+                .nth(1)
+                .unwrap_or("Unknown")
+                .trim()
+                .to_string();
+            author = author.trim_matches(&['[', ']', '"', ' '][..]).to_string();
+        }
+    }
+
+    Ok(PluginInfo {
+        name: crate_name.to_string(),
+        version,
+        description,
+        author,
+        extensions: guess_extensions_from_name(crate_name),
+        entry_files: guess_entry_files_from_name(crate_name),
+        plugin_type: PluginType::External,
+        source: Some(PluginSource::CratesIo {
+            name: crate_name.to_string(),
+            version: "*".to_string(),
+        }),
+        dependencies: vec![],
+        capabilities: guess_capabilities_from_name(crate_name),
+    })
+}
+
+fn fetch_from_crates_io_api(crate_name: &str) -> Result<PluginInfo> {
+    let curl_result = Command::new("curl")
+        .args([
+            "-s",
+            "--max-time",
+            "10",
+            "--user-agent",
+            "wasmrun/0.10.4",
+            &format!("https://crates.io/api/v1/crates/{}", crate_name),
+        ])
+        .output();
+
+    if let Ok(output) = curl_result {
+        if output.status.success() {
+            let json_str = String::from_utf8_lossy(&output.stdout);
+            if json_str.len() > 50 && json_str.contains("\"crate\"") {
+                return parse_crates_io_json(crate_name, &json_str);
+            }
+        }
+    }
+
+    Err(WasmrunError::from("API call failed"))
+}
+
+fn parse_crates_io_json(crate_name: &str, json_str: &str) -> Result<PluginInfo> {
+    let mut version = "0.1.0".to_string();
+    let mut description = "External plugin".to_string();
+    let mut author = "Unknown".to_string();
+
+    // Extract version
+    if let Some(start) = json_str.find("\"max_version\":\"") {
+        let start = start + 15;
+        if let Some(end) = json_str[start..].find('"') {
+            version = json_str[start..start + end].to_string();
+        }
+    }
+
+    // Extract description
+    if let Some(start) = json_str.find("\"description\":\"") {
+        let start = start + 15;
+        if let Some(end) = json_str[start..].find('"') {
+            description = json_str[start..start + end].to_string();
+        }
+    }
+
+    // Extract author
+    if let Some(published_start) = json_str.find("\"published_by\":{") {
+        let published_section = &json_str[published_start..];
+
+        if let Some(name_start) = published_section.find("\"name\":\"") {
+            let name_start = published_start + name_start + 8;
+            if let Some(end) = json_str[name_start..].find('"') {
+                author = json_str[name_start..name_start + end].to_string();
+            }
+        }
+        else if let Some(login_start) = published_section.find("\"login\":\"") {
+            let login_start = published_start + login_start + 9;
+            if let Some(end) = json_str[login_start..].find('"') {
+                author = json_str[login_start..login_start + end].to_string();
+            }
+        }
+    }
+
+    if author == "Unknown" {
+        if let Some(start) = json_str.find("\"authors\":[\"") {
+            let start = start + 12;
+            if let Some(end) = json_str[start..].find('"') {
+                author = json_str[start..start + end].to_string();
+            }
+        }
+    }
+
+    Ok(PluginInfo {
+        name: crate_name.to_string(),
+        version,
+        description,
+        author,
+        extensions: guess_extensions_from_name(crate_name),
+        entry_files: guess_entry_files_from_name(crate_name),
+        plugin_type: PluginType::External,
+        source: Some(PluginSource::CratesIo {
+            name: crate_name.to_string(),
+            version: "*".to_string(),
+        }),
+        dependencies: vec![],
+        capabilities: guess_capabilities_from_name(crate_name),
+    })
+}
+
+fn guess_extensions_from_name(crate_name: &str) -> Vec<String> {
+    match crate_name {
+        name if name.contains("rust") || name.contains("rs") => vec!["rs".to_string()],
+        name if name.contains("go") => vec!["go".to_string()],
+        name if name.contains("c") || name.contains("cpp") => {
+            vec!["c".to_string(), "cpp".to_string()]
+        }
+        name if name.contains("python") || name.contains("py") => vec!["py".to_string()],
+        name if name.contains("js") || name.contains("typescript") => {
+            vec!["js".to_string(), "ts".to_string()]
+        }
+        _ => vec![],
+    }
+}
+
+fn guess_entry_files_from_name(crate_name: &str) -> Vec<String> {
+    match crate_name {
+        name if name.contains("rust") || name.contains("rs") => {
+            vec!["main.rs".to_string(), "lib.rs".to_string()]
+        }
+        name if name.contains("go") => vec!["main.go".to_string()],
+        name if name.contains("c") || name.contains("cpp") => {
+            vec!["main.c".to_string(), "main.cpp".to_string()]
+        }
+        name if name.contains("python") || name.contains("py") => vec!["main.py".to_string()],
+        _ => vec![],
+    }
+}
+
+fn guess_capabilities_from_name(_crate_name: &str) -> PluginCapabilities {
+    PluginCapabilities {
+        compile_wasm: true,
+        compile_webapp: false,
+        live_reload: true,
+        optimization: true,
+        custom_targets: vec!["wasm".to_string()],
     }
 }
 

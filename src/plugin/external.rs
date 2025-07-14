@@ -52,6 +52,15 @@ impl PluginInstaller {
             )));
         }
 
+        // Validate plugin installation
+        if !Self::validate_plugin_installation(name, &plugin_dir)? {
+            std::fs::remove_dir_all(&plugin_dir).ok();
+            return Err(WasmrunError::from(format!(
+                "Crate '{}' does not appear to be a wasmrun plugin",
+                name
+            )));
+        }
+
         println!("Successfully installed plugin: {}", name);
         Ok(plugin_dir)
     }
@@ -157,6 +166,71 @@ impl PluginInstaller {
         Ok(plugin_dir)
     }
 
+    fn validate_plugin_installation(name: &str, plugin_dir: &Path) -> Result<bool> {
+        // Check for cargo install artifacts
+        let crates_toml = plugin_dir.join(".crates.toml");
+        let crates2_json = plugin_dir.join(".crates2.json");
+
+        if crates_toml.exists() || crates2_json.exists() {
+            return Ok(true);
+        }
+
+        // Validate by name/description for plugin-like crates
+        let plugin_indicators = ["wasmrun", "wasm-run", "plugin", "compiler", "builder"];
+
+        let name_lower = name.to_lowercase();
+        if plugin_indicators
+            .iter()
+            .any(|indicator| name_lower.contains(indicator))
+        {
+            return Ok(true);
+        }
+
+        // Check description via cargo search
+        if let Ok(description) = Self::fetch_crate_description(name) {
+            let desc_lower = description.to_lowercase();
+            let desc_suggests_plugin = plugin_indicators
+                .iter()
+                .any(|indicator| desc_lower.contains(indicator))
+                || desc_lower.contains("wasmrun")
+                || desc_lower.contains("webassembly")
+                || desc_lower.contains("wasm");
+
+            if desc_suggests_plugin {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn fetch_crate_description(name: &str) -> Result<String> {
+        let output = Command::new("cargo")
+            .args(["search", name, "--limit", "1"])
+            .output()
+            .map_err(|e| WasmrunError::from(format!("Failed to search crates.io: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(WasmrunError::from("Failed to fetch crate metadata"));
+        }
+
+        let search_output = String::from_utf8_lossy(&output.stdout);
+
+        for line in search_output.lines() {
+            if let Some(parts) = line.split_once(" = ") {
+                let crate_name = parts.0.trim();
+                if crate_name == name {
+                    let rest = parts.1;
+                    if let Some((_, description_part)) = rest.split_once("    # ") {
+                        return Ok(description_part.trim().to_string());
+                    }
+                }
+            }
+        }
+
+        Err(WasmrunError::from("Crate not found in search results"))
+    }
+
     fn copy_plugin_artifacts(source_dir: &Path, dest_dir: &Path) -> Result<()> {
         let target_dir = source_dir.join("target").join("release");
 
@@ -251,42 +325,11 @@ impl PluginInstaller {
     }
 }
 
-// TODO: Dynamic plugin loading
+// External plugin wrapper for dynamic loading
+// TODO: Implement dynamic loading
 #[allow(dead_code)]
-pub struct ExternalPluginLoader;
-
-#[allow(dead_code)]
-impl ExternalPluginLoader {
-    pub fn load(entry: &ExternalPluginEntry) -> Result<Box<dyn Plugin>> {
-        if !entry.enabled {
-            return Err(WasmrunError::from(format!(
-                "Plugin '{}' is disabled",
-                entry.info.name
-            )));
-        }
-
-        let install_dir = WasmrunConfig::plugin_dir()?;
-        let plugin_dir = install_dir.join(&entry.install_path);
-
-        if !plugin_dir.exists() {
-            return Err(WasmrunError::from(format!(
-                "Plugin '{}' is not installed. Run 'wasmrun plugin install {}'",
-                entry.info.name, entry.info.name
-            )));
-        }
-
-        let plugin = ExternalPluginWrapper::new(plugin_dir, entry.clone())?;
-        Ok(Box::new(plugin))
-    }
-}
-
-// TODO: Dynamic plugin wrapper
 pub struct ExternalPluginWrapper {
     info: PluginInfo,
-    #[allow(dead_code)]
-    entry: ExternalPluginEntry,
-    #[allow(dead_code)]
-    plugin_dir: PathBuf,
     plugin_name: String,
 }
 
@@ -296,12 +339,7 @@ impl ExternalPluginWrapper {
         let info = Self::load_plugin_info(&plugin_dir, &entry)?;
         let plugin_name = entry.info.name.clone();
 
-        Ok(Self {
-            info,
-            entry,
-            plugin_dir,
-            plugin_name,
-        })
+        Ok(Self { info, plugin_name })
     }
 
     fn load_plugin_info(plugin_dir: &Path, entry: &ExternalPluginEntry) -> Result<PluginInfo> {
@@ -321,7 +359,7 @@ impl ExternalPluginWrapper {
             .map_err(|e| WasmrunError::from(format!("Failed to read plugin metadata: {}", e)))?;
 
         #[derive(Deserialize)]
-        #[allow(dead_code)]
+        #[allow(dead_code)] // TODO: Use when plugin.toml metadata is loaded
         struct PluginMetadata {
             name: String,
             version: String,
@@ -414,73 +452,32 @@ impl WasmBuilder for ExternalPluginBuilder {
     }
 }
 
-// TODO: Future plugin utilities - These will be used when dynamic loading is implemented
+// Plugin loader - placeholder for future dynamic loading implementation
+// TODO: Implement actual plugin loading via dynamic libraries or subprocess execution
 #[allow(dead_code)]
-pub fn install_plugin(source: PluginSource) -> Result<Box<dyn Plugin>> {
-    let plugin_dir = PluginInstaller::install(source.clone())?;
-
-    let plugin_name = plugin_dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-
-    let entry = ExternalPluginEntry {
-        info: PluginInfo {
-            name: plugin_name,
-            version: "1.0.0".to_string(),
-            description: "External plugin".to_string(),
-            author: "Unknown".to_string(),
-            extensions: vec![],
-            entry_files: vec![],
-            plugin_type: PluginType::External,
-            source: Some(source),
-            dependencies: vec![],
-            capabilities: PluginCapabilities::default(),
-        },
-        source: PluginSource::Local {
-            path: plugin_dir.clone(),
-        },
-        installed_at: chrono::Utc::now().to_rfc3339(),
-        enabled: true,
-        install_path: plugin_dir
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string(),
-        executable_path: None,
-    };
-
-    ExternalPluginLoader::load(&entry)
-}
+pub struct ExternalPluginLoader;
 
 #[allow(dead_code)]
-pub fn load_external_plugin(entry: &ExternalPluginEntry) -> Result<Box<dyn Plugin>> {
-    ExternalPluginLoader::load(entry)
-}
+impl ExternalPluginLoader {
+    pub fn load(entry: &ExternalPluginEntry) -> Result<Box<dyn Plugin>> {
+        if !entry.enabled {
+            return Err(WasmrunError::from(format!(
+                "Plugin '{}' is disabled",
+                entry.info.name
+            )));
+        }
 
-#[allow(dead_code)]
-pub fn validate_plugin(plugin_dir: &PathBuf) -> Result<()> {
-    if !plugin_dir.exists() {
-        return Err(WasmrunError::from("Plugin directory does not exist"));
+        let install_dir = WasmrunConfig::plugin_dir()?;
+        let plugin_dir = install_dir.join(&entry.install_path);
+
+        if !plugin_dir.exists() {
+            return Err(WasmrunError::from(format!(
+                "Plugin '{}' is not installed. Run 'wasmrun plugin install {}'",
+                entry.info.name, entry.info.name
+            )));
+        }
+
+        let plugin = ExternalPluginWrapper::new(plugin_dir, entry.clone())?;
+        Ok(Box::new(plugin))
     }
-
-    let has_executable = std::fs::read_dir(plugin_dir)?
-        .filter_map(|entry| entry.ok())
-        .any(|entry| {
-            let path = entry.path();
-            PluginInstaller::is_executable(&path)
-                || path.extension().map_or(false, |ext| {
-                    let ext_str = ext.to_string_lossy().to_lowercase();
-                    ext_str == "so" || ext_str == "dll" || ext_str == "dylib"
-                })
-        });
-
-    if !has_executable {
-        return Err(WasmrunError::from(
-            "No executable or library files found in plugin directory",
-        ));
-    }
-
-    Ok(())
 }
