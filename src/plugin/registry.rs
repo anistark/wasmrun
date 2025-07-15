@@ -94,11 +94,12 @@ impl LocalPluginRegistry {
     }
 }
 
+#[allow(dead_code)]
 pub struct RegistryManager {
     local_registry: LocalPluginRegistry,
-    #[allow(dead_code)] // TODO: Use when remote registry caching is implemented
+    // TODO: Use when remote registry caching is implemented
     remote_cache: HashMap<String, RegistryEntry>,
-    #[allow(dead_code)] // TODO: Use when remote registry caching is implemented
+    // TODO: Use when remote registry caching is implemented
     cache_updated_at: Option<std::time::SystemTime>,
 }
 
@@ -200,7 +201,7 @@ impl Default for RegistryManager {
 }
 
 // Plugin metadata detection
-
+#[allow(dead_code)]
 pub fn detect_plugin_metadata(
     plugin_dir: &std::path::Path,
     plugin_name: &str,
@@ -427,8 +428,7 @@ fn parse_crates_io_json(crate_name: &str, json_str: &str) -> Result<PluginInfo> 
             if let Some(end) = json_str[name_start..].find('"') {
                 author = json_str[name_start..name_start + end].to_string();
             }
-        }
-        else if let Some(login_start) = published_section.find("\"login\":\"") {
+        } else if let Some(login_start) = published_section.find("\"login\":\"") {
             let login_start = published_start + login_start + 9;
             if let Some(end) = json_str[login_start..].find('"') {
                 author = json_str[login_start..login_start + end].to_string();

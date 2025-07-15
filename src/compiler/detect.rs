@@ -230,8 +230,7 @@ pub fn print_system_info() {
     let os = detect_operating_system();
 
     println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  🖥️  \x1b[1;36mSystem Information\x1b[0m");
-    println!();
+    println!("  🖥️  \x1b[1;36mSystem Information\x1b[0m\n");
     println!(
         "  \x1b[1;34mOperating System:\x1b[0m \x1b[1;33m{:?}\x1b[0m",
         os

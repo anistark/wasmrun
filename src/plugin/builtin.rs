@@ -2,21 +2,17 @@
 
 use crate::compiler::builder::WasmBuilder;
 use crate::error::Result;
-use crate::plugin::languages::{
-    asc_plugin::AscBuilder, c_plugin::CBuilder, 
-    python_plugin::PythonBuilder,
-};
-use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginRegistry, PluginType};
-use std::sync::Arc;
+use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
 
 /// Wrapper for built-in plugins
 pub struct BuiltinPlugin {
     info: PluginInfo,
-    builder: Arc<dyn WasmBuilder>,
+    #[allow(dead_code)]
+    builder: Box<dyn WasmBuilder>,
 }
 
 impl BuiltinPlugin {
-    /// Create a new built-in plugin
+    /// Create a new built-in plugin. make separate helper?
     pub fn new(
         name: String,
         version: String,
@@ -24,7 +20,7 @@ impl BuiltinPlugin {
         extensions: Vec<String>,
         entry_files: Vec<String>,
         capabilities: PluginCapabilities,
-        builder: Arc<dyn WasmBuilder>,
+        builder: Box<dyn WasmBuilder>,
     ) -> Self {
         let info = PluginInfo {
             name,
@@ -71,61 +67,81 @@ impl Plugin for BuiltinPlugin {
     }
 
     fn get_builder(&self) -> Box<dyn WasmBuilder> {
-        Box::new(BuiltinBuilderWrapper {
-            builder: Arc::clone(&self.builder),
-        })
+        match self.info.name.as_str() {
+            "c" => {
+                use crate::plugin::languages::c_plugin::CPlugin;
+                Box::new(CPlugin::new())
+            }
+            "asc" => {
+                use crate::plugin::languages::asc_plugin::AscPlugin;
+                Box::new(AscPlugin::new())
+            }
+            "python" => {
+                use crate::plugin::languages::python_plugin::PythonPlugin;
+                Box::new(PythonPlugin::new())
+            }
+            _ => Box::new(UnknownBuilder),
+        }
     }
 }
 
-struct BuiltinBuilderWrapper {
-    builder: Arc<dyn WasmBuilder>,
-}
+struct UnknownBuilder;
 
-impl WasmBuilder for BuiltinBuilderWrapper {
+impl WasmBuilder for UnknownBuilder {
     fn language_name(&self) -> &str {
-        self.builder.language_name()
+        "Unknown"
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
-        self.builder.entry_file_candidates()
+        &[]
     }
 
     fn supported_extensions(&self) -> &[&str] {
-        self.builder.supported_extensions()
+        &[]
     }
 
     fn check_dependencies(&self) -> Vec<String> {
-        self.builder.check_dependencies()
+        vec!["Language not detected or supported".to_string()]
     }
 
     fn build(
         &self,
-        config: &crate::compiler::builder::BuildConfig,
+        _config: &crate::compiler::builder::BuildConfig,
     ) -> crate::error::CompilationResult<crate::compiler::builder::BuildResult> {
-        self.builder.build(config)
+        Err(crate::error::CompilationError::UnsupportedLanguage {
+            language: "Unknown".to_string(),
+        })
     }
 
-    fn validate_project(&self, project_path: &str) -> crate::error::CompilationResult<()> {
-        self.builder.validate_project(project_path)
+    fn validate_project(&self, _project_path: &str) -> crate::error::CompilationResult<()> {
+        Err(crate::error::CompilationError::UnsupportedLanguage {
+            language: "Unknown".to_string(),
+        })
     }
 }
 
-/// Load all built-in plugins into the registry
-pub fn load_all_builtin_plugins(registry: &mut PluginRegistry) -> Result<()> {
+pub fn get_builtin_plugins() -> Vec<Box<dyn Plugin>> {
+    let mut plugins: Vec<Box<dyn Plugin>> = Vec::new();
+
     // C plugin
     let c_plugin = create_c_plugin();
-    registry.register_plugin(Box::new(c_plugin))?;
+    plugins.push(Box::new(c_plugin));
 
-    // Asc plugin
+    // AssemblyScript plugin
     let asc_plugin = create_asc_plugin();
-    registry.register_plugin(Box::new(asc_plugin))?;
+    plugins.push(Box::new(asc_plugin));
 
-    println!("Loaded {} built-in plugins", 3);
-    Ok(())
+    // Python plugin
+    let python_plugin = create_python_plugin();
+    plugins.push(Box::new(python_plugin));
+
+    plugins
 }
 
 /// Create the C built-in plugin
 fn create_c_plugin() -> BuiltinPlugin {
+    use crate::plugin::languages::c_plugin::CPlugin;
+
     let capabilities = PluginCapabilities {
         compile_wasm: true,
         compile_webapp: false,
@@ -144,14 +160,25 @@ fn create_c_plugin() -> BuiltinPlugin {
             "h".to_string(),
             "hpp".to_string(),
         ],
-        vec!["main.c".to_string(), "Makefile".to_string()],
+        vec![
+            "main.c".to_string(),
+            "src/main.c".to_string(),
+            "app.c".to_string(),
+            "index.c".to_string(),
+            "main.cpp".to_string(),
+            "src/main.cpp".to_string(),
+            "app.cpp".to_string(),
+            "index.cpp".to_string(),
+        ],
         capabilities,
-        Arc::new(CBuilder::new()),
+        Box::new(CPlugin::new()),
     )
 }
 
-/// Create the Asc built-in plugin
+/// Create the AssemblyScript built-in plugin
 fn create_asc_plugin() -> BuiltinPlugin {
+    use crate::plugin::languages::asc_plugin::AscPlugin;
+
     let capabilities = PluginCapabilities {
         compile_wasm: true,
         compile_webapp: false,
@@ -163,37 +190,50 @@ fn create_asc_plugin() -> BuiltinPlugin {
     BuiltinPlugin::new(
         "asc".to_string(),
         env!("CARGO_PKG_VERSION").to_string(),
-        "Asc WebAssembly compiler".to_string(),
-        vec!["ts".to_string()],
-        vec!["package.json".to_string(), "asconfig.json".to_string()],
+        "AssemblyScript WebAssembly compiler".to_string(),
+        vec!["ts".to_string(), "as".to_string()],
+        vec![
+            "assembly/index.ts".to_string(),
+            "src/index.ts".to_string(),
+            "index.ts".to_string(),
+            "main.ts".to_string(),
+        ],
         capabilities,
-        Arc::new(AscBuilder::new()),
+        Box::new(AscPlugin::new()),
     )
 }
 
-/// Get information about all built-in plugins
-#[allow(dead_code)]
-pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
-    vec![
-        create_c_plugin().info().clone(),
-        create_asc_plugin().info().clone(),
-        create_python_plugin().info().clone(),
-    ]
+/// Create the Python built-in plugin
+fn create_python_plugin() -> BuiltinPlugin {
+    use crate::plugin::languages::python_plugin::PythonPlugin;
+
+    let capabilities = PluginCapabilities {
+        compile_wasm: true,
+        compile_webapp: false,
+        live_reload: false,
+        optimization: false,
+        custom_targets: vec![],
+    };
+
+    BuiltinPlugin::new(
+        "python".to_string(),
+        env!("CARGO_PKG_VERSION").to_string(),
+        "Python WebAssembly runtime using Pyodide".to_string(),
+        vec!["py".to_string()],
+        vec![
+            "main.py".to_string(),
+            "app.py".to_string(),
+            "index.py".to_string(),
+            "src/main.py".to_string(),
+        ],
+        capabilities,
+        Box::new(PythonPlugin::new()),
+    )
 }
 
-/// Check if a plugin name is a built-in plugin
 #[allow(dead_code)]
-pub fn is_builtin_plugin(name: &str) -> bool {
-    matches!(name, "c" | "asc" | "python")
-}
-
-/// Get specific built-in plugin info by name
-#[allow(dead_code)]
-pub fn get_builtin_plugin_by_name(name: &str) -> Option<PluginInfo> {
-    match name {
-        "c" => Some(create_c_plugin().info().clone()),
-        "asc" => Some(create_asc_plugin().info().clone()),
-        "python" => Some(create_python_plugin().info().clone()),
-        _ => None,
-    }
+pub fn load_all_builtin_plugins() -> Result<Vec<Box<dyn Plugin>>> {
+    let plugins = get_builtin_plugins();
+    println!("Loaded {} built-in plugins", plugins.len());
+    Ok(plugins)
 }

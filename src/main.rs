@@ -195,8 +195,6 @@ fn handle_default_command(args: &ResolvedArgs) -> Result<()> {
 
 /// Error handling with better context
 fn handle_error(error: WasmrunError) {
-    println!();
-
     eprintln!(
         "\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m"
     );
@@ -257,8 +255,6 @@ fn handle_error(error: WasmrunError) {
             "\n🔄 \x1b[1;32mThis error might be recoverable.\x1b[0m Try the suggestions above."
         );
     }
-
-    eprintln!();
 }
 
 fn wrap_text(text: &str, width: usize) -> Vec<String> {

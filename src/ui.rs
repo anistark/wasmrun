@@ -3,9 +3,8 @@ use crate::compiler::builder::OptimizationLevel;
 /// Print a success message
 pub fn print_success(title: &str, message: &str) {
     println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  ✅ \x1b[1;36m{}\x1b[0m", title);
-    println!();
-    println!("  ✅ \x1b[1;32m{}\x1b[0m", message);
+    println!("\n  ✅ \x1b[1;36m{}\x1b[0m", title);
+    println!("\n  ✅ \x1b[1;32m{}\x1b[0m", message);
     println!("\x1b[1;34m╰\x1b[0m");
 }
 
