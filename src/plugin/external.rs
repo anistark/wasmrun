@@ -780,7 +780,7 @@ fn detect_from_cargo_toml(
     let cargo: CargoToml = toml::from_str(&content)
         .map_err(|e| WasmrunError::from(format!("Failed to parse Cargo.toml: {}", e)))?;
 
-    let package = cargo.package.unwrap_or_else(|| CargoPackage {
+    let package = cargo.package.unwrap_or(CargoPackage {
         name: None,
         version: None,
         description: None,

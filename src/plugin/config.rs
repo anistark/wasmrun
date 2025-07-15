@@ -61,6 +61,13 @@ impl Default for WasmrunConfig {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum VersionCompatibility {
+    Compatible,
+    NeedsMigration,
+    Incompatible,
+}
+
 impl WasmrunConfig {
     pub fn config_path() -> Result<PathBuf> {
         if let Ok(test_path) = std::env::var("WASMRUN_CONFIG_PATH") {
@@ -208,17 +215,65 @@ impl WasmrunConfig {
         self.settings.install_dir = Some(plugin_dir);
         self.settings.cache_dir = Some(cache_dir);
 
-        match self.version.as_str() {
-            env!("CARGO_PKG_VERSION") => {}
-            _ => {
+        let current_version = env!("CARGO_PKG_VERSION");
+        match self.is_version_compatible(current_version) {
+            VersionCompatibility::Compatible => {
+                self.version = current_version.to_string();
+            }
+            VersionCompatibility::NeedsMigration => {
+                self.migrate_config(current_version)?;
+                self.version = current_version.to_string();
+            }
+            VersionCompatibility::Incompatible => {
                 return Err(WasmrunError::from(format!(
-                    "Unsupported config version: {}. Please update Wasmrun.",
-                    self.version
+                    "Config file version {} is incompatible with Wasmrun {}. Please delete ~/.wasmrun/config.toml to reset configuration.",
+                    self.version, current_version
                 )));
             }
         }
 
         Ok(self)
+    }
+
+    fn is_version_compatible(&self, current_version: &str) -> VersionCompatibility {
+        if self.version.is_empty() {
+            return VersionCompatibility::NeedsMigration;
+        }
+
+        if self.version == current_version {
+            return VersionCompatibility::Compatible;
+        }
+
+        let config_version = parse_version(&self.version);
+        let current_version_parsed = parse_version(current_version);
+
+        match (config_version, current_version_parsed) {
+            (Some((config_major, config_minor, _)), Some((current_major, current_minor, _))) => {
+                if config_major != current_major {
+                    return VersionCompatibility::Incompatible;
+                }
+
+                if config_minor <= current_minor {
+                    VersionCompatibility::NeedsMigration
+                } else {
+                    VersionCompatibility::NeedsMigration
+                }
+            }
+            _ => {
+                VersionCompatibility::NeedsMigration
+            }
+        }
+    }
+
+    fn migrate_config(&mut self, target_version: &str) -> Result<()> {
+        if std::env::var("WASMRUN_DEBUG").is_ok() {
+            eprintln!(
+                "🔄 Migrating config from version {} to {}",
+                self.version, target_version
+            );
+        }
+        
+        Ok(())
     }
 
     // External plugin management
@@ -373,4 +428,19 @@ impl WasmrunConfig {
         self.save()?;
         Ok(())
     }
+}
+
+// Helper function to parse semantic versions
+fn parse_version(version: &str) -> Option<(u32, u32, u32)> {
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() >= 3 {
+        if let (Ok(major), Ok(minor), Ok(patch)) = (
+            parts[0].parse::<u32>(),
+            parts[1].parse::<u32>(),
+            parts[2].parse::<u32>(),
+        ) {
+            return Some((major, minor, patch));
+        }
+    }
+    None
 }

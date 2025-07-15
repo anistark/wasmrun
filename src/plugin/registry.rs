@@ -1,7 +1,7 @@
 //! Plugin registry for managing built-in and external plugins
 
 use crate::error::{Result, WasmrunError};
-use crate::plugin::config::{ExternalPluginEntry, WasmrunConfig};
+use crate::plugin::config::WasmrunConfig;
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -26,15 +26,8 @@ pub struct RegistryMetadata {
     pub categories: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ExternalPluginStats {
-    pub total_installed: usize,
-    pub enabled_count: usize,
-    pub disabled_count: usize,
-    pub supported_languages: Vec<String>,
-}
-
 pub struct LocalPluginRegistry {
+    #[allow(dead_code)]
     config: WasmrunConfig,
 }
 
@@ -42,55 +35,6 @@ impl LocalPluginRegistry {
     pub fn load() -> Result<Self> {
         let config = WasmrunConfig::load_or_default()?;
         Ok(Self { config })
-    }
-
-    pub fn add_plugin(
-        &mut self,
-        name: String,
-        info: PluginInfo,
-        source: PluginSource,
-        install_path: String,
-    ) -> Result<()> {
-        self.config
-            .add_external_plugin(name, info, source, install_path)?;
-        Ok(())
-    }
-
-    pub fn remove_plugin(&mut self, name: &str) -> Result<()> {
-        self.config.remove_external_plugin(name)?;
-        Ok(())
-    }
-
-    pub fn is_installed(&self, name: &str) -> bool {
-        self.config.is_external_plugin_installed(name)
-    }
-
-    pub fn get_installed_plugin(&self, name: &str) -> Option<&ExternalPluginEntry> {
-        self.config.get_external_plugin(name)
-    }
-
-    pub fn get_installed_plugins(&self) -> Vec<&PluginInfo> {
-        self.config.get_external_plugins()
-    }
-
-    pub fn set_plugin_enabled(&mut self, name: &str, enabled: bool) -> Result<()> {
-        self.config.set_external_plugin_enabled(name, enabled)
-    }
-
-    pub fn update_plugin_metadata(&mut self, name: &str, info: PluginInfo) -> Result<()> {
-        self.config.update_external_plugin_metadata(name, info)
-    }
-
-    pub fn get_stats(&self) -> ExternalPluginStats {
-        let (total_installed, enabled_count, disabled_count, supported_languages) =
-            self.config.get_external_plugin_stats();
-
-        ExternalPluginStats {
-            total_installed,
-            enabled_count,
-            disabled_count,
-            supported_languages,
-        }
     }
 }
 
@@ -114,14 +58,6 @@ impl RegistryManager {
             remote_cache: HashMap::new(),
             cache_updated_at: None,
         }
-    }
-
-    pub fn local_registry(&self) -> &LocalPluginRegistry {
-        &self.local_registry
-    }
-
-    pub fn local_registry_mut(&mut self) -> &mut LocalPluginRegistry {
-        &mut self.local_registry
     }
 
     pub fn search_all(&self, query: &str) -> Result<Vec<RegistryEntry>> {
@@ -234,16 +170,31 @@ pub fn detect_plugin_metadata(
     })
 }
 
+#[allow(dead_code)]
 fn detect_from_plugin_toml(
     config_path: &std::path::Path,
     plugin_name: &str,
     source: &PluginSource,
 ) -> Result<PluginInfo> {
-    let config_content = std::fs::read_to_string(config_path)
-        .map_err(|e| WasmrunError::from(format!("Failed to read plugin config: {}", e)))?;
+    use toml;
 
-    let config: PluginConfig = toml::from_str(&config_content)
-        .map_err(|e| WasmrunError::from(format!("Failed to parse plugin config: {}", e)))?;
+    let content = std::fs::read_to_string(config_path)
+        .map_err(|e| WasmrunError::from(format!("Failed to read plugin.toml: {}", e)))?;
+
+    #[derive(Deserialize)]
+    struct PluginConfig {
+        name: Option<String>,
+        version: Option<String>,
+        description: Option<String>,
+        author: Option<String>,
+        extensions: Option<Vec<String>>,
+        entry_files: Option<Vec<String>>,
+        dependencies: Option<Vec<String>>,
+        capabilities: Option<PluginCapabilities>,
+    }
+
+    let config: PluginConfig = toml::from_str(&content)
+        .map_err(|e| WasmrunError::from(format!("Failed to parse plugin.toml: {}", e)))?;
 
     Ok(PluginInfo {
         name: config.name.unwrap_or_else(|| plugin_name.to_string()),
@@ -261,254 +212,55 @@ fn detect_from_plugin_toml(
     })
 }
 
+#[allow(dead_code)]
 fn fetch_crates_io_metadata(crate_name: &str) -> Result<PluginInfo> {
-    if let Ok(api_info) = fetch_from_crates_io_api(crate_name) {
-        return Ok(api_info);
-    }
-
-    if let Ok(show_info) = fetch_from_cargo_show(crate_name) {
-        return Ok(show_info);
-    }
-
-    fetch_from_cargo_search(crate_name)
-}
-
-fn fetch_from_cargo_show(crate_name: &str) -> Result<PluginInfo> {
-    let output = Command::new("cargo").args(["show", crate_name]).output();
-
-    if let Ok(output) = output {
-        if output.status.success() {
-            let show_output = String::from_utf8_lossy(&output.stdout);
-            return parse_cargo_show_output(crate_name, &show_output);
-        }
-    }
-
-    Err(WasmrunError::from("cargo show failed"))
-}
-
-fn fetch_from_cargo_search(crate_name: &str) -> Result<PluginInfo> {
-    let output = Command::new("cargo")
-        .args(["search", crate_name, "--limit", "1"])
+    let url = format!("https://crates.io/api/v1/crates/{}", crate_name);
+    let output = Command::new("curl")
+        .args(["-s", &url])
         .output()
-        .map_err(|e| WasmrunError::from(format!("Failed to search crates.io: {}", e)))?;
+        .map_err(|e| WasmrunError::from(format!("Failed to fetch crates.io metadata: {}", e)))?;
 
     if !output.status.success() {
-        return Err(WasmrunError::from("Failed to fetch crate metadata"));
+        return Err(WasmrunError::from(
+            "Failed to fetch crates.io metadata".to_string(),
+        ));
     }
 
-    let search_output = String::from_utf8_lossy(&output.stdout);
-
-    for line in search_output.lines() {
-        if let Some(parts) = line.split_once(" = ") {
-            let name = parts.0.trim();
-            if name == crate_name {
-                let rest = parts.1;
-                if let Some((version_part, description_part)) = rest.split_once("    # ") {
-                    let version = version_part.trim_matches('"').trim();
-                    let description = description_part.trim();
-
-                    return Ok(PluginInfo {
-                        name: crate_name.to_string(),
-                        version: version.to_string(),
-                        description: description.to_string(),
-                        author: "Unknown (from cargo search)".to_string(),
-                        extensions: guess_extensions_from_name(crate_name),
-                        entry_files: guess_entry_files_from_name(crate_name),
-                        plugin_type: PluginType::External,
-                        source: Some(PluginSource::CratesIo {
-                            name: crate_name.to_string(),
-                            version: "*".to_string(),
-                        }),
-                        dependencies: vec![],
-                        capabilities: guess_capabilities_from_name(crate_name),
-                    });
-                }
-            }
-        }
+    #[derive(Deserialize)]
+    struct CratesIoResponse {
+        #[serde(rename = "crate")]
+        crate_info: CrateInfo,
     }
 
-    Err(WasmrunError::from("Crate not found in search results"))
-}
-
-fn parse_cargo_show_output(crate_name: &str, output: &str) -> Result<PluginInfo> {
-    let mut version = "0.1.0".to_string();
-    let mut description = "External plugin".to_string();
-    let mut author = "Unknown".to_string();
-
-    for line in output.lines() {
-        let line = line.trim();
-        if line.starts_with("version:") {
-            version = line.split(':').nth(1).unwrap_or("0.1.0").trim().to_string();
-        } else if line.starts_with("description:") {
-            description = line
-                .split(':')
-                .nth(1)
-                .unwrap_or("External plugin")
-                .trim()
-                .to_string();
-        } else if line.starts_with("authors:") {
-            author = line
-                .split(':')
-                .nth(1)
-                .unwrap_or("Unknown")
-                .trim()
-                .to_string();
-            author = author.trim_matches(&['[', ']', '"', ' '][..]).to_string();
-        }
+    #[derive(Deserialize)]
+    struct CrateInfo {
+        name: String,
+        description: Option<String>,
+        max_version: String,
+        #[serde(default)]
+        keywords: Vec<String>,
     }
+
+    let response_text = String::from_utf8_lossy(&output.stdout);
+    let response: CratesIoResponse = serde_json::from_str(&response_text)
+        .map_err(|e| WasmrunError::from(format!("Failed to parse crates.io response: {}", e)))?;
 
     Ok(PluginInfo {
-        name: crate_name.to_string(),
-        version,
-        description,
-        author,
-        extensions: guess_extensions_from_name(crate_name),
-        entry_files: guess_entry_files_from_name(crate_name),
+        name: response.crate_info.name,
+        version: response.crate_info.max_version,
+        description: response
+            .crate_info
+            .description
+            .unwrap_or_else(|| "External plugin from crates.io".to_string()),
+        author: "Unknown".to_string(),
+        extensions: response.crate_info.keywords,
+        entry_files: vec![],
         plugin_type: PluginType::External,
         source: Some(PluginSource::CratesIo {
             name: crate_name.to_string(),
-            version: "*".to_string(),
+            version: "latest".to_string(),
         }),
         dependencies: vec![],
-        capabilities: guess_capabilities_from_name(crate_name),
+        capabilities: PluginCapabilities::default(),
     })
-}
-
-fn fetch_from_crates_io_api(crate_name: &str) -> Result<PluginInfo> {
-    let curl_result = Command::new("curl")
-        .args([
-            "-s",
-            "--max-time",
-            "10",
-            "--user-agent",
-            "wasmrun/0.10.4",
-            &format!("https://crates.io/api/v1/crates/{}", crate_name),
-        ])
-        .output();
-
-    if let Ok(output) = curl_result {
-        if output.status.success() {
-            let json_str = String::from_utf8_lossy(&output.stdout);
-            if json_str.len() > 50 && json_str.contains("\"crate\"") {
-                return parse_crates_io_json(crate_name, &json_str);
-            }
-        }
-    }
-
-    Err(WasmrunError::from("API call failed"))
-}
-
-fn parse_crates_io_json(crate_name: &str, json_str: &str) -> Result<PluginInfo> {
-    let mut version = "0.1.0".to_string();
-    let mut description = "External plugin".to_string();
-    let mut author = "Unknown".to_string();
-
-    // Extract version
-    if let Some(start) = json_str.find("\"max_version\":\"") {
-        let start = start + 15;
-        if let Some(end) = json_str[start..].find('"') {
-            version = json_str[start..start + end].to_string();
-        }
-    }
-
-    // Extract description
-    if let Some(start) = json_str.find("\"description\":\"") {
-        let start = start + 15;
-        if let Some(end) = json_str[start..].find('"') {
-            description = json_str[start..start + end].to_string();
-        }
-    }
-
-    // Extract author
-    if let Some(published_start) = json_str.find("\"published_by\":{") {
-        let published_section = &json_str[published_start..];
-
-        if let Some(name_start) = published_section.find("\"name\":\"") {
-            let name_start = published_start + name_start + 8;
-            if let Some(end) = json_str[name_start..].find('"') {
-                author = json_str[name_start..name_start + end].to_string();
-            }
-        } else if let Some(login_start) = published_section.find("\"login\":\"") {
-            let login_start = published_start + login_start + 9;
-            if let Some(end) = json_str[login_start..].find('"') {
-                author = json_str[login_start..login_start + end].to_string();
-            }
-        }
-    }
-
-    if author == "Unknown" {
-        if let Some(start) = json_str.find("\"authors\":[\"") {
-            let start = start + 12;
-            if let Some(end) = json_str[start..].find('"') {
-                author = json_str[start..start + end].to_string();
-            }
-        }
-    }
-
-    Ok(PluginInfo {
-        name: crate_name.to_string(),
-        version,
-        description,
-        author,
-        extensions: guess_extensions_from_name(crate_name),
-        entry_files: guess_entry_files_from_name(crate_name),
-        plugin_type: PluginType::External,
-        source: Some(PluginSource::CratesIo {
-            name: crate_name.to_string(),
-            version: "*".to_string(),
-        }),
-        dependencies: vec![],
-        capabilities: guess_capabilities_from_name(crate_name),
-    })
-}
-
-fn guess_extensions_from_name(crate_name: &str) -> Vec<String> {
-    match crate_name {
-        name if name.contains("rust") || name.contains("rs") => vec!["rs".to_string()],
-        name if name.contains("go") => vec!["go".to_string()],
-        name if name.contains("c") || name.contains("cpp") => {
-            vec!["c".to_string(), "cpp".to_string()]
-        }
-        name if name.contains("python") || name.contains("py") => vec!["py".to_string()],
-        name if name.contains("js") || name.contains("typescript") => {
-            vec!["js".to_string(), "ts".to_string()]
-        }
-        _ => vec![],
-    }
-}
-
-fn guess_entry_files_from_name(crate_name: &str) -> Vec<String> {
-    match crate_name {
-        name if name.contains("rust") || name.contains("rs") => {
-            vec!["main.rs".to_string(), "lib.rs".to_string()]
-        }
-        name if name.contains("go") => vec!["main.go".to_string()],
-        name if name.contains("c") || name.contains("cpp") => {
-            vec!["main.c".to_string(), "main.cpp".to_string()]
-        }
-        name if name.contains("python") || name.contains("py") => vec!["main.py".to_string()],
-        _ => vec![],
-    }
-}
-
-fn guess_capabilities_from_name(_crate_name: &str) -> PluginCapabilities {
-    PluginCapabilities {
-        compile_wasm: true,
-        compile_webapp: false,
-        live_reload: true,
-        optimization: true,
-        custom_targets: vec!["wasm".to_string()],
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct PluginConfig {
-    name: Option<String>,
-    version: Option<String>,
-    description: Option<String>,
-    author: Option<String>,
-    extensions: Option<Vec<String>>,
-    entry_files: Option<Vec<String>>,
-    dependencies: Option<Vec<String>>,
-    capabilities: Option<PluginCapabilities>,
 }

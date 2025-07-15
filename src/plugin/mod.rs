@@ -89,7 +89,7 @@ impl PluginManager {
 
         // Load external plugins
         let config = WasmrunConfig::load()?;
-        for (_name, entry) in &config.external_plugins {
+        for entry in config.external_plugins.values() {
             if entry.enabled {
                 match ExternalPluginLoader::load(entry) {
                     Ok(plugin) => {

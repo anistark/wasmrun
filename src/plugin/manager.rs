@@ -339,8 +339,13 @@ impl PluginCommands {
         if !supported_languages.is_empty() {
             println!("🌐 \x1b[1;36mSupported Languages:\x1b[0m");
             for (i, lang) in supported_languages.iter().enumerate() {
-                if i > 0 && i % 4 == 0 {}
+                if i > 0 && i % 4 == 0 {
+                    println!();
+                }
                 print!("  {:<12}", lang);
+            }
+            if !supported_languages.is_empty() {
+                println!();
             }
         }
 
