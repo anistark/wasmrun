@@ -13,12 +13,12 @@
 - 💻 **Interactive Console** - View execution results and logs in a beautiful web interface
 - 🔍 **Smart Detection** - Automatically identifies entry points and module types (standard WASM vs wasm-bindgen)
 - 🔌 **Plugin Architecture** - Modular language support through a flexible plugin system
-- 📦 **Multi-Language Support** - Built-in plugins for Rust, Go, C/C++, AssemblyScript, and Python
+- 📦 **Multi-Language Support** - Built-in plugins for C/C++, AssemblyScript, and Python, plus external plugins for Rust and Go
 - 🔧 **Built-in Compilation** - Integrated build system with plugin-based compilation
 - 🔍 **WASM Inspection** - Verify and analyze WASM files with detailed module information and binary analysis
 - 👀 **Live Reload** - Watch mode for automatic recompilation and browser refresh during development
 - 🌟 **Full WASI Support** - Complete WebAssembly System Interface implementation with virtual filesystem
-- 🌐 **Web Application Support** - Experimental support for Rust web frameworks (Yew, Leptos, Dioxus, etc.)
+- 🌐 **Web Application Support** - Support for Rust web frameworks (Yew, Leptos, Dioxus, etc.) via external plugins
 - ⚡ **Zero Configuration** - Works out of the box with sensible defaults and automatic project detection
 
 ## 🚀 Installation
@@ -81,15 +81,19 @@ wasmrun compile ./my-project --optimization size --verbose
 
 #### Plugin Management
 
-List available plugins and check dependencies:
+List available plugins and manage external plugins:
 
 ```sh
 # List all available plugins
 wasmrun plugin list
 
+# Install external plugins
+wasmrun plugin install wasmrust
+wasmrun plugin install wasmgo
+
 # Get detailed plugin information
-wasmrun plugin info rust
-wasmrun plugin info go
+wasmrun plugin info wasmrust
+wasmrun plugin info wasmgo
 ```
 
 #### Verification & Inspection
@@ -139,33 +143,34 @@ Wasmrun uses a modular plugin system where each programming language is supporte
 
 | Plugin | Status | Compiler/Runtime | Capabilities |
 |--------|--------|------------------|--------------|
-| ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white) | ✅ Full Support | `cargo` + `rustc` | Standard WASM, wasm-bindgen, web apps, optimization |
 | ![C](https://img.shields.io/badge/c-%2300599C.svg?style=for-the-badge&logo=c&logoColor=white) ![C++](https://img.shields.io/badge/c++-%2300599C.svg?style=for-the-badge&logo=c%2B%2B&logoColor=white) | ✅ Full Support | `emscripten` | Complete toolchain, Makefile support |
 | ![AssemblyScript](https://img.shields.io/badge/assembly%20script-%23000000.svg?style=for-the-badge&logo=assemblyscript&logoColor=white) | ✅ Full Support | `asc` + npm/yarn | TypeScript-like syntax, optimization |
 | ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54) | ✅ Beta Support | `py2wasm` | Runtime integration, bundle creation |
 
 ### External Plugins
 
-| Plugin | Status | Source | Capabilities |
-|--------|--------|--------|--------------|
-| ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white) | ✅ Full Support | [wasmgo](https://crates.io/crates/wasmgo) | `tinygo` compiler, optimization |
+| Plugin | Status | Installation | Capabilities |
+|--------|--------|-------------|--------------|
+| ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white) | ✅ Full Support | `wasmrun plugin install wasmrust` | Standard WASM, wasm-bindgen, web apps, optimization |
+| ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white) | ✅ Full Support | `wasmrun plugin install wasmgo` | `tinygo` compiler, optimization |
 
 ### Plugin Capabilities
 
 Each plugin provides specific capabilities:
 
-| Feature | Rust | Go | C/C++ | AssemblyScript | Python |
-|---------|------|----|----|---------------|--------|
+| Feature | Rust* | Go* | C/C++ | AssemblyScript | Python |
+|---------|-------|-----|-------|---------------|--------|
 | **Compile to WASM** | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Web Applications** | ✅ | ❌ | ✅ | ❌ | ✅ |
 | **Live Reload** | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **Optimization** | ✅ | ✅ | ✅ | ✅ | ❌ |
 | **Custom Targets** | Multiple | wasm | web | wasm | TBD |
 
+*External plugins (requires installation)
 
 ### Web Frameworks (Rust Plugin)
 
-The Rust plugin automatically detects and supports web frameworks with specialized web application mode:
+The Rust plugin (wasmrust) automatically detects and supports web frameworks with specialized web application mode:
 
 - **Yew** - Modern Rust / Wasm framework
 - **Leptos** - Full-stack, compile-time optimal Rust framework  
@@ -197,7 +202,7 @@ The Rust plugin automatically detects and supports web frameworks with specializ
 2. **Dependency Checking** - Plugin verifies required tools are installed
 3. **Compilation** - Plugin builds optimized WASM with proper flags and optimizations
 4. **Serving** - Runs development server with live reload
-5. **Framework Detection** - Special handling for web applications (Rust plugin)
+5. **Framework Detection** - Special handling for web applications (external plugins)
 
 ## 🔍 WASI Support
 
@@ -224,8 +229,11 @@ wasmrun compile ./my-project --optimization size
 # List available plugins and their capabilities
 wasmrun plugin list
 
+# Install external plugins
+wasmrun plugin install wasmrust
+
 # Get detailed information about a specific plugin
-wasmrun plugin info rust
+wasmrun plugin info wasmrust
 ```
 
 ### Learning & Education
@@ -244,7 +252,7 @@ wasmrun run ./unknown-project --dry-run
 ### Web Application Development
 
 ```sh
-# Rust web app with hot reload (Rust plugin auto-detects frameworks)
+# Rust web app with hot reload (external wasmrust plugin auto-detects frameworks)
 wasmrun run ./my-yew-app --watch
 
 # Multi-framework support
@@ -283,8 +291,8 @@ wasmrun compile ./go-project --optimization size
 
 Wasmrun automatically selects plugins based on project structure:
 
-- **Rust Plugin**: `Cargo.toml` present
-- **Go Plugin**: `go.mod` or `.go` files present
+- **Rust Plugin (External)**: `Cargo.toml` present - requires `wasmrun plugin install wasmrust`
+- **Go Plugin (External)**: `go.mod` or `.go` files present - requires `wasmrun plugin install wasmgo`
 - **C/C++ Plugin**: `.c`, `.cpp`, `.h` files, or `Makefile` present
 - **AssemblyScript Plugin**: `package.json` with AssemblyScript dependency or `assembly/` directory
 - **Python Plugin**: `.py` files or `requirements.txt` present
@@ -306,16 +314,19 @@ Plugin-specific optimization levels:
 # Check what files are in your project
 ls -la
 # Ensure proper entry files exist (Cargo.toml, go.mod, etc.)
+# For Rust projects, install the external plugin:
+wasmrun plugin install wasmrust
 # Use wasmrun plugin list to see available plugins
 ```
+
 🚨 Open an [issue](https://github.com/anistark/wasmrun/issues) and let us know about it.
 
 **"Plugin dependencies missing"**
 ```sh
 # Install missing tools for specific plugins:
-rustup target add wasm32-unknown-unknown  # Rust plugin
+rustup target add wasm32-unknown-unknown  # For wasmrust plugin
 # Install emcc for C/C++ plugin
-# Install tinygo for Go plugin  
+# Install tinygo for wasmgo plugin  
 # Install asc for AssemblyScript plugin
 ```
 
@@ -325,6 +336,19 @@ rustup target add wasm32-unknown-unknown  # Rust plugin
 wasmrun --language rust
 wasmrun --language go
 ```
+
+### External Plugin Installation
+
+**"Plugin not found during installation"**
+```sh
+# Make sure you have the correct plugin name
+wasmrun plugin install wasmrust   # For Rust support
+wasmrun plugin install wasmgo     # For Go support
+
+# Check available external plugins
+wasmrun plugin list --external
+```
+
 ### Configuring py2wasm
 
 - Make sure that you have python3.11.0 is installed and configured. We recommend
@@ -352,7 +376,7 @@ wasmrun --port 3001  # Use different port
 - Check plugin-specific entry file requirements
 
 **"wasm-bindgen module detected"**
-- Use the `.js` file instead of the `.wasm` file directly (Rust plugin)
+- Use the `.js` file instead of the `.wasm` file directly (wasmrust plugin)
 - Run `wasmrun project-dir` instead of individual files
 
 ## 🤝 Contributing
