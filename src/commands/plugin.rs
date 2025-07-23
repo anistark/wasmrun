@@ -31,7 +31,8 @@ pub fn handle_plugin_command(cmd: &PluginSubcommands) -> Result<()> {
 
         PluginSubcommands::Enable { plugin, disable } => {
             let mut commands = PluginCommands::new()?;
-            commands.set_enabled(plugin, !disable)
+            let enabled = !disable;
+            commands.set_enabled(plugin, enabled)
         }
 
         PluginSubcommands::Info { plugin } => {

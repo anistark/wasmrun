@@ -241,6 +241,7 @@ impl PluginManager {
         self.plugins.iter().map(|plugin| plugin.info()).collect()
     }
 
+    #[allow(dead_code)]
     pub fn get_plugin_info(&self, name: &str) -> Option<&PluginInfo> {
         self.get_plugin_by_name(name).map(|plugin| plugin.info())
     }

@@ -2,7 +2,7 @@
 
 use crate::error::{Result, WasmrunError};
 use crate::plugin::registry::RegistryManager;
-use crate::plugin::{PluginInfo, PluginManager, PluginSource, PluginType};
+use crate::plugin::{PluginCapabilities, PluginInfo, PluginManager, PluginSource, PluginType};
 use std::process::Command;
 
 pub struct PluginCommands {
@@ -22,10 +22,7 @@ impl PluginCommands {
 
     pub fn list(&self, show_all: bool) -> Result<()> {
         let builtin_plugins = self.manager.list_plugins();
-        let external_plugins = self
-            .registry_manager
-            .local_registry()
-            .get_installed_plugins();
+        let external_plugins = self.registry_manager.local_registry().get_installed_plugins();
 
         if builtin_plugins.is_empty() && external_plugins.is_empty() {
             println!("No plugins installed.");
@@ -52,10 +49,7 @@ impl PluginCommands {
                     println!("    Extensions: {}", plugin.extensions.join(", "));
                     println!("    Entry files: {}", plugin.entry_files.join(", "));
                     if !plugin.capabilities.custom_targets.is_empty() {
-                        println!(
-                            "    Targets: {}",
-                            plugin.capabilities.custom_targets.join(", ")
-                        );
+                        println!("    Targets: {}", plugin.capabilities.custom_targets.join(", "));
                     }
                     println!();
                 }
@@ -81,10 +75,7 @@ impl PluginCommands {
                     println!("    Extensions: {}", plugin_info.extensions.join(", "));
                     println!("    Entry files: {}", plugin_info.entry_files.join(", "));
                     if !plugin_info.capabilities.custom_targets.is_empty() {
-                        println!(
-                            "    Targets: {}",
-                            plugin_info.capabilities.custom_targets.join(", ")
-                        );
+                        println!("    Targets: {}", plugin_info.capabilities.custom_targets.join(", "));
                     }
                     println!();
                 }
@@ -112,9 +103,13 @@ impl PluginCommands {
     }
 
     pub fn install(&mut self, plugin: &str, version: Option<String>) -> Result<()> {
-        println!("🔄 Installing plugin: {}", plugin);
+        if let Some(_) = self.registry_manager.local_registry().get_installed_plugin(plugin) {
+            if Self::is_plugin_available(plugin) {
+                println!("✅ Plugin '{}' is already installed and available", plugin);
+                return Ok(());
+            }
+        }
 
-        // TODO: Remove this once we have a proper plugin registry
         match plugin {
             "wasmrust" => self.install_wasmrust(version),
             "wasmgo" => self.install_wasmgo(version),
@@ -123,19 +118,11 @@ impl PluginCommands {
     }
 
     fn install_wasmrust(&mut self, version: Option<String>) -> Result<()> {
-        println!("🔄 Installing wasmrust plugin...");
-
         if Self::is_plugin_available("wasmrust") {
-            println!("✅ wasmrust is already available");
-            let actual_version = self.get_actual_wasmrust_version();
-            println!("📦 Found wasmrust version: {}", actual_version);
-            println!("🔌 Plugin detected and ready to use");
-            return Ok(());
+            return self.register_wasmrust_plugin();
         }
 
         let version_to_install = version.unwrap_or_else(|| "latest".to_string());
-
-        println!("📦 Installing wasmrust from crates.io...");
 
         let mut cmd = Command::new("cargo");
         cmd.args(&["install", "wasmrust"]);
@@ -148,22 +135,7 @@ impl PluginCommands {
             .output()
             .map_err(|e| WasmrunError::from(format!("Failed to run cargo install: {}", e)))?;
 
-        if output.status.success() {
-            println!("✅ wasmrust installed successfully!");
-
-            std::thread::sleep(std::time::Duration::from_millis(500));
-
-            if Self::is_plugin_available("wasmrust") {
-                let actual_version = self.get_actual_wasmrust_version();
-                println!("📦 Installed version: {}", actual_version);
-                println!("✓ Verification: wasmrust is available and ready to use");
-            } else {
-                println!("⚠️  Installation completed but wasmrust not immediately available");
-                self.diagnose_path_issue();
-            }
-
-            println!("🔌 Plugin installed and ready to use");
-        } else {
+        if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(WasmrunError::from(format!(
                 "Failed to install wasmrust: {}",
@@ -171,103 +143,48 @@ impl PluginCommands {
             )));
         }
 
+        println!("✅ wasmrust installed successfully!");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        self.register_wasmrust_plugin()
+    }
+
+    fn register_wasmrust_plugin(&mut self) -> Result<()> {
+        let version = self.get_actual_plugin_version("wasmrust");
+        
+        let plugin_info = PluginInfo {
+            name: "wasmrust".to_string(),
+            version: version.clone(),
+            description: "Rust WebAssembly plugin for Wasmrun".to_string(),
+            author: "Kumar Anirudha".to_string(),
+            extensions: vec!["rs".to_string()],
+            entry_files: vec!["Cargo.toml".to_string()],
+            plugin_type: PluginType::External,
+            source: Some(PluginSource::CratesIo {
+                name: "wasmrust".to_string(),
+                version: version.clone(),
+            }),
+            dependencies: vec!["cargo".to_string(), "rustc".to_string()],
+            capabilities: PluginCapabilities {
+                compile_wasm: true,
+                compile_webapp: true,
+                live_reload: true,
+                optimization: true,
+                custom_targets: vec!["wasm32-unknown-unknown".to_string(), "web".to_string()],
+            },
+        };
+
+        let source = PluginSource::CratesIo {
+            name: "wasmrust".to_string(),
+            version,
+        };
+
+        self.registry_manager
+            .local_registry_mut()
+            .add_plugin("wasmrust".to_string(), plugin_info, source, "wasmrust".to_string())?;
+
+        println!("✅ wasmrust registered and ready to use");
         Ok(())
-    }
-
-    fn get_actual_wasmrust_version(&self) -> String {
-        if let Ok(output) = Command::new("wasmrust").arg("--version").output() {
-            if output.status.success() {
-                let version_output = String::from_utf8_lossy(&output.stdout);
-                if let Some(version) = version_output.split_whitespace().nth(1) {
-                    return version.to_string();
-                }
-            }
-        }
-
-        if let Ok(home_dir) = std::env::var("HOME") {
-            let cargo_bin = format!("{}/.cargo/bin/wasmrust", home_dir);
-            if let Ok(output) = Command::new(&cargo_bin).arg("--version").output() {
-                if output.status.success() {
-                    let version_output = String::from_utf8_lossy(&output.stdout);
-                    if let Some(version) = version_output.split_whitespace().nth(1) {
-                        return version.to_string();
-                    }
-                }
-            }
-        }
-
-        if let Ok(output) = Command::new("wasmrust").arg("info").output() {
-            if output.status.success() {
-                let info_output = String::from_utf8_lossy(&output.stdout);
-                for line in info_output.lines() {
-                    if line.contains("WasmRust v") {
-                        if let Some(version) = line.split("WasmRust v").nth(1) {
-                            return version.trim().to_string();
-                        }
-                    }
-                }
-            }
-        }
-
-        "unknown".to_string()
-    }
-
-    fn diagnose_path_issue(&self) {
-        println!("🔍 Diagnosing PATH issue...");
-
-        if let Ok(home_dir) = std::env::var("HOME") {
-            let cargo_bin_dir = format!("{}/.cargo/bin", home_dir);
-            let cargo_bin_path = std::path::Path::new(&cargo_bin_dir);
-
-            if cargo_bin_path.exists() {
-                println!("✅ ~/.cargo/bin directory exists");
-
-                let wasmrust_path = format!("{}/wasmrust", cargo_bin_dir);
-                if std::path::Path::new(&wasmrust_path).exists() {
-                    println!("✅ wasmrust binary found at: {}", wasmrust_path);
-
-                    if let Ok(output) = Command::new(&wasmrust_path).arg("--version").output() {
-                        if output.status.success() {
-                            let version_output = String::from_utf8_lossy(&output.stdout);
-                            println!(
-                                "✅ wasmrust executable and version: {}",
-                                version_output.trim()
-                            );
-                        } else {
-                            println!("❌ wasmrust binary exists but not executable");
-                        }
-                    } else {
-                        println!("❌ Failed to execute wasmrust binary");
-                    }
-                } else {
-                    println!("❌ wasmrust binary not found in ~/.cargo/bin");
-
-                    if let Ok(entries) = std::fs::read_dir(&cargo_bin_dir) {
-                        println!("📁 Contents of ~/.cargo/bin:");
-                        for entry in entries.flatten() {
-                            if let Some(name) = entry.file_name().to_str() {
-                                if name.contains("wasm") || name.contains("rust") {
-                                    println!("   🔍 {}", name);
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                println!("❌ ~/.cargo/bin directory not found");
-            }
-        }
-
-        if let Ok(path) = std::env::var("PATH") {
-            let has_cargo_bin = path.contains("/.cargo/bin");
-            if has_cargo_bin {
-                println!("✅ ~/.cargo/bin is in PATH");
-            } else {
-                println!("❌ ~/.cargo/bin is NOT in PATH");
-                println!("💡 Add this to your shell profile (.bashrc, .zshrc, etc.):");
-                println!("   export PATH=\"$HOME/.cargo/bin:$PATH\"");
-            }
-        }
     }
 
     fn install_wasmgo(&mut self, _version: Option<String>) -> Result<()> {
@@ -305,13 +222,13 @@ impl PluginCommands {
     }
 
     pub fn uninstall(&mut self, plugin: &str) -> Result<()> {
-        println!("🗑️  Uninstalling plugin: {}", plugin);
+        if let Some(_) = self.registry_manager.local_registry().get_installed_plugin(plugin) {
+            self.registry_manager
+                .local_registry_mut()
+                .remove_plugin(plugin)?;
+            println!("🗑️ Removed {} from plugin registry", plugin);
+        }
 
-        self.registry_manager
-            .local_registry_mut()
-            .remove_plugin(plugin)?;
-
-        // Uninstall via cargo
         let output = Command::new("cargo")
             .args(&["uninstall", plugin])
             .output()
@@ -321,136 +238,403 @@ impl PluginCommands {
             println!("✅ {} uninstalled successfully!", plugin);
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            println!("⚠️  cargo uninstall failed: {}", stderr);
-            println!("💡 Plugin removed from wasmrun registry anyway");
+            println!("⚠️ Cargo uninstall failed: {}", stderr);
+            println!("💡 Plugin may not have been installed via cargo");
         }
 
         Ok(())
     }
 
-    pub fn info(&self, plugin: &str) -> Result<()> {
-        if let Some(plugin_info) = self.manager.get_plugin_info(plugin) {
-            self.print_plugin_info(plugin_info)?;
-            return Ok(());
+    pub fn update(&mut self, plugin: &str) -> Result<()> {
+        println!("🔄 Updating plugin: {}", plugin);
+
+        let current_version = if let Some(entry) = self.registry_manager.local_registry().get_installed_plugin(plugin) {
+            entry.info.version.clone()
+        } else {
+            "unknown".to_string()
+        };
+
+        match plugin {
+            "wasmrust" => {
+                let mut cmd = Command::new("cargo");
+                cmd.args(&["install", "wasmrust", "--force"]);
+                
+                let output = cmd.output()
+                    .map_err(|e| WasmrunError::from(format!("Failed to update wasmrust: {}", e)))?;
+
+                if output.status.success() {
+                    self.register_wasmrust_plugin()?;
+                    let new_version = self.get_actual_plugin_version("wasmrust");
+                    if new_version != current_version {
+                        println!("✅ {} updated from {} to {}", plugin, current_version, new_version);
+                    } else {
+                        println!("✅ {} is already up to date ({})", plugin, new_version);
+                    }
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(WasmrunError::from(format!("Failed to update {}: {}", plugin, stderr)));
+                }
+            }
+            _ => {
+                let mut cmd = Command::new("cargo");
+                cmd.args(&["install", plugin, "--force"]);
+                
+                let output = cmd.output()
+                    .map_err(|e| WasmrunError::from(format!("Failed to update {}: {}", plugin, e)))?;
+
+                if output.status.success() {
+                    println!("✅ {} updated successfully!", plugin);
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(WasmrunError::from(format!("Failed to update {}: {}", plugin, stderr)));
+                }
+            }
         }
 
-        if let Some(plugin_entry) = self
+        Ok(())
+    }
+
+    pub fn update_all(&mut self) -> Result<()> {
+        let external_plugins: Vec<String> = self
             .registry_manager
             .local_registry()
-            .get_installed_plugin(plugin)
-        {
-            self.print_plugin_info(&plugin_entry.info)?;
+            .get_installed_plugins()
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
 
-            println!();
-            println!("🔌 \x1b[1;36mExternal Plugin Details:\x1b[0m");
-            println!("  📍 Source: {:?}", plugin_entry.source);
-            println!("  📁 Install Path: {}", plugin_entry.install_path);
-            println!(
-                "  ⚡ Enabled: {}",
-                if plugin_entry.enabled { "Yes" } else { "No" }
-            );
-
-            let available = Self::is_plugin_available(plugin);
-            println!(
-                "  🔍 Available: {}",
-                if available { "✅ Yes" } else { "❌ No" }
-            );
-
-            if !available {
-                println!();
-                println!("💡 Plugin is registered but not available in PATH.");
-                println!("   Try reinstalling: wasmrun plugin install {}", plugin);
-            }
-
+        if external_plugins.is_empty() {
+            println!("No external plugins to update.");
             return Ok(());
         }
 
-        if Self::is_plugin_available(plugin) {
-            println!("🔍 \x1b[1;36mAuto-detected Plugin: {}\x1b[0m", plugin);
-            println!();
-            println!("  ⚡ Status: Available in PATH but not formally registered");
-            println!(
-                "  💡 Run \x1b[1;37mwasmrun plugin install {}\x1b[0m to register and get full info",
-                plugin
-            );
+        println!("🔄 Updating {} external plugins...", external_plugins.len());
+
+        for plugin in external_plugins {
+            if let Err(e) = self.update(&plugin) {
+                println!("❌ Failed to update {}: {}", plugin, e);
+            }
+        }
+
+        Ok(())
+    }
+
+    // TODO: Use when plugin enable/disable functionality is fully implemented
+    #[allow(dead_code)]
+    pub fn set_enabled(&mut self, plugin: &str, enabled: bool) -> Result<()> {
+        self.registry_manager
+            .local_registry_mut()
+            .set_plugin_enabled(plugin, enabled)?;
+
+        let status = if enabled { "enabled" } else { "disabled" };
+        println!("✅ Plugin {} {}", plugin, status);
+        Ok(())
+    }
+
+    pub fn info(&self, plugin: &str) -> Result<()> {
+        let builtin_plugins = self.manager.list_plugins();
+        if let Some(builtin) = builtin_plugins.iter().find(|p| p.name == plugin) {
+            println!("📋 Plugin Information: {}\n", plugin);
+            println!("Type: Built-in");
+            println!("Version: {}", builtin.version);
+            println!("Description: {}", builtin.description);
+            println!("Author: {}", builtin.author);
+            println!("Extensions: {}", builtin.extensions.join(", "));
+            println!("Entry files: {}", builtin.entry_files.join(", "));
+            println!("Dependencies: {}", builtin.dependencies.join(", "));
+            
+            println!("\nCapabilities:");
+            println!("  • Compile WASM: {}", if builtin.capabilities.compile_wasm { "✅" } else { "❌" });
+            println!("  • Web Applications: {}", if builtin.capabilities.compile_webapp { "✅" } else { "❌" });
+            println!("  • Live Reload: {}", if builtin.capabilities.live_reload { "✅" } else { "❌" });
+            println!("  • Optimization: {}", if builtin.capabilities.optimization { "✅" } else { "❌" });
+            
+            if !builtin.capabilities.custom_targets.is_empty() {
+                println!("  • Targets: {}", builtin.capabilities.custom_targets.join(", "));
+            }
+            
+            return Ok(());
+        }
+
+        if let Some(external) = self.registry_manager.local_registry().get_installed_plugin(plugin) {
+            let is_available = Self::is_plugin_available(plugin);
+            
+            println!("📋 Plugin Information: {}\n", plugin);
+            println!("Type: External");
+            println!("Status: {}", if is_available { "✅ Available" } else { "❌ Not Available" });
+            println!("Version: {}", external.info.version);
+            println!("Description: {}", external.info.description);
+            println!("Author: {}", external.info.author);
+            println!("Extensions: {}", external.info.extensions.join(", "));
+            println!("Entry files: {}", external.info.entry_files.join(", "));
+            println!("Dependencies: {}", external.info.dependencies.join(", "));
+            println!("Installed: {}", external.installed_at);
+            println!("Enabled: {}", if external.enabled { "✅" } else { "❌" });
+            
+            if let Some(source) = &external.info.source {
+                match source {
+                    PluginSource::CratesIo { name, version } => {
+                        println!("Source: crates.io/{} ({})", name, version);
+                    }
+                    PluginSource::Git { url, branch } => {
+                        println!("Source: Git {}{}", url, 
+                            branch.as_ref().map(|b| format!(" ({})", b)).unwrap_or_default());
+                    }
+                    PluginSource::Local { path } => {
+                        println!("Source: Local ({})", path.display());
+                    }
+                }
+            }
+
+            println!("\nCapabilities:");
+            println!("  • Compile WASM: {}", if external.info.capabilities.compile_wasm { "✅" } else { "❌" });
+            println!("  • Web Applications: {}", if external.info.capabilities.compile_webapp { "✅" } else { "❌" });
+            println!("  • Live Reload: {}", if external.info.capabilities.live_reload { "✅" } else { "❌" });
+            println!("  • Optimization: {}", if external.info.capabilities.optimization { "✅" } else { "❌" });
+            
+            if !external.info.capabilities.custom_targets.is_empty() {
+                println!("  • Targets: {}", external.info.capabilities.custom_targets.join(", "));
+            }
+            
+            return Ok(());
+        }
+
+        if self.get_auto_detected_plugins().contains(&plugin.to_string()) {
+            println!("📋 Plugin Information: {} (Auto-detected)\n", plugin);
+            println!("Type: External (auto-detected)");
+            println!("Status: ⚡ Available in PATH but not formally installed");
+            println!("Version: {}", self.get_actual_plugin_version(plugin));
+            println!("\n💡 Run 'wasmrun plugin install {}' to formally register this plugin", plugin);
             return Ok(());
         }
 
         Err(WasmrunError::from(format!("Plugin '{}' not found", plugin)))
     }
 
-    fn print_plugin_info(&self, plugin_info: &PluginInfo) -> Result<()> {
-        println!(
-            "\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m"
-        );
-        println!("\x1b[1;34m│\x1b[0m  🔌 \x1b[1;36mPlugin Information\x1b[0m                                    \x1b[1;34m│\x1b[0m");
-        println!(
-            "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
-        );
+    pub fn search(&self, query: &str) -> Result<()> {
+        println!("🔍 Searching for plugins matching '{}'...\n", query);
 
-        println!(
-            "\x1b[1;34m│\x1b[0m  \x1b[1;37mName:\x1b[0m {:<56} \x1b[1;34m│\x1b[0m",
-            plugin_info.name
-        );
-        println!(
-            "\x1b[1;34m│\x1b[0m  \x1b[1;37mVersion:\x1b[0m {:<52} \x1b[1;34m│\x1b[0m",
-            plugin_info.version
-        );
-        println!(
-            "\x1b[1;34m│\x1b[0m  \x1b[1;37mDescription:\x1b[0m {:<47} \x1b[1;34m│\x1b[0m",
-            self.truncate_string(&plugin_info.description, 47)
-        );
-        println!(
-            "\x1b[1;34m│\x1b[0m  \x1b[1;37mAuthor:\x1b[0m {:<53} \x1b[1;34m│\x1b[0m",
-            plugin_info.author
-        );
+        let query_lower = query.to_lowercase();
+        let mut found_any = false;
 
-        let plugin_type = match plugin_info.plugin_type {
-            PluginType::Builtin => "Built-in",
-            PluginType::External => "External",
-        };
-        println!(
-            "\x1b[1;34m│\x1b[0m  \x1b[1;37mType:\x1b[0m {:<55} \x1b[1;34m│\x1b[0m",
-            plugin_type
-        );
+        let builtin_plugins = self.manager.list_plugins();
+        let matching_builtin: Vec<_> = builtin_plugins.iter()
+            .filter(|p| p.name.to_lowercase().contains(&query_lower) 
+                     || p.description.to_lowercase().contains(&query_lower))
+            .collect();
 
-        println!(
-            "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
-        );
+        if !matching_builtin.is_empty() {
+            found_any = true;
+            println!("🔧 Built-in plugins:");
+            for plugin in matching_builtin {
+                println!("   • {} v{} - {}", plugin.name, plugin.version, plugin.description);
+            }
+            println!();
+        }
+
+        let external_plugins = self.registry_manager.local_registry().get_installed_plugins();
+        let matching_external: Vec<_> = external_plugins.iter()
+            .filter(|p| p.name.to_lowercase().contains(&query_lower) 
+                     || p.description.to_lowercase().contains(&query_lower))
+            .collect();
+
+        if !matching_external.is_empty() {
+            found_any = true;
+            println!("🔌 External plugins:");
+            for plugin in matching_external {
+                let status = if Self::is_plugin_available(&plugin.name) { "✅" } else { "❌" };
+                println!("   • {} v{} - {} [{}]", plugin.name, plugin.version, plugin.description, status);
+            }
+            println!();
+        }
+
+        let known_plugins = [
+            ("wasmrust", "Rust WebAssembly plugin for Wasmrun"),
+            ("wasmgo", "Go WebAssembly plugin for Wasmrun"),
+        ];
+
+        let matching_known: Vec<_> = known_plugins.iter()
+            .filter(|(name, desc)| name.to_lowercase().contains(&query_lower) 
+                                || desc.to_lowercase().contains(&query_lower))
+            .filter(|(name, _)| !external_plugins.iter().any(|p| p.name == *name))
+            .collect();
+
+        if !matching_known.is_empty() {
+            found_any = true;
+            println!("📦 Available for installation:");
+            for (name, desc) in matching_known {
+                let available = Self::is_plugin_available(name);
+                let status = if available { "⚡ Auto-detected" } else { "📦 Not installed" };
+                println!("   • {} - {} [{}]", name, desc, status);
+                if available {
+                    println!("     💡 Run 'wasmrun plugin install {}' to register", name);
+                } else {
+                    println!("     💡 Run 'wasmrun plugin install {}' to install", name);
+                }
+            }
+        }
+
+        if !found_any {
+            println!("No plugins found matching '{}'", query);
+            println!("\n💡 Available commands:");
+            println!("   • wasmrun plugin list - Show all plugins");
+            println!("   • wasmrun plugin install <name> - Install a plugin");
+        }
+
         Ok(())
     }
 
-    fn truncate_string(&self, s: &str, max_len: usize) -> String {
-        if s.len() <= max_len {
-            s.to_string()
-        } else {
-            format!("{}...", &s[..max_len - 3])
+    // TODO: Use when advanced debugging features are needed
+    #[allow(dead_code)]
+    pub fn debug(&self, plugin: Option<&str>) -> Result<()> {
+        match plugin {
+            Some(name) => self.debug_plugin(name),
+            None => self.debug_all(),
         }
     }
 
     #[allow(dead_code)]
-    fn create_wasmrust_plugin_info(&self, version: &str) -> PluginInfo {
-        PluginInfo {
-            name: "wasmrust".to_string(),
-            version: version.to_string(),
-            description: "Rust WebAssembly plugin for Wasmrun".to_string(),
-            author: "Kumar Anirudha".to_string(),
-            extensions: vec!["rs".to_string()],
-            entry_files: vec!["Cargo.toml".to_string()],
-            plugin_type: PluginType::External,
-            source: Some(PluginSource::CratesIo {
-                name: "wasmrust".to_string(),
-                version: version.to_string(),
-            }),
-            dependencies: vec!["cargo".to_string(), "rustc".to_string()],
-            capabilities: crate::plugin::PluginCapabilities {
-                compile_wasm: true,
-                compile_webapp: true,
-                live_reload: true,
-                optimization: true,
-                custom_targets: vec!["wasm32-unknown-unknown".to_string(), "web".to_string()],
-            },
+    fn debug_plugin(&self, plugin: &str) -> Result<()> {
+        println!("🐛 Debug information for plugin: {}\n", plugin);
+
+        let builtin_plugins = self.manager.list_plugins();
+        if let Some(builtin) = builtin_plugins.iter().find(|p| p.name == plugin) {
+            println!("📋 Plugin Type: Built-in");
+            println!("📍 Status: Always available");
+            println!("🔧 Implementation: Compiled into wasmrun binary");
+            println!("📦 Version: {}", builtin.version);
+            return Ok(());
         }
+
+        if let Some(external) = self.registry_manager.local_registry().get_installed_plugin(plugin) {
+            println!("📋 Plugin Type: External (registered)");
+            println!("📦 Version: {}", external.info.version);
+            println!("📁 Install path: {}", external.install_path);
+            println!("⚡ Enabled: {}", external.enabled);
+            println!("📅 Installed at: {}", external.installed_at);
+            
+            let is_available = Self::is_plugin_available(plugin);
+            println!("🔍 Executable available: {}", is_available);
+            
+            if !is_available {
+                println!("\n🚨 Issues detected:");
+                println!("   • Plugin is registered but executable not found");
+                println!("   • Possible solutions:");
+                println!("     - Run: cargo install {}", plugin);
+                println!("     - Check PATH includes ~/.cargo/bin");
+                println!("     - Run: wasmrun plugin uninstall {} && wasmrun plugin install {}", plugin, plugin);
+            } else {
+                let actual_version = self.get_actual_plugin_version(plugin);
+                if actual_version != external.info.version && actual_version != "unknown" {
+                    println!("\n⚠️ Version mismatch:");
+                    println!("   • Registered version: {}", external.info.version);
+                    println!("   • Actual version: {}", actual_version);
+                    println!("   • Run: wasmrun plugin update {}", plugin);
+                }
+            }
+
+            return Ok(());
+        }
+
+        if Self::is_plugin_available(plugin) {
+            println!("📋 Plugin Type: External (auto-detected)");
+            println!("📦 Version: {}", self.get_actual_plugin_version(plugin));
+            println!("📍 Status: Available in PATH but not registered");
+            println!("\n💡 Run 'wasmrun plugin install {}' to register", plugin);
+            return Ok(());
+        }
+
+        println!("❌ Plugin '{}' not found", plugin);
+        println!("\n🔍 Suggestions:");
+        println!("   • Check spelling: wasmrun plugin list");
+        println!("   • Install if needed: wasmrun plugin install {}", plugin);
+        println!("   • Search available: wasmrun plugin search {}", plugin);
+
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn debug_all(&self) -> Result<()> {
+        println!("🐛 Debug information for plugin system\n");
+
+        match crate::plugin::config::WasmrunConfig::config_path() {
+            Ok(config_path) => {
+                println!("📁 Config file: {}", config_path.display());
+                println!("📄 Config exists: {}", config_path.exists());
+            }
+            Err(e) => println!("❌ Config path error: {}", e),
+        }
+
+        match crate::plugin::config::WasmrunConfig::plugin_dir() {
+            Ok(plugin_dir) => {
+                println!("📁 Plugin directory: {}", plugin_dir.display());
+                println!("📄 Directory exists: {}", plugin_dir.exists());
+            }
+            Err(e) => println!("❌ Plugin directory error: {}", e),
+        }
+
+        println!();
+
+        let builtin_plugins = self.manager.list_plugins();
+        println!("🔧 Built-in plugins: {}", builtin_plugins.len());
+        for plugin in &builtin_plugins {
+            println!("   • {} v{}", plugin.name, plugin.version);
+        }
+
+        println!();
+
+        let external_plugins = self.registry_manager.local_registry().get_installed_plugins();
+        println!("🔌 External plugins (registered): {}", external_plugins.len());
+        for plugin in &external_plugins {
+            let available = Self::is_plugin_available(&plugin.name);
+            let status = if available { "✅" } else { "❌" };
+            println!("   • {} v{} {}", plugin.name, plugin.version, status);
+        }
+
+        println!();
+
+        let auto_detected = self.get_auto_detected_plugins();
+        let unregistered: Vec<_> = auto_detected.iter()
+            .filter(|name| !external_plugins.iter().any(|p| &p.name == *name))
+            .collect();
+
+        println!("🔍 Auto-detected (unregistered): {}", unregistered.len());
+        for plugin in &unregistered {
+            let version = self.get_actual_plugin_version(plugin);
+            println!("   • {} v{} (run 'wasmrun plugin install {}' to register)", plugin, version, plugin);
+        }
+
+        println!();
+
+        if let Ok(path) = std::env::var("PATH") {
+            let cargo_bin_in_path = path.contains("/.cargo/bin");
+            println!("🛣️ PATH includes ~/.cargo/bin: {}", if cargo_bin_in_path { "✅" } else { "❌" });
+            
+            if !cargo_bin_in_path {
+                println!("   ⚠️ Add ~/.cargo/bin to PATH to use cargo-installed plugins");
+            }
+        }
+
+        let cargo_available = std::process::Command::new("cargo")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        println!("📦 Cargo available: {}", if cargo_available { "✅" } else { "❌" });
+
+        Ok(())
+    }
+
+    fn get_actual_plugin_version(&self, plugin_name: &str) -> String {
+        if let Ok(output) = Command::new(plugin_name).arg("--version").output() {
+            if output.status.success() {
+                let version_output = String::from_utf8_lossy(&output.stdout);
+                if let Some(version) = version_output.split_whitespace().nth(1) {
+                    return version.to_string();
+                }
+            }
+        }
+        "unknown".to_string()
     }
 
     fn is_plugin_available(plugin_name: &str) -> bool {
@@ -482,11 +666,7 @@ impl PluginCommands {
             }
         }
 
-        let which_cmd = if cfg!(target_os = "windows") {
-            "where"
-        } else {
-            "which"
-        };
+        let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
         if let Ok(output) = Command::new(which_cmd).arg(plugin_name).output() {
             if output.status.success() && !output.stdout.is_empty() {
                 return true;
@@ -498,7 +678,6 @@ impl PluginCommands {
 
     fn get_auto_detected_plugins(&self) -> Vec<String> {
         let mut plugins = Vec::new();
-
         let known_plugins = ["wasmrust", "wasmgo"];
 
         for plugin in &known_plugins {
@@ -509,176 +688,4 @@ impl PluginCommands {
 
         plugins
     }
-
-    pub fn update(&mut self, plugin: &str) -> Result<()> {
-        println!("🔄 Updating plugin: {}", plugin);
-
-        self.uninstall(plugin)?;
-        self.install(plugin, None)
-    }
-
-    pub fn update_all(&mut self) -> Result<()> {
-        let external_plugins: Vec<String> = self
-            .registry_manager
-            .local_registry()
-            .get_installed_plugins()
-            .iter()
-            .map(|p| p.name.clone())
-            .collect();
-
-        if external_plugins.is_empty() {
-            println!("No external plugins to update.");
-            return Ok(());
-        }
-
-        println!("🔄 Updating {} external plugins...", external_plugins.len());
-
-        for plugin in external_plugins {
-            match self.update(&plugin) {
-                Ok(_) => println!("✅ Updated {}", plugin),
-                Err(e) => eprintln!("❌ Failed to update {}: {}", plugin, e),
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn set_enabled(&mut self, plugin: &str, enabled: bool) -> Result<()> {
-        let action = if enabled { "Enabling" } else { "Disabling" };
-        println!("{} plugin: {}", action, plugin);
-
-        self.registry_manager
-            .local_registry_mut()
-            .set_plugin_enabled(plugin, enabled)?;
-
-        let status = if enabled { "enabled" } else { "disabled" };
-        println!("✅ Plugin {} {}", plugin, status);
-
-        Ok(())
-    }
-
-    pub fn search(&self, query: &str) -> Result<()> {
-        println!("🔍 Searching for plugins matching '{}'...", query);
-
-        let known_plugins = [
-            ("wasmrust", "Rust WebAssembly plugin for Wasmrun"),
-            ("wasmgo", "Go WebAssembly plugin for Wasmrun (coming soon)"),
-        ];
-
-        let matches: Vec<_> = known_plugins
-            .iter()
-            .filter(|(name, desc)| {
-                name.contains(query) || desc.to_lowercase().contains(&query.to_lowercase())
-            })
-            .collect();
-
-        if matches.is_empty() {
-            println!("No plugins found matching '{}'", query);
-        } else {
-            println!("Found {} plugins:", matches.len());
-            for (name, desc) in matches {
-                let available = Self::is_plugin_available(name);
-                let status = if available {
-                    "✅ Available"
-                } else {
-                    "📦 Not installed"
-                };
-                println!("  • {} - {} [{}]", name, desc, status);
-            }
-        }
-
-        Ok(())
-    }
-}
-
-// Plugin status
-#[derive(Debug)]
-#[allow(dead_code)]
-enum PluginStatus {
-    Ready,        // Plugin is properly installed and ready
-    NotInstalled, // Plugin directory missing or installation failed
-    AccessError,  // Cannot access plugin directory
-}
-
-#[allow(dead_code)]
-fn check_plugin_status(plugin_dir: &std::path::Path) -> PluginStatus {
-    let crates_toml = plugin_dir.join(".crates.toml");
-    let crates2_json = plugin_dir.join(".crates2.json");
-
-    if crates_toml.exists() || crates2_json.exists() {
-        return PluginStatus::Ready;
-    }
-
-    let search_paths = vec![
-        plugin_dir.join("bin"),
-        plugin_dir.to_path_buf(),
-        plugin_dir.join("target").join("release"),
-        plugin_dir.join("src"),
-    ];
-
-    for search_path in search_paths {
-        if !search_path.exists() {
-            continue;
-        }
-
-        match std::fs::read_dir(&search_path) {
-            Ok(entries) => {
-                let has_content = entries.filter_map(|entry| entry.ok()).any(|entry| {
-                    let path = entry.path();
-                    if path.is_file() {
-                        is_executable_file(&path)
-                            || is_library_file(&path)
-                            || path.extension().map_or(false, |ext| {
-                                let ext_str = ext.to_string_lossy().to_lowercase();
-                                ext_str == "rs" || ext_str == "toml" || ext_str == "md"
-                            })
-                    } else {
-                        false
-                    }
-                });
-
-                if has_content {
-                    return PluginStatus::Ready;
-                }
-            }
-            Err(_) => return PluginStatus::AccessError,
-        }
-    }
-
-    PluginStatus::NotInstalled
-}
-
-fn is_library_file(path: &std::path::Path) -> bool {
-    if let Some(extension) = path.extension() {
-        let ext_str = extension.to_string_lossy().to_lowercase();
-        ext_str == "so" || ext_str == "dll" || ext_str == "dylib"
-    } else {
-        false
-    }
-}
-
-#[cfg(unix)]
-fn is_executable_file(path: &std::path::Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    if let Ok(metadata) = std::fs::metadata(path) {
-        let permissions = metadata.permissions();
-        permissions.mode() & 0o111 != 0
-    } else {
-        false
-    }
-}
-
-#[cfg(windows)]
-fn is_executable_file(path: &std::path::Path) -> bool {
-    if let Some(extension) = path.extension() {
-        let ext = extension.to_string_lossy().to_lowercase();
-        ext == "exe" || ext == "bat" || ext == "cmd"
-    } else {
-        false
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn is_executable_file(_path: &std::path::Path) -> bool {
-    false
 }
