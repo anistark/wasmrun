@@ -10,6 +10,7 @@ use std::time::Duration;
 use tiny_http::Server;
 
 use crate::compiler;
+use crate::compiler::builder::{OptimizationLevel, TargetType};
 use crate::watcher;
 
 use super::handler;
@@ -328,12 +329,11 @@ pub fn setup_project_compilation(
     path: &str,
     language_override: Option<String>,
     watch: bool,
-) -> Option<(compiler::ProjectLanguage, String)> {
+) -> Option<(crate::compiler::ProjectLanguage, String)> {
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  🚀 \x1b[1;36mWasmrun: Compile and Run\x1b[0m\n");
 
-    // Detect project language
-    let detected_language = compiler::detect_project_language(path);
+    let detected_language = crate::compiler::detect_project_language(path);
     println!(
         "  📂 \x1b[1;34mProject Path:\x1b[0m \x1b[1;33m{}\x1b[0m",
         path
@@ -347,14 +347,12 @@ pub fn setup_project_compilation(
         println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mEnabled\x1b[0m");
     }
 
-    // Use language from command if provided
     let lang = match language_override {
         Some(lang_str) => match lang_str.to_lowercase().as_str() {
-            // "rust" => compiler::ProjectLanguage::Rust,
-            // "go" => compiler::ProjectLanguage::Go,
-            "c" => compiler::ProjectLanguage::C,
-            "asc" => compiler::ProjectLanguage::Asc,
-            "python" => compiler::ProjectLanguage::Python,
+            "rust" => crate::compiler::ProjectLanguage::Rust,
+            "c" => crate::compiler::ProjectLanguage::C,
+            "asc" => crate::compiler::ProjectLanguage::Asc,
+            "python" => crate::compiler::ProjectLanguage::Python,
             _ => {
                 println!(
                     "  ⚠️ \x1b[1;33mUnknown language '{}', using auto-detected\x1b[0m",
@@ -366,12 +364,69 @@ pub fn setup_project_compilation(
         None => detected_language,
     };
 
-    if lang == compiler::ProjectLanguage::Unknown {
+    if lang == crate::compiler::ProjectLanguage::Unknown {
         println!("\n  ❓ \x1b[1;33mNo recognizable project detected in this directory\x1b[0m");
         println!("\n  💡 \x1b[1;33mTo run a WASM file directly:\x1b[0m");
         println!("     \x1b[1;37mwasmrun --wasm --path /path/to/your/file.wasm\x1b[0m");
         println!("\x1b[1;34m╰\x1b[0m");
         return None;
+    }
+
+    match crate::plugin::PluginManager::new() {
+        Ok(plugin_manager) => {
+            if let Some(plugin) = plugin_manager.find_plugin_for_project(path) {
+                println!(
+                    "  🔌 \x1b[1;34mPlugin:\x1b[0m \x1b[1;32m{} v{}\x1b[0m",
+                    plugin.info().name,
+                    plugin.info().version
+                );
+
+                let builder = plugin.get_builder();
+                let missing_deps = builder.check_dependencies();
+                if !missing_deps.is_empty() {
+                    println!("\n  ⚠️  \x1b[1;33mMissing Plugin Dependencies:\x1b[0m");
+                    for dep in &missing_deps {
+                        println!("     \x1b[1;31m• {}\x1b[0m", dep);
+                    }
+
+                    if lang == crate::compiler::ProjectLanguage::Rust {
+                        println!("\n  💡 \x1b[1;33mTo install the Rust plugin:\x1b[0m");
+                        println!("     \x1b[1;37mcargo install wasmrust\x1b[0m");
+                    }
+
+                    println!("\x1b[1;34m╰\x1b[0m\n");
+                    return None;
+                }
+            } else {
+                match lang {
+                    crate::compiler::ProjectLanguage::Rust => {
+                        println!("\n  ⚠️  \x1b[1;33mRust plugin not found\x1b[0m");
+                        println!("  💡 \x1b[1;33mInstall the wasmrust plugin:\x1b[0m");
+                        println!("     \x1b[1;37mwasmrun plugin install wasmrust\x1b[0m");
+                        println!("\n  ℹ️  \x1b[1;34mAfter installation, wasmrust will be auto-detected\x1b[0m");
+                        println!("\x1b[1;34m╰\x1b[0m\n");
+                        return None;
+                    }
+                    crate::compiler::ProjectLanguage::C
+                    | crate::compiler::ProjectLanguage::Asc
+                    | crate::compiler::ProjectLanguage::Python => {
+                        println!("  🔧 \x1b[1;34mUsing built-in plugin\x1b[0m");
+                    }
+                    _ => {}
+                }
+            }
+
+            let (builtin_count, external_count) = plugin_manager.plugin_counts();
+            if external_count > 0 {
+                println!(
+                    "  📊 \x1b[1;34mPlugins:\x1b[0m {} built-in, {} external",
+                    builtin_count, external_count
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("  ⚠️ Warning: Failed to initialize plugin manager: {}", e);
+        }
     }
 
     let temp_dir = std::env::temp_dir().join("wasmrun_temp");
@@ -393,24 +448,34 @@ pub fn setup_project_compilation(
         temp_output_dir
     );
     println!("\x1b[1;34m╰\x1b[0m\n");
-    compiler::print_system_info();
-    let os = compiler::detect_operating_system();
-    let missing_tools = compiler::get_missing_tools(&lang, &os);
-    if !missing_tools.is_empty() {
-        println!("\n\x1b[1;34m╭\x1b[0m");
-        println!("  ⚠️  \x1b[1;33mMissing Required Tools:\x1b[0m");
-        for tool in &missing_tools {
-            println!("     \x1b[1;31m• {}\x1b[0m", tool);
+
+    if matches!(
+        lang,
+        crate::compiler::ProjectLanguage::C
+            | crate::compiler::ProjectLanguage::Asc
+            | crate::compiler::ProjectLanguage::Python
+    ) {
+        crate::compiler::print_system_info();
+        let os = crate::compiler::detect_operating_system();
+        let missing_tools = crate::compiler::get_missing_tools(&lang, &os);
+        if !missing_tools.is_empty() {
+            println!("\n\x1b[1;34m╭\x1b[0m");
+            println!("  ⚠️  \x1b[1;33mMissing Required Tools:\x1b[0m");
+            for tool in &missing_tools {
+                println!("     \x1b[1;31m• {}\x1b[0m", tool);
+            }
+            println!(
+                "\n  \x1b[0;37mPlease install the required tools to compile this project.\x1b[0m"
+            );
+            println!("\x1b[1;34m╰\x1b[0m\n");
+            return None;
         }
-        println!("\n  \x1b[0;37mPlease install the required tools to compile this project.\x1b[0m");
-        println!("\x1b[1;34m╰\x1b[0m\n");
-        return None;
     }
 
-    if lang == compiler::ProjectLanguage::Python {
+    if lang == crate::compiler::ProjectLanguage::Python {
         println!("\n\x1b[1;34m╭\x1b[0m");
         println!("  ⚠️  \x1b[1;33mPython WebAssembly compilation coming soon!\x1b[0m");
-        println!("  \x1b[0;37mSupport for compiling Python projects is under development.\x1b[0m");
+        println!("  📝 \x1b[0;37mImplementing py2wasm integration for Python-to-WASM compilation.\x1b[0m");
         println!("\x1b[1;34m╰\x1b[0m\n");
         return None;
     }
@@ -420,139 +485,50 @@ pub fn setup_project_compilation(
 
 /// Compile a project
 pub fn compile_project(
-    path: &str,
+    project_path: &str,
     output_dir: &str,
-    _lang: compiler::ProjectLanguage,
-    watch: bool,
+    _lang: crate::compiler::ProjectLanguage,
+    _watch: bool,
 ) -> Option<(String, bool, Option<String>)> {
-    match compiler::compile_for_execution(path, output_dir) {
-        Ok(output_path) => {
-            println!("\n\x1b[1;34m╭\x1b[0m");
-            println!("  ✅ \x1b[1;36mCompilation Successful\x1b[0m\n");
+    if let Ok(plugin_manager) = crate::plugin::PluginManager::new() {
+        if let Some(plugin) = plugin_manager.find_plugin_for_project(project_path) {
+            println!("🔌 Compiling with {}", plugin.info().name);
 
-            // Check if this is a JS file (for wasm-bindgen)
-            let is_wasm_bindgen = output_path.ends_with(".js");
+            let builder = plugin.get_builder();
+            let config = crate::compiler::builder::BuildConfig {
+                project_path: project_path.to_string(),
+                output_dir: output_dir.to_string(),
+                verbose: false,
+                optimization_level: OptimizationLevel::Release,
+                target_type: TargetType::Standard,
+            };
 
-            if is_wasm_bindgen {
-                println!(
-                    "  📦 \x1b[1;34mJS File:\x1b[0m \x1b[1;32m{}\x1b[0m",
-                    output_path
-                );
-
-                // Find the corresponding WASM file
-                let wasm_path = Path::new(&output_path).with_extension("wasm");
-
-                if !wasm_path.exists() {
-                    // Check for the _bg.wasm file pattern
-                    let js_stem = Path::new(&output_path)
-                        .file_stem()
-                        .unwrap()
-                        .to_string_lossy();
-                    let dir = Path::new(&output_path).parent().unwrap();
-                    let bg_wasm_filename = format!("{}_bg.wasm", js_stem);
-                    let bg_wasm_path = dir.join(&bg_wasm_filename);
-
-                    if bg_wasm_path.exists() {
-                        println!(
-                            "  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m",
-                            bg_wasm_path.display()
-                        );
-
-                        if watch {
-                            println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m (Press Ctrl+C to stop)");
-                        }
-
-                        println!("\x1b[1;34m╰\x1b[0m\n");
-
-                        // Return the WASM path, indicate it's a wasm-bindgen project, and provide JS path
-                        return Some((
-                            bg_wasm_path.to_string_lossy().to_string(),
-                            true,
-                            Some(output_path),
-                        ));
-                    } else {
-                        // Try to find any .wasm file in the same directory
-                        let mut found_wasm = None;
-                        if let Ok(entries) = fs::read_dir(dir) {
-                            for entry in entries.flatten() {
-                                if let Some(ext) = entry.path().extension() {
-                                    if ext == "wasm" {
-                                        found_wasm = Some(entry.path());
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if let Some(found_wasm_path) = found_wasm {
-                            println!(
-                                "  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m",
-                                found_wasm_path.display()
-                            );
-
-                            if watch {
-                                println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m (Press Ctrl+C to stop)");
-                            }
-
-                            println!("\x1b[1;34m╰\x1b[0m\n");
-
-                            return Some((
-                                found_wasm_path.to_string_lossy().to_string(),
-                                true,
-                                Some(output_path),
-                            ));
-                        } else {
-                            eprintln!("\n\x1b[1;34m╭\x1b[0m");
-                            eprintln!("  ❌ \x1b[1;31mWASM File Not Found\x1b[0m\n");
-                            eprintln!(
-                                "  \x1b[0;91mExpected WASM file at: {}\x1b[0m",
-                                wasm_path.display()
-                            );
-                            eprintln!("\x1b[1;34m╰\x1b[0m");
-                            return None;
-                        }
-                    }
+            match builder.build(&config) {
+                Ok(result) => {
+                    let is_wasm_bindgen = result.js_path.is_some();
+                    return Some((result.wasm_path, is_wasm_bindgen, result.js_path));
                 }
-
-                println!(
-                    "  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m",
-                    wasm_path.display()
-                );
-
-                if watch {
-                    println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m (Press Ctrl+C to stop)");
+                Err(e) => {
+                    eprintln!("❌ Plugin compilation failed: {}", e);
+                    return None;
                 }
-
-                println!("\x1b[1;34m╰\x1b[0m\n");
-
-                // Return the WASM path, indicate it's a wasm-bindgen project, and provide JS path
-                Some((
-                    wasm_path.to_string_lossy().to_string(),
-                    true,
-                    Some(output_path),
-                ))
-            } else {
-                // Standard WASM file
-                println!(
-                    "  📦 \x1b[1;34mWASM File:\x1b[0m \x1b[1;32m{}\x1b[0m",
-                    output_path
-                );
-
-                if watch {
-                    println!("  👀 \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mActive\x1b[0m (Press Ctrl+C to stop)");
-                }
-
-                println!("\x1b[1;34m╰\x1b[0m\n");
-
-                // Return the WASM path and indicate it's not a wasm-bindgen project
-                Some((output_path, false, None))
             }
         }
+    }
+
+    match crate::compiler::compile_for_execution(project_path, output_dir) {
+        Ok(result) => {
+            let is_wasm_bindgen = result.contains(".js");
+            let js_path = if is_wasm_bindgen {
+                Some(result.clone())
+            } else {
+                None
+            };
+
+            Some((result, is_wasm_bindgen, js_path))
+        }
         Err(e) => {
-            eprintln!("\n\x1b[1;34m╭\x1b[0m");
-            eprintln!("  ❌ \x1b[1;31mCompilation Failed\x1b[0m\n");
-            eprintln!("  \x1b[0;91m{}\x1b[0m", e);
-            eprintln!("\x1b[1;34m╰\x1b[0m");
+            eprintln!("❌ Compilation failed: {}", e);
             None
         }
     }

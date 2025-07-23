@@ -1,9 +1,7 @@
-use crate::cli::CommandValidator;
-use crate::compiler;
-use crate::compiler::builder::{BuildConfig, BuilderFactory, OptimizationLevel};
-use crate::error::{CompilationError, Result, WasmrunError};
-use crate::ui::{print_compilation_success, print_compile_info, print_missing_tools};
-use std::fmt;
+use crate::compiler::builder::{BuildConfig, BuilderFactory, OptimizationLevel, TargetType};
+use crate::error::{Result, WasmrunError};
+use crate::ui::{print_compilation_success, print_compile_info};
+use crate::utils::PathResolver;
 
 /// Handle compile command
 pub fn handle_compile_command(
@@ -11,43 +9,28 @@ pub fn handle_compile_command(
     positional_path: &Option<String>,
     output: &Option<String>,
     verbose: bool,
-    optimization: &str,
+    optimization: &Option<String>,
 ) -> Result<()> {
-    let (project_path, output_dir) =
-        CommandValidator::validate_compile_args(path, positional_path, output)
-            .map_err(|e| WasmrunError::from(e.to_string()))?;
+    let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
+    PathResolver::validate_directory_exists(&project_path)?;
 
-    let optimization_level = match optimization.to_lowercase().as_str() {
-        "debug" => OptimizationLevel::Debug,
-        "release" => OptimizationLevel::Release,
-        "size" => OptimizationLevel::Size,
-        _ => {
-            return Err(WasmrunError::Compilation(
-                CompilationError::InvalidOptimizationLevel {
-                    level: optimization.to_string(),
-                    valid_options: vec![
-                        "debug".to_string(),
-                        "release".to_string(),
-                        "size".to_string(),
-                    ],
-                },
-            ));
+    let output_dir = match output {
+        Some(dir) => dir.clone(),
+        None => {
+            let default_output = PathResolver::join_paths(&project_path, "target/wasm");
+            std::fs::create_dir_all(&default_output)?;
+            default_output
         }
     };
 
-    let language = compiler::detect_project_language(&project_path);
+    let optimization_level = match optimization.as_deref() {
+        Some("debug") => OptimizationLevel::Debug,
+        Some("release") => OptimizationLevel::Release,
+        Some("size") => OptimizationLevel::Size,
+        _ => OptimizationLevel::Release,
+    };
 
-    if language == compiler::ProjectLanguage::Unknown {
-        return Err(WasmrunError::language_detection(format!(
-            "Could not detect project language in directory: {}",
-            project_path
-        )));
-    }
-
-    if verbose {
-        compiler::print_system_info();
-    }
-
+    let language = crate::compiler::detect_project_language(&project_path);
     print_compile_info(
         &project_path,
         &language,
@@ -56,20 +39,54 @@ pub fn handle_compile_command(
         verbose,
     );
 
-    let builder = BuilderFactory::create_builder(&language);
-    let missing_tools = builder.check_dependencies();
+    if let Ok(plugin_manager) = crate::plugin::PluginManager::new() {
+        if let Some(plugin) = plugin_manager.find_plugin_for_project(&project_path) {
+            println!(
+                "🔌 Using plugin: {} v{}",
+                plugin.info().name,
+                plugin.info().version
+            );
 
-    if !missing_tools.is_empty() {
-        print_missing_tools(&missing_tools);
-        return Err(WasmrunError::missing_tools(missing_tools));
+            let builder = plugin.get_builder();
+            let missing_deps = builder.check_dependencies();
+
+            if !missing_deps.is_empty() {
+                println!("❌ Missing dependencies:");
+                for dep in missing_deps {
+                    println!("   • {}", dep);
+                }
+                return Err(WasmrunError::from("Missing plugin dependencies"));
+            }
+
+            let config = BuildConfig {
+                project_path: project_path.clone(),
+                output_dir: output_dir.clone(),
+                verbose,
+                optimization_level,
+                target_type: TargetType::Standard,
+            };
+
+            let result = if verbose {
+                builder
+                    .build_verbose(&config)
+                    .map_err(WasmrunError::Compilation)?
+            } else {
+                builder.build(&config).map_err(WasmrunError::Compilation)?
+            };
+
+            print_compilation_success(&result.wasm_path, &result.js_path, &result.additional_files);
+            return Ok(());
+        }
     }
+
+    let builder = BuilderFactory::create_builder(&language);
 
     let config = BuildConfig {
         project_path,
-        output_dir: output_dir.clone(),
+        output_dir,
         verbose,
         optimization_level,
-        target_type: compiler::builder::TargetType::Standard,
+        target_type: TargetType::Standard,
     };
 
     let result = if verbose {
@@ -82,18 +99,4 @@ pub fn handle_compile_command(
 
     print_compilation_success(&result.wasm_path, &result.js_path, &result.additional_files);
     Ok(())
-}
-
-impl fmt::Display for compiler::ProjectLanguage {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let lang_str = match self {
-            // compiler::ProjectLanguage::Rust => "Rust",
-            // compiler::ProjectLanguage::Go => "Go",
-            compiler::ProjectLanguage::C => "C",
-            compiler::ProjectLanguage::Asc => "Asc",
-            compiler::ProjectLanguage::Python => "Python",
-            compiler::ProjectLanguage::Unknown => "Unknown",
-        };
-        write!(f, "{}", lang_str)
-    }
 }

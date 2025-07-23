@@ -1,11 +1,12 @@
+use std::fmt;
 use std::fs;
 use std::path::Path;
 
 /// Supported project languages
 #[derive(Debug, PartialEq)]
 pub enum ProjectLanguage {
-    // Rust,
-    // Go,
+    Rust,
+    Go,
     C,
     Asc,
     Python,
@@ -34,22 +35,22 @@ pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
         return ProjectLanguage::Unknown;
     }
 
-    // if path.join("Cargo.toml").exists() {
-    //     return ProjectLanguage::Rust;
-    // }
+    if path.join("Cargo.toml").exists() {
+        return ProjectLanguage::Rust;
+    }
 
-    // if path.join("go.mod").exists() {
-    //     return ProjectLanguage::Go;
-    // } else if let Ok(entries) = fs::read_dir(path) {
-    //     for entry in entries.flatten() {
-    //         if let Some(extension) = entry.path().extension() {
-    //             let ext = extension.to_string_lossy().to_lowercase();
-    //             if ext == "go" {
-    //                 return ProjectLanguage::Go;
-    //             }
-    //         }
-    //     }
-    // }
+    if path.join("go.mod").exists() {
+        return ProjectLanguage::Go;
+    } else if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Some(extension) = entry.path().extension() {
+                let ext = extension.to_string_lossy().to_lowercase();
+                if ext == "go" {
+                    return ProjectLanguage::Go;
+                }
+            }
+        }
+    }
 
     if path.join("pyproject.toml").exists() || path.join("setup.py").exists() {
         return ProjectLanguage::Python;
@@ -120,22 +121,16 @@ pub fn detect_operating_system() -> OperatingSystem {
 /// Get recommended compilation tools based on OS and language.
 pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -> Vec<String> {
     let recommended_tools = match (language, os) {
-        // (ProjectLanguage::Rust, _) => {
-        //     let mut tools = vec!["rustup".to_string(), "cargo".to_string()];
-
-        //     if let Ok(current_dir) = std::env::current_dir() {
-        //         let current_dir_str = current_dir.to_str().unwrap_or(".");
-        //         let builder = crate::plugin::languages::rust_plugin::RustPlugin::new();
-        //         if builder.uses_wasm_bindgen(current_dir_str) {
-        //             tools.push("wasm-pack".to_string());
-        //         }
-        //     }
-
-        //     tools
-        // }
-        // (ProjectLanguage::Go, _) => {
-        //     vec!["wasmgo".to_string(), "tinygo".to_string()]
-        // }
+        (ProjectLanguage::Rust, _) => {
+            vec![
+                "rustup".to_string(),
+                "cargo".to_string(),
+                "wasmrust plugin".to_string(),
+            ]
+        }
+        (ProjectLanguage::Go, _) => {
+            vec!["wasmgo plugin".to_string(), "tinygo".to_string()]
+        }
         (ProjectLanguage::C, OperatingSystem::Windows) => {
             vec![
                 "emscripten".to_string(),
@@ -215,75 +210,27 @@ pub fn is_tool_installed(tool_name: &str) -> bool {
     .unwrap_or(false)
 }
 
-/// Get missing tools required for compilation
+/// Get missing tools for a given language
 pub fn get_missing_tools(language: &ProjectLanguage, os: &OperatingSystem) -> Vec<String> {
-    let recommended_tools = get_recommended_tools(language, os);
-
-    recommended_tools
-        .into_iter()
-        .filter(|tool| !is_tool_installed(tool))
-        .collect()
+    get_recommended_tools(language, os)
 }
 
-/// Print system info for compilation
+/// Print system information
 pub fn print_system_info() {
     let os = detect_operating_system();
+    println!("💻 System: {:?}", os);
+}
 
-    println!("\n\x1b[1;34m╭\x1b[0m");
-    println!("  🖥️  \x1b[1;36mSystem Information\x1b[0m");
-    println!();
-    println!(
-        "  \x1b[1;34mOperating System:\x1b[0m \x1b[1;33m{:?}\x1b[0m",
-        os
-    );
-
-    #[cfg(target_os = "windows")]
-    {
-        let is_msys = std::env::var("MSYSTEM").is_ok();
-        let is_cygwin = std::env::var("CYGWIN").is_ok();
-        let is_wsl = std::fs::read_to_string("/proc/version")
-            .map(|v| v.contains("Microsoft") || v.contains("WSL"))
-            .unwrap_or(false);
-
-        if is_msys {
-            println!("  \x1b[1;34mEnvironment:\x1b[0m \x1b[1;33mMSYS/MinGW\x1b[0m");
-        } else if is_cygwin {
-            println!("  \x1b[1;34mEnvironment:\x1b[0m \x1b[1;33mCygwin\x1b[0m");
-        } else if is_wsl {
-            println!(
-                "  \x1b[1;34mEnvironment:\x1b[0m \x1b[1;33mWindows Subsystem for Linux\x1b[0m"
-            );
-        } else {
-            println!("  \x1b[1;34mEnvironment:\x1b[0m \x1b[1;33mNative Windows\x1b[0m");
-        }
+impl fmt::Display for ProjectLanguage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let lang_str = match self {
+            ProjectLanguage::Rust => "Rust",
+            ProjectLanguage::Go => "Go",
+            ProjectLanguage::C => "C",
+            ProjectLanguage::Asc => "Asc",
+            ProjectLanguage::Python => "Python",
+            ProjectLanguage::Unknown => "Unknown",
+        };
+        write!(f, "{}", lang_str)
     }
-
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(output) = std::process::Command::new("sw_vers")
-            .arg("-productVersion")
-            .output()
-        {
-            if let Ok(version) = String::from_utf8(output.stdout) {
-                println!(
-                    "  \x1b[1;34mmacOS Version:\x1b[0m \x1b[1;33m{}\x1b[0m",
-                    version.trim()
-                );
-            }
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(output) = std::fs::read_to_string("/etc/os-release") {
-            if let Some(name_line) = output.lines().find(|l| l.starts_with("PRETTY_NAME=")) {
-                if let Some(name) = name_line.strip_prefix("PRETTY_NAME=") {
-                    let name = name.trim_matches('"');
-                    println!("  \x1b[1;34mDistribution:\x1b[0m \x1b[1;33m{}\x1b[0m", name);
-                }
-            }
-        }
-    }
-
-    println!("\x1b[1;34m╰\x1b[0m");
 }

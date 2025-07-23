@@ -10,12 +10,15 @@ pub struct WasmAnalysis {
     pub path: String,
     pub filename: String,
     pub file_size: String,
+    #[allow(dead_code)]
     pub file_size_bytes: u64,
     #[allow(dead_code)]
     pub verification: Option<VerificationResult>,
     pub is_valid: bool,
     pub entry_points: Vec<String>,
+    #[allow(dead_code)]
     pub is_wasm_bindgen: bool,
+    #[allow(dead_code)]
     pub is_wasi: bool,
     pub module_type: ModuleType,
     #[allow(dead_code)]
@@ -120,56 +123,23 @@ impl WasmAnalysis {
             "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
         );
 
-        // Basic file info
-        println!(
-            "\x1b[1;34m│\x1b[1;34mFile:\x1b[0m \x1b[1;33m{:<51}\x1b[0m \x1b[1;34m│\x1b[0m",
-            truncate_string(&self.filename, 51)
-        );
-        println!(
-            "\x1b[1;34m│\x1b[1;34mSize:\x1b[0m \x1b[1;33m{:<51}\x1b[0m \x1b[1;34m│\x1b[0m",
-            format!("{} ({} bytes)", self.file_size, self.file_size_bytes)
-        );
-        println!(
-            "\x1b[1;34m│\x1b[1;34mPath:\x1b[0m \x1b[0;37m{:<51}\x1b[0m \x1b[1;34m│\x1b[0m",
-            truncate_string(&self.path, 51)
-        );
+        println!("\x1b[1;34m│\x1b[0m  📦 \x1b[1;34mFile:\x1b[0m \x1b[1;33m{:<51}\x1b[0m \x1b[1;34m│\x1b[0m", 
+                 self.filename);
+        println!("\x1b[1;34m│\x1b[0m  📂 \x1b[1;34mPath:\x1b[0m \x1b[0;37m{:<51}\x1b[0m \x1b[1;34m│\x1b[0m", 
+                 self.path);
+        println!("\x1b[1;34m│\x1b[0m  💾 \x1b[1;34mSize:\x1b[0m \x1b[1;33m{:<51}\x1b[0m \x1b[1;34m│\x1b[0m", 
+                 self.file_size);
 
-        // Module type and validity
-        let validity_icon = if self.is_valid { "✅" } else { "❌" };
-        let validity_text = if self.is_valid {
-            "Valid WebAssembly"
-        } else {
-            "Invalid Format"
-        };
-        println!("\x1b[1;34m│\x1b[0m  {} \x1b[1;34mFormat:\x1b[0m \x1b[1;32m{:<49}\x1b[0m \x1b[1;34m│\x1b[0m", 
-                 validity_icon, validity_text);
-
-        println!("\x1b[1;34m│\x1b[0m  🏷️  \x1b[1;34mType:\x1b[0m \x1b[1;36m{:<53}\x1b[0m \x1b[1;34m│\x1b[0m", 
-                 self.module_type.to_string());
-
-        // Module statistics
         if self.is_valid {
-            println!("\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m");
-            println!("\x1b[1;34m│\x1b[0m  📦 \x1b[1;36mModule Statistics\x1b[0m                                      \x1b[1;34m│\x1b[0m");
-            println!("\x1b[1;34m│\x1b[0m     \x1b[1;34mExports:\x1b[0m \x1b[1;33m{:<47}\x1b[0m \x1b[1;34m│\x1b[0m", self.exports_count);
-            println!("\x1b[1;34m│\x1b[0m     \x1b[1;34mFunctions:\x1b[0m \x1b[1;33m{:<45}\x1b[0m \x1b[1;34m│\x1b[0m", self.functions_count);
-
-            // Entry points
-            if !self.entry_points.is_empty() {
-                println!("\x1b[1;34m│\x1b[0m     \x1b[1;34mEntry Points:\x1b[0m \x1b[1;32m{:<43}\x1b[0m \x1b[1;34m│\x1b[0m", 
-                         self.entry_points.join(", "));
-            } else {
-                println!("\x1b[1;34m│\x1b[0m     \x1b[1;34mEntry Points:\x1b[0m \x1b[1;33m{:<43}\x1b[0m \x1b[1;34m│\x1b[0m", 
-                         "None detected");
-            }
-
-            // Special characteristics
-            if self.is_wasi {
-                println!("\x1b[1;34m│\x1b[0m     \x1b[1;32m✓ WASI Support Detected\x1b[0m                               \x1b[1;34m│\x1b[0m");
-            }
-            if self.is_wasm_bindgen {
-                println!("\x1b[1;34m│\x1b[0m     \x1b[1;32m✓ WASM-Bindgen Module\x1b[0m                                 \x1b[1;34m│\x1b[0m");
-            }
+            println!("\x1b[1;34m│\x1b[0m  ✅ \x1b[1;34mStatus:\x1b[0m \x1b[1;32mValid WebAssembly{:<32}\x1b[0m \x1b[1;34m│\x1b[0m", "");
+            println!("\x1b[1;34m│\x1b[0m  🏷️  \x1b[1;34mType:\x1b[0m \x1b[1;36m{:<49}\x1b[0m \x1b[1;34m│\x1b[0m", 
+                     self.module_type.to_string());
+            println!("\x1b[1;34m│\x1b[0m  📊 \x1b[1;34mExports:\x1b[0m \x1b[1;33m{:<47}\x1b[0m \x1b[1;34m│\x1b[0m", 
+                     self.exports_count);
+            println!("\x1b[1;34m│\x1b[0m  🔧 \x1b[1;34mFunctions:\x1b[0m \x1b[1;33m{:<45}\x1b[0m \x1b[1;34m│\x1b[0m", 
+                     self.functions_count);
+        } else {
+            println!("\x1b[1;34m│\x1b[0m  ❌ \x1b[1;34mStatus:\x1b[0m \x1b[1;31mInvalid Format{:<36}\x1b[0m \x1b[1;34m│\x1b[0m", "");
         }
 
         println!(

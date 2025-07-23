@@ -94,6 +94,7 @@ impl WasmrunConfig {
         }
     }
 
+    #[allow(dead_code)]
     pub fn cache_dir() -> Result<PathBuf> {
         let config = Self::load_or_default()?;
 
@@ -222,6 +223,7 @@ impl WasmrunConfig {
     }
 
     // External plugin management
+    #[allow(dead_code)]
     pub fn add_external_plugin(
         &mut self,
         name: String,
@@ -249,6 +251,7 @@ impl WasmrunConfig {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn is_external_plugin_installed(&self, name: &str) -> bool {
         self.external_plugins.contains_key(name)
     }
@@ -277,6 +280,7 @@ impl WasmrunConfig {
         }
     }
 
+    #[allow(dead_code)]
     pub fn update_external_plugin_metadata(&mut self, name: &str, info: PluginInfo) -> Result<()> {
         if let Some(entry) = self.external_plugins.get_mut(name) {
             entry.info = info;

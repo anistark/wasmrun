@@ -2,23 +2,20 @@ use crate::error::{Result, WasmrunError};
 use std::fs;
 use std::path::Path;
 
-/// Utility for resolving and handling file paths consistently across the application
+/// Utility for resolving and handling file paths
 pub struct PathResolver;
 
 impl PathResolver {
-    /// Resolve input path from positional argument or flag, with fallback to current directory
     pub fn resolve_input_path(positional: Option<String>, flag: Option<String>) -> String {
         positional.unwrap_or_else(|| flag.unwrap_or_else(|| String::from("./")))
     }
 
-    /// Check if file has the expected extension
     pub fn has_extension(path: &str, expected_ext: &str) -> bool {
         Path::new(path).extension().map_or(false, |ext| {
             ext.to_string_lossy().to_lowercase() == expected_ext.to_lowercase()
         })
     }
 
-    /// Get file extension as lowercase string
     #[allow(dead_code)]
     pub fn get_extension(path: &str) -> Option<String> {
         Path::new(path)
@@ -59,7 +56,7 @@ impl PathResolver {
         Ok(())
     }
 
-    /// Validate WASM file (exists, is file, has .wasm extension)
+    /// Validate WASM file
     pub fn validate_wasm_file(path: &str) -> Result<()> {
         Self::validate_file_exists(path)?;
 
@@ -73,7 +70,7 @@ impl PathResolver {
         Ok(())
     }
 
-    /// Get absolute path as string
+    /// Get absolute path
     #[allow(dead_code)]
     pub fn get_absolute_path(path: &str) -> Result<String> {
         fs::canonicalize(path)
@@ -93,7 +90,7 @@ impl PathResolver {
             .pipe(Ok)
     }
 
-    /// Get file stem (filename without extension)
+    /// Get file stem
     #[allow(dead_code)]
     pub fn get_file_stem(path: &str) -> Result<String> {
         Path::new(path)
@@ -112,7 +109,7 @@ impl PathResolver {
             .to_string()
     }
 
-    /// Create output directory if it doesn't exist
+    /// Create output directory
     pub fn ensure_output_directory(output_dir: &str) -> Result<()> {
         let output_path = Path::new(output_dir);
         if !output_path.exists() {
@@ -123,7 +120,6 @@ impl PathResolver {
         Ok(())
     }
 
-    /// Find files with specific extension in directory
     pub fn find_files_with_extension(dir_path: &str, extension: &str) -> Result<Vec<String>> {
         let mut files = Vec::new();
         let path = Path::new(dir_path);
@@ -150,6 +146,7 @@ impl PathResolver {
     }
 
     /// Find common entry files for different languages
+    #[allow(dead_code)]
     pub fn find_entry_file(project_path: &str, candidates: &[&str]) -> Option<String> {
         for candidate in candidates {
             let entry_path = Self::join_paths(project_path, candidate);
@@ -164,13 +161,11 @@ impl PathResolver {
     pub fn is_safe_path(path: &str) -> bool {
         let path = Path::new(path);
 
-        // Check for directory traversal attempts
         for component in path.components() {
             match component {
                 std::path::Component::ParentDir => return false,
                 std::path::Component::Normal(name) => {
                     let name_str = name.to_string_lossy();
-                    // Check for potentially dangerous names
                     if name_str.starts_with('.') && name_str.len() > 1 {
                         continue;
                     }

@@ -27,6 +27,7 @@ pub struct RegistryMetadata {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ExternalPluginStats {
     pub total_installed: usize,
     pub enabled_count: usize,
@@ -44,6 +45,7 @@ impl LocalPluginRegistry {
         Ok(Self { config })
     }
 
+    #[allow(dead_code)]
     pub fn add_plugin(
         &mut self,
         name: String,
@@ -61,6 +63,7 @@ impl LocalPluginRegistry {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn is_installed(&self, name: &str) -> bool {
         self.config.is_external_plugin_installed(name)
     }
@@ -77,10 +80,12 @@ impl LocalPluginRegistry {
         self.config.set_external_plugin_enabled(name, enabled)
     }
 
+    #[allow(dead_code)]
     pub fn update_plugin_metadata(&mut self, name: &str, info: PluginInfo) -> Result<()> {
         self.config.update_external_plugin_metadata(name, info)
     }
 
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> ExternalPluginStats {
         let (total_installed, enabled_count, disabled_count, supported_languages) =
             self.config.get_external_plugin_stats();
@@ -123,6 +128,7 @@ impl RegistryManager {
         &mut self.local_registry
     }
 
+    #[allow(dead_code)]
     pub fn search_all(&self, query: &str) -> Result<Vec<RegistryEntry>> {
         let query_lower = query.to_lowercase();
         let mut results = Vec::new();
@@ -175,11 +181,13 @@ impl RegistryManager {
         Ok(results)
     }
 
+    #[allow(dead_code)]
     fn search_external_registries(&self, _query: &str) -> Result<Vec<RegistryEntry>> {
         // TODO: Implement external registry search
         Ok(Vec::new())
     }
 
+    #[allow(dead_code)]
     pub fn get_builtin_plugins(&self) -> Vec<PluginInfo> {
         use crate::plugin::languages::{
             asc_plugin::AscPlugin, c_plugin::CPlugin, python_plugin::PythonPlugin,
@@ -200,19 +208,17 @@ impl Default for RegistryManager {
 }
 
 // Plugin metadata detection
-
+#[allow(dead_code)]
 pub fn detect_plugin_metadata(
     plugin_dir: &std::path::Path,
     plugin_name: &str,
     source: &PluginSource,
 ) -> Result<PluginInfo> {
-    // Try plugin.toml first (for Git/local installs)
     let config_path = plugin_dir.join("plugin.toml");
     if config_path.exists() {
         return detect_from_plugin_toml(&config_path, plugin_name, source);
     }
 
-    // For crates.io plugins, fetch metadata from API
     if let PluginSource::CratesIo { name, version: _ } = source {
         if let Ok(metadata) = fetch_crates_io_metadata(name) {
             return Ok(metadata);
@@ -427,8 +433,7 @@ fn parse_crates_io_json(crate_name: &str, json_str: &str) -> Result<PluginInfo> 
             if let Some(end) = json_str[name_start..].find('"') {
                 author = json_str[name_start..name_start + end].to_string();
             }
-        }
-        else if let Some(login_start) = published_section.find("\"login\":\"") {
+        } else if let Some(login_start) = published_section.find("\"login\":\"") {
             let login_start = published_start + login_start + 9;
             if let Some(end) = json_str[login_start..].find('"') {
                 author = json_str[login_start..login_start + end].to_string();

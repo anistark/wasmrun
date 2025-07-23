@@ -112,6 +112,7 @@ pub enum CompilationError {
 
     /// Optimization level invalid
     #[error("Invalid optimization level: {level}. Valid options: {valid_options:?}")]
+    #[allow(dead_code)]
     InvalidOptimizationLevel {
         level: String,
         valid_options: Vec<String>,

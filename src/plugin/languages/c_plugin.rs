@@ -1,4 +1,4 @@
-use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
+use crate::compiler::builder::{BuildConfig, BuildResult, OptimizationLevel, WasmBuilder};
 use crate::error::{CompilationError, CompilationResult};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
 use crate::utils::{CommandExecutor, PathResolver};
@@ -198,13 +198,13 @@ impl CPlugin {
 
         // Add optimization flags based on build config
         match config.optimization_level {
-            crate::compiler::builder::OptimizationLevel::Debug => {
+            OptimizationLevel::Debug => {
                 args.extend(&["-g", "-O0"]);
             }
-            crate::compiler::builder::OptimizationLevel::Release => {
+            OptimizationLevel::Release => {
                 args.extend(&["-O3"]);
             }
-            crate::compiler::builder::OptimizationLevel::Size => {
+            OptimizationLevel::Size => {
                 args.extend(&["-Os", "-s", "ELIMINATE_DUPLICATE_FUNCTIONS=1"]);
             }
         }
@@ -329,7 +329,7 @@ impl WasmBuilder for CPlugin {
         }
 
         // Check for make if Makefile exists
-        if self.has_makefile(&crate::compiler::builder::BuildConfig::default().project_path)
+        if self.has_makefile(&BuildConfig::default().project_path)
             && !CommandExecutor::is_tool_installed("make")
         {
             missing.push("make (build system)".to_string());

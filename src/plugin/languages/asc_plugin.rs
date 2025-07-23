@@ -1,4 +1,4 @@
-use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
+use crate::compiler::builder::{BuildConfig, BuildResult, OptimizationLevel, WasmBuilder};
 use crate::error::{CompilationError, CompilationResult};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
 use crate::utils::{CommandExecutor, PathResolver};
@@ -128,13 +128,13 @@ impl AscPlugin {
 
         // Optimization flags
         match config.optimization_level {
-            crate::compiler::builder::OptimizationLevel::Debug => {
+            OptimizationLevel::Debug => {
                 args.extend(&["--debug"]);
             }
-            crate::compiler::builder::OptimizationLevel::Release => {
+            OptimizationLevel::Release => {
                 args.extend(&["--optimize"]);
             }
-            crate::compiler::builder::OptimizationLevel::Size => {
+            OptimizationLevel::Size => {
                 args.extend(&["--optimize", "--shrinkLevel", "2"]);
             }
         }

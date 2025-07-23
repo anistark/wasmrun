@@ -396,6 +396,7 @@ impl CommandArgs for Commands {
 pub struct CommandValidator;
 
 impl CommandValidator {
+    #[allow(dead_code)]
     pub fn validate_compile_args(
         path: &Option<String>,
         positional_path: &Option<String>,

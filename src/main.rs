@@ -34,15 +34,19 @@ fn main() {
             output,
             verbose,
             optimization,
-        }) => {
-            commands::handle_compile_command(path, positional_path, output, *verbose, optimization)
-                .map_err(|e| match e {
-                    WasmrunError::Command(_)
-                    | WasmrunError::Compilation(_)
-                    | WasmrunError::Path { .. } => e,
-                    _ => e,
-                })
-        }
+        }) => commands::handle_compile_command(
+            path,
+            positional_path,
+            output,
+            *verbose,
+            &Some(optimization.clone()),
+        )
+        .map_err(|e| match e {
+            WasmrunError::Command(_) | WasmrunError::Compilation(_) | WasmrunError::Path { .. } => {
+                e
+            }
+            _ => e,
+        }),
 
         Some(Commands::Verify {
             path,

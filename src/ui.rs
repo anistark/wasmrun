@@ -56,6 +56,7 @@ pub fn print_compile_info(
 }
 
 /// Print missing tools warning
+#[allow(dead_code)]
 pub fn print_missing_tools(missing_tools: &[String]) {
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  ⚠️  \x1b[1;33mMissing Required Tools:\x1b[0m");
