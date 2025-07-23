@@ -143,7 +143,8 @@ impl PluginManager {
             plugin_type: PluginType::External,
             source: Some(PluginSource::CratesIo {
                 name: "wasmrust".to_string(),
-                version: Self::get_plugin_version("wasmrust").unwrap_or_else(|| "latest".to_string()),
+                version: Self::get_plugin_version("wasmrust")
+                    .unwrap_or_else(|| "latest".to_string()),
             }),
             dependencies: vec!["cargo".to_string(), "rustc".to_string()],
             capabilities: PluginCapabilities {
@@ -197,7 +198,11 @@ impl PluginManager {
             }
         }
 
-        let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+        let which_cmd = if cfg!(target_os = "windows") {
+            "where"
+        } else {
+            "which"
+        };
         if let Ok(output) = Command::new(which_cmd).arg(command).output() {
             return output.status.success();
         }
@@ -220,9 +225,9 @@ impl PluginManager {
         self.plugins
             .iter()
             .find(|plugin| {
-                plugin.info().name == name ||
-                plugin.info().name.contains(name) ||
-                (name == "rust" && plugin.info().name == "wasmrust")
+                plugin.info().name == name
+                    || plugin.info().name.contains(name)
+                    || (name == "rust" && plugin.info().name == "wasmrust")
             })
             .map(|boxed| boxed.as_ref())
     }

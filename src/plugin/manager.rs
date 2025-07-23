@@ -124,7 +124,7 @@ impl PluginCommands {
 
     fn install_wasmrust(&mut self, version: Option<String>) -> Result<()> {
         println!("🔄 Installing wasmrust plugin...");
-        
+
         if Self::is_plugin_available("wasmrust") {
             println!("✅ wasmrust is already available");
             let actual_version = self.get_actual_wasmrust_version();
@@ -134,24 +134,25 @@ impl PluginCommands {
         }
 
         let version_to_install = version.unwrap_or_else(|| "latest".to_string());
-        
+
         println!("📦 Installing wasmrust from crates.io...");
-        
+
         let mut cmd = Command::new("cargo");
         cmd.args(&["install", "wasmrust"]);
-        
+
         if version_to_install != "latest" {
             cmd.args(&["--version", &version_to_install]);
         }
 
-        let output = cmd.output()
+        let output = cmd
+            .output()
             .map_err(|e| WasmrunError::from(format!("Failed to run cargo install: {}", e)))?;
 
         if output.status.success() {
             println!("✅ wasmrust installed successfully!");
-            
+
             std::thread::sleep(std::time::Duration::from_millis(500));
-            
+
             if Self::is_plugin_available("wasmrust") {
                 let actual_version = self.get_actual_wasmrust_version();
                 println!("📦 Installed version: {}", actual_version);
@@ -160,9 +161,8 @@ impl PluginCommands {
                 println!("⚠️  Installation completed but wasmrust not immediately available");
                 self.diagnose_path_issue();
             }
-            
+
             println!("🔌 Plugin installed and ready to use");
-            
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(WasmrunError::from(format!(
@@ -218,18 +218,21 @@ impl PluginCommands {
         if let Ok(home_dir) = std::env::var("HOME") {
             let cargo_bin_dir = format!("{}/.cargo/bin", home_dir);
             let cargo_bin_path = std::path::Path::new(&cargo_bin_dir);
-            
+
             if cargo_bin_path.exists() {
                 println!("✅ ~/.cargo/bin directory exists");
 
                 let wasmrust_path = format!("{}/wasmrust", cargo_bin_dir);
                 if std::path::Path::new(&wasmrust_path).exists() {
                     println!("✅ wasmrust binary found at: {}", wasmrust_path);
-                    
+
                     if let Ok(output) = Command::new(&wasmrust_path).arg("--version").output() {
                         if output.status.success() {
                             let version_output = String::from_utf8_lossy(&output.stdout);
-                            println!("✅ wasmrust executable and version: {}", version_output.trim());
+                            println!(
+                                "✅ wasmrust executable and version: {}",
+                                version_output.trim()
+                            );
                         } else {
                             println!("❌ wasmrust binary exists but not executable");
                         }
@@ -238,7 +241,7 @@ impl PluginCommands {
                     }
                 } else {
                     println!("❌ wasmrust binary not found in ~/.cargo/bin");
-                    
+
                     if let Ok(entries) = std::fs::read_dir(&cargo_bin_dir) {
                         println!("📁 Contents of ~/.cargo/bin:");
                         for entry in entries.flatten() {
@@ -266,7 +269,7 @@ impl PluginCommands {
             }
         }
     }
-    
+
     fn install_wasmgo(&mut self, _version: Option<String>) -> Result<()> {
         println!("📦 wasmgo plugin installation coming soon!");
         println!("💡 For now, install manually: cargo install wasmgo");
@@ -479,7 +482,11 @@ impl PluginCommands {
             }
         }
 
-        let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+        let which_cmd = if cfg!(target_os = "windows") {
+            "where"
+        } else {
+            "which"
+        };
         if let Ok(output) = Command::new(which_cmd).arg(plugin_name).output() {
             if output.status.success() && !output.stdout.is_empty() {
                 return true;
