@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Python WebAssembly plugin
+#[derive(Clone)]
 pub struct PythonPlugin {
     info: PluginInfo,
 }
@@ -45,7 +46,7 @@ impl PythonPlugin {
             }
         }
 
-        // If no common entry file found, look for any .go file
+        // If no common entry file found, look for any .py file
         if let Ok(entries) = fs::read_dir(project_path) {
             for entry in entries.flatten() {
                 if let Some(extension) = entry.path().extension() {
@@ -70,7 +71,6 @@ impl Plugin for PythonPlugin {
 
     fn can_handle_project(&self, project_path: &str) -> bool {
         // TODO: Detect project
-
         if let Ok(entries) = fs::read_dir(project_path) {
             for entry in entries.flatten() {
                 if let Some(extension) = entry.path().extension() {
@@ -89,16 +89,16 @@ impl Plugin for PythonPlugin {
 }
 
 impl WasmBuilder for PythonPlugin {
-    fn language_name(&self) -> &str {
-        "Python"
+    fn supported_extensions(&self) -> &[&str] {
+        &["py"]
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
-        &["main.py", "app.py", "index.py", "src/main.py"]
+        &["main.py", "app.py", "index.py", "src/main.py", "__main__.py"]
     }
 
-    fn supported_extensions(&self) -> &[&str] {
-        &["py"]
+    fn language_name(&self) -> &str {
+        "Python"
     }
 
     fn check_dependencies(&self) -> Vec<String> {
@@ -129,7 +129,6 @@ impl WasmBuilder for PythonPlugin {
 
     fn validate_project(&self, project_path: &str) -> CompilationResult<()> {
         // TODO: Project validation
-
         if !std::path::Path::new(project_path).exists() {
             return Err(CompilationError::InvalidProjectStructure {
                 language: self.language_name().to_string(),
@@ -183,6 +182,40 @@ impl WasmBuilder for PythonPlugin {
             additional_files: vec![],
             is_wasm_bindgen: false,
         })
+    }
+
+    fn can_handle_project(&self, project_path: &str) -> bool {
+        if let Ok(entries) = std::fs::read_dir(project_path) {
+            for entry in entries.flatten() {
+                if let Some(extension) = entry.path().extension() {
+                    let ext = extension.to_string_lossy().to_lowercase();
+                    if self.supported_extensions().contains(&ext.as_str()) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        for entry_file in self.entry_file_candidates() {
+            let file_path = std::path::Path::new(project_path).join(entry_file);
+            if file_path.exists() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn clean(&self, project_path: &str) -> crate::error::Result<()> {
+        // Clean Python build artifacts
+        let dist_dir = std::path::Path::new(project_path).join("dist");
+        if dist_dir.exists() {
+            std::fs::remove_dir_all(dist_dir)?;
+        }
+        Ok(())
+    }
+
+    fn clone_box(&self) -> Box<dyn WasmBuilder> {
+        Box::new(self.clone())
     }
 }
 

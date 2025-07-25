@@ -236,7 +236,6 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
             Err(e) => {
                 eprintln!("Failed to set up file watcher: {}", e);
 
-                // Fall back to standard non-watching mode
                 if config.js_path.is_some() {
                     wasm::serve_wasm_bindgen_files(
                         &config.wasm_path,
@@ -250,7 +249,6 @@ pub fn run_server(config: ServerConfig) -> Result<(), String> {
             }
         }
     } else {
-        // Standard server without watching
         if config.js_path.is_some() {
             wasm::serve_wasm_bindgen_files(
                 &config.wasm_path,
@@ -500,6 +498,7 @@ pub fn compile_project(
                 output_dir: output_dir.to_string(),
                 verbose: false,
                 optimization_level: OptimizationLevel::Release,
+                watch: false,
                 target_type: TargetType::Standard,
             };
 

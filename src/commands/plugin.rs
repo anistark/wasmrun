@@ -2,7 +2,6 @@ use crate::cli::PluginSubcommands;
 use crate::error::Result;
 use crate::plugin::manager::PluginCommands;
 
-/// Handle plugin commands
 pub fn handle_plugin_command(cmd: &PluginSubcommands) -> Result<()> {
     match cmd {
         PluginSubcommands::List { all } => {
@@ -12,7 +11,7 @@ pub fn handle_plugin_command(cmd: &PluginSubcommands) -> Result<()> {
 
         PluginSubcommands::Install { plugin, version } => {
             let mut commands = PluginCommands::new()?;
-            commands.install(plugin, version.clone())
+            commands.install_with_version(plugin, version.as_deref())
         }
 
         PluginSubcommands::Uninstall { plugin } => {
@@ -31,8 +30,11 @@ pub fn handle_plugin_command(cmd: &PluginSubcommands) -> Result<()> {
 
         PluginSubcommands::Enable { plugin, disable } => {
             let mut commands = PluginCommands::new()?;
-            let enabled = !disable;
-            commands.set_enabled(plugin, enabled)
+            if *disable {
+                commands.disable(plugin)
+            } else {
+                commands.enable(plugin)
+            }
         }
 
         PluginSubcommands::Info { plugin } => {

@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// AssemblyScript WebAssembly plugin
+#[derive(Clone)]
 pub struct AscPlugin {
     info: PluginInfo,
 }
@@ -260,7 +261,7 @@ impl Plugin for AscPlugin {
             return true;
         }
 
-        // Check for common AssemblyScript entry files
+        // AssemblyScript entry files
         let assembly_files = ["assembly/index.ts", "assembly/main.ts"];
 
         for file in assembly_files {
@@ -279,22 +280,16 @@ impl Plugin for AscPlugin {
 }
 
 impl WasmBuilder for AscPlugin {
-    fn language_name(&self) -> &str {
-        "Asc"
+    fn supported_extensions(&self) -> &[&str] {
+        &["ts"]
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
-        &[
-            "assembly/index.ts",
-            "assembly/main.ts",
-            "src/index.ts",
-            "index.ts",
-            "package.json",
-        ]
+        &["assembly/index.ts", "assembly/main.ts", "package.json", "assembly/package.json"]
     }
 
-    fn supported_extensions(&self) -> &[&str] {
-        &["ts"]
+    fn language_name(&self) -> &str {
+        "AssemblyScript"
     }
 
     fn check_dependencies(&self) -> Vec<String> {
@@ -322,7 +317,6 @@ impl WasmBuilder for AscPlugin {
             }
         })?;
 
-        // Try to find an AssemblyScript entry file
         let _ = self.find_entry_file(project_path)?;
 
         Ok(())
@@ -354,6 +348,40 @@ impl WasmBuilder for AscPlugin {
                 language: self.language_name().to_string(),
             })
         }
+    }
+
+    fn can_handle_project(&self, project_path: &str) -> bool {
+        if let Ok(entries) = std::fs::read_dir(project_path) {
+            for entry in entries.flatten() {
+                if let Some(extension) = entry.path().extension() {
+                    let ext = extension.to_string_lossy().to_lowercase();
+                    if self.supported_extensions().contains(&ext.as_str()) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        for entry_file in self.entry_file_candidates() {
+            let file_path = std::path::Path::new(project_path).join(entry_file);
+            if file_path.exists() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Clean build artifacts
+    fn clean(&self, project_path: &str) -> crate::error::Result<()> {
+        let build_dir = std::path::Path::new(project_path).join("build");
+        if build_dir.exists() {
+            std::fs::remove_dir_all(build_dir)?;
+        }
+        Ok(())
+    }
+
+    fn clone_box(&self) -> Box<dyn WasmBuilder> {
+        Box::new(self.clone())
     }
 }
 

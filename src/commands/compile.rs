@@ -63,6 +63,7 @@ pub fn handle_compile_command(
                 output_dir: output_dir.clone(),
                 verbose,
                 optimization_level,
+                watch: false,
                 target_type: TargetType::Standard,
             };
 
@@ -86,6 +87,7 @@ pub fn handle_compile_command(
         output_dir,
         verbose,
         optimization_level,
+        watch: false,
         target_type: TargetType::Standard,
     };
 

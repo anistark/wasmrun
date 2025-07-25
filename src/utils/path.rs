@@ -158,6 +158,7 @@ impl PathResolver {
     }
 
     /// Check if a path is safe to use
+    #[allow(dead_code)]
     pub fn is_safe_path(path: &str) -> bool {
         let path = Path::new(path);
 

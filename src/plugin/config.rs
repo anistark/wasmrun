@@ -260,6 +260,7 @@ impl WasmrunConfig {
         self.external_plugins.get(name)
     }
 
+    #[allow(dead_code)]
     pub fn get_external_plugins(&self) -> Vec<&PluginInfo> {
         self.external_plugins
             .values()

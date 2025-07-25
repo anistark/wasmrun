@@ -1,6 +1,6 @@
 [package]
 name = "wasmrun"
-version = "0.10.5"
+version = "0.10.6"
 edition = "2021"
 description = "A WebAssembly Runtime"
 license = "MIT"
@@ -25,7 +25,12 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8.23"
 dirs = "6.0.0"
 serde_json = "1.0.140"
-chrono = "0.4.41"
+libloading = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.11.1"
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+libloading = "0.8"
 
 [dev-dependencies]
 tempfile = "3.8"

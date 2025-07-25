@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// C WebAssembly plugin
+#[derive(Clone)]
 pub struct CPlugin {
     info: PluginInfo,
 }
@@ -100,7 +101,6 @@ impl CPlugin {
         )?;
 
         if !build_output.status.success() {
-            // Try default make target
             let build_output = CommandExecutor::execute_command(
                 "make",
                 &[],
@@ -119,7 +119,6 @@ impl CPlugin {
             }
         }
 
-        // Look for generated WASM files
         let wasm_files = PathResolver::find_files_with_extension(&config.project_path, "wasm")
             .map_err(|e| CompilationError::BuildFailed {
                 language: self.language_name().to_string(),
@@ -133,7 +132,6 @@ impl CPlugin {
             });
         }
 
-        // Copy the first WASM file to output directory
         let output_path = CommandExecutor::copy_to_output(&wasm_files[0], &config.output_dir, "C")?;
 
         // Look for JS files (for Emscripten)
@@ -162,17 +160,14 @@ impl CPlugin {
 
     /// Build using Emscripten directly
     fn build_with_emscripten(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        // Find entry file
         let entry_path = self.find_entry_file(&config.project_path)?;
 
-        // Create output directory if it doesn't exist
         PathResolver::ensure_output_directory(&config.output_dir).map_err(|_| {
             CompilationError::OutputDirectoryCreationFailed {
                 path: config.output_dir.clone(),
             }
         })?;
 
-        // Get the output filename
         let output_name = entry_path
             .file_stem()
             .unwrap()
@@ -214,7 +209,7 @@ impl CPlugin {
             args.push(c_file);
         }
 
-        // Execute emcc
+        // Run emcc
         let build_output =
             CommandExecutor::execute_command("emcc", &args, &config.project_path, config.verbose)?;
 
@@ -228,7 +223,6 @@ impl CPlugin {
             });
         }
 
-        // Check if files were generated
         if !wasm_output_file.exists() || !js_output_file.exists() {
             return Err(CompilationError::BuildFailed {
                 language: self.language_name().to_string(),
@@ -307,16 +301,16 @@ impl Plugin for CPlugin {
 }
 
 impl WasmBuilder for CPlugin {
-    fn language_name(&self) -> &str {
-        "C"
+    fn supported_extensions(&self) -> &[&str] {
+        &["c", "h", "cpp", "hpp", "cc", "cxx"]
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
-        &["main.c", "src/main.c", "app.c", "index.c", "Makefile"]
+        &["main.c", "src/main.c", "app.c", "index.c", "Makefile", "CMakeLists.txt"]
     }
 
-    fn supported_extensions(&self) -> &[&str] {
-        &["c", "h"]
+    fn language_name(&self) -> &str {
+        "C"
     }
 
     fn check_dependencies(&self) -> Vec<String> {
@@ -328,7 +322,6 @@ impl WasmBuilder for CPlugin {
             );
         }
 
-        // Check for make if Makefile exists
         if self.has_makefile(&BuildConfig::default().project_path)
             && !CommandExecutor::is_tool_installed("make")
         {
@@ -363,12 +356,52 @@ impl WasmBuilder for CPlugin {
             });
         }
 
-        // Choose build method based on project structure
         if self.has_makefile(&config.project_path) {
             self.build_with_makefile(config)
         } else {
             self.build_with_emscripten(config)
         }
+    }
+
+    fn can_handle_project(&self, project_path: &str) -> bool {
+        if let Ok(entries) = std::fs::read_dir(project_path) {
+            for entry in entries.flatten() {
+                if let Some(extension) = entry.path().extension() {
+                    let ext = extension.to_string_lossy().to_lowercase();
+                    if self.supported_extensions().contains(&ext.as_str()) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        for entry_file in self.entry_file_candidates() {
+            let file_path = std::path::Path::new(project_path).join(entry_file);
+            if file_path.exists() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn clean(&self, project_path: &str) -> crate::error::Result<()> {
+        // Clean C/C++ build artifacts
+        let artifacts = ["*.o", "*.wasm", "*.js", "build"];
+        for artifact in artifacts {
+            let path = std::path::Path::new(project_path).join(artifact);
+            if path.exists() {
+                if path.is_dir() {
+                    let _ = std::fs::remove_dir_all(path);
+                } else {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn clone_box(&self) -> Box<dyn WasmBuilder> {
+        Box::new(self.clone())
     }
 }
 

@@ -1,7 +1,7 @@
 //! Plugin registry for managing built-in and external plugins
 
 use crate::error::{Result, WasmrunError};
-use crate::plugin::config::{ExternalPluginEntry, WasmrunConfig};
+use crate::plugin::config::WasmrunConfig;
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -58,26 +58,9 @@ impl LocalPluginRegistry {
         Ok(())
     }
 
-    pub fn remove_plugin(&mut self, name: &str) -> Result<()> {
-        self.config.remove_external_plugin(name)?;
-        Ok(())
-    }
-
     #[allow(dead_code)]
     pub fn is_installed(&self, name: &str) -> bool {
         self.config.is_external_plugin_installed(name)
-    }
-
-    pub fn get_installed_plugin(&self, name: &str) -> Option<&ExternalPluginEntry> {
-        self.config.get_external_plugin(name)
-    }
-
-    pub fn get_installed_plugins(&self) -> Vec<&PluginInfo> {
-        self.config.get_external_plugins()
-    }
-
-    pub fn set_plugin_enabled(&mut self, name: &str, enabled: bool) -> Result<()> {
-        self.config.set_external_plugin_enabled(name, enabled)
     }
 
     #[allow(dead_code)]
@@ -100,6 +83,7 @@ impl LocalPluginRegistry {
 }
 
 pub struct RegistryManager {
+    #[allow(dead_code)] // TODO: Use when local registry caching is implemented
     local_registry: LocalPluginRegistry,
     #[allow(dead_code)] // TODO: Use when remote registry caching is implemented
     remote_cache: HashMap<String, RegistryEntry>,
@@ -118,14 +102,6 @@ impl RegistryManager {
             remote_cache: HashMap::new(),
             cache_updated_at: None,
         }
-    }
-
-    pub fn local_registry(&self) -> &LocalPluginRegistry {
-        &self.local_registry
-    }
-
-    pub fn local_registry_mut(&mut self) -> &mut LocalPluginRegistry {
-        &mut self.local_registry
     }
 
     #[allow(dead_code)]

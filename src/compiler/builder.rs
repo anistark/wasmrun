@@ -1,102 +1,171 @@
-use crate::error::{CompilationError, CompilationResult};
-use crate::utils::PathResolver;
-use std::path::Path;
+//! Build system abstraction for different languages and compilation targets
 
-/// Configuration for building WASM modules
-#[derive(Debug, Clone)]
+use crate::error::{CompilationResult, Result};
+use serde::{Deserialize, Serialize};
+use std::fmt;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildConfig {
     pub project_path: String,
     pub output_dir: String,
-    pub verbose: bool,
     pub optimization_level: OptimizationLevel,
-    #[allow(dead_code)]
+    pub verbose: bool,
+    pub watch: bool,
     pub target_type: TargetType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum OptimizationLevel {
     Debug,
     Release,
     Size,
 }
 
-/// Type of WASM target
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TargetType {
     Standard,
-    #[allow(dead_code)]
-    WasmBindgen,
+    Web,
 }
 
-impl Default for BuildConfig {
-    fn default() -> Self {
+impl fmt::Display for OptimizationLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OptimizationLevel::Debug => write!(f, "debug"),
+            OptimizationLevel::Release => write!(f, "release"),
+            OptimizationLevel::Size => write!(f, "size"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildResult {
+    pub wasm_path: String,
+    pub js_path: Option<String>,
+    pub additional_files: Vec<String>,
+    pub is_wasm_bindgen: bool,
+}
+
+pub trait WasmBuilder: Send + Sync {
+    fn can_handle_project(&self, project_path: &str) -> bool;
+    fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult>;
+
+    // TODO: Implement clean functionality for build artifacts cleanup
+    #[allow(dead_code)]
+    fn clean(&self, project_path: &str) -> Result<()>;
+
+    // TODO: Implement plugin cloning for dynamic loading
+    #[allow(dead_code)]
+    fn clone_box(&self) -> Box<dyn WasmBuilder>;
+
+    fn language_name(&self) -> &str;
+    fn entry_file_candidates(&self) -> &[&str];
+    fn supported_extensions(&self) -> &[&str];
+    fn check_dependencies(&self) -> Vec<String>;
+    fn validate_project(&self, project_path: &str) -> CompilationResult<()>;
+
+    fn build_verbose(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        println!("Building {} project...", self.language_name());
+        self.build(config)
+    }
+}
+
+// Helper trait to enable cloning of WasmBuilder trait objects
+pub trait CloneableWasmBuilder: WasmBuilder {
+    // TODO: Implement cloneable builder for plugin management
+    #[allow(dead_code)]
+    fn clone_boxed(&self) -> Box<dyn WasmBuilder>;
+}
+
+impl<T> CloneableWasmBuilder for T
+where
+    T: WasmBuilder + Clone + 'static,
+{
+    fn clone_boxed(&self) -> Box<dyn WasmBuilder> {
+        Box::new(self.clone())
+    }
+}
+
+// Each WasmBuilder implementation should implement the trait directly
+impl BuildConfig {
+    // TODO: Use in future build configuration UI
+    #[allow(dead_code)]
+    pub fn new(
+        project_path: String,
+        output_dir: String,
+        optimization_level: OptimizationLevel,
+        verbose: bool,
+        watch: bool,
+    ) -> Self {
         Self {
-            project_path: "./".to_string(),
-            output_dir: "./".to_string(),
-            verbose: false,
+            project_path,
+            output_dir,
+            optimization_level,
+            verbose,
+            watch,
+            target_type: TargetType::Standard,
+        }
+    }
+
+    pub fn with_defaults(project_path: String, output_dir: String) -> Self {
+        Self {
+            project_path,
+            output_dir,
             optimization_level: OptimizationLevel::Release,
+            verbose: false,
+            watch: false,
             target_type: TargetType::Standard,
         }
     }
 }
 
-/// Result of a build operation
-#[derive(Debug)]
-pub struct BuildResult {
-    pub wasm_path: String,
-    pub js_path: Option<String>,
-    pub additional_files: Vec<String>,
-    #[allow(dead_code)]
-    pub is_wasm_bindgen: bool,
+impl Default for BuildConfig {
+    fn default() -> Self {
+        Self::with_defaults(".".to_string(), "./dist".to_string())
+    }
 }
 
-/// Common interface for all WASM builders
-pub trait WasmBuilder: Send + Sync {
-    fn language_name(&self) -> &str;
+impl BuildResult {
+    // TODO: Use these constructors in plugin implementations
     #[allow(dead_code)]
-    fn entry_file_candidates(&self) -> &[&str];
-    #[allow(dead_code)]
-    fn supported_extensions(&self) -> &[&str];
-    fn check_dependencies(&self) -> Vec<String>;
-    fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult>;
-
-    fn build_verbose(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        println!(
-            "🔨 Building {} project at: {}",
-            self.language_name(),
-            config.project_path
-        );
-        self.build(config)
+    pub fn new(wasm_path: String) -> Self {
+        Self {
+            wasm_path,
+            js_path: None,
+            additional_files: Vec::new(),
+            is_wasm_bindgen: false,
+        }
     }
 
     #[allow(dead_code)]
-    fn validate_project(&self, project_path: &str) -> CompilationResult<()> {
-        let path = Path::new(project_path);
-        if !path.exists() || !path.is_dir() {
-            return Err(CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: format!("Project path not found: {}", project_path),
-            });
+    pub fn with_js(wasm_path: String, js_path: String) -> Self {
+        Self {
+            wasm_path,
+            js_path: Some(js_path),
+            additional_files: Vec::new(),
+            is_wasm_bindgen: true,
         }
-        Ok(())
     }
 
-    fn validate_config(&self, config: &BuildConfig) -> CompilationResult<()> {
-        if !PathResolver::is_safe_path(&config.project_path) {
-            return Err(CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: format!("Unsafe project path: {}", config.project_path),
-            });
+    #[allow(dead_code)]
+    pub fn web_app(app_dir: String, index_path: String) -> Self {
+        Self {
+            wasm_path: app_dir,
+            js_path: Some(index_path),
+            additional_files: Vec::new(),
+            is_wasm_bindgen: false,
         }
+    }
 
-        if !PathResolver::is_safe_path(&config.output_dir) {
-            return Err(CompilationError::BuildFailed {
-                language: self.language_name().to_string(),
-                reason: format!("Unsafe output path: {}", config.output_dir),
-            });
-        }
+    #[allow(dead_code)]
+    pub fn get_primary_file(&self) -> &str {
+        self.js_path.as_ref().unwrap_or(&self.wasm_path)
+    }
 
-        Ok(())
+    #[allow(dead_code)]
+    pub fn is_web_app(&self) -> bool {
+        self.js_path.as_ref()
+            .map(|js| js.ends_with("index.html"))
+            .unwrap_or(false)
     }
 }
 
@@ -113,9 +182,11 @@ impl BuilderFactory {
         match language {
             ProjectLanguage::Rust => {
                 if let Ok(plugin_manager) = crate::plugin::PluginManager::new() {
-                    for plugin in plugin_manager.get_plugins() {
-                        if plugin.info().name.contains("rust") || plugin.info().name == "wasmrust" {
-                            return plugin.get_builder();
+                    for plugin in plugin_manager.list_plugins() {
+                        if plugin.name.contains("rust") || plugin.name == "wasmrust" {
+                            if let Some(found_plugin) = plugin_manager.get_plugin_by_name(&plugin.name) {
+                                return found_plugin.get_builder();
+                            }
                         }
                     }
                 }
@@ -123,9 +194,11 @@ impl BuilderFactory {
             }
             ProjectLanguage::Go => {
                 if let Ok(plugin_manager) = crate::plugin::PluginManager::new() {
-                    for plugin in plugin_manager.get_plugins() {
-                        if plugin.info().name.contains("go") || plugin.info().name == "wasmgo" {
-                            return plugin.get_builder();
+                    for plugin in plugin_manager.list_plugins() {
+                        if plugin.name.contains("go") || plugin.name == "wasmgo" {
+                            if let Some(found_plugin) = plugin_manager.get_plugin_by_name(&plugin.name) {
+                                return found_plugin.get_builder();
+                            }
                         }
                     }
                 }
@@ -147,6 +220,8 @@ impl BuilderFactory {
         None
     }
 
+    // TODO: Use in help command to show supported languages
+    // or read from dynamic plugin list
     #[allow(dead_code)]
     pub fn supported_languages() -> Vec<String> {
         vec![
@@ -160,9 +235,28 @@ impl BuilderFactory {
 }
 
 /// Unknown language builder
+#[derive(Clone)]
 struct UnknownBuilder;
 
 impl WasmBuilder for UnknownBuilder {
+    fn can_handle_project(&self, _project_path: &str) -> bool {
+        false
+    }
+
+    fn build(&self, _config: &BuildConfig) -> CompilationResult<BuildResult> {
+        Err(crate::error::CompilationError::UnsupportedLanguage {
+            language: "Unknown".to_string(),
+        })
+    }
+
+    fn clean(&self, _project_path: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn clone_box(&self) -> Box<dyn WasmBuilder> {
+        Box::new(self.clone())
+    }
+
     fn language_name(&self) -> &str {
         "Unknown"
     }
@@ -179,10 +273,15 @@ impl WasmBuilder for UnknownBuilder {
         vec!["Language not detected or supported".to_string()]
     }
 
-    fn build(&self, _config: &BuildConfig) -> CompilationResult<BuildResult> {
-        Err(CompilationError::UnsupportedLanguage {
+    fn validate_project(&self, _project_path: &str) -> CompilationResult<()> {
+        Err(crate::error::CompilationError::UnsupportedLanguage {
             language: "Unknown".to_string(),
         })
+    }
+
+    fn build_verbose(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        println!("❌ Unknown language project");
+        self.build(config)
     }
 }
 
@@ -198,6 +297,7 @@ pub fn build_wasm_project(
         output_dir: output_dir.to_string(),
         verbose,
         optimization_level: OptimizationLevel::Release,
+        watch: false,
         target_type: TargetType::Standard,
     };
 
@@ -205,7 +305,7 @@ pub fn build_wasm_project(
         if verbose {
             println!("🔌 Using plugin: {}", builder.language_name());
         }
-        builder.validate_config(&config)?;
+        builder.validate_project(project_path)?;
         return if verbose {
             builder.build_verbose(&config)
         } else {
@@ -214,7 +314,7 @@ pub fn build_wasm_project(
     }
 
     let builder = BuilderFactory::create_builder(language);
-    builder.validate_config(&config)?;
+    builder.validate_project(project_path)?;
 
     if verbose {
         builder.build_verbose(&config)

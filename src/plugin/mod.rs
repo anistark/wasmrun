@@ -1,4 +1,4 @@
-//! Plugin system for Wasmrun - Built-in and External plugins
+//! Plugin system for Wasmrun
 
 use crate::compiler::builder::WasmBuilder;
 use serde::{Deserialize, Serialize};
@@ -241,10 +241,6 @@ impl PluginManager {
         self.plugins.iter().map(|plugin| plugin.info()).collect()
     }
 
-    pub fn get_plugin_info(&self, name: &str) -> Option<&PluginInfo> {
-        self.get_plugin_by_name(name).map(|plugin| plugin.info())
-    }
-
     #[allow(dead_code)]
     pub fn check_all_dependencies(&self) -> Vec<(String, Vec<String>)> {
         self.plugins
@@ -331,7 +327,6 @@ impl PluginManager {
 
         for plugin_name in &auto_detected {
             if Self::is_command_available(plugin_name) {
-                // Check if it's already properly registered
                 if let Ok(config) = config::WasmrunConfig::load() {
                     if !config.external_plugins.contains_key(*plugin_name) {
                         println!("💡 Found {} in PATH but not registered.", plugin_name);
