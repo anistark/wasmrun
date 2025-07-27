@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod compiler;
+mod debug;
 mod error;
 mod plugin;
 mod server;
@@ -10,6 +11,7 @@ mod utils;
 mod watcher;
 
 use cli::{get_args, Commands, ResolvedArgs};
+use debug::enable_debug;
 use error::{Result, WasmrunError};
 use std::error::Error;
 // use ui::print_webapp_detected;
@@ -24,6 +26,11 @@ fn main() {
     }));
 
     let args = get_args();
+
+    // Initialize debug mode if flag is set
+    if args.debug {
+        enable_debug();
+    }
 
     let result = match &args.command {
         Some(Commands::Stop) => commands::handle_stop_command(),
@@ -106,7 +113,12 @@ fn main() {
         }),
 
         None => match ResolvedArgs::from_args(args) {
-            Ok(resolved_args) => handle_default_command(&resolved_args),
+            Ok(resolved_args) => {
+                if resolved_args.debug {
+                    enable_debug();
+                }
+                handle_default_command(&resolved_args)
+            }
             Err(e) => Err(e),
         },
     };

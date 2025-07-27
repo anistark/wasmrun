@@ -94,7 +94,13 @@ impl WasmBuilder for PythonPlugin {
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
-        &["main.py", "app.py", "index.py", "src/main.py", "__main__.py"]
+        &[
+            "main.py",
+            "app.py",
+            "index.py",
+            "src/main.py",
+            "__main__.py",
+        ]
     }
 
     fn language_name(&self) -> &str {

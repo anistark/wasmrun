@@ -49,6 +49,10 @@ pub struct Args {
     /// Enable watch mode for live-reloading on file changes
     #[arg(short = 'W', long, help = "Watch for file changes and reload")]
     pub watch: bool,
+
+    /// Enable debug output with detailed information
+    #[arg(long, help = "Show detailed debug information")]
+    pub debug: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -287,6 +291,7 @@ pub struct ResolvedArgs {
     pub port: u16,
     pub wasm: bool,
     pub watch: bool,
+    pub debug: bool,
     #[allow(dead_code)]
     pub command: Option<Commands>,
 }
@@ -301,6 +306,7 @@ impl ResolvedArgs {
             port: args.port,
             wasm: args.wasm,
             watch: args.watch,
+            debug: args.debug,
             command: args.command,
         })
     }

@@ -163,7 +163,8 @@ impl BuildResult {
 
     #[allow(dead_code)]
     pub fn is_web_app(&self) -> bool {
-        self.js_path.as_ref()
+        self.js_path
+            .as_ref()
             .map(|js| js.ends_with("index.html"))
             .unwrap_or(false)
     }
@@ -184,7 +185,9 @@ impl BuilderFactory {
                 if let Ok(plugin_manager) = crate::plugin::PluginManager::new() {
                     for plugin in plugin_manager.list_plugins() {
                         if plugin.name.contains("rust") || plugin.name == "wasmrust" {
-                            if let Some(found_plugin) = plugin_manager.get_plugin_by_name(&plugin.name) {
+                            if let Some(found_plugin) =
+                                plugin_manager.get_plugin_by_name(&plugin.name)
+                            {
                                 return found_plugin.get_builder();
                             }
                         }
@@ -196,7 +199,9 @@ impl BuilderFactory {
                 if let Ok(plugin_manager) = crate::plugin::PluginManager::new() {
                     for plugin in plugin_manager.list_plugins() {
                         if plugin.name.contains("go") || plugin.name == "wasmgo" {
-                            if let Some(found_plugin) = plugin_manager.get_plugin_by_name(&plugin.name) {
+                            if let Some(found_plugin) =
+                                plugin_manager.get_plugin_by_name(&plugin.name)
+                            {
                                 return found_plugin.get_builder();
                             }
                         }

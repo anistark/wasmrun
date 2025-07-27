@@ -285,7 +285,12 @@ impl WasmBuilder for AscPlugin {
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
-        &["assembly/index.ts", "assembly/main.ts", "package.json", "assembly/package.json"]
+        &[
+            "assembly/index.ts",
+            "assembly/main.ts",
+            "package.json",
+            "assembly/package.json",
+        ]
     }
 
     fn language_name(&self) -> &str {

@@ -306,7 +306,14 @@ impl WasmBuilder for CPlugin {
     }
 
     fn entry_file_candidates(&self) -> &[&str] {
-        &["main.c", "src/main.c", "app.c", "index.c", "Makefile", "CMakeLists.txt"]
+        &[
+            "main.c",
+            "src/main.c",
+            "app.c",
+            "index.c",
+            "Makefile",
+            "CMakeLists.txt",
+        ]
     }
 
     fn language_name(&self) -> &str {

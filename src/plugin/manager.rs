@@ -97,17 +97,16 @@ impl PluginManager {
 
         let load_result = manager.load_external_plugins()?;
         manager.update_stats();
-        
+
         if manager.verbose && (!load_result.warnings.is_empty() || !load_result.errors.is_empty()) {
             manager.print_load_summary(&load_result);
         }
-        
+
         Ok(manager)
     }
 
     fn is_verbose_mode() -> bool {
-        std::env::var("WASMRUN_DEBUG").is_ok() || 
-        std::env::var("WASMRUN_VERBOSE").is_ok()
+        std::env::var("WASMRUN_DEBUG").is_ok() || std::env::var("WASMRUN_VERBOSE").is_ok()
     }
 
     /// Load all external plugins defined in the configuration.
@@ -118,12 +117,15 @@ impl PluginManager {
         let mut errors = Vec::new();
 
         println!("🔍 Debug: Loading external plugins...");
-        println!("🔍 Debug: Found {} external plugin configs", self.config.external_plugins.len());
+        println!(
+            "🔍 Debug: Found {} external plugin configs",
+            self.config.external_plugins.len()
+        );
 
         for (plugin_name, entry) in &self.config.external_plugins {
             println!("🔍 Debug: Processing plugin: {}", plugin_name);
             println!("🔍 Debug: Plugin enabled: {}", entry.enabled);
-            
+
             if !entry.enabled {
                 if self.verbose {
                     warnings.push(format!("Plugin '{}' is disabled", plugin_name));
@@ -153,7 +155,10 @@ impl PluginManager {
             }
         }
 
-        println!("🔍 Debug: Loading complete. Loaded: {}, Failed: {}", loaded_count, failed_count);
+        println!(
+            "🔍 Debug: Loading complete. Loaded: {}, Failed: {}",
+            loaded_count, failed_count
+        );
 
         Ok(PluginLoadResult {
             loaded_count,
@@ -164,21 +169,28 @@ impl PluginManager {
     }
 
     /// Load single external plugin
-    fn load_single_external_plugin(&self, plugin_name: &str, entry: &ExternalPluginEntry) -> Result<Box<dyn Plugin>> {
-        println!("🔍 Debug: load_single_external_plugin called for: {}", plugin_name);
+    fn load_single_external_plugin(
+        &self,
+        plugin_name: &str,
+        entry: &ExternalPluginEntry,
+    ) -> Result<Box<dyn Plugin>> {
+        println!(
+            "🔍 Debug: load_single_external_plugin called for: {}",
+            plugin_name
+        );
         println!("🔍 Debug: Entry info: {:?}", entry.info.name);
         println!("🔍 Debug: Entry enabled: {}", entry.enabled);
-        
+
         use crate::plugin::external::ExternalPluginLoader;
-        
+
         println!("🔍 Debug: Calling ExternalPluginLoader::load");
         let result = ExternalPluginLoader::load(entry);
-        
+
         match &result {
             Ok(_) => println!("🔍 Debug: ExternalPluginLoader::load succeeded"),
             Err(e) => println!("🔍 Debug: ExternalPluginLoader::load failed: {}", e),
         }
-        
+
         result
     }
 
@@ -200,17 +212,16 @@ impl PluginManager {
         }
 
         let plugin_dir = self.get_plugin_directory(name)?;
-        
+
         let plugin_info = match &source {
-            PluginSource::CratesIo { name: crate_name, version } => {
-                self.install_from_crates_io(name, crate_name, version, &plugin_dir)?
-            }
+            PluginSource::CratesIo {
+                name: crate_name,
+                version,
+            } => self.install_from_crates_io(name, crate_name, version, &plugin_dir)?,
             PluginSource::Git { url, branch } => {
                 self.install_from_git(name, url, branch.as_deref(), &plugin_dir)?
             }
-            PluginSource::Local { path } => {
-                self.install_from_local(name, path, &plugin_dir)?
-            }
+            PluginSource::Local { path } => self.install_from_local(name, path, &plugin_dir)?,
         };
 
         self.config.add_external_plugin(
@@ -225,7 +236,7 @@ impl PluginManager {
                 Ok(plugin) => {
                     self.external_plugins.insert(name.to_string(), plugin);
                     self.update_stats();
-                    
+
                     if self.verbose {
                         println!("✅ Successfully installed and loaded plugin: {}", name);
                     }
@@ -248,35 +259,38 @@ impl PluginManager {
         }
 
         if !self.config.is_external_plugin_installed(name) {
-            return Err(WasmrunError::from(format!("Plugin '{}' is not installed", name)));
+            return Err(WasmrunError::from(format!(
+                "Plugin '{}' is not installed",
+                name
+            )));
         }
 
         self.external_plugins.remove(name);
         let plugin_dir = self.get_plugin_directory(name)?;
         self.config.remove_external_plugin(name)?;
-        
+
         if plugin_dir.exists() {
             std::fs::remove_dir_all(&plugin_dir)?;
         }
-        
+
         self.update_stats();
-        
+
         if self.verbose {
             println!("✅ Successfully uninstalled plugin: {}", name);
         }
-        
+
         Ok(())
     }
 
     pub fn enable_external_plugin(&mut self, name: &str) -> Result<()> {
         self.config.set_external_plugin_enabled(name, true)?;
-        
+
         if let Some(entry) = self.config.get_external_plugin(name) {
             match self.load_single_external_plugin(name, entry) {
                 Ok(plugin) => {
                     self.external_plugins.insert(name.to_string(), plugin);
                     self.update_stats();
-                    
+
                     if self.verbose {
                         println!("✅ Plugin '{}' enabled and loaded", name);
                     }
@@ -288,7 +302,7 @@ impl PluginManager {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -296,11 +310,11 @@ impl PluginManager {
         self.config.set_external_plugin_enabled(name, false)?;
         self.external_plugins.remove(name);
         self.update_stats();
-        
+
         if self.verbose {
             println!("✅ Plugin '{}' disabled", name);
         }
-        
+
         Ok(())
     }
 
@@ -371,10 +385,10 @@ impl PluginManager {
     #[allow(dead_code)]
     pub fn get_plugin_by_language(&self, language: &str) -> Option<&dyn Plugin> {
         let normalized = language.to_lowercase();
-        
+
         let plugin_name = match normalized.as_str() {
             "rust" | "rs" => "wasmrust",
-            "go" => "wasmgo", 
+            "go" => "wasmgo",
             "c" | "cpp" | "c++" | "cc" | "cxx" => "c",
             "assemblyscript" | "asc" | "as" => "assemblyscript",
             "python" | "py" => "python",
@@ -389,15 +403,15 @@ impl PluginManager {
     #[allow(dead_code)]
     pub fn get_available_languages(&self) -> Vec<String> {
         let mut languages = Vec::new();
-        
+
         for plugin in &self.builtin_plugins {
             languages.push(plugin.info().name.clone());
         }
-        
+
         for plugin in self.external_plugins.values() {
             languages.push(plugin.info().name.clone());
         }
-        
+
         languages.sort();
         languages.dedup();
         languages
@@ -409,8 +423,9 @@ impl PluginManager {
         let known_plugins = ["wasmrust", "wasmgo"];
 
         for plugin_name in &known_plugins {
-            if Self::is_external_binary_available(plugin_name) 
-                && !self.config.external_plugins.contains_key(*plugin_name) {
+            if Self::is_external_binary_available(plugin_name)
+                && !self.config.external_plugins.contains_key(*plugin_name)
+            {
                 detected.push(plugin_name.to_string());
             }
         }
@@ -479,14 +494,21 @@ impl PluginManager {
         let mut recommendations = Vec::new();
 
         if self.plugin_stats.failed_to_load > 0 {
-            issues.push(format!("{} plugins failed to load", self.plugin_stats.failed_to_load));
-            recommendations.push("Try 'wasmrun plugin reload' or check plugin dependencies".to_string());
+            issues.push(format!(
+                "{} plugins failed to load",
+                self.plugin_stats.failed_to_load
+            ));
+            recommendations
+                .push("Try 'wasmrun plugin reload' or check plugin dependencies".to_string());
         }
 
         for (name, entry) in &self.config.external_plugins {
             if entry.enabled && !self.external_plugins.contains_key(name) {
                 issues.push(format!("Plugin '{}' is enabled but failed to load", name));
-                recommendations.push(format!("Try 'wasmrun plugin reload' or check plugin dependencies for '{}'", name));
+                recommendations.push(format!(
+                    "Try 'wasmrun plugin reload' or check plugin dependencies for '{}'",
+                    name
+                ));
             }
         }
 
@@ -494,7 +516,10 @@ impl PluginManager {
         for plugin_name in common_plugins {
             if !self.is_plugin_available(plugin_name) {
                 warnings.push(format!("Popular plugin '{}' is not installed", plugin_name));
-                recommendations.push(format!("Consider installing '{}' with 'wasmrun plugin install {}'", plugin_name, plugin_name));
+                recommendations.push(format!(
+                    "Consider installing '{}' with 'wasmrun plugin install {}'",
+                    plugin_name, plugin_name
+                ));
             }
         }
 
@@ -512,13 +537,19 @@ impl PluginManager {
         let home_dir = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .map_err(|_| WasmrunError::from("Could not determine home directory"))?;
-        
-        Ok(PathBuf::from(home_dir).join(".wasmrun/plugins").join(plugin_name))
+
+        Ok(PathBuf::from(home_dir)
+            .join(".wasmrun/plugins")
+            .join(plugin_name))
     }
 
     fn is_external_binary_available(binary_name: &str) -> bool {
-        let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-        
+        let which_cmd = if cfg!(target_os = "windows") {
+            "where"
+        } else {
+            "which"
+        };
+
         Command::new(which_cmd)
             .arg(binary_name)
             .output()
@@ -527,19 +558,30 @@ impl PluginManager {
     }
 
     /// Install an external plugin from crates.io
-    fn install_from_crates_io(&self, plugin_name: &str, crate_name: &str, version: &str, plugin_dir: &PathBuf) -> Result<PluginInfo> {
+    fn install_from_crates_io(
+        &self,
+        plugin_name: &str,
+        crate_name: &str,
+        version: &str,
+        plugin_dir: &PathBuf,
+    ) -> Result<PluginInfo> {
         if self.verbose {
-            println!("📥 Installing {} v{} from crates.io to {}", crate_name, version, plugin_dir.display());
+            println!(
+                "📥 Installing {} v{} from crates.io to {}",
+                crate_name,
+                version,
+                plugin_dir.display()
+            );
         }
 
         std::fs::create_dir_all(plugin_dir)?;
 
-        let version_spec = if version == "*" || version == "latest" { 
-            "".to_string() 
-        } else { 
-            format!("@{}", version) 
+        let version_spec = if version == "*" || version == "latest" {
+            "".to_string()
+        } else {
+            format!("@{}", version)
         };
-        
+
         let cargo_args = vec![
             "install".to_string(),
             format!("{}{}", crate_name, version_spec),
@@ -547,21 +589,21 @@ impl PluginManager {
             plugin_dir.to_string_lossy().to_string(),
             "--force".to_string(),
         ];
-        
+
         if self.verbose {
             println!("  Executing: cargo {}", cargo_args.join(" "));
         }
-        
-        let output = Command::new("cargo")
-            .args(&cargo_args)
-            .output()?;
+
+        let output = Command::new("cargo").args(&cargo_args).output()?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
             return Err(WasmrunError::from(format!(
-                "Failed to install plugin '{}' from crates.io.\nError: {}\nOutput: {}", 
-                crate_name, stderr.trim(), stdout.trim()
+                "Failed to install plugin '{}' from crates.io.\nError: {}\nOutput: {}",
+                crate_name,
+                stderr.trim(),
+                stdout.trim()
             )));
         }
 
@@ -573,14 +615,20 @@ impl PluginManager {
     }
 
     /// Install an external plugin from a git repository
-    fn install_from_git(&self, plugin_name: &str, url: &str, branch: Option<&str>, plugin_dir: &PathBuf) -> Result<PluginInfo> {
+    fn install_from_git(
+        &self,
+        plugin_name: &str,
+        url: &str,
+        branch: Option<&str>,
+        plugin_dir: &PathBuf,
+    ) -> Result<PluginInfo> {
         if self.verbose {
             println!("📥 Cloning {} from git...", url);
         }
 
         let mut cmd = Command::new("git");
         cmd.args(&["clone", url, &plugin_dir.to_string_lossy()]);
-        
+
         if let Some(branch) = branch {
             cmd.args(&["--branch", branch]);
         }
@@ -588,7 +636,10 @@ impl PluginManager {
         let output = cmd.output()?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(WasmrunError::from(format!("Failed to clone git repository: {}", stderr)));
+            return Err(WasmrunError::from(format!(
+                "Failed to clone git repository: {}",
+                stderr
+            )));
         }
 
         self.build_plugin_from_source(plugin_dir)?;
@@ -596,7 +647,12 @@ impl PluginManager {
     }
 
     /// Install an external plugin from a local path
-    fn install_from_local(&self, plugin_name: &str, source_path: &PathBuf, plugin_dir: &PathBuf) -> Result<PluginInfo> {
+    fn install_from_local(
+        &self,
+        plugin_name: &str,
+        source_path: &PathBuf,
+        plugin_dir: &PathBuf,
+    ) -> Result<PluginInfo> {
         if self.verbose {
             println!("📁 Copying from local path: {}", source_path.display());
         }
@@ -619,21 +675,29 @@ impl PluginManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(WasmrunError::from(format!("Failed to build plugin: {}", stderr)));
+            return Err(WasmrunError::from(format!(
+                "Failed to build plugin: {}",
+                stderr
+            )));
         }
 
         Ok(())
     }
 
-    fn extract_plugin_info(&self, plugin_name: &str, _crate_name: &str, plugin_dir: &PathBuf) -> Result<PluginInfo> {
+    fn extract_plugin_info(
+        &self,
+        plugin_name: &str,
+        _crate_name: &str,
+        plugin_dir: &PathBuf,
+    ) -> Result<PluginInfo> {
         let cargo_toml_path = plugin_dir.join("Cargo.toml");
-        
+
         if cargo_toml_path.exists() {
             if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
                 return Ok(self.parse_cargo_toml_for_plugin_info(plugin_name, &content));
             }
         }
-        
+
         Ok(self.create_default_plugin_info(plugin_name))
     }
 
@@ -685,7 +749,13 @@ impl PluginManager {
         )
     }
 
-    fn create_plugin_info_with_metadata(&self, plugin_name: &str, version: String, description: String, author: String) -> PluginInfo {
+    fn create_plugin_info_with_metadata(
+        &self,
+        plugin_name: &str,
+        version: String,
+        description: String,
+        author: String,
+    ) -> PluginInfo {
         PluginInfo {
             name: plugin_name.to_string(),
             version,
@@ -730,7 +800,7 @@ impl PluginManager {
 
     fn copy_dir_recursive(&self, from: &PathBuf, to: &PathBuf) -> Result<()> {
         std::fs::create_dir_all(to)?;
-        
+
         for entry in std::fs::read_dir(from)? {
             let entry = entry?;
             let file_type = entry.file_type()?;
@@ -756,9 +826,7 @@ pub struct PluginCommands {
 impl PluginCommands {
     pub fn new() -> Result<Self> {
         let manager = PluginManager::new()?;
-        Ok(Self {
-            manager,
-        })
+        Ok(Self { manager })
     }
 
     /// List all available plugins
@@ -792,7 +860,10 @@ impl PluginCommands {
                     println!("    Extensions: {}", plugin.extensions.join(", "));
                     println!("    Entry files: {}", plugin.entry_files.join(", "));
                     if !plugin.capabilities.custom_targets.is_empty() {
-                        println!("    Targets: {}", plugin.capabilities.custom_targets.join(", "));
+                        println!(
+                            "    Targets: {}",
+                            plugin.capabilities.custom_targets.join(", ")
+                        );
                     }
                     println!();
                 }
@@ -808,7 +879,7 @@ impl PluginCommands {
                 let is_loaded = self.manager.is_plugin_loaded(&plugin_info.name);
 
                 let actual_version = self.get_actual_plugin_version(&plugin_info.name);
-                
+
                 let status = if !plugin_entry.enabled {
                     "\x1b[1;33m⏸ Disabled\x1b[0m"
                 } else if is_loaded {
@@ -832,8 +903,14 @@ impl PluginCommands {
                                 println!("    Source: crates.io/{} ({})", name, version);
                             }
                             PluginSource::Git { url, branch } => {
-                                println!("    Source: Git {} {}", url, 
-                                    branch.as_ref().map(|b| format!("({})", b)).unwrap_or_default());
+                                println!(
+                                    "    Source: Git {} {}",
+                                    url,
+                                    branch
+                                        .as_ref()
+                                        .map(|b| format!("({})", b))
+                                        .unwrap_or_default()
+                                );
                             }
                             PluginSource::Local { path } => {
                                 println!("    Source: Local ({})", path.display());
@@ -841,13 +918,16 @@ impl PluginCommands {
                         }
                     }
                     if !plugin_info.capabilities.custom_targets.is_empty() {
-                        println!("    Targets: {}", plugin_info.capabilities.custom_targets.join(", "));
+                        println!(
+                            "    Targets: {}",
+                            plugin_info.capabilities.custom_targets.join(", ")
+                        );
                     }
 
                     if actual_version != plugin_info.version && plugin_info.version != "unknown" {
                         println!("    Registered version: {}", plugin_info.version);
                     }
-                    
+
                     println!();
                 }
             }
@@ -861,7 +941,7 @@ impl PluginCommands {
             for plugin_name in &auto_detected {
                 // FIX: Get actual version for auto-detected plugins too
                 let detected_version = self.get_actual_plugin_version(plugin_name);
-                
+
                 println!(
                     "  • \x1b[1;37m{:<15}\x1b[0m v{:<8} - Available binary [\x1b[1;34m⚡ Install\x1b[0m]",
                     plugin_name, detected_version
@@ -874,15 +954,22 @@ impl PluginCommands {
         // Statistics
         let stats = self.manager.get_stats();
         println!("🌏 \x1b[1;36mStatistics:\x1b[0m");
-        println!("  Total plugins: {} ({} built-in, {} external)", 
-                stats.total_plugins, stats.builtin_count, stats.external_count);
-        
+        println!(
+            "  Total plugins: {} ({} built-in, {} external)",
+            stats.total_plugins, stats.builtin_count, stats.external_count
+        );
+
         if stats.external_count > 0 {
-            println!("  External status: {} enabled, {} disabled, {} failed to load", 
-                    stats.enabled_external, stats.disabled_external, stats.failed_to_load);
+            println!(
+                "  External status: {} enabled, {} disabled, {} failed to load",
+                stats.enabled_external, stats.disabled_external, stats.failed_to_load
+            );
         }
-        
-        println!("  Supported languages: {}", stats.supported_languages.join(", "));
+
+        println!(
+            "  Supported languages: {}",
+            stats.supported_languages.join(", ")
+        );
 
         Ok(())
     }
@@ -925,7 +1012,12 @@ impl PluginCommands {
                                         .trim_matches('"')
                                         .trim_matches('\'')
                                         .trim();
-                                    if !version.is_empty() && version.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                                    if !version.is_empty()
+                                        && version
+                                            .chars()
+                                            .next()
+                                            .map_or(false, |c| c.is_ascii_digit())
+                                    {
                                         return version.to_string();
                                     }
                                 }
@@ -955,7 +1047,9 @@ impl PluginCommands {
                             .trim_matches('"')
                             .trim_matches('\'')
                             .trim();
-                        if !version.is_empty() && version.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                        if !version.is_empty()
+                            && version.chars().next().map_or(false, |c| c.is_ascii_digit())
+                        {
                             return Some(version.to_string());
                         }
                     }
@@ -996,7 +1090,12 @@ impl PluginCommands {
     }
 
     pub fn info(&self, plugin: &str) -> Result<()> {
-        if let Some(builtin) = self.manager.list_builtin_plugins().iter().find(|p| p.name == plugin) {
+        if let Some(builtin) = self
+            .manager
+            .list_builtin_plugins()
+            .iter()
+            .find(|p| p.name == plugin)
+        {
             self.print_plugin_info_box(builtin, None, true)?;
             return Ok(());
         }
@@ -1006,7 +1105,11 @@ impl PluginCommands {
             return Ok(());
         }
 
-        if self.manager.get_auto_detected_plugins().contains(&plugin.to_string()) {
+        if self
+            .manager
+            .get_auto_detected_plugins()
+            .contains(&plugin.to_string())
+        {
             let info = self.create_auto_detected_plugin_info(plugin);
             self.print_plugin_info_box(&info, None, false)?;
             println!("\n💡 Run \x1b[1;37mwasmrun plugin install {}\x1b[0m to formally register this plugin", plugin);
@@ -1016,25 +1119,35 @@ impl PluginCommands {
         Err(WasmrunError::from(format!("Plugin '{}' not found", plugin)))
     }
 
-    fn print_plugin_info_box(&self, info: &PluginInfo, external_entry: Option<&ExternalPluginEntry>, is_builtin: bool) -> Result<()> {
+    fn print_plugin_info_box(
+        &self,
+        info: &PluginInfo,
+        external_entry: Option<&ExternalPluginEntry>,
+        is_builtin: bool,
+    ) -> Result<()> {
         let is_loaded = self.manager.is_plugin_loaded(&info.name);
-        let actual_version = if is_builtin { 
-            info.version.clone() 
-        } else { 
-            self.get_actual_plugin_version(&info.name) 
+        let actual_version = if is_builtin {
+            info.version.clone()
+        } else {
+            self.get_actual_plugin_version(&info.name)
         };
-        
+
         let box_width = 70;
 
         println!("\x1b[1;36m╭{}\x1b[0m", "─".repeat(box_width - 2));
-        println!("\x1b[1;36m│\x1b[0m  🔌 \x1b[1;37mPlugin Information: {}\x1b[0m{}\x1b[1;36m│\x1b[0m", 
+        println!(
+            "\x1b[1;36m│\x1b[0m  🔌 \x1b[1;37mPlugin Information: {}\x1b[0m{}\x1b[1;36m│\x1b[0m",
             info.name,
             " ".repeat(box_width.saturating_sub(info.name.len() + 22))
         );
         println!("\x1b[1;36m├{}\x1b[0m", "─".repeat(box_width - 2));
 
-        self.print_info_row("Type", &format!("{}", if is_builtin { "Built-in" } else { "External" }), box_width);
-        
+        self.print_info_row(
+            "Type",
+            &format!("{}", if is_builtin { "Built-in" } else { "External" }),
+            box_width,
+        );
+
         let status = if is_builtin {
             "\x1b[1;32m✅ Always Available\x1b[0m".to_string()
         } else if is_loaded {
@@ -1043,9 +1156,12 @@ impl PluginCommands {
             "\x1b[1;31m❌ Not Loaded\x1b[0m".to_string()
         };
         self.print_info_row("Status", &status, box_width);
-        
+
         let version_display = if actual_version != "unknown" && actual_version != info.version {
-            format!("{} \x1b[1;33m(registered: {})\x1b[0m", actual_version, info.version)
+            format!(
+                "{} \x1b[1;33m(registered: {})\x1b[0m",
+                actual_version, info.version
+            )
         } else {
             actual_version.clone()
         };
@@ -1058,13 +1174,32 @@ impl PluginCommands {
         if let Some(external) = external_entry {
             println!("\x1b[1;36m├{}\x1b[0m", "─".repeat(box_width - 2));
             self.print_info_row("Installed", &external.installed_at, box_width);
-            self.print_info_row("Enabled", &format!("{}", if external.enabled { "✅ Yes" } else { "❌ No" }), box_width);
-            
+            self.print_info_row(
+                "Enabled",
+                &format!(
+                    "{}",
+                    if external.enabled {
+                        "✅ Yes"
+                    } else {
+                        "❌ No"
+                    }
+                ),
+                box_width,
+            );
+
             if let Some(source) = &info.source {
                 let source_str = match source {
-                    PluginSource::CratesIo { name, version } => format!("crates.io/{} ({})", name, version),
-                    PluginSource::Git { url, branch } => format!("Git {}{}", url, 
-                        branch.as_ref().map(|b| format!(" ({})", b)).unwrap_or_default()),
+                    PluginSource::CratesIo { name, version } => {
+                        format!("crates.io/{} ({})", name, version)
+                    }
+                    PluginSource::Git { url, branch } => format!(
+                        "Git {}{}",
+                        url,
+                        branch
+                            .as_ref()
+                            .map(|b| format!(" ({})", b))
+                            .unwrap_or_default()
+                    ),
                     PluginSource::Local { path } => format!("Local ({})", path.display()),
                 };
                 self.print_info_row("Source", &source_str, box_width);
@@ -1078,15 +1213,35 @@ impl PluginCommands {
 
         println!("\x1b[1;36m├{}\x1b[0m", "─".repeat(box_width - 2));
         let capabilities = vec![
-            if info.capabilities.compile_wasm { "✅ WebAssembly" } else { "❌ WebAssembly" },
-            if info.capabilities.compile_webapp { "✅ Web Apps" } else { "❌ Web Apps" },
-            if info.capabilities.live_reload { "✅ Live Reload" } else { "❌ Live Reload" },
-            if info.capabilities.optimization { "✅ Optimization" } else { "❌ Optimization" },
+            if info.capabilities.compile_wasm {
+                "✅ WebAssembly"
+            } else {
+                "❌ WebAssembly"
+            },
+            if info.capabilities.compile_webapp {
+                "✅ Web Apps"
+            } else {
+                "❌ Web Apps"
+            },
+            if info.capabilities.live_reload {
+                "✅ Live Reload"
+            } else {
+                "❌ Live Reload"
+            },
+            if info.capabilities.optimization {
+                "✅ Optimization"
+            } else {
+                "❌ Optimization"
+            },
         ];
         self.print_info_row("Capabilities", &capabilities.join(", "), box_width);
-        
+
         if !info.capabilities.custom_targets.is_empty() {
-            self.print_info_row("Targets", &info.capabilities.custom_targets.join(", "), box_width);
+            self.print_info_row(
+                "Targets",
+                &info.capabilities.custom_targets.join(", "),
+                box_width,
+            );
         }
 
         println!("\x1b[1;36m╰{}\x1b[0m", "─".repeat(box_width - 2));
@@ -1105,9 +1260,10 @@ impl PluginCommands {
         } else {
             value.to_string()
         };
-        
-        println!("\x1b[1;36m│\x1b[0m \x1b[1;33m{:<width$}\x1b[0m: {:<value_width$} \x1b[1;36m│\x1b[0m", 
-            label, 
+
+        println!(
+            "\x1b[1;36m│\x1b[0m \x1b[1;33m{:<width$}\x1b[0m: {:<value_width$} \x1b[1;36m│\x1b[0m",
+            label,
             truncated_value,
             width = label_width,
             value_width = value_width
@@ -1151,9 +1307,9 @@ impl PluginCommands {
     #[allow(dead_code)]
     pub fn health(&self) -> Result<()> {
         let report = self.manager.health_check();
-        
+
         println!("🏥 \x1b[1;36mPlugin Health Report\x1b[0m\n");
-        
+
         if report.healthy {
             println!("✅ \x1b[1;32mAll plugins are healthy\x1b[0m");
         } else {
@@ -1162,52 +1318,70 @@ impl PluginCommands {
                 println!("  ❌ {}", issue);
             }
         }
-        
+
         if !report.warnings.is_empty() {
             println!("\n⚠️  \x1b[1;33mWarnings:\x1b[0m");
             for warning in &report.warnings {
                 println!("  • {}", warning);
             }
         }
-        
+
         if !report.recommendations.is_empty() {
             println!("\n💡 \x1b[1;36mRecommendations:\x1b[0m");
             for rec in &report.recommendations {
                 println!("  • {}", rec);
             }
         }
-        
+
         let stats = &report.stats;
         println!("\n📊 \x1b[1;36mStatistics:\x1b[0m");
         println!("  Total plugins: {}", stats.total_plugins);
         println!("  Built-in: {}", stats.builtin_count);
-        println!("  External: {} ({} enabled, {} disabled)", 
-                stats.external_count, stats.enabled_external, stats.disabled_external);
-        
+        println!(
+            "  External: {} ({} enabled, {} disabled)",
+            stats.external_count, stats.enabled_external, stats.disabled_external
+        );
+
         if stats.failed_to_load > 0 {
             println!("  Failed to load: {}", stats.failed_to_load);
         }
-        
+
         Ok(())
     }
 
     // TODO: Implement plugin update functionality
     pub fn update(&mut self, plugin_name: &str) -> Result<()> {
         println!("🔄 Updating plugin '{}'...", plugin_name);
-        
-        if !self.manager.config.is_external_plugin_installed(plugin_name) {
-            return Err(WasmrunError::from(format!("Plugin '{}' is not installed", plugin_name)));
+
+        if !self
+            .manager
+            .config
+            .is_external_plugin_installed(plugin_name)
+        {
+            return Err(WasmrunError::from(format!(
+                "Plugin '{}' is not installed",
+                plugin_name
+            )));
         }
 
-        let entry = self.manager.config.get_external_plugin(plugin_name)
-            .ok_or_else(|| WasmrunError::from(format!("Plugin '{}' not found in config", plugin_name)))?;
+        let entry = self
+            .manager
+            .config
+            .get_external_plugin(plugin_name)
+            .ok_or_else(|| {
+                WasmrunError::from(format!("Plugin '{}' not found in config", plugin_name))
+            })?;
 
-        let source = entry.info.source.clone()
-            .ok_or_else(|| WasmrunError::from(format!("Plugin '{}' has no source information", plugin_name)))?;
+        let source = entry.info.source.clone().ok_or_else(|| {
+            WasmrunError::from(format!(
+                "Plugin '{}' has no source information",
+                plugin_name
+            ))
+        })?;
 
         self.manager.uninstall_external_plugin(plugin_name)?;
         self.manager.install_external_plugin(plugin_name, source)?;
-        
+
         println!("✅ Plugin '{}' updated successfully", plugin_name);
         Ok(())
     }
@@ -1216,23 +1390,25 @@ impl PluginCommands {
     #[allow(dead_code)]
     pub fn reload(&mut self) -> Result<()> {
         println!("🔄 Reloading all plugins...");
-        
+
         self.manager.external_plugins.clear();
         self.manager.config = WasmrunConfig::load_or_default()?;
-        
+
         let result = self.manager.load_external_plugins()?;
         self.manager.update_stats();
-        
-        println!("✅ Reload complete: {} loaded, {} failed", 
-                result.loaded_count, result.failed_count);
-        
+
+        println!(
+            "✅ Reload complete: {} loaded, {} failed",
+            result.loaded_count, result.failed_count
+        );
+
         if !result.errors.is_empty() {
             println!("⚠️  Errors during reload:");
             for error in &result.errors {
                 println!("  • {}", error);
             }
         }
-        
+
         Ok(())
     }
 
@@ -1250,14 +1426,17 @@ impl PluginCommands {
         };
 
         self.manager.install_external_plugin(plugin_name, source)?;
-        println!("✅ Plugin '{}' v{} installed successfully", plugin_name, actual_version);
+        println!(
+            "✅ Plugin '{}' v{} installed successfully",
+            plugin_name, actual_version
+        );
         Ok(())
     }
 
     // Get latest version from crates.io
     fn get_latest_crate_version(&self, crate_name: &str) -> Result<String> {
         use std::process::Command;
-        
+
         let output = Command::new("cargo")
             .args(["search", crate_name, "--limit", "1"])
             .output()
@@ -1300,28 +1479,34 @@ impl PluginCommands {
     #[allow(dead_code)]
     pub fn sync_plugin_versions(&mut self) -> Result<()> {
         let mut updated_count = 0;
-        
-        let external_plugins: Vec<String> = self.manager
+
+        let external_plugins: Vec<String> = self
+            .manager
             .list_installed_external_plugins()
             .iter()
             .map(|entry| entry.info.name.clone())
             .collect();
 
         for plugin_name in external_plugins {
-            let stored_version = self.manager.config
+            let stored_version = self
+                .manager
+                .config
                 .get_external_plugin(&plugin_name)
                 .map(|entry| entry.info.version.clone())
                 .unwrap_or_else(|| "unknown".to_string());
 
             let actual_version = self.get_actual_plugin_version(&plugin_name);
-            
+
             if actual_version != "unknown" && actual_version != stored_version {
                 if let Some(entry) = self.manager.config.external_plugins.get_mut(&plugin_name) {
                     entry.info.version = actual_version.clone();
                     updated_count += 1;
-                    
+
                     if self.manager.verbose {
-                        println!("Updated {} version: {} -> {}", plugin_name, stored_version, actual_version);
+                        println!(
+                            "Updated {} version: {} -> {}",
+                            plugin_name, stored_version, actual_version
+                        );
                     }
                 }
             }
@@ -1329,7 +1514,7 @@ impl PluginCommands {
 
         if updated_count > 0 {
             self.manager.config.save()?;
-            
+
             if self.manager.verbose {
                 println!("✅ Synced {} plugin versions to config", updated_count);
             }
@@ -1364,8 +1549,12 @@ impl PluginCommands {
             return Ok(());
         }
 
-        let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-        
+        let which_cmd = if cfg!(target_os = "windows") {
+            "where"
+        } else {
+            "which"
+        };
+
         println!("\n🔍 Checking binary availability:");
         if let Ok(output) = Command::new(which_cmd).arg(plugin_name).output() {
             if output.status.success() {
@@ -1373,7 +1562,10 @@ impl PluginCommands {
                 println!("✅ Plugin binary found at: {}", path.trim());
             } else {
                 println!("❌ Plugin binary not found in PATH");
-                println!("💡 Try: export PATH=\"$HOME/.wasmrun/plugins/{}/bin:$PATH\"", plugin_name);
+                println!(
+                    "💡 Try: export PATH=\"$HOME/.wasmrun/plugins/{}/bin:$PATH\"",
+                    plugin_name
+                );
             }
         } else {
             println!("❌ Failed to run which command");
@@ -1383,12 +1575,12 @@ impl PluginCommands {
             println!("\n🔍 Checking installation directory:");
             println!("  Plugin dir: {}", plugin_dir.display());
             println!("  Directory exists: {}", plugin_dir.exists());
-            
+
             if plugin_dir.exists() {
                 let bin_dir = plugin_dir.join("bin");
                 println!("  Bin dir: {}", bin_dir.display());
                 println!("  Bin directory exists: {}", bin_dir.exists());
-                
+
                 if bin_dir.exists() {
                     println!("  Contents of bin directory:");
                     if let Ok(entries) = std::fs::read_dir(&bin_dir) {
@@ -1409,9 +1601,13 @@ impl PluginCommands {
                                     true
                                 }
                             };
-                            
+
                             let marker = if is_executable { "✅" } else { "📄" };
-                            println!("    {} {}", marker, path.file_name().unwrap_or_default().to_string_lossy());
+                            println!(
+                                "    {} {}",
+                                marker,
+                                path.file_name().unwrap_or_default().to_string_lossy()
+                            );
                         }
                     }
                 } else {
@@ -1429,7 +1625,7 @@ impl PluginCommands {
                 Err(e) => println!("❌ Failed to load plugin: {}", e),
             }
         }
-        
+
         Ok(())
     }
 
@@ -1437,9 +1633,12 @@ impl PluginCommands {
     pub fn setup_plugin_path(&self, plugin_name: &str) -> Result<()> {
         if let Ok(plugin_dir) = self.manager.get_plugin_directory(plugin_name) {
             let bin_dir = plugin_dir.join("bin");
-            
+
             if bin_dir.exists() {
-                println!("To make {} available globally, add this to your shell profile:", plugin_name);
+                println!(
+                    "To make {} available globally, add this to your shell profile:",
+                    plugin_name
+                );
                 println!();
                 println!("export PATH=\"{}:$PATH\"", bin_dir.display());
                 println!();
@@ -1460,7 +1659,7 @@ impl PluginCommands {
         } else {
             println!("❌ Plugin not installed");
         }
-        
+
         Ok(())
     }
 }

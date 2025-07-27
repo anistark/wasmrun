@@ -26,21 +26,21 @@ impl ExternalPluginWrapper {
     pub fn new(_plugin_path: PathBuf, entry: ExternalPluginEntry) -> Result<Self> {
         println!("🔍 Debug: ExternalPluginWrapper::new called");
         println!("🔍 Debug: Plugin name: {}", entry.info.name);
-        
+
         // Plugin type and availability
         let plugin_name = entry.info.name.clone();
         let plugin_available = Self::is_plugin_available(&plugin_name);
         println!("🔍 Debug: Plugin available: {}", plugin_available);
-        
+
         if !plugin_available {
             let error = WasmrunError::from(format!("Plugin '{}' not available", plugin_name));
             println!("🔍 Debug: Plugin not available, returning error");
             return Err(error);
         }
-        
+
         // Create builder for this plugin
         let builder = Self::create_builder(&plugin_name, &entry)?;
-        
+
         println!("🔍 Debug: ExternalPluginWrapper created successfully");
         Ok(Self {
             info: entry.info,
@@ -51,7 +51,10 @@ impl ExternalPluginWrapper {
         })
     }
 
-    fn create_builder(plugin_name: &str, entry: &ExternalPluginEntry) -> Result<Box<dyn WasmBuilder>> {
+    fn create_builder(
+        plugin_name: &str,
+        entry: &ExternalPluginEntry,
+    ) -> Result<Box<dyn WasmBuilder>> {
         // TODO: Implement dynamic loading for library plugins
         if !Self::is_plugin_available(plugin_name) {
             return Err(WasmrunError::from(format!(
@@ -68,46 +71,55 @@ impl ExternalPluginWrapper {
 
     pub fn is_plugin_available(plugin_name: &str) -> bool {
         println!("🔍 Debug: Plugin detection: '{}'", plugin_name);
-        
+
         // For library-based plugins (like wasmrust), check if the plugin directory exists
         let home_dir = std::env::var("HOME").unwrap_or_default();
         let plugin_dir = format!("{}/.wasmrun/plugins/{}", home_dir, plugin_name);
-        
+
         if std::path::Path::new(&plugin_dir).exists() {
             println!("🔍 Debug: Plugin directory exists: {}", plugin_dir);
-            
+
             // Check for metadata files that indicate proper installation
             let crates_toml = format!("{}/.crates.toml", plugin_dir);
             let crates2_json = format!("{}/.crates2.json", plugin_dir);
-            
-            if std::path::Path::new(&crates_toml).exists() || std::path::Path::new(&crates2_json).exists() {
+
+            if std::path::Path::new(&crates_toml).exists()
+                || std::path::Path::new(&crates2_json).exists()
+            {
                 println!("🔍 Debug: Found metadata files, treating as library-based plugin");
-                
+
                 // For library-based plugins like wasmrust, check if required tools are available
                 let required_deps = match plugin_name {
                     "wasmrust" => vec!["cargo", "rustc"],
                     "wasmgo" => vec!["tinygo"],
                     _ => vec![],
                 };
-                
+
                 for dep in &required_deps {
                     if !Self::is_tool_available(dep) {
                         println!("🔍 Debug: Missing dependency: {}", dep);
                         return false;
                     }
                 }
-                
-                println!("🔍 Debug: All dependencies satisfied for library plugin: {}", plugin_name);
+
+                println!(
+                    "🔍 Debug: All dependencies satisfied for library plugin: {}",
+                    plugin_name
+                );
                 return true;
             }
         }
-        
+
         Self::is_binary_available(plugin_name)
     }
-    
+
     pub fn is_tool_available(tool: &str) -> bool {
-        let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-        
+        let which_cmd = if cfg!(target_os = "windows") {
+            "where"
+        } else {
+            "which"
+        };
+
         match Command::new(which_cmd).arg(tool).output() {
             Ok(output) => {
                 let available = output.status.success();
@@ -120,12 +132,16 @@ impl ExternalPluginWrapper {
             }
         }
     }
-    
+
     pub fn is_binary_available(plugin_name: &str) -> bool {
         println!("🔍 Debug: Checking for binary plugin: {}", plugin_name);
 
-        let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-        
+        let which_cmd = if cfg!(target_os = "windows") {
+            "where"
+        } else {
+            "which"
+        };
+
         match Command::new(which_cmd).arg(plugin_name).output() {
             Ok(output) => {
                 if output.status.success() {
@@ -146,7 +162,7 @@ impl ExternalPluginWrapper {
             }
             Err(_) => {}
         }
-        
+
         println!("🔍 Debug: Binary plugin '{}' not found", plugin_name);
         false
     }
@@ -238,12 +254,12 @@ impl ExternalPluginBuilder {
             cmd.arg("--verbose");
         }
 
-        let output = cmd.output().map_err(|e| {
-            crate::error::CompilationError::BuildFailed {
+        let output = cmd
+            .output()
+            .map_err(|e| crate::error::CompilationError::BuildFailed {
                 language: "wasmrust".to_string(),
                 reason: format!("Failed to execute wasmrust command: {}", e),
-            }
-        })?;
+            })?;
 
         if !output.status.success() {
             return Err(crate::error::CompilationError::BuildFailed {
@@ -280,12 +296,12 @@ impl ExternalPluginBuilder {
             cmd.arg("--verbose");
         }
 
-        let output = cmd.output().map_err(|e| {
-            crate::error::CompilationError::BuildFailed {
+        let output = cmd
+            .output()
+            .map_err(|e| crate::error::CompilationError::BuildFailed {
                 language: "wasmgo".to_string(),
                 reason: format!("Failed to execute wasmgo command: {}", e),
-            }
-        })?;
+            })?;
 
         if !output.status.success() {
             return Err(crate::error::CompilationError::BuildFailed {
@@ -309,9 +325,9 @@ impl ExternalPluginBuilder {
         println!("🔧 Building with {} plugin...", self.plugin_name);
         println!("📂 Project path: {}", config.project_path);
         println!("📦 Output dir: {}", config.output_dir);
-        
+
         let result = self.build_impl(config);
-        
+
         match &result {
             Ok(build_result) => {
                 println!("✅ Build successful!");
@@ -324,7 +340,7 @@ impl ExternalPluginBuilder {
                 println!("❌ Build failed: {}", e);
             }
         }
-        
+
         result
     }
 }
@@ -456,7 +472,7 @@ impl ExternalPluginLoader {
         println!("🔍 Debug: ExternalPluginLoader::load entry point");
         println!("🔍 Debug: Plugin name: {}", entry.info.name);
         println!("🔍 Debug: Plugin enabled: {}", entry.enabled);
-        
+
         if !entry.enabled {
             let error = WasmrunError::from(format!("Plugin '{}' is disabled", entry.info.name));
             println!("🔍 Debug: Plugin disabled, returning error");
@@ -465,22 +481,22 @@ impl ExternalPluginLoader {
 
         println!("🔍 Debug: Calling load_binary");
         let result = Self::load_binary(entry);
-        
+
         match &result {
             Ok(_) => println!("🔍 Debug: load_binary succeeded"),
             Err(e) => println!("🔍 Debug: load_binary failed: {}", e),
         }
-        
+
         result
     }
 
     pub fn load_binary(entry: &ExternalPluginEntry) -> Result<Box<dyn Plugin>> {
         println!("🔍 Debug: load_binary called");
         println!("🔍 Debug: Creating ExternalPluginWrapper");
-        
+
         let wrapper = ExternalPluginWrapper::new(PathBuf::new(), entry.clone())?;
         println!("🔍 Debug: ExternalPluginWrapper created successfully");
-        
+
         Ok(Box::new(wrapper))
     }
 
@@ -514,10 +530,7 @@ impl ExternalPluginLoader {
                     compile_webapp: true,
                     live_reload: true,
                     optimization: true,
-                    custom_targets: vec![
-                        "wasm32-unknown-unknown".to_string(),
-                        "web".to_string(),
-                    ],
+                    custom_targets: vec!["wasm32-unknown-unknown".to_string(), "web".to_string()],
                 },
             },
             enabled: true,
@@ -557,7 +570,7 @@ impl DynamicPluginWrapper {
     #[allow(dead_code)]
     pub fn new(library_path: &Path, entry: &ExternalPluginEntry) -> Result<Self> {
         use std::ffi::c_char;
-        
+
         unsafe {
             let library = Library::new(library_path).map_err(|e| {
                 WasmrunError::from(format!(
@@ -567,9 +580,8 @@ impl DynamicPluginWrapper {
                 ))
             })?;
 
-            let _get_name: Symbol<unsafe extern "C" fn() -> *const c_char> = library
-                .get(b"wasmrust_get_name")
-                .map_err(|e| {
+            let _get_name: Symbol<unsafe extern "C" fn() -> *const c_char> =
+                library.get(b"wasmrust_get_name").map_err(|e| {
                     WasmrunError::from(format!(
                         "Plugin missing required symbol 'wasmrust_get_name': {}",
                         e

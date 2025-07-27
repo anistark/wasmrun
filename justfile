@@ -50,6 +50,10 @@ format:
 lint:
     cargo clippy -- -D warnings
 
+# Run clippy lints
+lint-fix:
+    cargo clippy --fix
+
 # Build documentation
 docs:
     cargo doc --no-deps --open
