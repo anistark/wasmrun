@@ -14,7 +14,8 @@ use cli::{get_args, Commands, ResolvedArgs};
 use debug::enable_debug;
 use error::{Result, WasmrunError};
 use std::error::Error;
-// use ui::print_webapp_detected;
+use crate::compiler::builder::OptimizationLevel;
+use crate::utils::PathResolver;
 
 fn main() {
     std::panic::set_hook(Box::new(|panic_info| {
@@ -27,7 +28,6 @@ fn main() {
 
     let args = get_args();
 
-    // Initialize debug mode if flag is set
     if args.debug {
         enable_debug();
     }
@@ -41,13 +41,23 @@ fn main() {
             output,
             verbose,
             optimization,
-        }) => commands::handle_compile_command(
-            path,
-            positional_path,
-            output,
-            *verbose,
-            &Some(optimization.clone()),
-        )
+        }) => {
+            let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
+            let output_dir = output.clone().unwrap_or_else(|| ".".to_string());
+            
+            let opt_level = match optimization.as_str() {
+                "debug" => OptimizationLevel::Debug,
+                "size" => OptimizationLevel::Size,
+                _ => OptimizationLevel::Release,
+            };
+            
+            commands::handle_compile_command(
+                project_path,
+                output_dir,
+                opt_level,
+                *verbose,
+            )
+        }
         .map_err(|e| match e {
             WasmrunError::Command(_) | WasmrunError::Compilation(_) | WasmrunError::Path { .. } => {
                 e
@@ -95,36 +105,44 @@ fn main() {
             })
         }
 
-        // TODO: WASM project using Wasmrun
-        // Some(Commands::Init {
-        //     name,
-        //     template,
-        //     directory,
-        // }) => commands::handle_init_command(name, template, directory).map_err(|e| match e {
-        //     WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
-        //     _ => e,
-        // }),
         Some(Commands::Clean {
             path,
             positional_path,
-        }) => commands::handle_clean_command(path, positional_path).map_err(|e| match e {
-            WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
-            _ => e,
-        }),
+        }) => {
+            // let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
+            commands::handle_clean_command(&path.clone(), &positional_path.clone())
+        }
 
-        None => match ResolvedArgs::from_args(args) {
-            Ok(resolved_args) => {
-                if resolved_args.debug {
-                    enable_debug();
+        None => {
+            let resolved_args = match ResolvedArgs::from_args(args) {
+                Ok(args) => args,
+                Err(e) => {
+                    eprintln!("❌ {}", e);
+                    std::process::exit(1);
                 }
-                handle_default_command(&resolved_args)
+            };
+            if resolved_args.wasm {
+                server::run_wasm_file(&resolved_args.path, resolved_args.port)
+            } else {
+                server::run_project(
+                    &resolved_args.path,
+                    resolved_args.port,
+                    None,
+                    resolved_args.watch,
+                )
             }
-            Err(e) => Err(e),
-        },
+        }
     };
 
-    if let Err(error) = result {
-        handle_error(error);
+    if let Err(e) = result {
+        let mut error_source: &dyn Error = &e;
+        eprintln!("❌ {}", error_source);
+
+        while let Some(source) = error_source.source() {
+            eprintln!("   Caused by: {}", source);
+            error_source = source;
+        }
+
         std::process::exit(1);
     }
 }
