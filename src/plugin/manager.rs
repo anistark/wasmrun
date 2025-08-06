@@ -209,39 +209,6 @@ impl PluginManager {
             .unwrap_or(false)
     }
 
-    pub fn install_plugin(&mut self, plugin_name: &str) -> Result<()> {
-        if ExternalPluginWrapper::is_plugin_available(plugin_name) {
-            let entry = match plugin_name {
-                "wasmrust" => ExternalPluginLoader::create_wasmrust_entry(),
-                "wasmgo" => ExternalPluginLoader::create_wasmgo_entry(),
-                _ => return Err(WasmrunError::from(format!(
-                    "Plugin '{}' installation not supported", plugin_name
-                ))),
-            };
-            
-            self.config.external_plugins.insert(plugin_name.to_string(), entry);
-            self.config.save()?;
-            
-            if let Some(entry) = self.config.external_plugins.get(plugin_name) {
-                match ExternalPluginLoader::load(entry) {
-                    Ok(plugin) => {
-                        self.external_plugins.insert(plugin_name.to_string(), plugin);
-                        self.update_stats();
-                    }
-                    Err(e) => {
-                        eprintln!("⚠️  Plugin '{}' installed but failed to load: {}", plugin_name, e);
-                    }
-                }
-            }
-            Ok(())
-        } else {
-            Err(WasmrunError::from(format!(
-                "Plugin '{}' not available. Install it first with: cargo install {}",
-                plugin_name, plugin_name
-            )))
-        }
-    }
-
     pub fn update_plugin(&mut self, plugin_name: &str) -> Result<()> {
         if plugin_name == "all" {
             self.reload_external_plugins()
@@ -479,6 +446,111 @@ impl PluginManager {
         }
     }
 
+    // Detect the actual version of an installed external plugin
+    fn detect_plugin_version(&self, plugin_name: &str) -> String {
+        if let Ok(output) = std::process::Command::new(plugin_name)
+            .arg("--version")
+            .output() 
+        {
+            if output.status.success() {
+                let version_output = String::from_utf8_lossy(&output.stdout);
+                if let Some(version_line) = version_output.lines().next() {
+                    let parts: Vec<&str> = version_line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        return parts[1].to_string();
+                    }
+                    if let Ok(re) = regex::Regex::new(r"(\d+\.\d+\.\d+)") {
+                        if let Some(cap) = re.captures(&version_output) {
+                            if let Some(version) = cap.get(1) {
+                                return version.as_str().to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Ok(output) = std::process::Command::new("cargo")
+            .args(&["search", plugin_name, "--limit", "1"])
+            .output()
+        {
+            if output.status.success() {
+                let search_output = String::from_utf8_lossy(&output.stdout);
+                if let Some(line) = search_output.lines().next() {
+                    if let Ok(re) = regex::Regex::new(r#"=\s*"([^"]+)""#) {
+                        if let Some(cap) = re.captures(line) {
+                            if let Some(version) = cap.get(1) {
+                                return version.as_str().to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Ok(output) = std::process::Command::new("cargo")
+            .args(&["install", "--list"])
+            .output()
+        {
+            if output.status.success() {
+                let install_output = String::from_utf8_lossy(&output.stdout);
+                for line in install_output.lines() {
+                    if line.starts_with(plugin_name) {
+                        if let Ok(re) = regex::Regex::new(r"v(\d+\.\d+\.\d+)") {
+                            if let Some(cap) = re.captures(line) {
+                                if let Some(version) = cap.get(1) {
+                                    return version.as_str().to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        "unknown".to_string()
+    }
+
+    // Updated install_plugin method
+    pub fn install_plugin(&mut self, plugin_name: &str) -> Result<()> {
+        if ExternalPluginWrapper::is_plugin_available(plugin_name) {
+            let detected_version = self.detect_plugin_version(plugin_name);
+            
+            let mut entry = match plugin_name {
+                "wasmrust" => ExternalPluginLoader::create_wasmrust_entry(),
+                "wasmgo" => ExternalPluginLoader::create_wasmgo_entry(),
+                _ => return Err(WasmrunError::from(format!(
+                    "Plugin '{}' installation not supported", plugin_name
+                ))),
+            };
+            
+            entry.info.version = detected_version.clone();
+            if let PluginSource::CratesIo { ref mut version, .. } = entry.source {
+                *version = detected_version;
+            }
+            
+            self.config.external_plugins.insert(plugin_name.to_string(), entry);
+            self.config.save()?;
+            
+            if let Some(entry) = self.config.external_plugins.get(plugin_name) {
+                match ExternalPluginLoader::load(entry) {
+                    Ok(plugin) => {
+                        self.external_plugins.insert(plugin_name.to_string(), plugin);
+                        self.update_stats();
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Plugin '{}' installed but failed to load: {}", plugin_name, e);
+                    }
+                }
+            }
+            Ok(())
+        } else {
+            Err(WasmrunError::from(format!(
+                "Plugin '{}' not available. Install it first with: cargo install {}",
+                plugin_name, plugin_name
+            )))
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

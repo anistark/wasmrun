@@ -211,10 +211,13 @@ impl ExternalPluginLoader {
     }
 
     pub fn create_wasmrust_entry() -> ExternalPluginEntry {
+        // Try to detect actual version
+        let version = detect_wasmrust_version().unwrap_or_else(|| "0.2.0".to_string());
+        
         ExternalPluginEntry {
             info: PluginInfo {
                 name: "wasmrust".to_string(),
-                version: "latest".to_string(),
+                version: version.clone(),
                 description: "Rust to WebAssembly compiler with wasm-bindgen support".to_string(),
                 author: "wasmrun".to_string(),
                 capabilities: PluginCapabilities {
@@ -230,15 +233,15 @@ impl ExternalPluginLoader {
                 plugin_type: PluginType::External,
                 source: Some(PluginSource::CratesIo {
                     name: "wasmrust".to_string(),
-                    version: "latest".to_string(),
+                    version: version.clone(),
                 }),
             },
             enabled: true,
             source: PluginSource::CratesIo {
                 name: "wasmrust".to_string(),
-                version: "latest".to_string(),
+                version,
             },
-            installed_at: "2025-01-01T00:00:00Z".to_string(),
+            installed_at: chrono::Utc::now().to_rfc3339(),
             install_path: "~/.wasmrun/plugins/wasmrust".to_string(),
             executable_path: Some("wasmrust".to_string()),
         }
@@ -277,4 +280,41 @@ impl ExternalPluginLoader {
             executable_path: Some("tinygo".to_string()),
         }
     }
+}
+
+fn detect_wasmrust_version() -> Option<String> {
+    if let Ok(output) = std::process::Command::new("wasmrust")
+        .arg("--version")
+        .output() 
+    {
+        if output.status.success() {
+            let version_output = String::from_utf8_lossy(&output.stdout);
+            if let Some(version_line) = version_output.lines().next() {
+                let parts: Vec<&str> = version_line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    return Some(parts[1].to_string());
+                }
+            }
+        }
+    }
+
+    if let Ok(output) = std::process::Command::new("cargo")
+        .args(&["install", "--list"])
+        .output()
+    {
+        if output.status.success() {
+            let install_output = String::from_utf8_lossy(&output.stdout);
+            for line in install_output.lines() {
+                if line.starts_with("wasmrust") {
+                    if let Some(start) = line.find('v') {
+                        if let Some(end) = line[start..].find(':') {
+                            return Some(line[start+1..start+end].to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
