@@ -8,6 +8,7 @@ pub mod builtin;
 pub mod bridge;
 pub mod config;
 pub mod external;
+pub mod installer;
 pub mod languages;
 pub mod manager;
 pub mod registry;

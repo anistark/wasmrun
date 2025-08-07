@@ -4,7 +4,7 @@ use crate::compiler::builder::WasmBuilder;
 use crate::error::{Result, WasmrunError};
 use crate::plugin::builtin::load_all_builtin_plugins;
 use crate::plugin::config::{ExternalPluginEntry, WasmrunConfig};
-use crate::plugin::external::{ExternalPluginLoader, ExternalPluginWrapper};
+use crate::plugin::external::ExternalPluginLoader;
 use crate::plugin::{Plugin, PluginInfo, PluginSource, PluginCapabilities};
 use std::collections::HashMap;
 use std::process::Command;
@@ -293,23 +293,6 @@ impl PluginManager {
         }
     }
 
-    pub fn check_plugin_health(&self, plugin_name: &str) -> Result<PluginHealthStatus> {
-        if let Some(plugin) = self.find_plugin_by_name(plugin_name) {
-            let builder = plugin.get_builder();
-            let missing_deps = builder.check_dependencies();
-            
-            let status = if missing_deps.is_empty() {
-                PluginHealthStatus::Healthy
-            } else {
-                PluginHealthStatus::MissingDependencies(missing_deps)
-            };
-            
-            Ok(status)
-        } else {
-            Ok(PluginHealthStatus::NotFound)
-        }
-    }
-
     pub fn get_plugins_by_capability(&self, capability: PluginCapabilityFilter) -> Vec<&PluginInfo> {
         let mut matching_plugins = Vec::new();
 
@@ -511,46 +494,151 @@ impl PluginManager {
         "unknown".to_string()
     }
 
-    // Updated install_plugin method
-    pub fn install_plugin(&mut self, plugin_name: &str) -> Result<()> {
-        if ExternalPluginWrapper::is_plugin_available(plugin_name) {
-            let detected_version = self.detect_plugin_version(plugin_name);
-            
-            let mut entry = match plugin_name {
-                "wasmrust" => ExternalPluginLoader::create_wasmrust_entry(),
-                "wasmgo" => ExternalPluginLoader::create_wasmgo_entry(),
-                _ => return Err(WasmrunError::from(format!(
-                    "Plugin '{}' installation not supported", plugin_name
-                ))),
-            };
-            
-            entry.info.version = detected_version.clone();
-            if let PluginSource::CratesIo { ref mut version, .. } = entry.source {
-                *version = detected_version;
-            }
-            
-            self.config.external_plugins.insert(plugin_name.to_string(), entry);
-            self.config.save()?;
-            
-            if let Some(entry) = self.config.external_plugins.get(plugin_name) {
-                match ExternalPluginLoader::load(entry) {
-                    Ok(plugin) => {
-                        self.external_plugins.insert(plugin_name.to_string(), plugin);
-                        self.update_stats();
-                    }
-                    Err(e) => {
-                        eprintln!("⚠️  Plugin '{}' installed but failed to load: {}", plugin_name, e);
-                    }
+    pub fn is_plugin_installed(&self, plugin_name: &str) -> bool {
+        // Check if it's a builtin plugin
+        if self.builtin_plugins.iter().any(|p| p.info().name == plugin_name) {
+            return true;
+        }
+
+        // Check if it's an external plugin in config
+        if self.config.external_plugins.contains_key(plugin_name) {
+            return true;
+        }
+
+        false
+    }
+
+    pub fn register_installed_plugin(&mut self, plugin_name: &str) -> Result<()> {
+        // Check if plugin binary is actually available
+        if !self.is_tool_available_in_path(plugin_name) {
+            return Err(WasmrunError::from(format!(
+                "Plugin binary '{}' not found in PATH after installation",
+                plugin_name
+            )));
+        }
+
+        // Detect plugin version
+        let detected_version = self.detect_plugin_version(plugin_name);
+
+        // Create plugin entry
+        let entry = match plugin_name {
+            "wasmrust" => ExternalPluginLoader::create_wasmrust_entry(),
+            "wasmgo" => ExternalPluginLoader::create_wasmgo_entry(),
+            _ => return Err(WasmrunError::from(format!(
+                "Plugin '{}' registration not supported", plugin_name
+            ))),
+        };
+
+        // Update version with detected version
+        let mut entry = entry;
+        entry.info.version = detected_version.clone();
+        if let PluginSource::CratesIo { ref mut version, .. } = entry.source {
+            *version = detected_version;
+        }
+
+        // Update install path to actual plugin directory
+        let plugin_dir = self.get_plugin_directory(plugin_name)?;
+        entry.install_path = plugin_dir.to_string_lossy().to_string();
+
+        // Add to config and save
+        self.config.external_plugins.insert(plugin_name.to_string(), entry);
+        self.config.save()?;
+
+        // Try to load the plugin
+        if let Some(entry) = self.config.external_plugins.get(plugin_name) {
+            match ExternalPluginLoader::load(entry) {
+                Ok(plugin) => {
+                    self.external_plugins.insert(plugin_name.to_string(), plugin);
+                    self.update_stats();
+                    println!("Plugin '{}' registered and loaded successfully", plugin_name);
+                }
+                Err(e) => {
+                    eprintln!("Plugin '{}' registered but failed to load: {}", plugin_name, e);
+                    eprintln!("The plugin will be available for basic operations");
                 }
             }
-            Ok(())
+        }
+
+        Ok(())
+    }
+
+    pub fn check_plugin_health(&self, plugin_name: &str) -> Result<PluginHealthStatus> {
+        // Check if plugin exists in builtin or external
+        if let Some(plugin) = self.find_plugin_by_name(plugin_name) {
+            let builder = plugin.get_builder();
+            let missing_deps = builder.check_dependencies();
+            
+            if missing_deps.is_empty() {
+                Ok(PluginHealthStatus::Healthy)
+            } else {
+                Ok(PluginHealthStatus::MissingDependencies(missing_deps))
+            }
+        } else if self.config.external_plugins.contains_key(plugin_name) {
+            // Plugin is in config but not loaded
+            let entry = self.config.external_plugins.get(plugin_name).unwrap();
+            if !entry.enabled {
+                Ok(PluginHealthStatus::LoadError("Plugin is disabled".to_string()))
+            } else {
+                // Try to check if binary is available
+                if self.is_tool_available_in_path(plugin_name) {
+                    Ok(PluginHealthStatus::LoadError("Plugin binary exists but failed to load".to_string()))
+                } else {
+                    Ok(PluginHealthStatus::NotFound)
+                }
+            }
         } else {
-            Err(WasmrunError::from(format!(
-                "Plugin '{}' not available. Install it first with: cargo install {}",
-                plugin_name, plugin_name
-            )))
+            Ok(PluginHealthStatus::NotFound)
         }
     }
+
+    fn get_plugin_directory(&self, plugin_name: &str) -> Result<std::path::PathBuf> {
+        let config_dir = crate::plugin::config::WasmrunConfig::config_dir()?;
+        Ok(config_dir.join("plugins").join(plugin_name))
+    }
+
+    fn is_tool_available_in_path(&self, tool: &str) -> bool {
+        let which_cmd = if cfg!(target_os = "windows") {
+            "where"
+        } else {
+            "which"
+        };
+
+        std::process::Command::new(which_cmd)
+            .arg(tool)
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    pub fn install_plugin(&mut self, plugin_name: &str) -> Result<()> {
+        // Check if already installed
+        if self.is_plugin_installed(plugin_name) {
+            return Err(WasmrunError::from(format!(
+                "Plugin '{}' is already installed", plugin_name
+            )));
+        }
+
+        // Check if it's a supported plugin
+        if !is_supported_external_plugin(plugin_name) {
+            return Err(WasmrunError::from(format!(
+                "Plugin '{}' is not supported. Supported plugins: wasmrust, wasmgo", 
+                plugin_name
+            )));
+        }
+
+        // The actual installation (cargo install) should already be done
+        // by the command handler, so we just register it here
+        if !self.is_tool_available_in_path(plugin_name) {
+            return Err(WasmrunError::from(format!(
+                "Plugin '{}' binary not found. Please ensure it was installed correctly via cargo install",
+                plugin_name
+            )));
+        }
+
+        self.register_installed_plugin(plugin_name)?;
+        Ok(())
+    }
+
 }
 
 #[derive(Debug, Clone)]
@@ -568,4 +656,8 @@ pub enum PluginCapabilityFilter {
     LiveReload,
     Optimization,
     Extension(String),
+}
+
+fn is_supported_external_plugin(plugin: &str) -> bool {
+    matches!(plugin, "wasmrust" | "wasmgo")
 }
