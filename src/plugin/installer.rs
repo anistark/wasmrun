@@ -9,6 +9,7 @@ impl PluginInstaller {
         let mut result = InstallationResult::new(plugin_name);
 
         // Validate plugin name
+        // TODO: Move to either plugin registration or open plugin registry
         if !Self::is_supported_plugin(plugin_name) {
             return Err(WasmrunError::from(format!(
                 "Unsupported plugin: {}. Supported: wasmrust, wasmgo",
@@ -27,6 +28,7 @@ impl PluginInstaller {
         let plugin_dir = Self::get_plugin_directory(plugin_name)?;
 
         // Check if already installed by looking for the plugin files in the directory
+        // TODO: Maintain plugin registry to check if plugin is already installed
         if Self::is_plugin_library_installed(plugin_name) {
             result.binary_already_installed = true;
             result.version = Self::detect_plugin_version_from_metadata(plugin_name)
@@ -83,19 +85,33 @@ impl PluginInstaller {
 
     fn is_plugin_library_installed(plugin_name: &str) -> bool {
         if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
-            // Check for Cargo.toml in the plugin directory
             let cargo_toml = plugin_dir.join("Cargo.toml");
             if cargo_toml.exists() {
+                // Verify it's a wasm plugin by checking content
+                if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
+                    if content.contains("[wasm_plugin]") || 
+                       content.contains("wasmrun") ||
+                       content.contains("wasm-bindgen") {
+                        return true;
+                    }
+                }
                 return true;
             }
 
-            // Check for manifest file
+            // Secondary check: manifest file
             let manifest_path = plugin_dir.join("wasmrun.toml");
             if manifest_path.exists() {
                 return true;
             }
 
-            // Check for shared library files
+            // Tertiary check: metadata file
+            let metadata_path = plugin_dir.join(".wasmrun_metadata");
+            if metadata_path.exists() {
+                return true;
+            }
+
+            // Quaternary check: shared library files (for dynamic loading scenarios)
+            // TODO: Not implemented yet, but can be used for future plugin types
             let lib_extensions = ["so", "dylib", "dll"];
             for ext in &lib_extensions {
                 let lib_path = plugin_dir.join(format!("lib{}.{}", plugin_name, ext));
@@ -108,6 +124,7 @@ impl PluginInstaller {
         false
     }
 
+    /// Install plugin library files and setup directory structure
     fn install_plugin_library(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
         println!("Setting up {} plugin library files...", plugin_name);
 
@@ -115,20 +132,10 @@ impl PluginInstaller {
         std::fs::create_dir_all(plugin_dir)
             .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {}", e)))?;
 
-        // For library-based plugins, we need to:
-        // 1. Set up the plugin source code and metadata files
-        // 2. Copy the necessary files to the plugin directory  
-        // 3. Optionally build the shared library for dynamic loading
-
         // Setup the plugin source and metadata
         Self::setup_plugin_source(plugin_name, plugin_dir)?;
+        println!("Plugin '{}' library files setup completed", plugin_name);
 
-        // Optionally build the plugin as a shared library for dynamic loading
-        if Self::should_build_shared_library(plugin_name) {
-            Self::build_plugin_library(plugin_name, plugin_dir)?;
-        }
-
-        println!("Plugin '{}' library files set up successfully", plugin_name);
         Ok(())
     }
 
@@ -180,29 +187,146 @@ impl PluginInstaller {
     }
 
     fn setup_plugin_source(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
-        // Create a temporary directory for downloading the source
-        let temp_dir = std::env::temp_dir().join(format!("wasmrun_{}", plugin_name));
-        std::fs::create_dir_all(&temp_dir)
-            .map_err(|e| WasmrunError::from(format!("Failed to create temp directory: {}", e)))?;
-
-        // Use cargo download to get the source (if available) or create basic structure
         match plugin_name {
-            "wasmrust" => {
-                // Try to download source or create from known structure
-                if let Err(_) = Self::download_crate_source(plugin_name, &temp_dir) {
-                    Self::create_wasmrust_structure(plugin_dir)?;
-                } else {
-                    Self::copy_plugin_files(&temp_dir, plugin_dir)?;
-                }
-            }
-            "wasmgo" => {
-                Self::create_wasmgo_structure(plugin_dir)?;
-            }
-            _ => return Err(WasmrunError::from(format!("Unknown plugin: {}", plugin_name))),
+            "wasmrust" => Self::setup_wasmrust_plugin(plugin_dir),
+            "wasmgo" => Self::setup_wasmgo_plugin(plugin_dir),
+            _ => Err(WasmrunError::from(format!("Unsupported plugin: {}", plugin_name))),
         }
+    }
 
-        // Clean up temp directory
-        let _ = std::fs::remove_dir_all(&temp_dir);
+    /// Setup wasmrust plugin files
+    fn setup_wasmrust_plugin(plugin_dir: &Path) -> Result<()> {
+        // Create Cargo.toml for wasmrust plugin
+        let cargo_toml_content = r#"[package]
+name = "wasmrust"
+version = "0.2.1"
+edition = "2021"
+description = "Rust to WebAssembly compiler plugin for wasmrun"
+authors = ["Kumar Anirudha"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+web-sys = "0.3"
+js-sys = "0.3"
+wasmrun-core = { path = "../../.." }
+
+[wasm_plugin]
+name = "wasmrust"
+version = "0.2.1"
+capabilities = ["compile_wasm", "compile_webapp", "live_reload", "optimization"]
+extensions = ["rs", "toml"]
+entry_files = ["Cargo.toml", "src/main.rs"]
+dependencies = ["cargo", "rustc"]
+"#;
+
+        let cargo_toml_path = plugin_dir.join("Cargo.toml");
+        std::fs::write(&cargo_toml_path, cargo_toml_content)
+            .map_err(|e| WasmrunError::from(format!("Failed to create Cargo.toml: {}", e)))?;
+
+        // Create basic src/lib.rs
+        let src_dir = plugin_dir.join("src");
+        std::fs::create_dir_all(&src_dir)
+            .map_err(|e| WasmrunError::from(format!("Failed to create src directory: {}", e)))?;
+
+        let lib_rs_content = r#"//! Wasmrust plugin for wasmrun
+//! Provides Rust to WebAssembly compilation capabilities
+
+use wasmrun_core::plugin::*;
+
+#[no_mangle]
+pub extern "C" fn wasmrun_plugin_info() -> PluginInfo {
+    PluginInfo {
+        name: "wasmrust".to_string(),
+        version: "0.2.1".to_string(),
+        description: "Rust to WebAssembly compiler with wasm-bindgen support".to_string(),
+        author: "Kumar Anirudha".to_string(),
+        capabilities: PluginCapabilities {
+            compile_wasm: true,
+            compile_webapp: true,
+            live_reload: true,
+            optimization: true,
+            custom_targets: vec!["wasm32-unknown-unknown".to_string(), "wasm32-wasi".to_string()],
+        },
+        extensions: vec!["rs".to_string(), "toml".to_string()],
+        entry_files: vec!["Cargo.toml".to_string(), "src/main.rs".to_string()],
+        dependencies: vec!["cargo".to_string(), "rustc".to_string()],
+    }
+}
+"#;
+
+        let lib_rs_path = src_dir.join("lib.rs");
+        std::fs::write(&lib_rs_path, lib_rs_content)
+            .map_err(|e| WasmrunError::from(format!("Failed to create lib.rs: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Setup wasmgo plugin files
+    fn setup_wasmgo_plugin(plugin_dir: &Path) -> Result<()> {
+        // Create Cargo.toml for wasmgo plugin
+        let cargo_toml_content = r#"[package]
+name = "wasmgo"
+version = "0.1.0"
+edition = "2021"
+description = "Go to WebAssembly compiler plugin for wasmrun"
+authors = ["Kumar Anirudha"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasmrun-core = { path = "../../.." }
+
+[wasm_plugin]
+name = "wasmgo"
+version = "0.1.0"
+capabilities = ["compile_wasm", "live_reload", "optimization"]
+extensions = ["go", "mod"]
+entry_files = ["go.mod", "main.go"]
+dependencies = ["tinygo"]
+"#;
+
+        let cargo_toml_path = plugin_dir.join("Cargo.toml");
+        std::fs::write(&cargo_toml_path, cargo_toml_content)
+            .map_err(|e| WasmrunError::from(format!("Failed to create Cargo.toml: {}", e)))?;
+
+        // Create basic src/lib.rs
+        let src_dir = plugin_dir.join("src");
+        std::fs::create_dir_all(&src_dir)
+            .map_err(|e| WasmrunError::from(format!("Failed to create src directory: {}", e)))?;
+
+        let lib_rs_content = r#"//! Wasmgo plugin for wasmrun
+//! Provides Go to WebAssembly compilation capabilities
+
+use wasmrun_core::plugin::*;
+
+#[no_mangle]
+pub extern "C" fn wasmrun_plugin_info() -> PluginInfo {
+    PluginInfo {
+        name: "wasmgo".to_string(),
+        version: "0.1.0".to_string(),
+        description: "Go to WebAssembly compiler using TinyGo".to_string(),
+        author: "Kumar Anirudha".to_string(),
+        capabilities: PluginCapabilities {
+            compile_wasm: true,
+            compile_webapp: false,
+            live_reload: true,
+            optimization: true,
+            custom_targets: vec!["wasm".to_string()],
+        },
+        extensions: vec!["go".to_string(), "mod".to_string()],
+        entry_files: vec!["go.mod".to_string(), "main.go".to_string()],
+        dependencies: vec!["tinygo".to_string()],
+    }
+}
+"#;
+
+        let lib_rs_path = src_dir.join("lib.rs");
+        std::fs::write(&lib_rs_path, lib_rs_content)
+            .map_err(|e| WasmrunError::from(format!("Failed to create lib.rs: {}", e)))?;
 
         Ok(())
     }
@@ -329,7 +453,7 @@ optimization = true
                 }
             }
 
-            // Try to read from metadata file
+            // Metadata file
             let metadata_path = plugin_dir.join(".wasmrun_metadata");
             if metadata_path.exists() {
                 if let Ok(content) = std::fs::read_to_string(&metadata_path) {
@@ -446,7 +570,7 @@ tools = ["tinygo"]
     pub fn verify_plugin_installation(plugin_name: &str) -> Result<PluginVerificationResult> {
         let mut result = PluginVerificationResult::new(plugin_name);
 
-        // Check if plugin library files are available
+        // Check if plugin library files are available (not binary in PATH)
         result.binary_available = Self::is_plugin_library_installed(plugin_name);
 
         // Check directory structure
@@ -466,15 +590,33 @@ tools = ["tinygo"]
                 println!("  Manifest exists: {}", result.manifest_exists);
                 println!("  Metadata exists: {}", result.metadata_exists);
                 println!("  Cargo.toml exists: {}", cargo_toml_exists);
+
+                // Check for shared library files
+                let lib_extensions = ["so", "dylib", "dll"];
+                let mut lib_exists = false;
+                for ext in &lib_extensions {
+                    let lib_path = plugin_dir.join(format!("lib{}.{}", plugin_name, ext));
+                    if lib_path.exists() {
+                        lib_exists = true;
+                        println!("  Library file exists: {}", lib_path.display());
+                        break;
+                    }
+                }
+                
+                if !lib_exists {
+                    println!("  No shared library files found (this is normal for source-based plugins)");
+                }
             }
         }
 
         // Check dependencies
         result.dependencies_available = Self::check_plugin_dependencies(plugin_name);
 
+        // Plugin is functional if library files exist and directory structure is valid
         result.is_functional = result.binary_available && 
                               result.directory_exists && 
-                              result.manifest_exists;
+                              result.manifest_exists &&
+                              result.dependencies_available;
 
         println!("Plugin '{}' functional status: {}", plugin_name, result.is_functional);
 

@@ -130,79 +130,382 @@ Stop any running Wasmrun server:
 wasmrun stop
 ```
 
-## 🔌 Plugin Architecture
+## 🏗️ Plugin Architecture
 
-Wasmrun uses a modular plugin system where each programming language is supported through dedicated plugins. This architecture provides:
+Wasmrun's modular plugin architecture that enables seamless integration of different programming languages and compilation toolchains into a unified development experience.
 
-- **Extensibility** - Easy to add new language support
-- **Maintainability** - Each plugin is self-contained
-- **Consistency** - Unified interface across all languages
-- **Flexibility** - Plugin-specific optimizations and features
+### Architecture Overview
 
-### Built-in Plugins
+TBD
 
-| Plugin | Status | Compiler/Runtime | Capabilities |
-|--------|--------|------------------|--------------|
-| ![C](https://img.shields.io/badge/c-%2300599C.svg?style=for-the-badge&logo=c&logoColor=white) ![C++](https://img.shields.io/badge/c++-%2300599C.svg?style=for-the-badge&logo=c%2B%2B&logoColor=white) | ✅ Full Support | `emscripten` | Complete toolchain, Makefile support |
-| ![AssemblyScript](https://img.shields.io/badge/assembly%20script-%23000000.svg?style=for-the-badge&logo=assemblyscript&logoColor=white) | ✅ Full Support | `asc` + npm/yarn | TypeScript-like syntax, optimization |
-| ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54) | ✅ Beta Support | `py2wasm` | Runtime integration, bundle creation |
+### Plugin Types
 
-### External Plugins
+#### 1. **Built-in Plugins** 🔧
+Built-in plugins are compiled directly into Wasmrun and provide core language support:
 
-| Plugin | Status | Installation | Capabilities |
-|--------|--------|-------------|--------------|
-| ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white) | ✅ Full Support | `wasmrun plugin install wasmrust` | Standard WASM, wasm-bindgen, web apps, optimization |
-| ![Go](https://img.shields.io/badge/go-%2300ADD8.svg?style=for-the-badge&logo=go&logoColor=white) | ✅ Full Support | `wasmrun plugin install wasmgo` | `tinygo` compiler, optimization |
+| Plugin | Language | Compiler | Status | Capabilities |
+|--------|----------|----------|---------|--------------|
+| **C/C++** | C, C++ | Emscripten | ✅ Stable | Full WASM + Web Apps + Makefiles |
+| **AssemblyScript** | TypeScript-like | `asc` | ✅ Stable | WASM + Optimization + npm/yarn |
+| **Python** | Python | `py2wasm` | 🚧 Beta | Runtime Integration + Bundle creation |
 
-### Plugin Capabilities
+#### 2. **External Plugins** 📦
+External plugins extend Wasmrun's capabilities and are installed as **library extensions**:
 
-Each plugin provides specific capabilities:
+| Plugin | Language | Installation | Status | Capabilities |
+|--------|----------|-------------|---------|--------------|
+| **wasmrust** | Rust | `wasmrun plugin install wasmrust` | ✅ Stable | WASM + Web Apps + wasm-bindgen + Frameworks |
+| **wasmgo** | Go | `wasmrun plugin install wasmgo` | ✅ Stable | WASM via TinyGo + Optimization |
 
-| Feature | Rust* | Go* | C/C++ | AssemblyScript | Python |
-|---------|-------|-----|-------|---------------|--------|
-| **Compile to WASM** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Web Applications** | ✅ | ❌ | ✅ | ❌ | ✅ |
-| **Live Reload** | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **Optimization** | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **Custom Targets** | Multiple | wasm | web | wasm | TBD |
+### How Plugins Work
 
-*External plugins (requires installation)
+#### Plugin Interface Architecture
+Every plugin implements the core `Plugin` trait providing a consistent interface:
 
-### Web Frameworks (Rust Plugin)
+```rust
+pub trait Plugin {
+    fn info(&self) -> &PluginInfo;                    // Plugin metadata
+    fn can_handle_project(&self, path: &str) -> bool; // Project compatibility
+    fn get_builder(&self) -> Box<dyn WasmBuilder>;    // Compilation engine
+}
 
-The Rust plugin (wasmrust) automatically detects and supports web frameworks with specialized web application mode:
+pub trait WasmBuilder {
+    fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult>;
+    fn check_dependencies(&self) -> Vec<String>;      // Missing tools
+    fn validate_project(&self, path: &str) -> CompilationResult<()>;
+    fn clean(&self, path: &str) -> Result<()>;        // Cleanup artifacts
+    fn supported_extensions(&self) -> &[&str];        // File extensions
+    fn entry_file_candidates(&self) -> &[&str];       // Entry files
+}
+```
 
-- **Yew** - Modern Rust / Wasm framework
-- **Leptos** - Full-stack, compile-time optimal Rust framework  
-- **Dioxus** - Cross-platform GUI library
-- **Sycamore** - Reactive library
-- **Trunk** - Build tool for Rust-generated WebAssembly
+#### Plugin Capabilities System
+Each plugin declares its capabilities through structured metadata:
 
-*Web framework support is highly experimental and actively being improved. Looking for contributors. 👋*
+```rust
+pub struct PluginCapabilities {
+    pub compile_wasm: bool,          // Standard .wasm file generation
+    pub compile_webapp: bool,        // Web application bundling
+    pub live_reload: bool,           // Development server support
+    pub optimization: bool,          // Size/speed optimization passes
+    pub custom_targets: Vec<String>, // Additional compilation targets
+}
 
-## 🌟 How It Works
+pub struct PluginInfo {
+    pub name: String,                     // Plugin identifier
+    pub version: String,                  // Plugin version
+    pub description: String,              // Human-readable description
+    pub author: String,                   // Plugin author
+    pub extensions: Vec<String>,          // Supported file extensions
+    pub entry_files: Vec<String>,         // Project entry points
+    pub plugin_type: PluginType,          // Built-in vs External
+    pub dependencies: Vec<String>,        // Required system tools
+    pub capabilities: PluginCapabilities,
+}
+```
 
-### Plugin-Based Compilation
+### External Plugin Installation
 
-1. **Project Detection** - Wasmrun analyzes the project and selects the appropriate plugin
-2. **Dependency Verification** - The plugin checks for required tools and dependencies
-3. **Compilation** - Plugin-specific build process with optimizations
-4. **Output Generation** - WASM file creation with plugin-specific features
+External plugins are **library extensions** that integrate directly with Wasmrun, not standalone binaries. This design enables deep integration while maintaining modularity.
 
-### For WASM Files
+_Maybe, in future we can also support standalone binaries._
 
-1. Wasmrun server with WASI support starts running
-2. Opens your default browser with an interactive interface
-3. Serves the WASM file with comprehensive WASI support including virtual filesystem
-4. Provides real-time console output, debugging tools, and file system interaction
+#### Plugin Directory Structure (supposed to be)
 
-### For Projects
+```sh
+~/.wasmrun/
+├── config.toml               # Global Wasmrun configuration
+├── plugins/                  # Plugin installation directory
+│   ├── wasmrust/             # Rust plugin (external)
+│   │   ├── Cargo.toml        # Plugin build configuration
+│   │   ├── src/
+│   │   │   └── lib.rs        # Rust plugin implementation
+│   │   ├── wasmrun.toml      # Plugin manifest
+│   │   └── .wasmrun_metadata # Installation metadata
+│   └── wasmgo/               # Go plugin (external)
+│       ├── Cargo.toml        # Plugin uses Rust for integration
+│       ├── src/lib.rs        # Go compilation bridge
+│       └── wasmrun.toml      # Plugin configuration
+├── cache/                    # Build artifact cache
+└── logs/                     # Plugin operation logs
+```
 
-1. **Plugin Selection** - Automatically identifies and loads the appropriate language plugin
-2. **Dependency Checking** - Plugin verifies required tools are installed
-3. **Compilation** - Plugin builds optimized WASM with proper flags and optimizations
-4. **Serving** - Runs development server with live reload
-5. **Framework Detection** - Special handling for web applications (external plugins)
+### Plugin Development Guide
+
+#### Creating a Built-in Plugin
+
+1. **Create Plugin Structure**
+   ```rust
+   // src/plugin/languages/my_language_plugin.rs
+   use crate::plugin::{Plugin, PluginInfo, PluginCapabilities, PluginType};
+   use crate::compiler::builder::WasmBuilder;
+   
+   pub struct MyLanguagePlugin {
+       info: PluginInfo,
+   }
+   
+   impl MyLanguagePlugin {
+       pub fn new() -> Self {
+           let info = PluginInfo {
+               name: "mylang".to_string(),
+               version: env!("CARGO_PKG_VERSION").to_string(),
+               description: "My Language WebAssembly compiler".to_string(),
+               author: "Your Name".to_string(),
+               extensions: vec!["ml".to_string(), "myl".to_string()],
+               entry_files: vec!["main.ml".to_string(), "package.myl".to_string()],
+               plugin_type: PluginType::Builtin,
+               source: None,
+               dependencies: vec!["mylang-compiler".to_string()],
+               capabilities: PluginCapabilities {
+                   compile_wasm: true,
+                   compile_webapp: false,
+                   live_reload: true,
+                   optimization: true,
+                   custom_targets: vec!["wasm32-wasi".to_string()],
+               },
+           };
+           Self { info }
+       }
+   }
+   ```
+
+2. **Implement Plugin Trait**
+   ```rust
+   impl Plugin for MyLanguagePlugin {
+       fn info(&self) -> &PluginInfo {
+           &self.info
+       }
+   
+       fn can_handle_project(&self, project_path: &str) -> bool {
+           let path = std::path::Path::new(project_path);
+           
+           // Check for entry files
+           for entry_file in &self.info.entry_files {
+               if path.join(entry_file).exists() {
+                   return true;
+               }
+           }
+           
+           // Check for source files with supported extensions
+           if let Ok(entries) = std::fs::read_dir(path) {
+               for entry in entries.flatten() {
+                   if let Some(ext) = entry.path().extension() {
+                       if let Some(ext_str) = ext.to_str() {
+                           if self.info.extensions.contains(&ext_str.to_string()) {
+                               return true;
+                           }
+                       }
+                   }
+               }
+           }
+           
+           false
+       }
+   
+       fn get_builder(&self) -> Box<dyn WasmBuilder> {
+           Box::new(MyLanguageBuilder::new())
+       }
+   }
+   ```
+
+3. **Implement WasmBuilder**
+   ```rust
+   pub struct MyLanguageBuilder;
+   
+   impl MyLanguageBuilder {
+       pub fn new() -> Self {
+           Self
+       }
+   }
+   
+   impl WasmBuilder for MyLanguageBuilder {
+       fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+           // Implement your language's compilation logic
+           let project_path = &config.input;
+           let output_dir = &config.output_dir;
+           
+           // Example: Call your language's WASM compiler
+           let output = std::process::Command::new("mylang-compiler")
+               .args(&["--target", "wasm32-wasi"])
+               .args(&["--output", output_dir])
+               .arg(project_path)
+               .output()
+               .map_err(|e| CompilationError::ToolExecutionFailed {
+                   tool: "mylang-compiler".to_string(),
+                   reason: e.to_string(),
+               })?;
+   
+           if !output.status.success() {
+               return Err(CompilationError::BuildFailed {
+                   language: "mylang".to_string(),
+                   reason: String::from_utf8_lossy(&output.stderr).to_string(),
+               });
+           }
+   
+           Ok(BuildResult {
+               output_path: format!("{}/output.wasm", output_dir),
+               language: "mylang".to_string(),
+               optimization_level: config.optimization.clone(),
+               build_time: std::time::Duration::from_millis(100), // Measure actual time
+               file_size: std::fs::metadata(format!("{}/output.wasm", output_dir))
+                   .map(|m| m.len())
+                   .unwrap_or(0),
+           })
+       }
+   
+       fn check_dependencies(&self) -> Vec<String> {
+           let mut missing = Vec::new();
+           
+           // Check if compiler is available
+           if !self.is_tool_available("mylang-compiler") {
+               missing.push("mylang-compiler".to_string());
+           }
+           
+           missing
+       }
+   
+       fn validate_project(&self, project_path: &str) -> CompilationResult<()> {
+           let path = std::path::Path::new(project_path);
+           
+           if !path.exists() {
+               return Err(CompilationError::BuildFailed {
+                   language: "mylang".to_string(),
+                   reason: format!("Project path does not exist: {}", project_path),
+               });
+           }
+   
+           // Add your validation logic here
+           Ok(())
+       }
+   
+       // ... implement other required methods
+   }
+   ```
+
+4. **Register Plugin in Manager**
+   ```rust
+   // In src/plugin/manager.rs
+   impl PluginManager {
+       fn load_builtin_plugins() -> Vec<BuiltinPlugin> {
+           vec![
+               // Existing plugins
+               BuiltinPlugin::new(Arc::new(CPlugin::new())),
+               BuiltinPlugin::new(Arc::new(AscPlugin::new())),
+               BuiltinPlugin::new(Arc::new(PythonPlugin::new())),
+               
+               // Your new plugin
+               BuiltinPlugin::new(Arc::new(MyLanguagePlugin::new())),
+           ]
+       }
+   }
+   ```
+
+#### Creating an External Plugin
+
+External plugins are separate Rust crates that implement the Wasmrun plugin interface:
+
+1. **Create Plugin Crate**
+
+```sh
+cargo new --lib wasmxlang
+cd wasmxlang
+```
+
+2. **Plugin Cargo.toml**
+   ```toml
+   [package]
+   name = "wasmxlang"
+   version = "0.1.0"
+   edition = "2021"
+   description = "XLang to WebAssembly compiler plugin for Wasmrun"
+   
+   [lib]
+   crate-type = ["cdylib", "rlib"]
+   
+   [dependencies]
+   wasmrun-core = { path = "../wasmrun" }  # Or from crates.io when published
+   
+   [wasm_plugin]
+   name = "xlang"
+   version = "0.1.0"
+   capabilities = ["compile_wasm", "live_reload", "optimization"]
+   extensions = ["xl", "xlang"]
+   entry_files = ["main.xl", "project.xlang"]
+   dependencies = ["xlang-compiler"]
+   ```
+
+3. **Implement Plugin**
+   ```rust
+   // src/lib.rs
+   use wasmrun_core::plugin::*;
+   
+   #[no_mangle]
+   pub extern "C" fn wasmrun_plugin_info() -> PluginInfo {
+       PluginInfo {
+           name: "xlang".to_string(),
+           version: "0.1.0".to_string(),
+           description: "XLang to WebAssembly compiler".to_string(),
+           author: "Your Name".to_string(),
+           capabilities: PluginCapabilities {
+               compile_wasm: true,
+               compile_webapp: false,
+               live_reload: true,
+               optimization: true,
+               custom_targets: vec!["wasm32-unknown-unknown".to_string()],
+           },
+           extensions: vec!["xl".to_string(), "xlang".to_string()],
+           entry_files: vec!["main.xl".to_string(), "project.xlang".to_string()],
+           plugin_type: PluginType::External,
+           source: Some(PluginSource::CratesIo {
+               name: "wasmxlang".to_string(),
+               version: "0.1.0".to_string(),
+           }),
+           dependencies: vec!["xlang-compiler".to_string()],
+       }
+   }
+   ```
+
+### Plugin Configuration
+
+#### Project-Level Configuration
+```toml
+# wasmrun.toml in your project root
+[project]
+name = "my-wasm-app"
+version = "0.1.0"
+language = "rust"  # Force specific plugin
+
+[build]
+plugin = "wasmrust"        # Explicit plugin selection
+optimization = "release"   # Plugin-specific optimization
+output_dir = "./dist"      # Custom output directory
+
+[capabilities]
+live_reload = true
+web_app = true             # Enable web app features if supported
+
+[dependencies]
+# Plugin-specific dependency configuration
+```
+
+#### Global Plugin Configuration
+```toml
+# ~/.wasmrun/config.toml
+[settings]
+auto_update = false
+default_optimization = "size"
+verbose = false
+
+[external_plugins.wasmrust]
+enabled = true
+install_path = "/home/user/.wasmrun/plugins/wasmrust"
+auto_update = true
+
+[external_plugins.wasmgo]
+enabled = true
+install_path = "/home/user/.wasmrun/plugins/wasmgo"
+auto_update = false
+```
 
 ## 🔍 WASI Support
 
@@ -217,7 +520,7 @@ Wasmrun intends to provide support for complete WebAssembly System Interface (WA
 wasmrun test.wasm
 
 # Project development with live reload (plugin auto-detected)
-wasmrun run ./my-rust-project --watch
+wasmrun ./my-rust-project --watch
 
 # Build and optimize for production (plugin-specific optimizations)
 wasmrun compile ./my-project --optimization size
@@ -236,7 +539,7 @@ wasmrun plugin install wasmrust
 wasmrun plugin info wasmrust
 ```
 
-### Learning & Education
+### Debugging WASM
 
 ```sh
 # Inspect WASM structure and understand internals
@@ -246,21 +549,21 @@ wasmrun inspect ./complex-module.wasm
 wasmrun verify ./student-submission.wasm --detailed
 
 # See which plugin would handle a project
-wasmrun run ./unknown-project --dry-run
+wasmrun ./unknown-project --dry-run
 ```
 
 ### Web Application Development
 
 ```sh
 # Rust web app with hot reload (external wasmrust plugin auto-detects frameworks)
-wasmrun run ./my-yew-app --watch
+wasmrun ./my-yew-app --watch
 
 # Multi-framework support
-wasmrun run ./leptos-project
-wasmrun run ./dioxus-app
+wasmrun ./leptos-project
+wasmrun ./dioxus-app
 
 # Python web app with Pyodide
-wasmrun run ./my-python-web-app
+wasmrun ./my-python-web-app
 ```
 
 ### Performance Analysis
@@ -310,6 +613,7 @@ Plugin-specific optimization levels:
 ### Plugin-Related Issues
 
 **"No plugin found for project"**
+
 ```sh
 # Check what files are in your project
 ls -la
@@ -340,6 +644,7 @@ wasmrun --language go
 ### External Plugin Installation
 
 **"Plugin not found during installation"**
+
 ```sh
 # Make sure you have the correct plugin name
 wasmrun plugin install wasmrust   # For Rust support
@@ -366,7 +671,7 @@ pip install py2wasm
 
 **"Port is already in use"**
 ```sh
-wasmrun stop  # Stop existing server
+wasmrun stop         # Stop existing server
 wasmrun --port 3001  # Use different port
 ```
 

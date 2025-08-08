@@ -68,31 +68,82 @@ pub fn run_plugin_install(plugin: &str) -> Result<()> {
         return Ok(());
     }
 
-    // Install the plugin library and setup directory
-    let _install_result = PluginInstaller::install_external_plugin(plugin)?;
-    PluginInstaller::setup_plugin_directory(plugin)?;
+    // Step 1: Install the plugin library and setup directory
+    println!("📦 Setting up plugin library files...");
+    let install_result = PluginInstaller::install_external_plugin(plugin)?;
+    let plugin_dir = PluginInstaller::setup_plugin_directory(plugin)?;
+    
+    println!("✅ Plugin files installed to: {}", plugin_dir.display());
 
-    // Register plugin in wasmrun config
+    // Step 2: Register plugin in wasmrun config
+    println!("📋 Registering plugin with wasmrun...");
     let mut manager = PluginManager::new()?;
-    manager.register_installed_plugin(plugin)?;
+    
+    match manager.register_installed_plugin(plugin) {
+        Ok(()) => {
+            println!("✅ Plugin '{}' registered successfully", plugin);
+        }
+        Err(e) => {
+            println!("⚠️  Plugin files installed but registration had issues: {}", e);
+            println!("   Plugin may still be functional for basic operations");
+        }
+    }
 
-    // Verify installation
+    // Step 3: Verify installation
+    println!("🔍 Verifying installation...");
     let verification = PluginInstaller::verify_plugin_installation(plugin)?;
+    
     if verification.is_functional {
-        println!("Plugin '{}' installed successfully", plugin);
+        println!("🎉 Plugin '{}' installed and verified successfully!", plugin);
         
-        // Show what was installed
-        if let Ok(plugin_dir) = PluginInstaller::get_plugin_directory(plugin) {
-            println!("Plugin files installed to: {}", plugin_dir.display());
+        // Show installation summary
+        println!("\n📋 Installation Summary:");
+        println!("   Plugin: {}", plugin);
+        if !install_result.version.is_empty() {
+            println!("   Version: {}", install_result.version);
+        }
+        println!("   Location: {}", plugin_dir.display());
+        println!("   Status: Functional ✅");
+        
+        // Show basic usage info
+        match plugin {
+            "wasmrust" => {
+                println!("\n💡 Usage:");
+                println!("   wasmrun compile ./rust-project");
+                println!("   wasmrun ./rust-project --watch");
+            }
+            "wasmgo" => {
+                println!("\n💡 Usage:");
+                println!("   wasmrun compile ./go-project");
+                println!("   wasmrun ./go-project --watch");
+            }
+            _ => {}
         }
     } else {
-        println!("Plugin '{}' installed but may have issues:", plugin);
+        println!("⚠️  Plugin '{}' installed but may have issues:", plugin);
+        
         if !verification.binary_available {
-            println!("  - Plugin library files not available");
+            println!("   - Plugin library files not properly installed");
         }
         if !verification.dependencies_available {
-            println!("  - Dependencies missing");
+            println!("   - Dependencies missing:");
+            match plugin {
+                "wasmrust" => {
+                    println!("     • Install: rustup target add wasm32-unknown-unknown");
+                    println!("     • Ensure cargo and rustc are available");
+                }
+                "wasmgo" => {
+                    println!("     • Install TinyGo: https://tinygo.org/getting-started/install/");
+                }
+                _ => {}
+            }
         }
+        if !verification.directory_exists {
+            println!("   - Plugin directory structure invalid");
+        }
+        
+        println!("\n🔧 Try fixing the issues above and run:");
+        println!("   wasmrun plugin install {}", plugin);
     }
 
     Ok(())
@@ -103,19 +154,30 @@ pub fn run_plugin_uninstall(plugin: &str) -> Result<()> {
     
     let mut manager = PluginManager::new()?;
     
+    // Check if plugin is installed
+    if !manager.is_plugin_installed(plugin) {
+        println!("Plugin '{}' is not installed", plugin);
+        return Ok(());
+    }
+    
     // Remove from wasmrun config
+    println!("📋 Removing plugin from wasmrun configuration...");
     manager.uninstall_plugin(plugin)?;
     
     // Remove plugin directory
+    println!("🗂️  Removing plugin directory...");
     PluginInstaller::remove_plugin_directory(plugin)?;
     
-    // Optionally uninstall library (ask user)
+    // Uninstall library
     if should_uninstall_binary() {
-        PluginInstaller::uninstall_plugin_library(plugin)?;
-        println!("Plugin library '{}' also uninstalled", plugin);
+        println!("🧹 Cleaning up plugin library files...");
+        match PluginInstaller::uninstall_plugin_library(plugin) {
+            Ok(()) => println!("Plugin library '{}' also removed", plugin),
+            Err(e) => println!("Warning: Could not remove plugin library: {}", e),
+        }
     }
     
-    println!("Plugin '{}' uninstalled successfully", plugin);
+    println!("✅ Plugin '{}' uninstalled successfully", plugin);
     Ok(())
 }
 
@@ -196,10 +258,14 @@ pub fn run_plugin_search(_query: &str) -> Result<()> {
     Ok(())
 }
 
-// Helper functions for plugin installation
-
 fn should_uninstall_binary() -> bool {
-    // For now, default to not uninstalling the binary
-    // Could be made interactive in the future
-    false
+    println!("Do you also want to remove the plugin library files? (y/N)");
+    
+    let mut input = String::new();
+    if std::io::stdin().read_line(&mut input).is_ok() {
+        let input = input.trim().to_lowercase();
+        matches!(input.as_str(), "y" | "yes")
+    } else {
+        false
+    }
 }

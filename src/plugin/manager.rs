@@ -509,10 +509,10 @@ impl PluginManager {
     }
 
     pub fn register_installed_plugin(&mut self, plugin_name: &str) -> Result<()> {
-        // Check if plugin binary is actually available
-        if !self.is_tool_available_in_path(plugin_name) {
+        // For external plugins, check if library files are installed instead of binary in PATH
+        if !self.is_external_plugin_available(plugin_name) {
             return Err(WasmrunError::from(format!(
-                "Plugin binary '{}' not found in PATH after installation",
+                "Plugin '{}' library files not found after installation. Expected files in plugin directory.",
                 plugin_name
             )));
         }
@@ -562,6 +562,54 @@ impl PluginManager {
         Ok(())
     }
 
+    /// Check if external plugin library files are available (replaces PATH check)
+    fn is_external_plugin_available(&self, plugin_name: &str) -> bool {
+        if let Ok(plugin_dir) = self.get_plugin_directory(plugin_name) {
+            // Check for Cargo.toml with plugin metadata
+            let cargo_toml_path = plugin_dir.join("Cargo.toml");
+            if cargo_toml_path.exists() {
+                // Verify it's a valid wasmrun plugin
+                if self.is_valid_wasmrun_plugin(&cargo_toml_path) {
+                    return true;
+                }
+            }
+
+            // Check for manifest file
+            let manifest_path = plugin_dir.join("wasmrun.toml");
+            if manifest_path.exists() {
+                return true;
+            }
+
+            // Check for metadata file
+            let metadata_path = plugin_dir.join(".wasmrun_metadata");
+            if metadata_path.exists() {
+                return true;
+            }
+
+            // Check for shared library files (for dynamic loading)
+            let lib_extensions = ["so", "dylib", "dll"];
+            for ext in &lib_extensions {
+                let lib_path = plugin_dir.join(format!("lib{}.{}", plugin_name, ext));
+                if lib_path.exists() {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Verify if a Cargo.toml belongs to a wasmrun plugin
+    fn is_valid_wasmrun_plugin(&self, cargo_toml_path: &std::path::Path) -> bool {
+        if let Ok(content) = std::fs::read_to_string(cargo_toml_path) {
+            content.contains("[wasm_plugin]") || 
+            content.contains("wasmrun") ||
+            content.contains("wasm-bindgen")
+        } else {
+            false
+        }
+    }
+
     pub fn check_plugin_health(&self, plugin_name: &str) -> Result<PluginHealthStatus> {
         // Check if plugin exists in builtin or external
         if let Some(plugin) = self.find_plugin_by_name(plugin_name) {
@@ -579,9 +627,9 @@ impl PluginManager {
             if !entry.enabled {
                 Ok(PluginHealthStatus::LoadError("Plugin is disabled".to_string()))
             } else {
-                // Try to check if binary is available
-                if self.is_tool_available_in_path(plugin_name) {
-                    Ok(PluginHealthStatus::LoadError("Plugin binary exists but failed to load".to_string()))
+                // Check if library files are available instead of binary
+                if self.is_external_plugin_available(plugin_name) {
+                    Ok(PluginHealthStatus::LoadError("Plugin library exists but failed to load".to_string()))
                 } else {
                     Ok(PluginHealthStatus::NotFound)
                 }
@@ -610,6 +658,7 @@ impl PluginManager {
             .unwrap_or(false)
     }
 
+    // TODO: Deprecate and move to installer.rs
     pub fn install_plugin(&mut self, plugin_name: &str) -> Result<()> {
         // Check if already installed
         if self.is_plugin_installed(plugin_name) {
@@ -619,6 +668,7 @@ impl PluginManager {
         }
 
         // Check if it's a supported plugin
+        // TODO: Move to either plugin registration or open plugin registry
         if !is_supported_external_plugin(plugin_name) {
             return Err(WasmrunError::from(format!(
                 "Plugin '{}' is not supported. Supported plugins: wasmrust, wasmgo", 
@@ -626,11 +676,10 @@ impl PluginManager {
             )));
         }
 
-        // The actual installation (cargo install) should already be done
-        // by the command handler, so we just register it here
-        if !self.is_tool_available_in_path(plugin_name) {
+        // For external plugins, check library availability instead of binary in PATH
+        if !self.is_external_plugin_available(plugin_name) {
             return Err(WasmrunError::from(format!(
-                "Plugin '{}' binary not found. Please ensure it was installed correctly via cargo install",
+                "Plugin '{}' library files not found. Please ensure installation completed successfully.",
                 plugin_name
             )));
         }
