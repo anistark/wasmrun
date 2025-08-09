@@ -122,7 +122,7 @@ impl CPlugin {
         let wasm_files = PathResolver::find_files_with_extension(&config.project_path, "wasm")
             .map_err(|e| CompilationError::BuildFailed {
                 language: self.language_name().to_string(),
-                reason: format!("Failed to find WASM files after make build: {}", e),
+                reason: format!("Failed to find WASM files after make build: {e}"),
             })?;
 
         if wasm_files.is_empty() {
@@ -173,8 +173,8 @@ impl CPlugin {
             .unwrap()
             .to_string_lossy()
             .to_string();
-        let wasm_output_file = Path::new(&config.output_dir).join(format!("{}.wasm", output_name));
-        let js_output_file = Path::new(&config.output_dir).join(format!("{}.js", output_name));
+        let wasm_output_file = Path::new(&config.output_dir).join(format!("{output_name}.wasm"));
+        let js_output_file = Path::new(&config.output_dir).join(format!("{output_name}.js"));
 
         println!("🔨 Building with Emscripten...");
 
@@ -244,7 +244,7 @@ impl CPlugin {
 
         let entries = fs::read_dir(project_path).map_err(|e| CompilationError::BuildFailed {
             language: self.language_name().to_string(),
-            reason: format!("Failed to read project directory: {}", e),
+            reason: format!("Failed to read project directory: {e}"),
         })?;
 
         for entry in entries.flatten() {
@@ -342,7 +342,7 @@ impl WasmBuilder for CPlugin {
         PathResolver::validate_directory_exists(project_path).map_err(|e| {
             CompilationError::InvalidProjectStructure {
                 language: self.language_name().to_string(),
-                reason: format!("Project directory validation failed: {}", e),
+                reason: format!("Project directory validation failed: {e}"),
             }
         })?;
 

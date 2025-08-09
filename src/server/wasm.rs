@@ -7,7 +7,7 @@ use super::handler;
 /// Simple server for non-watching mode
 pub fn serve_wasm_file(wasm_path: &str, port: u16, wasm_filename: &str) -> Result<(), String> {
     let server = Server::http(format!("0.0.0.0:{port}"))
-        .map_err(|e| format!("Failed to start server: {}", e))?;
+        .map_err(|e| format!("Failed to start server: {e}"))?;
 
     let mut clients_to_reload = Vec::new();
     for request in server.incoming_requests() {
@@ -32,7 +32,7 @@ pub fn serve_wasm_bindgen_files(
     wasm_filename: &str,
 ) -> Result<(), String> {
     let server = Server::http(format!("0.0.0.0:{port}"))
-        .map_err(|e| format!("Failed to start server: {}", e))?;
+        .map_err(|e| format!("Failed to start server: {e}"))?;
 
     let js_path_obj = Path::new(js_path);
     let js_filename = js_path_obj
@@ -66,8 +66,8 @@ pub fn handle_wasm_bindgen_files(
 ) -> Result<(), String> {
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  ✅  \x1b[1;32mRunning wasm-bindgen project\x1b[0m");
-    println!("  \x1b[0;37mJS File: {}\x1b[0m", js_path);
-    println!("  \x1b[0;37mWASM File: {}\x1b[0m", wasm_path);
+    println!("  \x1b[0;37mJS File: {js_path}\x1b[0m");
+    println!("  \x1b[0;37mWASM File: {wasm_path}\x1b[0m");
     println!("\x1b[1;34m╰\x1b[0m\n");
 
     // Run with wasm-bindgen support
@@ -97,7 +97,7 @@ fn find_corresponding_js_file(wasm_path: &Path) -> Option<String> {
     let file_name = wasm_path.file_name()?.to_string_lossy();
     if file_name.ends_with("_bg.wasm") {
         let stem = file_name.replace("_bg.wasm", "");
-        let js_name = format!("{}.js", stem);
+        let js_name = format!("{stem}.js");
         let parent = wasm_path.parent()?;
         let js_path = parent.join(&js_name);
 
@@ -110,7 +110,7 @@ fn find_corresponding_js_file(wasm_path: &Path) -> Option<String> {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "js") {
+                if path.extension().is_some_and(|ext| ext == "js") {
                     if let Ok(content) = fs::read_to_string(&path) {
                         if content.contains("wasm_bindgen") || content.contains("__wbindgen") {
                             return Some(path.to_string_lossy().to_string());

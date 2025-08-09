@@ -41,7 +41,7 @@ pub fn handle_verify_command(
 ) -> Result<()> {
     let wasm_path = resolve_and_validate_wasm_path(path, positional_path)?;
 
-    println!("🔍 Verifying WebAssembly file: {}", wasm_path);
+    println!("🔍 Verifying WebAssembly file: {wasm_path}");
 
     let result =
         verify_wasm(&wasm_path).map_err(|e| WasmrunError::Wasm(WasmError::validation_failed(e)))?;
@@ -69,13 +69,13 @@ pub fn handle_inspect_command(
     positional_path: &Option<String>,
 ) -> Result<()> {
     let resolved_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
-    println!("Resolved path: {:?}", resolved_path);
+    println!("Resolved path: {resolved_path:?}");
 
     let wasm_path = CommandValidator::validate_verify_args(path, positional_path)?;
 
     PathResolver::validate_wasm_file(&wasm_path)?;
 
-    println!("🔍 Inspecting WebAssembly file: {}", wasm_path);
+    println!("🔍 Inspecting WebAssembly file: {wasm_path}");
 
     print_detailed_binary_info(&wasm_path)
         .map_err(|e| WasmrunError::Wasm(WasmError::validation_failed(e)))?;
@@ -87,10 +87,10 @@ pub fn handle_inspect_command(
 /// Verify a WebAssembly file
 pub fn verify_wasm(path: &str) -> std::result::Result<VerificationResult, String> {
     if !Path::new(path).exists() {
-        return Err(format!("File not found: {}", path));
+        return Err(format!("File not found: {path}"));
     }
 
-    let wasm_bytes = fs::read(path).map_err(|e| format!("Error reading file: {}", e))?;
+    let wasm_bytes = fs::read(path).map_err(|e| format!("Error reading file: {e}"))?;
 
     if wasm_bytes.len() < 8 {
         return Err("File is too small to be a valid WASM module".to_string());
@@ -155,7 +155,7 @@ pub fn verify_wasm(path: &str) -> std::result::Result<VerificationResult, String
             let section_name = if section_id < section_names.len() as u32 {
                 section_names[section_id as usize].to_string()
             } else {
-                format!("Unknown ({})", section_id)
+                format!("Unknown ({section_id})")
             };
 
             sections.push(WasmSection {
@@ -272,7 +272,7 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
 
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  🔍 \x1b[1;36mWASM Verification Results\x1b[0m\n");
-    println!("  📄 \x1b[1;34mFile:\x1b[0m \x1b[1;33m{}\x1b[0m", filename);
+    println!("  📄 \x1b[1;34mFile:\x1b[0m \x1b[1;33m{filename}\x1b[0m");
 
     let size_str = if results.file_size < 1024 {
         format!("{} bytes", results.file_size)
@@ -282,7 +282,7 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
         format!("{:.2} MB", results.file_size as f64 / (1024.0 * 1024.0))
     };
 
-    println!("  💾 \x1b[1;34mSize:\x1b[0m \x1b[1;33m{}\x1b[0m", size_str);
+    println!("  💾 \x1b[1;34mSize:\x1b[0m \x1b[1;33m{size_str}\x1b[0m");
 
     if results.valid_magic {
         println!("  ✅ \x1b[1;32mValid WebAssembly format\x1b[0m");
@@ -327,7 +327,7 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
         let mut found_entry = false;
         for name in &results.export_names {
             if is_entry_point(name) {
-                println!("  ✅ \x1b[1;32mFound entry point: '{}'\x1b[0m", name);
+                println!("  ✅ \x1b[1;32mFound entry point: '{name}'\x1b[0m");
                 found_entry = true;
             }
         }
@@ -371,14 +371,12 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
             let initial_pages = initial;
             let initial_bytes = initial * 64 * 1024;
 
-            println!("     \x1b[1;34mInitial size:\x1b[0m \x1b[1;33m{} pages\x1b[0m (\x1b[1;33m{} bytes\x1b[0m)", 
-                initial_pages, initial_bytes);
+            println!("     \x1b[1;34mInitial size:\x1b[0m \x1b[1;33m{initial_pages} pages\x1b[0m (\x1b[1;33m{initial_bytes} bytes\x1b[0m)");
 
             if let Some(max) = maximum {
                 let max_pages = max;
                 let max_bytes = max * 64 * 1024;
-                println!("     \x1b[1;34mMaximum size:\x1b[0m \x1b[1;33m{} pages\x1b[0m (\x1b[1;33m{} bytes\x1b[0m)", 
-                    max_pages, max_bytes);
+                println!("     \x1b[1;34mMaximum size:\x1b[0m \x1b[1;33m{max_pages} pages\x1b[0m (\x1b[1;33m{max_bytes} bytes\x1b[0m)");
             } else {
                 println!("     \x1b[1;34mMaximum size:\x1b[0m \x1b[1;33munlimited\x1b[0m");
             }
@@ -427,8 +425,7 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
             if results.has_start_section {
                 if let Some(index) = results.start_function_index {
                     println!(
-                        "       \x1b[0;90mModule has a start section with function index {}\x1b[0m",
-                        index
+                        "       \x1b[0;90mModule has a start section with function index {index}\x1b[0m"
                     );
                 } else {
                     println!("       \x1b[0;90mModule has a start section\x1b[0m");
@@ -447,7 +444,7 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
                     if entry_points.len() > 1 { "s" } else { "" },
                     entry_points
                         .iter()
-                        .map(|s| format!("'{}'", s))
+                        .map(|s| format!("'{s}'"))
                         .collect::<Vec<_>>()
                         .join(", ")
                 );
@@ -466,14 +463,14 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
 
     if results.valid_magic && (results.has_export_section || results.has_start_section) {
         println!("\n  🚀 \x1b[1;33mRun with Wasmrun:\x1b[0m");
-        println!("     \x1b[1;37mwasmrun --wasm --path {}\x1b[0m", path);
+        println!("     \x1b[1;37mwasmrun --wasm --path {path}\x1b[0m");
     }
 
     println!("\x1b[1;34m╰\x1b[0m");
 }
 
 pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String> {
-    let wasm_bytes = fs::read(path).map_err(|e| format!("Error reading file: {}", e))?;
+    let wasm_bytes = fs::read(path).map_err(|e| format!("Error reading file: {e}"))?;
 
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  🔬 \x1b[1;36mDetailed WASM Binary Analysis\x1b[0m\n");
@@ -510,10 +507,7 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
     }
 
     let version = u32::from_le_bytes([wasm_bytes[4], wasm_bytes[5], wasm_bytes[6], wasm_bytes[7]]);
-    println!(
-        "  📊 \x1b[1;34mWASM version:\x1b[0m \x1b[1;33m{}\x1b[0m",
-        version
-    );
+    println!("  📊 \x1b[1;34mWASM version:\x1b[0m \x1b[1;33m{version}\x1b[0m");
 
     if version != 1 {
         println!("  ⚠️ \x1b[1;33mUnexpected WASM version (expected 1)\x1b[0m");
@@ -574,7 +568,7 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
                     let current_pos = reader.position();
                     if section_size >= 1 && (current_pos as usize) < wasm_bytes.len() {
                         if let Ok(num_memories) = read_leb128_u32(&mut reader) {
-                            println!("     \x1b[1;33mNumber of memories: {}\x1b[0m", num_memories);
+                            println!("     \x1b[1;33mNumber of memories: {num_memories}\x1b[0m");
                         }
                     }
                     reader.set_position(current_pos);
@@ -588,10 +582,7 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
         }
     }
 
-    println!(
-        "\n  📊 \x1b[1;34mTotal sections found:\x1b[0m \x1b[1;33m{}\x1b[0m",
-        section_count
-    );
+    println!("\n  📊 \x1b[1;34mTotal sections found:\x1b[0m \x1b[1;33m{section_count}\x1b[0m");
 
     if section_count > 0 {
         println!("  ✅ \x1b[1;32mWASM file structure seems valid\x1b[0m");
@@ -675,10 +666,7 @@ fn resolve_and_validate_wasm_path(
             if let Ok(metadata) = std::fs::metadata(&resolved_path) {
                 let size_bytes = metadata.len();
                 if size_bytes > 100 * 1024 * 1024 {
-                    println!(
-                        "⚠️  Warning: Large WASM file ({}) - verification may take time",
-                        size
-                    );
+                    println!("⚠️  Warning: Large WASM file ({size}) - verification may take time");
                 } else if size_bytes == 0 {
                     return Err(WasmrunError::Wasm(WasmError::validation_failed(
                         "WASM file is empty",

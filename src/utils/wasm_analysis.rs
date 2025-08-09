@@ -58,18 +58,15 @@ impl WasmAnalysis {
 
         let filename = PathResolver::get_filename(path)?;
         let file_size_bytes = fs::metadata(path)
-            .map_err(|e| WasmrunError::add_context(format!("Getting file size for {}", path), e))?
+            .map_err(|e| WasmrunError::add_context(format!("Getting file size for {path}"), e))?
             .len();
 
         let file_size = CommandExecutor::format_file_size(file_size_bytes);
 
         // Verify wasm
-        let verification = match verify_wasm(path) {
-            Ok(result) => Some(result),
-            Err(_) => None,
-        };
+        let verification = verify_wasm(path).ok();
 
-        let is_valid = verification.as_ref().map_or(false, |v| v.valid_magic);
+        let is_valid = verification.as_ref().is_some_and(|v| v.valid_magic);
 
         // Analyze entry points
         let entry_points = if let Some(ref verify_result) = verification {
@@ -80,7 +77,7 @@ impl WasmAnalysis {
 
         // Determine module characteristics
         let is_wasm_bindgen = detect_wasm_bindgen(path_obj);
-        let is_wasi = verification.as_ref().map_or(false, |v| {
+        let is_wasi = verification.as_ref().is_some_and(|v| {
             v.has_export_section && v.export_names.iter().any(|name| name == "_start")
         });
 
@@ -321,7 +318,7 @@ fn extract_entry_points(verification: &VerificationResult) -> Vec<String> {
     // If we have a start section, note that
     if verification.has_start_section {
         if let Some(index) = verification.start_function_index {
-            entry_points.push(format!("_start (index {})", index));
+            entry_points.push(format!("_start (index {index})"));
         } else {
             entry_points.push("_start".to_string());
         }
@@ -344,7 +341,7 @@ fn detect_wasm_bindgen(path: &Path) -> bool {
 
         // Look for corresponding JS file
         let js_candidates = [
-            format!("{}.js", stem),
+            format!("{stem}.js"),
             format!("{}_bg.js", stem.trim_end_matches("_bg")),
         ];
 

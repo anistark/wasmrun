@@ -23,7 +23,7 @@ pub fn generate_html_with_watch_mode(filename: &str, watch_mode: bool) -> String
         .replace("$FILENAME$", filename)
         .replace(
             "<!-- @style-placeholder -->",
-            &format!("<style>\n{}\n    </style>", STYLE_CSS),
+            &format!("<style>\n{STYLE_CSS}\n    </style>"),
         )
         .replace(
             "<!-- @script-placeholder -->",
@@ -63,7 +63,7 @@ pub fn generate_html_dev(filename: &str) -> String {
     html.replace("$FILENAME$", filename)
         .replace(
             "<!-- @style-placeholder -->",
-            &format!("<style>\n{}\n    </style>", css),
+            &format!("<style>\n{css}\n    </style>"),
         )
         .replace(
             "<!-- @script-placeholder -->",
@@ -88,7 +88,7 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wasmrun - Running {}</title>
+    <title>Wasmrun - Running {js_only_filename}</title>
     <link rel="icon" href="/assets/logo.png" type="image/png">
     <style>
     * {{
@@ -309,7 +309,7 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
     
     <script type="module">
     // Import the wasm-bindgen JS module
-    import init from './{}';
+    import init from './{js_only_filename}';
     
     async function runWasmBindgen() {{
         try {{
@@ -353,7 +353,6 @@ pub fn generate_html_wasm_bindgen(js_filename: &str, _wasm_filename: &str) -> St
     runWasmBindgen();
     </script>
 </body>
-</html>"#,
-        js_only_filename, js_only_filename
+</html>"#
     )
 }

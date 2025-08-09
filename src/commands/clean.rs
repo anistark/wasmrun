@@ -18,10 +18,7 @@ pub fn handle_clean_command(path: &Option<String>, positional_path: &Option<Stri
         compiler::ProjectLanguage::C => clean_c_project(&project_path),
         compiler::ProjectLanguage::Asc => clean_asc_project(&project_path),
         _ => {
-            println!(
-                "⚠️ Clean operation not specifically implemented for {:?}",
-                language
-            );
+            println!("⚠️ Clean operation not specifically implemented for {language:?}");
             println!("💡 You can manually delete build artifacts in your project directory.");
             Ok(())
         }

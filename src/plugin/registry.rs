@@ -7,6 +7,7 @@ pub struct PluginRegistry {
     plugins: Vec<Box<dyn Plugin>>,
 }
 
+#[allow(dead_code)]
 impl PluginRegistry {
     pub fn new() -> Self {
         Self {

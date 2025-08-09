@@ -16,11 +16,9 @@ pub fn handle_run_command(
     language: &Option<String>,
     watch: bool,
 ) -> Result<()> {
-    let resolved_path = crate::utils::PathResolver::resolve_input_path(
-        positional_path.clone(), 
-        path.clone()
-    );
-    
+    let resolved_path =
+        crate::utils::PathResolver::resolve_input_path(positional_path.clone(), path.clone());
+
     run_project(resolved_path, Some(port), watch, language.clone(), false)
 }
 
@@ -32,9 +30,9 @@ pub fn run_project(
     verbose: bool,
 ) -> Result<()> {
     let resolved_path = PathResolver::resolve_input_path(Some(path.clone()), None);
-    
+
     if verbose {
-        println!("🔍 Analyzing path: {}", resolved_path);
+        println!("🔍 Analyzing path: {resolved_path}");
     }
 
     if is_wasm_file(&resolved_path) {
@@ -46,31 +44,31 @@ pub fn run_project(
     }
 
     Err(WasmrunError::from(format!(
-        "Invalid path: {}. Expected a .wasm file or project directory.",
-        path
+        "Invalid path: {path}. Expected a .wasm file or project directory."
     )))
 }
 
 fn is_wasm_file(path: &str) -> bool {
-    Path::new(path).extension()
+    Path::new(path)
+        .extension()
         .map(|ext| ext.to_string_lossy().to_lowercase() == "wasm")
         .unwrap_or(false)
 }
 
 fn run_wasm_file(wasm_path: &str, port: Option<u16>, verbose: bool) -> Result<()> {
     if verbose {
-        println!("🎯 Running WASM file: {}", wasm_path);
+        println!("🎯 Running WASM file: {wasm_path}");
     }
 
     // Create a simple server config
     let server_port = port.unwrap_or(8420);
-    
+
     if verbose {
-        println!("🚀 Starting server on port {}", server_port);
+        println!("🚀 Starting server on port {server_port}");
     }
-    
+
     // For now, just indicate success - actual server implementation would go here
-    println!("✅ Server would start on port {} for file: {}", server_port, wasm_path);
+    println!("✅ Server would start on port {server_port} for file: {wasm_path}");
     Ok(())
 }
 
@@ -82,13 +80,20 @@ fn run_project_directory(
     verbose: bool,
 ) -> Result<()> {
     if verbose {
-        println!("🔍 Detecting project type in: {}", project_path);
+        println!("🔍 Detecting project type in: {project_path}");
     }
 
     // Try plugin-based compilation first
     if let Ok(plugin_manager) = PluginManager::new() {
         if let Some(plugin) = plugin_manager.find_plugin_for_project(project_path) {
-            return run_with_plugin(&plugin_manager, plugin.info().name.clone(), project_path, port, watch, verbose);
+            return run_with_plugin(
+                &plugin_manager,
+                plugin.info().name.clone(),
+                project_path,
+                port,
+                watch,
+                verbose,
+            );
         }
     }
 
@@ -98,15 +103,15 @@ fn run_project_directory(
     }
 
     let detected_language = detect_project_language(project_path);
-    
+
     if let Some(lang) = language {
         if verbose {
-            println!("🎯 Using specified language: {}", lang);
+            println!("🎯 Using specified language: {lang}");
         }
         run_with_language_override(project_path, &lang, port, watch, verbose)
     } else {
         if verbose {
-            println!("🎯 Detected language: {:?}", detected_language);
+            println!("🎯 Detected language: {detected_language:?}");
         }
         run_with_detected_language(project_path, port, watch, verbose)
     }
@@ -121,10 +126,11 @@ fn run_with_plugin(
     verbose: bool,
 ) -> Result<()> {
     if verbose {
-        println!("🔌 Using plugin: {}", plugin_name);
+        println!("🔌 Using plugin: {plugin_name}");
     }
 
-    let builder = plugin_manager.get_builder_for_project(project_path)
+    let builder = plugin_manager
+        .get_builder_for_project(project_path)
         .ok_or_else(|| WasmrunError::from("Failed to get builder for project"))?;
 
     // Check dependencies
@@ -157,12 +163,19 @@ fn run_with_language_override(
 ) -> Result<()> {
     if let Ok(plugin_manager) = PluginManager::new() {
         if let Some(plugin) = plugin_manager.get_plugin_by_language(language) {
-            return run_with_plugin(&plugin_manager, plugin.info().name.clone(), project_path, port, watch, verbose);
+            return run_with_plugin(
+                &plugin_manager,
+                plugin.info().name.clone(),
+                project_path,
+                port,
+                watch,
+                verbose,
+            );
         }
     }
 
     if verbose {
-        println!("🔄 Plugin not found for language '{}', using legacy detection", language);
+        println!("🔄 Plugin not found for language '{language}', using legacy detection");
     }
 
     run_with_detected_language(project_path, port, watch, verbose)
@@ -214,8 +227,8 @@ fn run_once(
 
     let server_port = port.unwrap_or(8420);
     let primary_file = result.js_path.as_ref().unwrap_or(&result.wasm_path);
-    
-    println!("✅ Server would start on port {} for file: {}", server_port, primary_file);
+
+    println!("✅ Server would start on port {server_port} for file: {primary_file}");
     Ok(())
 }
 
@@ -241,10 +254,13 @@ fn run_with_watch(
     };
 
     let initial_result = builder.build(&config).map_err(WasmrunError::Compilation)?;
-    let primary_file = initial_result.js_path.as_ref().unwrap_or(&initial_result.wasm_path);
+    let primary_file = initial_result
+        .js_path
+        .as_ref()
+        .unwrap_or(&initial_result.wasm_path);
 
     println!("✅ Initial build completed");
-    println!("🚀 Server would start on port {} for file: {}", server_port, primary_file);
+    println!("🚀 Server would start on port {server_port} for file: {primary_file}");
     println!("👀 Watching for changes... (press Ctrl+C to stop)");
 
     // Simple watch loop simulation
@@ -273,7 +289,7 @@ fn run_once_legacy(
     }
 
     let server_port = port.unwrap_or(8420);
-    println!("✅ Server would start on port {} for file: {}", server_port, primary_file);
+    println!("✅ Server would start on port {server_port} for file: {primary_file}");
     Ok(())
 }
 
@@ -291,7 +307,7 @@ fn run_with_watch_legacy(
     let initial_file = compile_for_execution(project_path, output_dir)?;
 
     println!("✅ Initial compilation completed");
-    println!("🚀 Server would start on port {} for file: {}", server_port, initial_file);
+    println!("🚀 Server would start on port {server_port} for file: {initial_file}");
     println!("👀 Watching for changes... (press Ctrl+C to stop)");
 
     // Simple watch loop simulation

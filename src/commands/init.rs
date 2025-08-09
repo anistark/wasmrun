@@ -16,11 +16,8 @@ pub fn handle_init_command(
 
     // TODO: Implement project initialization
     // Need to create a new project from a template. (Can be plugin based?)
-    println!(
-        "📦 Creating new {} project: {}",
-        template_name, project_name
-    );
-    println!("📂 Target directory: {}", target_dir);
+    println!("📦 Creating new {template_name} project: {project_name}");
+    println!("📂 Target directory: {target_dir}");
 
     Err(WasmrunError::from(
         "Project initialization is not yet implemented. This will be added in a future version."

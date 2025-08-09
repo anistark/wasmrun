@@ -22,7 +22,7 @@ pub fn handle_request(
         None => "unknown".to_string(),
     };
 
-    println!("📝 Received request for: {}", url);
+    println!("📝 Received request for: {url}");
 
     if url == "/" {
         // Serve the main HTML page
@@ -36,16 +36,16 @@ pub fn handle_request(
 
         let response = Response::from_string(html).with_header(content_type_header("text/html"));
         if let Err(e) = request.respond(response) {
-            eprintln!("❗ Error sending HTML response: {}", e);
+            eprintln!("❗ Error sending HTML response: {e}");
         }
 
         if watch_mode && !clients_to_reload.contains(&client_addr) {
             clients_to_reload.push(client_addr);
         }
-    } else if url == format!("/{}", wasm_filename) {
+    } else if url == format!("/{wasm_filename}") {
         serve_file(request, wasm_path, "application/wasm");
     } else if let Some(js_file) = js_filename {
-        if url == format!("/{}", js_file) {
+        if url == format!("/{js_file}") {
             let js_path = Path::new(wasm_path).parent().unwrap().join(js_file);
             serve_file(request, js_path.to_str().unwrap(), "application/javascript");
         }
@@ -58,14 +58,14 @@ pub fn handle_request(
                 Response::from_string("no-reload").with_header(content_type_header("text/plain"));
 
             if let Err(e) = request.respond(response) {
-                eprintln!("❗ Error sending reload response: {}", e);
+                eprintln!("❗ Error sending reload response: {e}");
             }
         } else {
             let response = Response::from_string("not-watching")
                 .with_header(content_type_header("text/plain"));
 
             if let Err(e) = request.respond(response) {
-                eprintln!("❗ Error sending reload response: {}", e);
+                eprintln!("❗ Error sending reload response: {e}");
             }
         }
     } else if url.starts_with("/assets/") {
@@ -99,14 +99,14 @@ pub fn handle_request(
 
             // Check for common file patterns (js, css, etc.)
             for ext in &["js", "css", "json", "wasm"] {
-                if url.ends_with(&format!(".{}", ext)) {
-                    let filename = url.split('/').last().unwrap_or("");
+                if url.ends_with(&format!(".{ext}")) {
+                    let filename = url.split('/').next_back().unwrap_or("");
                     if let Ok(entries) = fs::read_dir(base_dir) {
                         for entry in entries.flatten() {
                             let entry_path = entry.path();
                             if entry_path
                                 .file_name()
-                                .map_or(false, |name| name.to_string_lossy() == filename)
+                                .is_some_and(|name| name.to_string_lossy() == filename)
                             {
                                 let content_type = match *ext {
                                     "js" => "application/javascript",
@@ -128,7 +128,7 @@ pub fn handle_request(
                 .with_status_code(404)
                 .with_header(content_type_header("text/plain"));
             if let Err(e) = request.respond(response) {
-                eprintln!("❗ Error sending 404 response: {}", e);
+                eprintln!("❗ Error sending 404 response: {e}");
             }
         }
     }
@@ -147,16 +147,16 @@ pub fn serve_file(request: Request, file_path: &str, content_type: &str) {
             let response =
                 Response::from_data(file_bytes).with_header(content_type_header(content_type));
             if let Err(e) = request.respond(response) {
-                eprintln!("❗ Error sending file response: {}", e);
+                eprintln!("❗ Error sending file response: {e}");
             }
         }
         Err(e) => {
-            eprintln!("❗ Error reading file {}: {}", file_path, e);
-            let response = Response::from_string(format!("Error: {}", e))
+            eprintln!("❗ Error reading file {file_path}: {e}");
+            let response = Response::from_string(format!("Error: {e}"))
                 .with_status_code(500)
                 .with_header(content_type_header("text/plain"));
             if let Err(e) = request.respond(response) {
-                eprintln!("❗ Error sending error response: {}", e);
+                eprintln!("❗ Error sending error response: {e}");
             }
         }
     }
@@ -165,7 +165,7 @@ pub fn serve_file(request: Request, file_path: &str, content_type: &str) {
 /// Serve a static asset file
 pub fn serve_asset(request: Request, url: &str) {
     let asset_filename = url.strip_prefix("/assets/").unwrap_or("");
-    let asset_path = format!("./assets/{}", asset_filename);
+    let asset_path = format!("./assets/{asset_filename}");
 
     let content_type = if url.ends_with(".png") {
         "image/png"
@@ -193,22 +193,19 @@ pub fn serve_asset(request: Request, url: &str) {
             let response =
                 Response::from_data(asset_bytes).with_header(content_type_header(content_type));
             if let Err(e) = request.respond(response) {
-                eprintln!("‼️ Error sending asset response: {}", e);
+                eprintln!("‼️ Error sending asset response: {e}");
             }
         }
         Err(e) => {
-            eprintln!(
-                "‼️ Error reading asset file {}: {} (does the file exist?)",
-                asset_path, e
-            );
+            eprintln!("‼️ Error reading asset file {asset_path}: {e} (does the file exist?)");
 
             check_assets_directory();
 
-            let response = Response::from_string(format!("Asset not found: {}", e))
+            let response = Response::from_string(format!("Asset not found: {e}"))
                 .with_status_code(404)
                 .with_header(content_type_header("text/plain"));
             if let Err(e) = request.respond(response) {
-                eprintln!("‼️ Error sending asset error response: {}", e);
+                eprintln!("‼️ Error sending asset error response: {e}");
             }
         }
     }

@@ -115,7 +115,7 @@ impl AscPlugin {
             .unwrap()
             .to_string_lossy()
             .to_string();
-        let wasm_output_file = Path::new(&config.output_dir).join(format!("{}.wasm", output_name));
+        let wasm_output_file = Path::new(&config.output_dir).join(format!("{output_name}.wasm"));
 
         println!("🔨 Building with AssemblyScript compiler...");
 
@@ -193,7 +193,7 @@ impl AscPlugin {
         };
         // TODO: Add support for pnpm, bun, etc.
 
-        println!("🔨 Building with {}...", cmd);
+        println!("🔨 Building with {cmd}...");
         let args = if cmd == "yarn" {
             vec!["build"]
         } else {
@@ -318,7 +318,7 @@ impl WasmBuilder for AscPlugin {
         PathResolver::validate_directory_exists(project_path).map_err(|e| {
             CompilationError::InvalidProjectStructure {
                 language: self.language_name().to_string(),
-                reason: format!("Project directory validation failed: {}", e),
+                reason: format!("Project directory validation failed: {e}"),
             }
         })?;
 

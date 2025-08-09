@@ -7,9 +7,9 @@ impl CommandExecutor {
     /// Check if a tool is installed on the system
     pub fn is_tool_installed(tool_name: &str) -> bool {
         let command = if cfg!(target_os = "windows") {
-            format!("where {}", tool_name)
+            format!("where {tool_name}")
         } else {
-            format!("which {}", tool_name)
+            format!("which {tool_name}")
         };
 
         std::process::Command::new(if cfg!(target_os = "windows") {
@@ -96,13 +96,13 @@ impl CommandExecutor {
         let filename =
             PathResolver::get_filename(source).map_err(|_| CompilationError::BuildFailed {
                 language: language.to_string(),
-                reason: format!("Invalid source file path: {}", source),
+                reason: format!("Invalid source file path: {source}"),
             })?;
         let output_path = PathResolver::join_paths(output_dir, &filename);
 
         fs::copy(source_path, &output_path).map_err(|e| CompilationError::BuildFailed {
             language: language.to_string(),
-            reason: format!("Failed to copy {} to {}: {}", source, output_path, e),
+            reason: format!("Failed to copy {source} to {output_path}: {e}"),
         })?;
 
         Ok(output_path)
@@ -111,7 +111,7 @@ impl CommandExecutor {
     /// Format file size in human readable format
     pub fn format_file_size(bytes: u64) -> String {
         if bytes < 1024 {
-            format!("{} bytes", bytes)
+            format!("{bytes} bytes")
         } else if bytes < 1024 * 1024 {
             format!("{:.2} KB", bytes as f64 / 1024.0)
         } else if bytes < 1024 * 1024 * 1024 {

@@ -1,6 +1,6 @@
 use std::fs;
-use std::path::Path;
 use std::net::TcpListener;
+use std::path::Path;
 
 use crate::compiler::builder::{BuildConfig, BuilderFactory, OptimizationLevel, TargetType};
 use crate::error::{Result, ServerError, WasmrunError};
@@ -10,6 +10,7 @@ use crate::utils::CommandExecutor;
 use super::wasm;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ServerConfig {
     pub wasm_path: String,
     pub js_path: Option<String>,
@@ -19,6 +20,7 @@ pub struct ServerConfig {
     pub output_dir: Option<String>,
 }
 
+#[allow(dead_code)]
 pub fn content_type_header(value: &str) -> tiny_http::Header {
     tiny_http::Header::from_bytes(&b"Content-Type"[..], value.as_bytes()).unwrap()
 }
@@ -54,6 +56,7 @@ pub fn is_port_available(port: u16) -> bool {
     TcpListener::bind(format!("0.0.0.0:{port}")).is_ok()
 }
 
+#[allow(dead_code)]
 pub fn check_assets_directory() {
     if let Ok(metadata) = fs::metadata("./assets") {
         if metadata.is_dir() {
@@ -66,6 +69,7 @@ pub fn check_assets_directory() {
     }
 }
 
+#[allow(dead_code)]
 pub fn determine_content_type(path: &Path) -> &'static str {
     match path.extension().and_then(|ext| ext.to_str()) {
         Some("html") => "text/html",
@@ -95,6 +99,7 @@ pub struct ServerInfo {
 #[derive(Debug)]
 pub enum ContentType {
     WasmFile(WasmAnalysis),
+    #[allow(dead_code)]
     Project(ProjectAnalysis),
 }
 
@@ -103,7 +108,7 @@ impl ServerInfo {
         let analysis = WasmAnalysis::analyze(wasm_path)?;
 
         Ok(Self {
-            url: format!("http://localhost:{}", port),
+            url: format!("http://localhost:{port}"),
             port,
             server_pid: std::process::id(),
             watch_mode,
@@ -111,12 +116,13 @@ impl ServerInfo {
         })
     }
 
+    #[allow(dead_code)]
     pub fn for_project(project_path: &str, port: u16, watch_mode: bool) -> Result<Self> {
         let analysis = ProjectAnalysis::analyze(project_path)?;
         let content_type = ContentType::Project(analysis);
 
         Ok(Self {
-            url: format!("http://localhost:{}", port),
+            url: format!("http://localhost:{port}"),
             port,
             server_pid: std::process::id(),
             watch_mode,
@@ -127,7 +133,9 @@ impl ServerInfo {
     pub fn print_server_startup(&self) {
         println!("\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m");
         println!("\x1b[1;34m│\x1b[0m  🌐 \x1b[1;36mWasmrun Server Started\x1b[0m                               \x1b[1;34m│\x1b[0m");
-        println!("\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m");
+        println!(
+            "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
+        );
 
         match &self.content_type {
             ContentType::WasmFile(analysis) => {
@@ -138,16 +146,20 @@ impl ServerInfo {
             }
         }
 
-        println!("\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m");
+        println!(
+            "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
+        );
         println!("\x1b[1;34m│\x1b[0m  🌐 \x1b[1;34mURL:\x1b[0m \x1b[1;32m{:<53}\x1b[0m \x1b[1;34m│\x1b[0m", self.url);
         println!("\x1b[1;34m│\x1b[0m  🔌 \x1b[1;34mPort:\x1b[0m \x1b[1;33m{:<52}\x1b[0m \x1b[1;34m│\x1b[0m", self.port);
         println!("\x1b[1;34m│\x1b[0m  🆔 \x1b[1;34mPID:\x1b[0m \x1b[1;37m{:<53}\x1b[0m \x1b[1;34m│\x1b[0m", self.server_pid);
-        
+
         if self.watch_mode {
             println!("\x1b[1;34m│\x1b[0m  👁️  \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mEnabled\x1b[0m                              \x1b[1;34m│\x1b[0m");
         }
 
-        println!("\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m");
+        println!(
+            "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
+        );
         println!("\x1b[1;34m│\x1b[0m  💡 \x1b[1;37mPress Ctrl+C to stop the server\x1b[0m                        \x1b[1;34m│\x1b[0m");
         println!("\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m\n");
     }
@@ -156,40 +168,52 @@ impl ServerInfo {
 pub struct ServerUtils;
 
 impl ServerUtils {
+    #[allow(dead_code)]
     pub fn handle_port_conflict(requested_port: u16) -> Result<u16> {
         if is_port_available(requested_port) {
             return Ok(requested_port);
         }
 
         println!("\n\x1b[1;34m╭\x1b[0m");
-        println!("  ⚠️  \x1b[1;33mPort {} is already in use\x1b[0m", requested_port);
+        println!("  ⚠️  \x1b[1;33mPort {requested_port} is already in use\x1b[0m");
         println!("  🔍 \x1b[0;37mSearching for available port...\x1b[0m");
 
         for port in (requested_port + 1)..=(requested_port + 100) {
             if is_port_available(port) {
-                println!("  ✅ \x1b[1;32mUsing port {} instead\x1b[0m", port);
+                println!("  ✅ \x1b[1;32mUsing port {port} instead\x1b[0m");
                 println!("\x1b[1;34m╰\x1b[0m\n");
                 return Ok(port);
             }
         }
 
         Err(WasmrunError::Server(ServerError::RequestHandlingFailed {
-            reason: format!("No available ports in range {}-{}", requested_port, requested_port + 100),
+            reason: format!(
+                "No available ports in range {}-{}",
+                requested_port,
+                requested_port + 100
+            ),
         }))
     }
 
     pub fn print_initial_project_detection(project_path: &str) {
         println!("\n\x1b[1;34m╭\x1b[0m");
-        println!("  🔍 \x1b[1;34mAnalyzing project:\x1b[0m \x1b[1;33m{}\x1b[0m", project_path);
+        println!("  🔍 \x1b[1;34mAnalyzing project:\x1b[0m \x1b[1;33m{project_path}\x1b[0m");
 
         let lang = crate::compiler::detect_project_language(project_path);
 
         match crate::plugin::manager::PluginManager::new() {
             Ok(plugin_manager) => {
                 if let Some(plugin) = plugin_manager.find_plugin_for_project(project_path) {
-                    println!("  🔌 \x1b[1;34mPlugin:\x1b[0m \x1b[1;32m{} v{}\x1b[0m", plugin.info().name, plugin.info().version);
-                    
-                    if matches!(plugin.info().plugin_type, crate::plugin::PluginType::External) {
+                    println!(
+                        "  🔌 \x1b[1;34mPlugin:\x1b[0m \x1b[1;32m{} v{}\x1b[0m",
+                        plugin.info().name,
+                        plugin.info().version
+                    );
+
+                    if matches!(
+                        plugin.info().plugin_type,
+                        crate::plugin::PluginType::External
+                    ) {
                         println!("  📦 \x1b[1;34mType:\x1b[0m \x1b[1;36mExternal Plugin\x1b[0m");
                     } else {
                         println!("  📦 \x1b[1;34mType:\x1b[0m \x1b[1;35mBuilt-in Plugin\x1b[0m");
@@ -213,16 +237,16 @@ impl ServerUtils {
                     }
                 }
 
-                let (builtin_count, external_count, _enabled_count) = plugin_manager.plugin_counts();
+                let (builtin_count, external_count, _enabled_count) =
+                    plugin_manager.plugin_counts();
                 if external_count > 0 {
                     println!(
-                        "  📊 \x1b[1;34mPlugins:\x1b[0m {} built-in, {} external",
-                        builtin_count, external_count
+                        "  📊 \x1b[1;34mPlugins:\x1b[0m {builtin_count} built-in, {external_count} external"
                     );
                 }
             }
             Err(e) => {
-                eprintln!("  ⚠️ Warning: Failed to initialize plugin manager: {}", e);
+                eprintln!("  ⚠️ Warning: Failed to initialize plugin manager: {e}");
             }
         }
 
@@ -231,19 +255,13 @@ impl ServerUtils {
 
         if !temp_dir.exists() {
             if let Err(e) = std::fs::create_dir_all(&temp_dir) {
-                println!(
-                    "  ❌ \x1b[1;31mFailed to create temporary directory: {}\x1b[0m",
-                    e
-                );
+                println!("  ❌ \x1b[1;31mFailed to create temporary directory: {e}\x1b[0m");
                 println!("\x1b[1;34m╰\x1b[0m");
                 return;
             }
         }
 
-        println!(
-            "  📁 \x1b[1;34mOutput Directory:\x1b[0m \x1b[1;33m{}\x1b[0m",
-            temp_output_dir
-        );
+        println!("  📁 \x1b[1;34mOutput Directory:\x1b[0m \x1b[1;33m{temp_output_dir}\x1b[0m");
         println!("\x1b[1;34m╰\x1b[0m\n");
 
         if matches!(
@@ -259,17 +277,17 @@ impl ServerUtils {
                 println!("\n\x1b[1;34m╭\x1b[0m");
                 println!("  ⚠️  \x1b[1;33mMissing Required Tools:\x1b[0m");
                 for tool in &missing_tools {
-                    println!("     \x1b[1;31m• {}\x1b[0m", tool);
+                    println!("     \x1b[1;31m• {tool}\x1b[0m");
                 }
                 println!(
                     "\n  \x1b[0;37mPlease install the required tools to compile this project.\x1b[0m"
                 );
                 println!("\x1b[1;34m╰\x1b[0m\n");
-                return;
             }
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_file_info(path: &str) -> Result<FileInfo> {
         let path_obj = Path::new(path);
         let metadata = fs::metadata(path)?;
@@ -295,6 +313,7 @@ impl ServerUtils {
         })
     }
 
+    #[allow(dead_code)]
     pub fn check_port_availability(port: u16) -> PortStatus {
         if is_port_available(port) {
             PortStatus::Available
@@ -321,7 +340,7 @@ pub fn setup_project_compilation(
             "asc" | "assemblyscript" => crate::compiler::ProjectLanguage::Asc,
             "python" | "py" => crate::compiler::ProjectLanguage::Python,
             _ => {
-                println!("⚠️  Unknown language override: {}", lang_override);
+                println!("⚠️  Unknown language override: {lang_override}");
                 crate::compiler::detect_project_language(project_path)
             }
         }
@@ -334,7 +353,7 @@ pub fn setup_project_compilation(
 
     if !temp_dir.exists() {
         if let Err(e) = std::fs::create_dir_all(&temp_dir) {
-            println!("❌ Failed to create temporary directory: {}", e);
+            println!("❌ Failed to create temporary directory: {e}");
             return None;
         }
     }
@@ -363,12 +382,12 @@ pub fn compile_project(
             println!("✅ Compilation successful!");
             println!("📦 WASM file: {}", result.wasm_path);
             if let Some(ref js_path) = result.js_path {
-                println!("📦 JS file: {}", js_path);
+                println!("📦 JS file: {js_path}");
             }
             Some((result.wasm_path, result.is_wasm_bindgen, result.js_path))
         }
         Err(e) => {
-            println!("❌ Compilation failed: {}", e);
+            println!("❌ Compilation failed: {e}");
             None
         }
     }
@@ -390,7 +409,10 @@ pub fn run_server(config: ServerConfig) -> Result<()> {
 
     let path_obj = Path::new(&config.wasm_path);
     if !path_obj.exists() {
-        return Err(WasmrunError::path(format!("Path not found: {}", config.wasm_path)));
+        return Err(WasmrunError::path(format!(
+            "Path not found: {}",
+            config.wasm_path
+        )));
     }
 
     if path_obj.is_dir() {
@@ -415,18 +437,26 @@ pub fn run_server(config: ServerConfig) -> Result<()> {
             println!("\n  \x1b[1;34mPlease specify which file to run:\x1b[0m");
             println!("  \x1b[1;37mwasmrun --wasm --path <filename.wasm>\x1b[0m");
             println!("\x1b[1;34m╰\x1b[0m");
-            return Err(WasmrunError::path("Please select a specific WASM file to run".to_string()));
+            return Err(WasmrunError::path(
+                "Please select a specific WASM file to run".to_string(),
+            ));
         }
     }
 
     if !path_obj.is_file() {
-        return Err(WasmrunError::path(format!("Not a file: {}", config.wasm_path)));
+        return Err(WasmrunError::path(format!(
+            "Not a file: {}",
+            config.wasm_path
+        )));
     }
     if path_obj
         .extension()
         .map_or(true, |ext| ext.to_string_lossy().to_lowercase() != "wasm")
     {
-        return Err(WasmrunError::path(format!("Not a WASM file: {}", config.wasm_path)));
+        return Err(WasmrunError::path(format!(
+            "Not a WASM file: {}",
+            config.wasm_path
+        )));
     }
 
     let wasm_filename = path_obj
@@ -438,13 +468,15 @@ pub fn run_server(config: ServerConfig) -> Result<()> {
     let server_info = ServerInfo::for_wasm_file(&config.wasm_path, config.port, config.watch_mode)?;
     server_info.print_server_startup();
 
-    wasm::serve_wasm_file(&config.wasm_path, config.port, &wasm_filename)
-        .map_err(|e| WasmrunError::Server(ServerError::RequestHandlingFailed {
-            reason: format!("Server startup failed: {}", e),
-        }))
+    wasm::serve_wasm_file(&config.wasm_path, config.port, &wasm_filename).map_err(|e| {
+        WasmrunError::Server(ServerError::RequestHandlingFailed {
+            reason: format!("Server startup failed: {e}"),
+        })
+    })
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct FileInfo {
     pub filename: String,
     pub absolute_path: String,
@@ -455,5 +487,8 @@ pub struct FileInfo {
 #[derive(Debug)]
 pub enum PortStatus {
     Available,
-    Unavailable { alternative: Option<u16> },
+    #[allow(dead_code)]
+    Unavailable {
+        alternative: Option<u16>,
+    },
 }

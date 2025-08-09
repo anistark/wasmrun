@@ -4,6 +4,7 @@ use crate::compiler::builder::{BuildConfig, BuildResult, OptimizationLevel};
 use std::ffi::{CStr, CString};
 
 /// Convert wasmrun OptimizationLevel to C representation
+#[allow(dead_code)] // TODO: Future C plugin bridge
 pub fn optimization_to_c(opt: &OptimizationLevel) -> u8 {
     match opt {
         OptimizationLevel::Debug => 0,
@@ -13,6 +14,7 @@ pub fn optimization_to_c(opt: &OptimizationLevel) -> u8 {
 }
 
 /// Convert wasmrun BuildConfig to C struct for external plugins
+#[allow(dead_code)] // TODO: Future C FFI bridge
 pub struct BuildConfigC {
     pub project_path: *const std::ffi::c_char,
     pub output_dir: *const std::ffi::c_char,
@@ -22,10 +24,11 @@ pub struct BuildConfigC {
 }
 
 impl BuildConfigC {
+    #[allow(dead_code)] // TODO: Future C FFI bridge
     pub fn from_wasmrun_config(config: &BuildConfig) -> (Self, CString, CString) {
         let project_path_cstr = CString::new(config.project_path.clone()).unwrap();
         let output_dir_cstr = CString::new(config.output_dir.clone()).unwrap();
-        
+
         let config_c = Self {
             project_path: project_path_cstr.as_ptr(),
             output_dir: output_dir_cstr.as_ptr(),
@@ -40,6 +43,7 @@ impl BuildConfigC {
 
 /// C struct for build results from external plugins
 #[repr(C)]
+#[allow(dead_code)] // TODO: Future C FFI bridge
 pub struct BuildResultC {
     pub wasm_path: *mut std::ffi::c_char,
     pub js_path: *mut std::ffi::c_char,
@@ -49,10 +53,13 @@ pub struct BuildResultC {
 }
 
 impl BuildResultC {
-    pub unsafe fn to_wasmrun_result(self) -> Result<BuildResult, String> {
+    #[allow(dead_code)] // TODO: Future C FFI bridge
+    pub unsafe fn into_wasmrun_result(self) -> Result<BuildResult, String> {
         if !self.success {
             let error_msg = if !self.error_message.is_null() {
-                CStr::from_ptr(self.error_message).to_string_lossy().to_string()
+                CStr::from_ptr(self.error_message)
+                    .to_string_lossy()
+                    .to_string()
             } else {
                 "Unknown error".to_string()
             };
@@ -76,12 +83,15 @@ impl BuildResultC {
 }
 
 /// Helper functions for working with external plugin symbols
+#[allow(dead_code)] // TODO: Future C plugin bridge
 pub mod symbols {
     use std::ffi::c_void;
 
     pub type CreateBuilderFn = unsafe extern "C" fn() -> *mut c_void;
-    pub type CanHandleProjectFn = unsafe extern "C" fn(*const c_void, *const std::ffi::c_char) -> bool;
-    pub type BuildFn = unsafe extern "C" fn(*const c_void, *const super::BuildConfigC) -> *mut super::BuildResultC;
+    pub type CanHandleProjectFn =
+        unsafe extern "C" fn(*const c_void, *const std::ffi::c_char) -> bool;
+    pub type BuildFn =
+        unsafe extern "C" fn(*const c_void, *const super::BuildConfigC) -> *mut super::BuildResultC;
     pub type CleanFn = unsafe extern "C" fn(*const c_void, *const std::ffi::c_char) -> bool;
     pub type CloneBoxFn = unsafe extern "C" fn(*const c_void) -> *mut c_void;
     pub type DropFn = unsafe extern "C" fn(*mut c_void);
@@ -125,6 +135,7 @@ impl PluginSymbols {
     }
 }
 
+#[allow(dead_code)] // TODO: Future plugin system symbols
 pub struct PluginSymbolSet {
     pub create_builder: &'static [u8],
     pub can_handle_project: &'static [u8],

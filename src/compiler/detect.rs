@@ -28,10 +28,7 @@ pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
     let path = Path::new(project_path);
 
     if !path.exists() || !path.is_dir() {
-        eprintln!(
-            "❌ Project path does not exist or is not a directory: {}",
-            project_path
-        );
+        eprintln!("❌ Project path does not exist or is not a directory: {project_path}");
         return ProjectLanguage::Unknown;
     }
 
@@ -190,9 +187,9 @@ pub fn is_tool_installed(tool_name: &str) -> bool {
     }
 
     let command = if cfg!(target_os = "windows") {
-        format!("where {}", tool_name)
+        format!("where {tool_name}")
     } else {
-        format!("which {}", tool_name)
+        format!("which {tool_name}")
     };
 
     std::process::Command::new(if cfg!(target_os = "windows") {
@@ -218,7 +215,7 @@ pub fn get_missing_tools(language: &ProjectLanguage, os: &OperatingSystem) -> Ve
 /// Print system information
 pub fn print_system_info() {
     let os = detect_operating_system();
-    println!("💻 System: {:?}", os);
+    println!("💻 System: {os:?}");
 }
 
 impl fmt::Display for ProjectLanguage {
@@ -231,6 +228,6 @@ impl fmt::Display for ProjectLanguage {
             ProjectLanguage::Python => "Python",
             ProjectLanguage::Unknown => "Unknown",
         };
-        write!(f, "{}", lang_str)
+        write!(f, "{lang_str}")
     }
 }

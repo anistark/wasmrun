@@ -291,6 +291,7 @@ pub struct ResolvedArgs {
     pub port: u16,
     pub wasm: bool,
     pub watch: bool,
+    #[allow(dead_code)] // TODO: Used for debug output control
     pub debug: bool,
     #[allow(dead_code)]
     pub command: Option<Commands>,
@@ -426,6 +427,7 @@ impl CommandValidator {
         Ok(wasm_path)
     }
 
+    #[allow(dead_code)]
     pub fn validate_run_args(
         path: &Option<String>,
         positional_path: &Option<String>,
@@ -435,8 +437,7 @@ impl CommandValidator {
 
         if !std::path::Path::new(&project_path).exists() {
             return Err(WasmrunError::path(format!(
-                "Path not found: {}",
-                project_path
+                "Path not found: {project_path}"
             )));
         }
 
@@ -465,8 +466,7 @@ impl CommandValidator {
 
         if std::path::Path::new(&target_dir).exists() {
             return Err(WasmrunError::path(format!(
-                "Directory '{}' already exists",
-                target_dir
+                "Directory '{target_dir}' already exists"
             )));
         }
 
@@ -501,10 +501,9 @@ fn print_styled_version() {
 
     println!(
         "\n\x1b[1;34m╭\x1b[0m\n\
-         \x1b[1;34m│\x1b[0m  🅦 \x1b[1;36m{} v{}\x1b[0m\n\
+         \x1b[1;34m│\x1b[0m  🅦 \x1b[1;36m{name} v{version}\x1b[0m\n\
          \x1b[1;34m│\x1b[0m  \x1b[0;90mA lightweight WebAssembly runner\x1b[0m\n\
-         \x1b[1;34m╰\x1b[0m\n",
-        name, version
+         \x1b[1;34m╰\x1b[0m\n"
     );
 }
 

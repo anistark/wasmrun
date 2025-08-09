@@ -11,9 +11,9 @@ impl PathResolver {
     }
 
     pub fn has_extension(path: &str, expected_ext: &str) -> bool {
-        Path::new(path).extension().map_or(false, |ext| {
-            ext.to_string_lossy().to_lowercase() == expected_ext.to_lowercase()
-        })
+        Path::new(path)
+            .extension()
+            .is_some_and(|ext| ext.to_string_lossy().to_lowercase() == expected_ext.to_lowercase())
     }
 
     #[allow(dead_code)]
@@ -32,7 +32,7 @@ impl PathResolver {
         }
 
         if !path_obj.is_file() {
-            return Err(WasmrunError::path(format!("Path is not a file: {}", path)));
+            return Err(WasmrunError::path(format!("Path is not a file: {path}")));
         }
 
         Ok(())
@@ -48,8 +48,7 @@ impl PathResolver {
 
         if !path_obj.is_dir() {
             return Err(WasmrunError::path(format!(
-                "Path is not a directory: {}",
-                path
+                "Path is not a directory: {path}"
             )));
         }
 
@@ -75,16 +74,14 @@ impl PathResolver {
     pub fn get_absolute_path(path: &str) -> Result<String> {
         fs::canonicalize(path)
             .map(|p| p.to_string_lossy().to_string())
-            .map_err(|e| {
-                WasmrunError::add_context(format!("Getting absolute path for {}", path), e)
-            })
+            .map_err(|e| WasmrunError::add_context(format!("Getting absolute path for {path}"), e))
     }
 
     /// Get filename from path
     pub fn get_filename(path: &str) -> Result<String> {
         Path::new(path)
             .file_name()
-            .ok_or_else(|| WasmrunError::path(format!("Invalid path: {}", path)))?
+            .ok_or_else(|| WasmrunError::path(format!("Invalid path: {path}")))?
             .to_string_lossy()
             .to_string()
             .pipe(Ok)
@@ -95,7 +92,7 @@ impl PathResolver {
     pub fn get_file_stem(path: &str) -> Result<String> {
         Path::new(path)
             .file_stem()
-            .ok_or_else(|| WasmrunError::path(format!("Invalid path: {}", path)))?
+            .ok_or_else(|| WasmrunError::path(format!("Invalid path: {path}")))?
             .to_string_lossy()
             .to_string()
             .pipe(Ok)
@@ -114,7 +111,7 @@ impl PathResolver {
         let output_path = Path::new(output_dir);
         if !output_path.exists() {
             fs::create_dir_all(output_path).map_err(|e| {
-                WasmrunError::add_context(format!("Creating output directory {}", output_dir), e)
+                WasmrunError::add_context(format!("Creating output directory {output_dir}"), e)
             })?;
         }
         Ok(())
@@ -126,13 +123,12 @@ impl PathResolver {
 
         if !path.is_dir() {
             return Err(WasmrunError::path(format!(
-                "Path is not a directory: {}",
-                dir_path
+                "Path is not a directory: {dir_path}"
             )));
         }
 
         let entries = fs::read_dir(path)
-            .map_err(|e| WasmrunError::add_context(format!("Reading directory {}", dir_path), e))?;
+            .map_err(|e| WasmrunError::add_context(format!("Reading directory {dir_path}"), e))?;
 
         for entry in entries.flatten() {
             let entry_path = entry.path();
@@ -181,13 +177,13 @@ impl PathResolver {
     /// Get file size in a human-readable format
     pub fn get_file_size_human(path: &str) -> Result<String> {
         let metadata = fs::metadata(path).map_err(|e| {
-            WasmrunError::add_context(format!("Getting file metadata for {}", path), e)
+            WasmrunError::add_context(format!("Getting file metadata for {path}"), e)
         })?;
 
         let bytes = metadata.len();
 
         if bytes < 1024 {
-            Ok(format!("{} bytes", bytes))
+            Ok(format!("{bytes} bytes"))
         } else if bytes < 1024 * 1024 {
             Ok(format!("{:.2} KB", bytes as f64 / 1024.0))
         } else if bytes < 1024 * 1024 * 1024 {
@@ -203,14 +199,14 @@ impl PathResolver {
     /// Remove file
     pub fn remove_file(path: &str) -> Result<()> {
         fs::remove_file(path)
-            .map_err(|e| WasmrunError::add_context(format!("Removing file {}", path), e))?;
+            .map_err(|e| WasmrunError::add_context(format!("Removing file {path}"), e))?;
         Ok(())
     }
 
     /// Remove directory recursively
     pub fn remove_dir_all(path: &str) -> Result<()> {
         fs::remove_dir_all(path)
-            .map_err(|e| WasmrunError::add_context(format!("Removing directory {}", path), e))?;
+            .map_err(|e| WasmrunError::add_context(format!("Removing directory {path}"), e))?;
         Ok(())
     }
 }

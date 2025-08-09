@@ -18,13 +18,13 @@ pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
 
     let path_obj = std::path::Path::new(path);
 
-    if !path_obj.extension().map_or(false, |ext| ext == "wasm") {
-        if path_obj.extension().map_or(false, |ext| ext == "js") {
+    if !path_obj.extension().is_some_and(|ext| ext == "wasm") {
+        if path_obj.extension().is_some_and(|ext| ext == "js") {
             return handle_js_file(path, port);
         }
 
         return Err(WasmrunError::Server(ServerError::RequestHandlingFailed {
-            reason: format!("Not a WASM file: {}", path),
+            reason: format!("Not a WASM file: {path}"),
         }));
     }
 
@@ -39,12 +39,16 @@ pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
 
     let wasm_filename = Path::new(path)
         .file_name()
-        .ok_or_else(|| WasmrunError::path(format!("Invalid path: {}", path)))?
+        .ok_or_else(|| WasmrunError::path(format!("Invalid path: {path}")))?
         .to_string_lossy()
         .to_string();
 
-    wasm::serve_wasm_file(path, final_port, &wasm_filename)
-        .map_err(|e| WasmrunError::Server(ServerError::startup_failed(final_port, format!("Server error: {}", e))))
+    wasm::serve_wasm_file(path, final_port, &wasm_filename).map_err(|e| {
+        WasmrunError::Server(ServerError::startup_failed(
+            final_port,
+            format!("Server error: {e}"),
+        ))
+    })
 }
 
 pub fn run_project(
@@ -59,24 +63,24 @@ pub fn run_project(
 
     let path_obj = std::path::Path::new(path);
 
-    if path_obj.is_file() && path_obj.extension().map_or(false, |ext| ext == "wasm") {
+    if path_obj.is_file() && path_obj.extension().is_some_and(|ext| ext == "wasm") {
         println!("\n\x1b[1;34m╭\x1b[0m");
-        println!("  ℹ️  \x1b[1;34mDetected WASM file: {}\x1b[0m", path);
+        println!("  ℹ️  \x1b[1;34mDetected WASM file: {path}\x1b[0m");
         println!("  \x1b[0;37mRunning the WASM file directly...\x1b[0m");
         println!("\x1b[1;34m╰\x1b[0m\n");
 
         return run_wasm_file(path, port);
     }
 
-    if path_obj.is_file() && path_obj.extension().map_or(false, |ext| ext == "js") {
+    if path_obj.is_file() && path_obj.extension().is_some_and(|ext| ext == "js") {
         return handle_js_file(path, port);
     }
 
     if !path_obj.is_dir() {
         let error_msg = if !path_obj.exists() {
-            format!("Path not found: {}", path)
+            format!("Path not found: {path}")
         } else {
-            format!("Not a WASM file or project directory: {}", path)
+            format!("Not a WASM file or project directory: {path}")
         };
 
         return Err(WasmrunError::path(error_msg));
@@ -90,8 +94,7 @@ pub fn run_project(
     let (lang, temp_output_dir) = config::setup_project_compilation(path, language_override, watch)
         .ok_or_else(|| {
             WasmrunError::language_detection(format!(
-                "Failed to setup compilation for project: {}",
-                path
+                "Failed to setup compilation for project: {path}"
             ))
         })?;
 
@@ -123,8 +126,12 @@ pub fn run_project(
         println!("⚡ Running standard WASM project");
     }
 
-    config::run_server(server_config)
-        .map_err(|e| WasmrunError::Server(ServerError::startup_failed(final_port, format!("Project server error: {}", e))))
+    config::run_server(server_config).map_err(|e| {
+        WasmrunError::Server(ServerError::startup_failed(
+            final_port,
+            format!("Project server error: {e}"),
+        ))
+    })
 }
 
 pub fn is_server_running() -> bool {
@@ -155,7 +162,7 @@ pub fn stop_existing_server() -> Result<()> {
             std::fs::remove_file(PID_FILE).map_err(|e| {
                 WasmrunError::Server(ServerError::StopFailed {
                     pid: 0,
-                    reason: format!("Failed to remove stale PID file: {}", e),
+                    reason: format!("Failed to remove stale PID file: {e}"),
                 })
             })?;
         }
@@ -165,7 +172,7 @@ pub fn stop_existing_server() -> Result<()> {
     let pid_str = std::fs::read_to_string(PID_FILE).map_err(|e| {
         WasmrunError::Server(ServerError::StopFailed {
             pid: 0,
-            reason: format!("Failed to read PID file: {}", e),
+            reason: format!("Failed to read PID file: {e}"),
         })
     })?;
 
@@ -183,7 +190,7 @@ pub fn stop_existing_server() -> Result<()> {
         .map_err(|e| {
             WasmrunError::Server(ServerError::StopFailed {
                 pid,
-                reason: format!("Failed to kill server process: {}", e),
+                reason: format!("Failed to kill server process: {e}"),
             })
         })?;
 
@@ -191,7 +198,7 @@ pub fn stop_existing_server() -> Result<()> {
         std::fs::remove_file(PID_FILE).map_err(|e| {
             WasmrunError::Server(ServerError::StopFailed {
                 pid,
-                reason: format!("Failed to remove PID file: {}", e),
+                reason: format!("Failed to remove PID file: {e}"),
             })
         })?;
         println!("💀 Existing Wasmrun server terminated successfully.");
@@ -211,10 +218,7 @@ fn handle_js_file(path: &str, port: u16) -> Result<()> {
     let wasm_path = path_obj.with_extension("wasm");
     if wasm_path.exists() {
         println!("\n\x1b[1;34m╭\x1b[0m");
-        println!(
-            "  ℹ️  \x1b[1;34mDetected potential wasm-bindgen JS file: {}\x1b[0m",
-            path
-        );
+        println!("  ℹ️  \x1b[1;34mDetected potential wasm-bindgen JS file: {path}\x1b[0m");
         println!(
             "  \x1b[0;37mFound corresponding WASM file: {}\x1b[0m",
             wasm_path.display()
@@ -243,7 +247,12 @@ fn handle_js_file(path: &str, port: u16) -> Result<()> {
                     port,
                     &wasm_filename,
                 )
-                .map_err(|e| WasmrunError::Server(ServerError::startup_failed(port, format!("wasm-bindgen error: {}", e))));
+                .map_err(|e| {
+                    WasmrunError::Server(ServerError::startup_failed(
+                        port,
+                        format!("wasm-bindgen error: {e}"),
+                    ))
+                });
             }
         }
 
@@ -251,8 +260,7 @@ fn handle_js_file(path: &str, port: u16) -> Result<()> {
     }
 
     Err(WasmrunError::file_not_found(format!(
-        "Corresponding WASM file not found for JS file: {}",
-        path
+        "Corresponding WASM file not found for JS file: {path}"
     )))
 }
 
@@ -264,13 +272,10 @@ fn handle_wasm_bindgen_file(path_obj: &std::path::Path, path: &str, port: u16) -
 
     if file_name.ends_with("_bg.wasm") {
         println!("\n\x1b[1;34m╭\x1b[0m");
-        println!(
-            "  ℹ️  \x1b[1;34mDetected wasm-bindgen _bg.wasm file: {}\x1b[0m",
-            path
-        );
+        println!("  ℹ️  \x1b[1;34mDetected wasm-bindgen _bg.wasm file: {path}\x1b[0m");
 
         let js_base_name = file_name.replace("_bg.wasm", "");
-        let js_file_name = format!("{}.js", js_base_name);
+        let js_file_name = format!("{js_base_name}.js");
         let js_path = path_obj
             .parent()
             .ok_or_else(|| WasmrunError::path("Invalid parent directory"))?
@@ -294,7 +299,12 @@ fn handle_wasm_bindgen_file(path_obj: &std::path::Path, path: &str, port: u16) -
                 port,
                 file_name.as_ref(),
             )
-            .map_err(|e| WasmrunError::Server(ServerError::startup_failed(port, format!("bindgen error: {}", e))))?;
+            .map_err(|e| {
+                WasmrunError::Server(ServerError::startup_failed(
+                    port,
+                    format!("bindgen error: {e}"),
+                ))
+            })?;
 
             return Ok(true);
         } else {
@@ -317,7 +327,7 @@ fn search_for_js_files(
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let entry_path = entry.path();
-                if entry_path.extension().map_or(false, |ext| ext == "js") {
+                if entry_path.extension().is_some_and(|ext| ext == "js") {
                     if let Ok(js_content) = std::fs::read_to_string(&entry_path) {
                         if js_content.contains("wasm_bindgen") || js_content.contains("__wbindgen")
                         {
@@ -339,7 +349,10 @@ fn search_for_js_files(
                                 output_dir: None,
                             })
                             .map_err(|e| {
-                                WasmrunError::Server(ServerError::startup_failed(port, format!("config error: {}", e)))
+                                WasmrunError::Server(ServerError::startup_failed(
+                                    port,
+                                    format!("config error: {e}"),
+                                ))
                             })?;
 
                             return Ok(true);

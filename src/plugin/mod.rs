@@ -4,8 +4,8 @@ use crate::compiler::builder::WasmBuilder;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub mod builtin;
 pub mod bridge;
+pub mod builtin;
 pub mod config;
 pub mod external;
 pub mod installer;

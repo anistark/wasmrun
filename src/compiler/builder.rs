@@ -49,7 +49,9 @@ pub struct BuildResult {
 pub trait WasmBuilder: Send + Sync {
     fn can_handle_project(&self, project_path: &str) -> bool;
     fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult>;
+    #[allow(dead_code)] // TODO: Future cleanup functionality
     fn clean(&self, project_path: &str) -> Result<()>;
+    #[allow(dead_code)] // TODO: For plugin cloning functionality
     fn clone_box(&self) -> Box<dyn WasmBuilder>;
     fn language_name(&self) -> &str;
     fn entry_file_candidates(&self) -> &[&str];
@@ -64,6 +66,7 @@ pub trait WasmBuilder: Send + Sync {
 }
 
 pub trait CloneableWasmBuilder: WasmBuilder {
+    #[allow(dead_code)] // TODO: Future cleanup functionality
     fn clone_boxed(&self) -> Box<dyn WasmBuilder>;
 }
 
@@ -77,6 +80,7 @@ where
 }
 
 impl BuildConfig {
+    #[allow(dead_code)] // TODO: Future builder pattern implementation
     pub fn new(
         project_path: String,
         output_dir: String,
@@ -113,6 +117,7 @@ impl Default for BuildConfig {
 }
 
 impl BuildResult {
+    #[allow(dead_code)] // TODO: Future builder pattern implementation
     pub fn new(wasm_path: String) -> Self {
         Self {
             wasm_path,
@@ -122,6 +127,7 @@ impl BuildResult {
         }
     }
 
+    #[allow(dead_code)] // TODO: Future JS bundle support
     pub fn with_js(wasm_path: String, js_path: String) -> Self {
         Self {
             wasm_path,
@@ -131,6 +137,7 @@ impl BuildResult {
         }
     }
 
+    #[allow(dead_code)] // TODO: Future web app support
     pub fn web_app(app_dir: String, index_path: String) -> Self {
         Self {
             wasm_path: app_dir,
@@ -140,10 +147,12 @@ impl BuildResult {
         }
     }
 
+    #[allow(dead_code)] // TODO: Future file serving logic
     pub fn get_primary_file(&self) -> &str {
         self.js_path.as_ref().unwrap_or(&self.wasm_path)
     }
 
+    #[allow(dead_code)] // TODO: Future web app detection
     pub fn is_web_app(&self) -> bool {
         self.js_path
             .as_ref()
@@ -166,7 +175,7 @@ impl BuilderFactory {
 
     pub fn create_builder(language: &crate::compiler::ProjectLanguage) -> Box<dyn WasmBuilder> {
         use crate::compiler::ProjectLanguage;
-        
+
         match language {
             ProjectLanguage::Rust => {
                 // Try to get wasmrust plugin first
@@ -178,8 +187,12 @@ impl BuilderFactory {
                 Box::new(UnknownBuilder)
             }
             ProjectLanguage::C => Box::new(crate::plugin::languages::c_plugin::CPlugin::new()),
-            ProjectLanguage::Asc => Box::new(crate::plugin::languages::asc_plugin::AscPlugin::new()),
-            ProjectLanguage::Python => Box::new(crate::plugin::languages::python_plugin::PythonPlugin::new()),
+            ProjectLanguage::Asc => {
+                Box::new(crate::plugin::languages::asc_plugin::AscPlugin::new())
+            }
+            ProjectLanguage::Python => {
+                Box::new(crate::plugin::languages::python_plugin::PythonPlugin::new())
+            }
             ProjectLanguage::Go => {
                 if let Ok(plugin_manager) = PluginManager::new() {
                     if let Some(plugin) = plugin_manager.find_plugin_by_name("wasmgo") {
@@ -192,6 +205,7 @@ impl BuilderFactory {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_supported_languages() -> Vec<String> {
         vec![
             "Rust".to_string(),

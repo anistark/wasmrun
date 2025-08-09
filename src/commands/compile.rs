@@ -1,7 +1,7 @@
 //! Compilation command implementation
 
 use crate::compiler::builder::{BuildConfig, BuilderFactory, OptimizationLevel, TargetType};
-use crate::compiler::{detect_project_language, get_missing_tools, detect_operating_system};
+use crate::compiler::{detect_operating_system, detect_project_language, get_missing_tools};
 use crate::error::{Result, WasmrunError};
 use crate::plugin::manager::PluginManager;
 use crate::utils::PathResolver;
@@ -33,7 +33,11 @@ pub fn run_compile(
     if let Ok(plugin_manager) = PluginManager::new() {
         if let Some(plugin) = plugin_manager.find_plugin_for_project(&project_path) {
             if verbose {
-                println!("🔌 Using plugin: {} v{}", plugin.info().name, plugin.info().version);
+                println!(
+                    "🔌 Using plugin: {} v{}",
+                    plugin.info().name,
+                    plugin.info().version
+                );
                 println!("📝 Description: {}", plugin.info().description);
             }
 
@@ -58,7 +62,9 @@ pub fn run_compile(
             };
 
             let result = if verbose {
-                builder.build_verbose(&config).map_err(WasmrunError::Compilation)?
+                builder
+                    .build_verbose(&config)
+                    .map_err(WasmrunError::Compilation)?
             } else {
                 builder.build(&config).map_err(WasmrunError::Compilation)?
             };
@@ -82,8 +88,8 @@ pub fn run_compile(
     }
 
     if verbose {
-        println!("🎯 Language: {:?}", language);
-        println!("💻 OS: {:?}", os);
+        println!("🎯 Language: {language:?}");
+        println!("💻 OS: {os:?}");
     }
 
     let builder = BuilderFactory::create_builder(&language);
@@ -98,7 +104,9 @@ pub fn run_compile(
     };
 
     let result = if verbose {
-        builder.build_verbose(&config).map_err(WasmrunError::Compilation)?
+        builder
+            .build_verbose(&config)
+            .map_err(WasmrunError::Compilation)?
     } else {
         builder.build(&config).map_err(WasmrunError::Compilation)?
     };
@@ -113,23 +121,23 @@ fn print_compilation_success(
     additional_files: &[String],
 ) {
     println!("✅ Compilation successful!");
-    
+
     if Path::new(wasm_path).is_dir() {
-        println!("📁 Web app built: {}", wasm_path);
+        println!("📁 Web app built: {wasm_path}");
         if let Some(js_path) = js_path {
-            println!("🌐 Entry point: {}", js_path);
+            println!("🌐 Entry point: {js_path}");
         }
     } else {
-        println!("📄 WASM file: {}", wasm_path);
+        println!("📄 WASM file: {wasm_path}");
         if let Some(js_path) = js_path {
-            println!("📄 JS file: {}", js_path);
+            println!("📄 JS file: {js_path}");
         }
     }
 
     if !additional_files.is_empty() {
         println!("📎 Additional files:");
         for file in additional_files {
-            println!("   - {}", file);
+            println!("   - {file}");
         }
     }
 }

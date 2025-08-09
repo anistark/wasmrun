@@ -3,7 +3,8 @@ mod detect;
 
 pub use builder::build_wasm_project;
 pub use detect::{
-    detect_operating_system, detect_project_language, get_missing_tools, print_system_info, ProjectLanguage,
+    detect_operating_system, detect_project_language, get_missing_tools, print_system_info,
+    ProjectLanguage,
 };
 
 use crate::error::{Result, WasmrunError};
@@ -11,6 +12,7 @@ use crate::plugin::manager::PluginManager;
 use crate::utils::PathResolver;
 
 /// Compile a WASM file from a project directory using plugin system
+#[allow(dead_code)]
 pub fn create_wasm_from_project(project_path: &str, output_dir: &str) -> Result<String> {
     PathResolver::ensure_output_directory(output_dir)?;
 
@@ -21,7 +23,7 @@ pub fn create_wasm_from_project(project_path: &str, output_dir: &str) -> Result<
                 project_path.to_string(),
                 output_dir.to_string(),
             );
-            
+
             let result = builder.build(&config).map_err(WasmrunError::Compilation)?;
             return Ok(result.wasm_path);
         }
@@ -42,7 +44,7 @@ pub fn compile_for_execution(project_path: &str, output_dir: &str) -> Result<Str
     if let Ok(plugin_manager) = PluginManager::new() {
         if let Some(plugin) = plugin_manager.find_plugin_for_project(project_path) {
             let builder = plugin.get_builder();
-            
+
             // Check dependencies
             let missing_deps = builder.check_dependencies();
             if !missing_deps.is_empty() {
@@ -53,7 +55,7 @@ pub fn compile_for_execution(project_path: &str, output_dir: &str) -> Result<Str
                 project_path.to_string(),
                 output_dir.to_string(),
             );
-            
+
             let result = builder.build(&config).map_err(WasmrunError::Compilation)?;
             return Ok(result.js_path.unwrap_or(result.wasm_path));
         }

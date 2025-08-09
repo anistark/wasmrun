@@ -123,10 +123,10 @@ impl WasmrunConfig {
         }
 
         let config_content = fs::read_to_string(&config_path)
-            .map_err(|e| WasmrunError::from(format!("Failed to read config file: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to read config file: {e}")))?;
 
         let mut config: Self = toml::from_str(&config_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to parse TOML config file: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to parse TOML config file: {e}")))?;
 
         if config.version.is_empty() {
             config.version = "1.0.0".to_string();
@@ -151,16 +151,15 @@ impl WasmrunConfig {
 
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                WasmrunError::from(format!("Failed to create config directory: {}", e))
+                WasmrunError::from(format!("Failed to create config directory: {e}"))
             })?;
         }
 
-        let config_content = toml::to_string_pretty(self).map_err(|e| {
-            WasmrunError::from(format!("Failed to serialize config to TOML: {}", e))
-        })?;
+        let config_content = toml::to_string_pretty(self)
+            .map_err(|e| WasmrunError::from(format!("Failed to serialize config to TOML: {e}")))?;
 
         fs::write(&config_path, config_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to write config file: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to write config file: {e}")))?;
 
         Ok(())
     }
@@ -201,10 +200,10 @@ impl WasmrunConfig {
         };
 
         fs::create_dir_all(&plugin_dir)
-            .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {e}")))?;
 
         fs::create_dir_all(&cache_dir)
-            .map_err(|e| WasmrunError::from(format!("Failed to create cache directory: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to create cache directory: {e}")))?;
 
         self.settings.install_dir = Some(plugin_dir);
         self.settings.cache_dir = Some(cache_dir);
@@ -245,6 +244,7 @@ impl WasmrunConfig {
         Ok(())
     }
 
+    #[allow(dead_code)] // TODO: Future plugin management
     pub fn remove_external_plugin(&mut self, name: &str) -> Result<()> {
         self.external_plugins.remove(name);
         self.save()?;
@@ -256,6 +256,7 @@ impl WasmrunConfig {
         self.external_plugins.contains_key(name)
     }
 
+    #[allow(dead_code)] // TODO: Get external plugin by name
     pub fn get_external_plugin(&self, name: &str) -> Option<&ExternalPluginEntry> {
         self.external_plugins.get(name)
     }
@@ -268,6 +269,7 @@ impl WasmrunConfig {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn set_external_plugin_enabled(&mut self, name: &str, enabled: bool) -> Result<()> {
         if let Some(entry) = self.external_plugins.get_mut(name) {
             entry.enabled = enabled;
@@ -275,8 +277,7 @@ impl WasmrunConfig {
             Ok(())
         } else {
             Err(WasmrunError::from(format!(
-                "External plugin '{}' not found",
-                name
+                "External plugin '{name}' not found"
             )))
         }
     }
@@ -289,8 +290,7 @@ impl WasmrunConfig {
             Ok(())
         } else {
             Err(WasmrunError::from(format!(
-                "External plugin '{}' not found",
-                name
+                "External plugin '{name}' not found"
             )))
         }
     }
@@ -363,11 +363,11 @@ impl WasmrunConfig {
     #[allow(dead_code)]
     pub fn print_config(&self) -> Result<()> {
         let config_toml = toml::to_string_pretty(self)
-            .map_err(|e| WasmrunError::from(format!("Failed to serialize config: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to serialize config: {e}")))?;
 
         println!("Current Wasmrun Configuration:");
         println!("============================");
-        println!("{}", config_toml);
+        println!("{config_toml}");
 
         Ok(())
     }

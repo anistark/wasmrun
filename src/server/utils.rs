@@ -11,6 +11,7 @@ pub fn content_type_header(value: &str) -> tiny_http::Header {
 }
 
 /// Find WASM files in a directory
+#[allow(dead_code)]
 pub fn find_wasm_files(dir_path: &Path) -> Vec<String> {
     let mut wasm_files = Vec::new();
 
@@ -97,7 +98,7 @@ impl ServerInfo {
         let analysis = WasmAnalysis::analyze(wasm_path)?;
 
         Ok(Self {
-            url: format!("http://localhost:{}", port),
+            url: format!("http://localhost:{port}"),
             port,
             server_pid: std::process::id(),
             watch_mode,
@@ -116,7 +117,7 @@ impl ServerInfo {
         let content_type = ContentType::Project(analysis);
 
         Ok(Self {
-            url: format!("http://localhost:{}", port),
+            url: format!("http://localhost:{port}"),
             port,
             server_pid: std::process::id(),
             watch_mode,
@@ -169,7 +170,7 @@ impl ServerInfo {
             // }
         };
 
-        println!("   \x1b[0;37m{}\x1b[0m\n", content_description);
+        println!("   \x1b[0;37m{content_description}\x1b[0m\n");
     }
 
     fn print_wasm_server_info(&self) {
@@ -249,10 +250,7 @@ impl ServerInfo {
         } else {
             "\x1b[1;32m✓ Running\x1b[0m"
         };
-        println!(
-            "\x1b[1;34m│\x1b[0m  ⚫️ \x1b[1;34mStatus:\x1b[0m {:<47} \x1b[1;34m│\x1b[0m",
-            status
-        );
+        println!("\x1b[1;34m│\x1b[0m  ⚫️ \x1b[1;34mStatus:\x1b[0m {status:<47} \x1b[1;34m│\x1b[0m");
 
         println!(
             "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
@@ -263,10 +261,7 @@ impl ServerInfo {
         println!("\n🌐 \x1b[1;36mOpening browser...\x1b[0m");
 
         if let Err(e) = webbrowser::open(&self.url) {
-            println!(
-                "❗ \x1b[1;33mFailed to open browser automatically: {}\x1b[0m",
-                e
-            );
+            println!("❗ \x1b[1;33mFailed to open browser automatically: {e}\x1b[0m");
             println!(
                 "🔗 \x1b[1;34mManually open:\x1b[0m \x1b[4;36m{}\x1b[0m",
                 self.url
@@ -326,10 +321,10 @@ impl ServerUtils {
         match Self::check_port_availability(port) {
             PortStatus::Available => Ok(port),
             PortStatus::Unavailable { alternative } => {
-                println!("\n⚠️  \x1b[1;33mPort {} is already in use\x1b[0m", port);
+                println!("\n⚠️  \x1b[1;33mPort {port} is already in use\x1b[0m");
 
                 if let Some(alt_port) = alternative {
-                    println!("🔄 \x1b[1;34mTrying alternative port: {}\x1b[0m", alt_port);
+                    println!("🔄 \x1b[1;34mTrying alternative port: {alt_port}\x1b[0m");
                     Ok(alt_port)
                 } else {
                     println!(
@@ -340,7 +335,7 @@ impl ServerUtils {
                     Err(crate::error::WasmrunError::Server(
                         crate::error::ServerError::startup_failed(
                             port,
-                            format!("Port {} is in use and no alternatives found", port),
+                            format!("Port {port} is in use and no alternatives found"),
                         ),
                     ))
                 }
@@ -365,6 +360,7 @@ pub enum PortStatus {
 }
 
 /// Get Server Info
+#[allow(dead_code)]
 pub fn print_server_info(
     url: &str,
     port: u16,
@@ -389,6 +385,7 @@ pub fn print_server_info(
 }
 
 /// Basic server info printing
+#[allow(dead_code)]
 fn print_basic_server_info(
     url: &str,
     port: u16,
@@ -399,23 +396,11 @@ fn print_basic_server_info(
 ) {
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  🅦 \x1b[1;36mWasmrun WASM Server\x1b[0m\n");
-    println!("  🚀 \x1b[1;34mServer URL:\x1b[0m \x1b[4;36m{}\x1b[0m", url);
-    println!(
-        "  🔌 \x1b[1;34mListening on port:\x1b[0m \x1b[1;33m{}\x1b[0m",
-        port
-    );
-    println!(
-        "  📦 \x1b[1;34mServing file:\x1b[0m \x1b[1;32m{}\x1b[0m",
-        wasm_filename
-    );
-    println!(
-        "  💾 \x1b[1;34mFile size:\x1b[0m \x1b[0;37m{}\x1b[0m",
-        file_size
-    );
-    println!(
-        "  🔍 \x1b[1;34mFull path:\x1b[0m \x1b[0;37m{:.45}\x1b[0m",
-        absolute_path
-    );
+    println!("  🚀 \x1b[1;34mServer URL:\x1b[0m \x1b[4;36m{url}\x1b[0m");
+    println!("  🔌 \x1b[1;34mListening on port:\x1b[0m \x1b[1;33m{port}\x1b[0m");
+    println!("  📦 \x1b[1;34mServing file:\x1b[0m \x1b[1;32m{wasm_filename}\x1b[0m");
+    println!("  💾 \x1b[1;34mFile size:\x1b[0m \x1b[0;37m{file_size}\x1b[0m");
+    println!("  🔍 \x1b[1;34mFull path:\x1b[0m \x1b[0;37m{absolute_path:.45}\x1b[0m");
     println!(
         "  ℹ️ \x1b[1;34mServer PID:\x1b[0m \x1b[0;37m{}\x1b[0m",
         std::process::id()

@@ -210,6 +210,7 @@ impl WasmrunError {
     }
 
     /// Check if this error is recoverable
+    #[allow(dead_code)] // TODO: Future error recovery features
     pub fn is_recoverable(&self) -> bool {
         match self {
             WasmrunError::FileNotFound { .. } => false,
@@ -220,13 +221,14 @@ impl WasmrunError {
     }
 
     /// Get user-friendly error message
+    #[allow(dead_code)] // TODO: Future user-friendly error messages
     pub fn user_message(&self) -> String {
         match self {
             WasmrunError::FileNotFound { path } => {
-                format!("File not found: {}\n💡 Check the file path and try again", path)
+                format!("File not found: {path}\n💡 Check the file path and try again")
             }
             WasmrunError::DirectoryNotFound { path } => {
-                format!("Directory not found: {}\n💡 Check the directory path and try again", path)
+                format!("Directory not found: {path}\n💡 Check the directory path and try again")
             }
             WasmrunError::MissingTools { tools } => {
                 format!(
@@ -242,11 +244,12 @@ impl WasmrunError {
     }
 
     /// Get suggested actions for the error
+    #[allow(dead_code)] // TODO: Future error suggestions system
     pub fn suggestions(&self) -> Vec<String> {
         match self {
             WasmrunError::MissingTools { tools } => tools
                 .iter()
-                .map(|tool| format!("Install {} using your package manager", tool))
+                .map(|tool| format!("Install {tool} using your package manager"))
                 .collect(),
             WasmrunError::Compilation(CompilationError::MissingEntryFile {
                 candidates, ..
