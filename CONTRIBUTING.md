@@ -10,70 +10,430 @@ Wasmrun is designed with a modular architecture that separates concerns clearly:
 
 ```sh
 src/
-├── cli.rs              # Command line interface and argument parsing
-├── main.rs             # Application entry point and command routing
-├── error.rs            # Centralized error handling with user-friendly messages
-├── ui.rs               # User interface utilities and styled output
-├── watcher.rs          # File system watching for live reload functionality
-├── commands/           # Command implementations
-│   ├── verify.rs       # WASM verification and inspection
-│   ├── compile.rs      # Project compilation with optimization options
-│   ├── run.rs          # Development server and project execution
-│   ├── clean.rs        # Build artifact cleanup
-│   ├── init.rs         # Project initialization (TODO)
-│   └── stop.rs         # Server management
-├── compiler/           # Legacy compilation system (being phased out)
-│   ├── builder.rs      # Build configuration and result types
-│   └── detect.rs       # Project type detection utilities
-├── plugin/             # 🔌 Plugin system
-│   ├── mod.rs          # Plugin manager and core traits
-│   ├── registry.rs     # Plugin registry and discovery
-│   ├── external.rs     # External plugin loading (TODO)
-│   └── languages/      # Built-in language plugins
-│       ├── rust_plugin.rs      # Rust plugin
-│       ├── go_plugin.rs        # Go plugin with TinyGo support
-│       ├── c_plugin.rs         # C/C++ plugin with Emscripten
-│       ├── asc_plugin.rs       # AssemblyScript plugin
-│       └── python_plugin.rs    # Python plugin with Pyodide
-├── server/             # HTTP server and web interface
-│   ├── config.rs       # Server configuration and setup
-│   ├── handler.rs      # HTTP request handling
-│   ├── wasm.rs         # WASM file serving
-│   ├── webapp.rs       # Web application support
-│   └── utils.rs        # Server utilities
-├── template/           # HTML, CSS, and JavaScript templates
-│   ├── server/         # WASM runner interface templates
-│   └── webapp/         # Web application templates
-└── utils/              # Shared utilities and helpers
-    ├── path.rs         # Path resolution and validation
-    └── command.rs      # Shared command execution utilities
+├── cli.rs                    # Command line interface and argument parsing
+├── main.rs                   # Application entry point and command routing
+├── error.rs                  # Centralized error handling with user-friendly messages
+├── ui.rs                     # User interface utilities and styled output
+├── debug.rs                  # Debug utilities and logging
+├── watcher.rs                # File system watching for live reload functionality
+├── commands/                 # Command implementations
+│   ├── mod.rs                # Command module exports
+│   ├── verify.rs             # WASM verification and inspection
+│   ├── compile.rs            # Project compilation with optimization options
+│   ├── run.rs                # Development server and project execution
+│   ├── clean.rs              # Build artifact cleanup
+│   ├── init.rs               # Project initialization
+│   ├── stop.rs               # Server management
+│   └── plugin.rs             # Plugin management commands
+├── compiler/                 # Legacy compilation system (being phased out)
+│   ├── mod.rs                # Compiler module exports
+│   ├── builder.rs            # Build configuration and result types
+│   └── detect.rs             # Project type detection utilities
+├── plugin/                   # 🔌 Plugin system (Core Architecture)
+│   ├── mod.rs                # Plugin manager and core traits
+│   ├── bridge.rs             # Plugin bridge functionality
+│   ├── builtin.rs            # Built-in plugin registry
+│   ├── config.rs             # Plugin configuration management
+│   ├── external.rs           # External plugin loading and management
+│   ├── installer.rs          # Plugin installation system
+│   ├── manager.rs            # Plugin lifecycle management
+│   ├── registry.rs           # Plugin registry and discovery
+│   └── languages/            # Built-in language plugins
+│       ├── mod.rs            # Language plugin exports
+│       ├── asc_plugin.rs     # AssemblyScript plugin
+│       ├── c_plugin.rs       # C/C++ plugin with Emscripten
+│       └── python_plugin.rs  # Python plugin with py2wasm
+├── server/                   # HTTP server and web interface
+│   ├── mod.rs                # Server module exports
+│   ├── config.rs             # Server configuration and setup
+│   ├── handler.rs            # HTTP request handling
+│   ├── wasm.rs               # WASM file serving
+│   └── utils.rs              # Server utilities
+├── template/                 # HTML, CSS, and JavaScript templates
+│   ├── mod.rs                # Template module exports
+│   └── server/               # WASM runner interface templates
+│       ├── mod.rs            # Server template exports
+│       ├── index.html        # Main HTML template
+│       ├── scripts.js        # JavaScript utilities
+│       ├── style.css         # CSS styles
+│       └── wasmrun_wasi_impl.js  # WASI implementation
+└── utils/                    # Shared utilities and helpers
+    ├── mod.rs                # Utility module exports
+    ├── command.rs            # Shared command execution utilities
+    ├── path.rs               # Path resolution and validation
+    ├── plugin_utils.rs       # Plugin-specific utilities
+    ├── system.rs             # System information and detection
+    └── wasm_analysis.rs      # WebAssembly file analysis
 ```
 
-## 🔌 Plugin Architecture Overview
+## 🔌 Plugin Architecture Deep Dive
 
-Wasmrun's new plugin system provides:
+Wasmrun implements a plugin architecture with built-in and external plugins.
 
-- **Unified Interface** - All plugins implement the same `Plugin` and `WasmBuilder` traits
-- **Self-Contained** - Each plugin handles both metadata and compilation logic
-- **Shared Utilities** - Common functionality through `CommandExecutor`
-- **Extensible** - Easy to add new language support
+### How Plugins Work
 
-### Plugin Structure
-
-Each plugin is a single struct that implements both traits:
+#### Plugin Interface Architecture
+Every plugin implements the core `Plugin` trait providing a consistent interface:
 
 ```rust
-pub struct RustPlugin {
-    info: PluginInfo,
+pub trait Plugin {
+    fn info(&self) -> &PluginInfo;                    // Plugin metadata
+    fn can_handle_project(&self, path: &str) -> bool; // Project compatibility
+    fn get_builder(&self) -> Box<dyn WasmBuilder>;    // Compilation engine
 }
 
-impl Plugin for RustPlugin {
-    // Plugin metadata and project detection
+pub trait WasmBuilder {
+    fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult>;
+    fn check_dependencies(&self) -> Vec<String>;      // Missing tools
+    fn validate_project(&self, path: &str) -> CompilationResult<()>;
+    fn clean(&self, path: &str) -> Result<()>;        // Cleanup artifacts
+    fn supported_extensions(&self) -> &[&str];        // File extensions
+    fn entry_file_candidates(&self) -> &[&str];       // Entry files
+}
+```
+
+#### Plugin Capabilities System
+Each plugin declares its capabilities through structured metadata:
+
+```rust
+pub struct PluginCapabilities {
+    pub compile_wasm: bool,          // Standard .wasm file generation
+    pub compile_webapp: bool,        // Web application bundling
+    pub live_reload: bool,           // Development server support
+    pub optimization: bool,          // Size/speed optimization passes
+    pub custom_targets: Vec<String>, // Additional compilation targets
 }
 
-impl WasmBuilder for RustPlugin {
-    // Compilation and build logic
+pub struct PluginInfo {
+    pub name: String,                     // Plugin identifier
+    pub version: String,                  // Plugin version
+    pub description: String,              // Human-readable description
+    pub author: String,                   // Plugin author
+    pub extensions: Vec<String>,          // Supported file extensions
+    pub entry_files: Vec<String>,         // Project entry points
+    pub plugin_type: PluginType,          // Built-in vs External
+    pub dependencies: Vec<String>,        // Required system tools
+    pub capabilities: PluginCapabilities,
 }
+```
+
+### External Plugin Installation
+
+External plugins are **library extensions** that integrate directly with Wasmrun, not standalone binaries. This design enables deep integration while maintaining modularity.
+
+_Maybe, in future we can also support standalone binaries._
+
+#### Plugin Directory Structure
+
+```sh
+~/.wasmrun/
+├── config.toml               # Global Wasmrun configuration
+├── plugins/                  # Plugin installation directory
+│   ├── wasmrust/             # Rust plugin (external)
+│   │   ├── Cargo.toml        # Plugin build configuration
+│   │   ├── src/
+│   │   │   └── lib.rs        # Rust plugin implementation
+│   │   ├── wasmrun.toml      # Plugin manifest
+│   │   └── .wasmrun_metadata # Installation metadata
+│   └── wasmgo/               # Go plugin (external)
+│       ├── Cargo.toml        # Plugin uses Rust for integration
+│       ├── src/lib.rs        # Go compilation bridge
+│       └── wasmrun.toml      # Plugin configuration
+├── cache/                    # Build artifact cache
+└── logs/                     # Plugin operation logs
+```
+
+## 🔧 Plugin Development Guide
+
+### Creating a Built-in Plugin
+
+1. **Create Plugin Structure**
+   ```rust
+   // src/plugin/languages/my_language_plugin.rs
+   use crate::plugin::{Plugin, PluginInfo, PluginCapabilities, PluginType};
+   use crate::compiler::builder::WasmBuilder;
+   
+   pub struct MyLanguagePlugin {
+       info: PluginInfo,
+   }
+   
+   impl MyLanguagePlugin {
+       pub fn new() -> Self {
+           let info = PluginInfo {
+               name: "mylang".to_string(),
+               version: env!("CARGO_PKG_VERSION").to_string(),
+               description: "My Language WebAssembly compiler".to_string(),
+               author: "Your Name".to_string(),
+               extensions: vec!["ml".to_string(), "myl".to_string()],
+               entry_files: vec!["main.ml".to_string(), "package.myl".to_string()],
+               plugin_type: PluginType::Builtin,
+               source: None,
+               dependencies: vec!["mylang-compiler".to_string()],
+               capabilities: PluginCapabilities {
+                   compile_wasm: true,
+                   compile_webapp: false,
+                   live_reload: true,
+                   optimization: true,
+                   custom_targets: vec!["wasm32-wasi".to_string()],
+               },
+           };
+           Self { info }
+       }
+   }
+   ```
+
+2. **Implement Plugin Trait**
+   ```rust
+   impl Plugin for MyLanguagePlugin {
+       fn info(&self) -> &PluginInfo {
+           &self.info
+       }
+
+       fn can_handle_project(&self, path: &str) -> bool {
+           // Check for language-specific files or configurations
+           std::path::Path::new(path).join("mylang.config").exists() ||
+           std::fs::read_dir(path).ok().map_or(false, |mut entries| {
+               entries.any(|e| e.ok().map_or(false, |entry| {
+                   entry.path().extension()
+                       .and_then(|ext| ext.to_str())
+                       .map_or(false, |ext| ext == "ml" || ext == "myl")
+               }))
+           })
+       }
+
+       fn get_builder(&self) -> Box<dyn WasmBuilder> {
+           Box::new(MyLanguageBuilder::new())
+       }
+   }
+   ```
+
+3. **Implement WasmBuilder Trait**
+   ```rust
+   pub struct MyLanguageBuilder {
+       language_name: String,
+   }
+
+   impl MyLanguageBuilder {
+       pub fn new() -> Self {
+           Self {
+               language_name: "mylang".to_string(),
+           }
+       }
+
+       fn language_name(&self) -> &str {
+           &self.language_name
+       }
+   }
+
+   impl WasmBuilder for MyLanguageBuilder {
+       fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+           // Implementation details for building with your language
+           let executor = CommandExecutor::new(&config.project_path);
+           
+           // Check dependencies
+           let missing_deps = self.check_dependencies();
+           if !missing_deps.is_empty() {
+               return Err(CompilationError::DependencyError {
+                   tool: missing_deps.join(", "),
+                   language: self.language_name().to_string(),
+               });
+           }
+
+           // Build command
+           let build_result = executor.execute_command(
+               "mylang-compiler",
+               &["build", "--target", "wasm32", &config.project_path],
+               "Failed to compile with MyLang compiler",
+           )?;
+
+           Ok(BuildResult {
+               wasm_file: build_result.output_file,
+               js_file: None,
+               additional_files: vec![],
+               has_bindgen: false,
+           })
+       }
+
+       fn check_dependencies(&self) -> Vec<String> {
+           let mut missing = Vec::new();
+           
+           if !CommandExecutor::is_tool_installed("mylang-compiler") {
+               missing.push("mylang-compiler".to_string());
+           }
+           
+           missing
+       }
+
+       fn validate_project(&self, path: &str) -> CompilationResult<()> {
+           // Validate project structure and required files
+           let project_path = std::path::Path::new(path);
+           
+           if !project_path.join("main.ml").exists() && !project_path.join("package.myl").exists() {
+               return Err(CompilationError::ProjectValidationFailed {
+                   language: self.language_name().to_string(),
+                   reason: "No entry file found (main.ml or package.myl)".to_string(),
+               });
+           }
+           
+           Ok(())
+       }
+
+       fn clean(&self, path: &str) -> Result<()> {
+           // Clean build artifacts
+           let build_dir = std::path::Path::new(path).join("build");
+           if build_dir.exists() {
+               std::fs::remove_dir_all(build_dir)?;
+           }
+           Ok(())
+       }
+
+       fn supported_extensions(&self) -> &[&str] {
+           &["ml", "myl"]
+       }
+
+       fn entry_file_candidates(&self) -> &[&str] {
+           &["main.ml", "package.myl", "app.ml"]
+       }
+   }
+   ```
+
+4. **Register the Plugin**
+   ```rust
+   // In src/plugin/languages/mod.rs
+   pub mod my_language_plugin;
+   pub use my_language_plugin::MyLanguagePlugin;
+
+   // In src/plugin/builtin.rs or manager.rs
+   pub fn get_builtin_plugins() -> Vec<Box<dyn Plugin>> {
+       vec![
+           Box::new(CPlugin::new()),
+           Box::new(AscPlugin::new()),
+           Box::new(PythonPlugin::new()),
+           Box::new(MyLanguagePlugin::new()), // Add your plugin here
+       ]
+   }
+   ```
+
+### Creating an External Plugin
+
+External plugins are distributed as separate crates that integrate with Wasmrun:
+
+1. **Create a New Crate**
+   ```toml
+   # Cargo.toml
+   [package]
+   name = "wasmrun-mylang"
+   version = "0.1.0"
+   edition = "2021"
+
+   [lib]
+   crate-type = ["cdylib"]
+
+   [dependencies]
+   wasmrun = { version = "0.10", features = ["plugin-api"] }
+   ```
+
+2. **Implement Plugin in lib.rs**
+   ```rust
+   // src/lib.rs
+   use wasmrun::plugin::{Plugin, PluginInfo, WasmBuilder, PluginCapabilities, PluginType};
+
+   pub struct MyExternalPlugin {
+       info: PluginInfo,
+   }
+
+   impl MyExternalPlugin {
+       pub fn new() -> Self {
+           // Similar implementation to built-in plugin
+       }
+   }
+
+   // Implement Plugin and WasmBuilder traits...
+
+   // Export plugin creation function
+   #[no_mangle]
+   pub extern "C" fn create_plugin() -> *mut dyn Plugin {
+       Box::into_raw(Box::new(MyExternalPlugin::new()))
+   }
+   ```
+
+3. **Create Plugin Manifest**
+   ```toml
+   # wasmrun.toml
+   [plugin]
+   name = "mylang"
+   version = "0.1.0"
+   description = "MyLang WebAssembly compiler plugin"
+   author = "Your Name"
+   
+   [dependencies]
+   system = ["mylang-compiler >= 1.0.0"]
+   
+   [capabilities]
+   compile_wasm = true
+   compile_webapp = false
+   live_reload = true
+   optimization = true
+   ```
+
+### Plugin Development Best Practices
+
+#### Code Organization
+
+Use the shared utilities and follow established patterns:
+
+```rust
+// ✅ Good - use shared CommandExecutor
+use crate::utils::command::CommandExecutor;
+
+let executor = CommandExecutor::new(&config.project_path);
+let copied = CommandExecutor::copy_to_output(&source, &output_dir, "Language")?;
+if CommandExecutor::is_tool_installed("tool") { /* ... */ }
+
+// ❌ Bad - duplicate implementation
+fn my_execute_command() { /* ... */ }
+```
+
+#### Error Handling
+
+Use consistent error types:
+
+```rust
+// ✅ Good - use CompilationError types
+return Err(CompilationError::BuildToolNotFound {
+    tool: "compiler".to_string(),
+    language: self.language_name().to_string(),
+});
+
+return Err(CompilationError::BuildFailed {
+    language: self.language_name().to_string(),
+    reason: "Specific reason".to_string(),
+});
+```
+
+#### Plugin Info Structure
+
+Provide comprehensive plugin information:
+
+```rust
+let info = PluginInfo {
+    name: "language".to_string(),
+    version: env!("CARGO_PKG_VERSION").to_string(),
+    description: "Clear description of what this plugin does".to_string(),
+    author: "Wasmrun Team".to_string(),
+    extensions: vec!["ext1".to_string(), "ext2".to_string()],
+    entry_files: vec!["main.ext".to_string(), "build.config".to_string()],
+    plugin_type: PluginType::Builtin,
+    source: None,
+    dependencies: vec![], // External tool dependencies
+    capabilities: PluginCapabilities {
+        compile_wasm: true,
+        compile_webapp: false, // Set to true if supports web apps
+        live_reload: true,
+        optimization: true, // Set to false if not supported
+        custom_targets: vec!["target1".to_string()],
+    },
+};
 ```
 
 ## 🛠️ Development Setup
@@ -123,20 +483,7 @@ cargo test plugin::tests
 cargo test server::tests -- --test-threads=1
 ```
 
-3. **Test plugins**:
-```sh
-# Test plugin detection and dependencies
-wasmrun plugin list
-
-# Test specific plugins
-just example-wasm-rust    # Test Rust plugin
-just run ./examples/rust_example.wasm
-
-just example-wasm-emcc   # Test C plugin (if emcc available)
-just run ./examples/simple.wasm
-```
-
-4. **Code quality**:
+3. **Code quality**:
 ```sh
 just format        # Format code with rustfmt
 just lint          # Run clippy lints
@@ -158,7 +505,6 @@ just clean           # Clean build artifacts
 
 # Plugin testing commands
 just run WASM_FILE   # Test with a WASM file
-just example-wasm    # Generate test WASM files
 just stop            # Stop running servers
 
 # Release commands [For Maintainers only]
@@ -173,110 +519,45 @@ just publish         # Publish to crates.io and GitHub
 3. **Error Handling**: Use the centralized `WasmrunError` types in `src/error.rs`
 4. **Documentation**: Add doc comments for public APIs and complex logic
 5. **Testing**: Add tests for new functionality, ensure they don't hang
-6. **User Experience**: Focus on helpful error messages and clear output
-7. **Plugin Consistency**: Use `CommandExecutor` for shared operations
+6. **Plugin Integration**: Use shared utilities from `utils/` modules
 
-## 🧪 Adding New Features
+### File Organization Guidelines
 
-### Adding a New Command
+When adding new functionality:
 
-1. **Create command file** in `src/commands/`
-2. **Add to CLI** in `src/cli.rs`
-3. **Add to main router** in `src/main.rs`
-4. **Export from commands module** in `src/commands/mod.rs`
+- **Commands**: Add to `src/commands/` if it's a CLI command
+- **Plugin Languages**: Add to `src/plugin/languages/` for built-in plugins
+- **Server Features**: Add to `src/server/` for web server functionality
+- **Utilities**: Add to `src/utils/` for shared functionality
+- **Templates**: Add to `src/template/` for HTML/CSS/JS resources
+- **Tests**: Co-locate with the module being tested or in `tests/` for integration tests
 
-### 🔌 Adding a New Plugin
+## 🚀 Contributing Process
 
-TBD
+### 1. Getting Started
 
-### Enhancing Existing Plugins
-
-To enhance an existing plugin:
-
-1. **Identify the plugin file** in `src/plugin/languages/`
-2. **Add new functionality** to the implementation
-3. **Use shared utilities** from `CommandExecutor` when possible
-4. **Update plugin capabilities** in the `PluginInfo`
-5. **Add tests** for new functionality
-
-### Enhancing the Web Interface
-
-#### Server Templates (WASM Runner)
-
-To modify the WASM runner interface:
-
-1. **HTML**: Edit `src/template/server/index.html`
-2. **CSS**: Edit `src/template/server/style.css` 
-3. **JavaScript**: Edit `src/template/server/scripts.js`
-4. **Wasmrun WASI Implementation**: Edit `src/template/server/wasmrun_wasi_impl.js`
-
-#### Web App Templates (Framework Support)
-
-To modify the web application interface:
-
-1. **HTML**: Edit `src/template/webapp/index.html`
-2. **CSS**: Edit `src/template/webapp/style.css`
-3. **JavaScript**: Edit `src/template/webapp/scripts.js`
-
-**Note**: Templates are embedded at compile time, so changes require rebuilding.
-
-### Testing Your Changes
-
-1. **Unit tests**:
-```sh
-just test
-cargo test my_plugin::tests
-```
-
-2. **Plugin integration testing**:
-```sh
-# Test plugin detection
-wasmrun plugin list
-
-# Test specific plugin functionality
-mkdir test-project && cd test-project
-# Create project files for your plugin
-wasmrun run . --language your-plugin
-```
-
-3. **Manual testing**:
-```sh
-# Test different project types
-mkdir test-rust && cd test-rust
-cargo init --bin
-echo 'fn main() { println!("Hello WASM!"); }' > src/main.rs
-wasmrun run . --watch
-
-# Test plugin selection
-wasmrun verify ./examples/rust_example.wasm --detailed
-wasmrun inspect ./examples/rust_example.wasm
-wasmrun compile ./test-rust --optimization size
-```
-
-## 🤝 Pull Request Process
-
-### Before Submitting
-
-1. **Fork and branch**:
+**Fork and branch**:
 ```sh
 git checkout -b feature/my-new-plugin
 git checkout -b feature/enhance-rust-plugin
 ```
 
-2. **Develop and test**:
+### 2. Development and Testing
+
+**Develop and test**:
 ```sh
 # Make your changes
 just format           # Format code
 just lint             # Check lints
 just test             # Run tests
-just test-plugins     # Test plugin functionality
-just example-wasm     # Test with examples
 ```
 
-3. **Update documentation**:
-   - Update relevant documentation in README.md if needed
-   - Add tests for new plugin functionality
-   - Update this CONTRIBUTING.md if adding new patterns
+### 3. Documentation Updates
+
+**Update documentation**:
+- Update relevant documentation in README.md if needed
+- Add tests for new plugin functionality
+- Update this CONTRIBUTING.md if adding new patterns
 
 ### PR Guidelines
 
@@ -343,105 +624,143 @@ For plugin-specific features:
 - **Identify target plugin** - which plugin needs enhancement?
 - **Plugin compatibility** - how would it affect other plugins?
 - **Shared utilities** - could it benefit multiple plugins?
-- **Performance impact** - especially for compilation speed
 
-_If you feel unsure about it, feel free to [open a discussion](https://github.com/anistark/wasmrun/discussions)._
+## 🧪 Testing Guidelines
 
-## 📚 Resources
+### Running Tests
 
-### About Wasmrun
+```sh
+# Run all tests
+just test
 
-- ✨ [Wasmrun: A Wasm Runtime](https://blog.anirudha.dev/wasmrun)
-
-### Learning WebAssembly
-
-- [WebAssembly Official Site](https://webassembly.org/)
-- [WASI Specification](https://github.com/WebAssembly/WASI)
-- [Rust and WebAssembly Book](https://rustwasm.github.io/docs/book/)
-
-### Plugin Development
-
-- [Rust Trait Objects](https://doc.rust-lang.org/book/ch17-02-trait-objects.html)
-- [Error Handling in Rust](https://doc.rust-lang.org/book/ch09-00-error-handling.html)
-- [Testing in Rust](https://doc.rust-lang.org/book/ch11-00-testing.html)
-
-### Language-Specific Resources
-
-- **Rust**: [The Rust Programming Language](https://doc.rust-lang.org/book/)
-- **Go**: [TinyGo Documentation](https://tinygo.org/docs/)
-- **C/C++**: [Emscripten Documentation](https://emscripten.org/docs/)
-- **AssemblyScript**: [AssemblyScript Book](https://www.assemblyscript.org/)
-- **Python**: [Waspy](https://github.com/anistark/waspy)
-
-### Rust Resources
-
-- [The Rust Programming Language](https://doc.rust-lang.org/book/)
-- [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
-- [Clap Documentation](https://docs.rs/clap/latest/clap/)
-
-### Project-Specific
-
-- [Wasmrun Issues](https://github.com/anistark/wasmrun/issues)
-- [Wasmrun Discussions](https://github.com/anistark/wasmrun/discussions)
-
-## 🧪 Plugin Development Best Practices
-
-### Using Shared Utilities
-
-Always use `CommandExecutor` for common operations:
-
-```rust
-// ✅ Good - use shared utilities
-use crate::utils::CommandExecutor;
-
-let output = CommandExecutor::execute_command("tool", &args, &dir, verbose)?;
-let copied = CommandExecutor::copy_to_output(&source, &output_dir, "Language")?;
-if CommandExecutor::is_tool_installed("tool") { /* ... */ }
-
-// ❌ Bad - duplicate implementation
-fn my_execute_command() { /* ... */ }
+# Run specific test categories
+cargo test --lib                         # Unit tests
+cargo test --test integration            # Integration tests
+cargo test plugin::                      # Plugin tests
+cargo test server:: -- --test-threads=1  # Server tests (single-threaded)
 ```
 
-### Error Handling
+### Test Data and Examples
 
-Use consistent error types:
+Create realistic test scenarios:
 
-```rust
-// ✅ Good - use CompilationError types
-return Err(CompilationError::BuildToolNotFound {
-    tool: "compiler".to_string(),
-    language: self.language_name().to_string(),
-});
-
-return Err(CompilationError::BuildFailed {
-    language: self.language_name().to_string(),
-    reason: "Specific reason".to_string(),
-});
+```sh
+# Test project structures should mirror real-world usage
+tests/
+├── fixtures/
+│   ├── rust_project/
+│   │   ├── Cargo.toml
+│   │   └── src/main.rs
+│   ├── c_project/
+│   │   ├── Makefile
+│   │   └── main.c
+│   └── mylang_project/
+│       ├── main.ml
+│       └── mylang.config
+└── integration/
+    ├── plugin_tests.rs
+    └── server_tests.rs
 ```
 
-### Plugin Info Structure
+## 🔧 Advanced Development Topics
 
-Provide comprehensive plugin information:
+### Plugin System Architecture
 
+The plugin system is designed with these principles:
+
+1. **Trait-based**: All plugins implement the same `Plugin` and `WasmBuilder` traits
+2. **Dynamic Loading**: External plugins are loaded at runtime via dynamic libraries
+3. **Configuration-driven**: Plugin behavior is controlled through structured configuration
+4. **Error Propagation**: Consistent error handling across all plugins
+
+### Adding New Command
+
+To add a new CLI command:
+
+1. **Create command file**:
 ```rust
-let info = PluginInfo {
-    name: "language".to_string(),
-    version: env!("CARGO_PKG_VERSION").to_string(),
-    description: "Clear description of what this plugin does".to_string(),
-    author: "Wasmrun Team".to_string(),
-    extensions: vec!["ext1".to_string(), "ext2".to_string()],
-    entry_files: vec!["main.ext".to_string(), "build.config".to_string()],
-    plugin_type: PluginType::Builtin,
-    source: None,
-    dependencies: vec![], // External tool dependencies
-    capabilities: PluginCapabilities {
-        compile_wasm: true,
-        compile_webapp: false, // Set to true if supports web apps
-        live_reload: true,
-        optimization: true, // Set to false if not supported
-        custom_targets: vec!["target1".to_string()],
+// src/commands/my_command.rs
+use crate::error::Result;
+
+pub fn run_my_command(arg: &str) -> Result<()> {
+    println!("Running my command with: {}", arg);
+    Ok(())
+}
+```
+
+2. **Update command module**:
+```rust
+// src/commands/mod.rs
+pub mod my_command;
+pub use my_command::run_my_command;
+```
+
+3. **Add to CLI definition**:
+```rust
+// src/cli.rs
+#[derive(Parser)]
+pub enum Commands {
+    // ... existing commands
+    MyCommand {
+        arg: String,
     },
-};
+}
+```
+
+4. **Handle in main**:
+```rust
+// src/main.rs
+Commands::MyCommand { arg } => {
+    commands::run_my_command(&arg)?;
+}
+```
+
+### Extending Server Functionality
+
+To add new server endpoints:
+
+1. **Add handler**:
+```rust
+// src/server/handler.rs
+fn handle_my_endpoint(request: &Request<()>) -> Response<std::io::Cursor<Vec<u8>>> {
+    let response_body = "My custom response";
+    create_response(200, "text/plain", response_body.as_bytes())
+}
+```
+
+2. **Register route**:
+```rust
+// In the main request handler
+"/my-endpoint" => handle_my_endpoint(request),
+```
+
+### Plugin Configuration Schema
+
+External plugins use a standardized configuration format:
+
+```toml
+# wasmrun.toml
+[plugin]
+name = "plugin-name"
+version = "1.0.0"
+description = "Plugin description"
+author = "Author Name"
+
+[dependencies]
+system = ["tool1 >= 1.0", "tool2"]
+wasmrun = "0.10.0"
+
+[capabilities]
+compile_wasm = true
+compile_webapp = false
+live_reload = true
+optimization = true
+custom_targets = ["wasm32-wasi", "wasm32-unknown-unknown"]
+
+[settings]
+default_optimization = "size"
+entry_files = ["main.ext", "app.ext"]
+file_extensions = ["ext", "extension"]
 ```
 
 ## 📄 License
