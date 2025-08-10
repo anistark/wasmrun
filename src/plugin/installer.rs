@@ -1,4 +1,5 @@
 use crate::error::{Result, WasmrunError};
+use crate::utils::{PluginUtils, SystemUtils};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -14,20 +15,20 @@ impl PluginInstaller {
             )));
         }
 
-        if !Self::is_cargo_available() {
+        if !SystemUtils::is_tool_available("cargo") {
             return Err(WasmrunError::from(
                 "cargo is required for plugin installation but was not found",
             ));
         }
 
-        let plugin_dir = Self::get_plugin_directory(plugin_name)?;
+        let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
 
         if Self::is_plugin_library_installed(plugin_name) {
             result.binary_already_installed = true;
-            let current_version = Self::detect_plugin_version_from_metadata(plugin_name)
+            let current_version = PluginUtils::detect_plugin_version_from_metadata(plugin_name)
                 .unwrap_or_else(|| "unknown".to_string());
 
-            if let Some(latest_version) = Self::get_latest_crates_io_version(plugin_name) {
+            if let Some(latest_version) = SystemUtils::get_latest_crates_version(plugin_name) {
                 if current_version != latest_version && current_version != "unknown" {
                     println!("📦 Installed version: {current_version}");
                     println!("🆕 Latest version available: {latest_version}");
@@ -45,7 +46,7 @@ impl PluginInstaller {
         } else {
             Self::install_plugin_library(plugin_name, &plugin_dir)?;
             result.binary_installed = true;
-            result.version = Self::get_latest_crates_io_version(plugin_name)
+            result.version = SystemUtils::get_latest_crates_version(plugin_name)
                 .unwrap_or_else(|| "unknown".to_string());
 
             println!(
@@ -57,40 +58,30 @@ impl PluginInstaller {
         Ok(result)
     }
 
-    #[allow(dead_code)]
     pub fn update_plugin_metadata(plugin_name: &str, new_version: &str) -> Result<()> {
-        if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
-            let metadata_content = format!(
-                "[metadata]\ninstalled_at = \"{}\"\nversion = \"{}\"\nplugin_name = \"{}\"\ninstall_method = \"cargo\"\nupdated_at = \"{}\"\n",
-                chrono::Utc::now().to_rfc3339(),
-                new_version,
-                plugin_name,
-                chrono::Utc::now().to_rfc3339()
-            );
-
-            let metadata_path = plugin_dir.join(".wasmrun_metadata");
-            std::fs::write(&metadata_path, metadata_content)
-                .map_err(|e| WasmrunError::from(format!("Failed to update metadata file: {e}")))?;
-
+        if let Ok(plugin_dir) = PluginUtils::get_plugin_directory(plugin_name) {
+            PluginUtils::create_metadata_file(plugin_name, &plugin_dir, new_version)?;
             println!("📝 Updated metadata file with version: {new_version}");
         }
         Ok(())
     }
 
     pub fn setup_plugin_directory(plugin_name: &str) -> Result<PathBuf> {
-        let plugin_dir = Self::get_plugin_directory(plugin_name)?;
+        let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
 
         std::fs::create_dir_all(&plugin_dir)
             .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {e}")))?;
 
         Self::create_plugin_manifest(plugin_name, &plugin_dir)?;
-        Self::create_metadata_file(plugin_name, &plugin_dir)?;
+        let version = SystemUtils::get_latest_crates_version(plugin_name)
+            .unwrap_or_else(|| "unknown".to_string());
+        PluginUtils::create_metadata_file(plugin_name, &plugin_dir, &version)?;
 
         Ok(plugin_dir)
     }
 
     pub fn remove_plugin_directory(plugin_name: &str) -> Result<()> {
-        let plugin_dir = Self::get_plugin_directory(plugin_name)?;
+        let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
         if plugin_dir.exists() {
             std::fs::remove_dir_all(&plugin_dir).map_err(|e| {
                 WasmrunError::from(format!("Failed to remove plugin directory: {e}"))
@@ -103,16 +94,8 @@ impl PluginInstaller {
         matches!(plugin_name, "wasmrust" | "wasmgo")
     }
 
-    fn is_cargo_available() -> bool {
-        Command::new("cargo")
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
     fn is_plugin_library_installed(plugin_name: &str) -> bool {
-        if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
+        if let Ok(plugin_dir) = PluginUtils::get_plugin_directory(plugin_name) {
             let cargo_toml = plugin_dir.join("Cargo.toml");
             let src_lib = plugin_dir.join("src").join("lib.rs");
 
@@ -173,8 +156,8 @@ impl PluginInstaller {
     }
 
     fn setup_wasmrust_plugin(plugin_dir: &Path) -> Result<()> {
-        let version =
-            Self::get_latest_crates_io_version("wasmrust").unwrap_or_else(|| "0.3.0".to_string());
+        let version = SystemUtils::get_latest_crates_version("wasmrust")
+            .unwrap_or_else(|| "0.3.0".to_string());
 
         let cargo_toml_content = format!(
             r#"[package]
@@ -223,8 +206,8 @@ dependencies = ["cargo", "rustc"]
     }
 
     fn setup_wasmgo_plugin(plugin_dir: &Path) -> Result<()> {
-        let version =
-            Self::get_latest_crates_io_version("wasmgo").unwrap_or_else(|| "0.3.0".to_string());
+        let version = SystemUtils::get_latest_crates_version("wasmgo")
+            .unwrap_or_else(|| "0.3.0".to_string());
 
         let cargo_toml_content = format!(
             r#"[package]
@@ -453,11 +436,6 @@ impl WasmGoBuilder {
 }
 "#
     }
-    pub fn get_plugin_directory(plugin_name: &str) -> Result<PathBuf> {
-        let home_dir = dirs::home_dir()
-            .ok_or_else(|| WasmrunError::from("Could not determine home directory".to_string()))?;
-        Ok(home_dir.join(".wasmrun").join("plugins").join(plugin_name))
-    }
 
     fn create_plugin_manifest(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
         let manifest_content = match plugin_name {
@@ -507,23 +485,6 @@ tools = ["tinygo"]
         Ok(())
     }
 
-    fn create_metadata_file(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
-        let version = Self::detect_plugin_version_from_metadata(plugin_name)
-            .unwrap_or_else(|| "unknown".to_string());
-        let metadata_content = format!(
-            "[metadata]\ninstalled_at = \"{}\"\nversion = \"{}\"\nbinary_path = \"{}\"\n",
-            chrono::Utc::now().to_rfc3339(),
-            version,
-            plugin_name
-        );
-
-        let metadata_path = plugin_dir.join(".wasmrun_metadata");
-        std::fs::write(&metadata_path, metadata_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to create metadata file: {e}")))?;
-
-        Ok(())
-    }
-
     pub fn uninstall_plugin_library(plugin_name: &str) -> Result<()> {
         println!("Removing plugin library files...");
 
@@ -551,7 +512,7 @@ tools = ["tinygo"]
     pub fn verify_plugin_installation(plugin_name: &str) -> Result<PluginVerificationResult> {
         let mut result = PluginVerificationResult::new(plugin_name);
 
-        if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
+        if let Ok(plugin_dir) = PluginUtils::get_plugin_directory(plugin_name) {
             result.directory_exists = plugin_dir.exists();
 
             if result.directory_exists {
@@ -567,21 +528,8 @@ tools = ["tinygo"]
                 let src_lib_path = plugin_dir.join("src").join("lib.rs");
                 let has_source_files = src_lib_path.exists();
 
-                let missing_deps = match plugin_name {
-                    "wasmrust" => {
-                        vec![
-                            ("cargo", Self::is_command_available("cargo")),
-                            ("rustc", Self::is_command_available("rustc")),
-                        ]
-                    }
-                    "wasmgo" => {
-                        vec![("tinygo", Self::is_command_available("tinygo"))]
-                    }
-                    _ => vec![],
-                };
-
-                result.dependencies_available =
-                    missing_deps.iter().all(|(_, available)| *available);
+                let missing_deps = PluginUtils::check_plugin_dependencies(plugin_name);
+                result.dependencies_available = missing_deps.is_empty();
 
                 result.is_functional = result.binary_available
                     && result.manifest_exists
@@ -597,14 +545,7 @@ tools = ["tinygo"]
                 println!("  Source files exist: {has_source_files}");
 
                 if !missing_deps.is_empty() {
-                    println!("  Dependencies:");
-                    for (dep, available) in missing_deps {
-                        let status = if available { "✅" } else { "❌" };
-                        println!("    {dep}: {status}");
-                    }
-                }
-
-                if !result.dependencies_available {
+                    println!("  Missing dependencies: {:?}", missing_deps);
                     println!("  ⚠️  Some dependencies are missing, but plugin files are installed");
                 }
 
@@ -621,62 +562,6 @@ tools = ["tinygo"]
             plugin_name, result.is_functional
         );
         Ok(result)
-    }
-
-    fn is_command_available(cmd: &str) -> bool {
-        Command::new(cmd)
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
-    fn get_latest_crates_io_version(plugin_name: &str) -> Option<String> {
-        if let Ok(output) = Command::new("cargo")
-            .args(["search", plugin_name, "--limit", "1"])
-            .output()
-        {
-            if output.status.success() {
-                let search_output = String::from_utf8_lossy(&output.stdout);
-                if let Some(line) = search_output.lines().next() {
-                    if let Some(start) = line.find(" = \"") {
-                        if let Some(end) = line[start + 4..].find('"') {
-                            return Some(line[start + 4..start + 4 + end].to_string());
-                        }
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
-    fn detect_plugin_version_from_metadata(plugin_name: &str) -> Option<String> {
-        if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
-            let metadata_path = plugin_dir.join(".wasmrun_metadata");
-            if let Ok(content) = std::fs::read_to_string(&metadata_path) {
-                for line in content.lines() {
-                    if line.starts_with("version = ") {
-                        if let Some(version) = line.split(" = ").nth(1) {
-                            return Some(version.trim_matches('"').to_string());
-                        }
-                    }
-                }
-            }
-
-            let cargo_toml_path = plugin_dir.join("Cargo.toml");
-            if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
-                for line in content.lines() {
-                    if line.starts_with("version = ") {
-                        if let Some(version) = line.split(" = ").nth(1) {
-                            return Some(version.trim_matches('"').to_string());
-                        }
-                    }
-                }
-            }
-        }
-
-        None
     }
 }
 

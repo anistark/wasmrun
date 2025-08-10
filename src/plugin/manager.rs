@@ -1,10 +1,12 @@
 //! Plugin management and registry
 
+use crate::utils::PluginUtils;
 use crate::compiler::builder::WasmBuilder;
 use crate::error::{Result, WasmrunError};
 use crate::plugin::builtin::load_all_builtin_plugins;
 use crate::plugin::config::{ExternalPluginEntry, WasmrunConfig};
 use crate::plugin::external::ExternalPluginLoader;
+use crate::plugin::installer::PluginInstaller;
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource};
 use std::collections::HashMap;
 use std::process::Command;
@@ -346,7 +348,7 @@ impl PluginManager {
     fn detect_plugin_version_from_directory(&self, plugin_name: &str) -> Option<String> {
         // Try to get plugin directory
         let plugin_dir =
-            match crate::plugin::installer::PluginInstaller::get_plugin_directory(plugin_name) {
+            match PluginUtils::get_plugin_directory(plugin_name) {
                 Ok(dir) => dir,
                 Err(_) => return None,
             };
@@ -390,33 +392,34 @@ impl PluginManager {
     }
 
     fn reinstall_external_plugin(&mut self, plugin_name: &str, new_version: &str) -> Result<()> {
-        use crate::plugin::installer::PluginInstaller;
+    // Remove current plugin from memory
+    self.external_plugins.remove(plugin_name);
 
-        // Remove current plugin from memory
-        self.external_plugins.remove(plugin_name);
+    // Remove plugin directory
+    PluginInstaller::remove_plugin_directory(plugin_name)?;
 
-        // Remove plugin directory
-        PluginInstaller::remove_plugin_directory(plugin_name)?;
+    // Install the plugin again (this will get the latest version)
+    let _result = PluginInstaller::install_external_plugin(plugin_name)?;
 
-        // Install the plugin again (this will get the latest version)
-        let _result = PluginInstaller::install_external_plugin(plugin_name)?;
+    // 🔧 FIX: Update the actual plugin metadata files with the new version
+    PluginInstaller::update_plugin_metadata(plugin_name, new_version)?;
 
-        // Update the config with the new version
-        if let Some(entry) = self.config.external_plugins.get_mut(plugin_name) {
-            entry.info.version = new_version.to_string();
-            if let PluginSource::CratesIo { version, .. } = &mut entry.source {
-                *version = new_version.to_string();
-            }
+    // Update the config with the new version
+    if let Some(entry) = self.config.external_plugins.get_mut(plugin_name) {
+        entry.info.version = new_version.to_string();
+        if let PluginSource::CratesIo { version, .. } = &mut entry.source {
+            *version = new_version.to_string();
         }
-
-        // Save config
-        self.config.save()?;
-
-        // Reload the plugin
-        self.reload_single_plugin(plugin_name)?;
-
-        Ok(())
     }
+
+    // Save config
+    self.config.save()?;
+
+    // Reload the plugin
+    self.reload_single_plugin(plugin_name)?;
+
+    Ok(())
+}
 
     pub fn enable_plugin(&mut self, plugin_name: &str) -> Result<()> {
         if let Some(entry) = self.config.external_plugins.get_mut(plugin_name) {
@@ -809,7 +812,7 @@ impl PluginManager {
             let cargo_toml_path = plugin_dir.join("Cargo.toml");
             if cargo_toml_path.exists() {
                 // Verify it's a valid wasmrun plugin
-                if self.is_valid_wasmrun_plugin(&cargo_toml_path) {
+                if PluginUtils::is_valid_wasmrun_plugin(&cargo_toml_path) {
                     return true;
                 }
             }
@@ -837,17 +840,6 @@ impl PluginManager {
         }
 
         false
-    }
-
-    /// Verify if a Cargo.toml belongs to a wasmrun plugin
-    fn is_valid_wasmrun_plugin(&self, cargo_toml_path: &std::path::Path) -> bool {
-        if let Ok(content) = std::fs::read_to_string(cargo_toml_path) {
-            content.contains("[wasm_plugin]")
-                || content.contains("wasmrun")
-                || content.contains("wasm-bindgen")
-        } else {
-            false
-        }
     }
 
     pub fn check_plugin_health(&self, plugin_name: &str) -> Result<PluginHealthStatus> {

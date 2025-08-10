@@ -6,6 +6,7 @@ use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
 use crate::error::{CompilationResult, Result, WasmrunError};
 use crate::plugin::config::ExternalPluginEntry;
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource, PluginType};
+use crate::utils::{PluginUtils, SystemUtils};
 
 #[cfg(not(target_os = "windows"))]
 use crate::plugin::bridge::{symbols::*, PluginSymbols};
@@ -23,7 +24,7 @@ impl ExternalPluginWrapper {
     pub fn new(_plugin_path: PathBuf, entry: ExternalPluginEntry) -> Result<Self> {
         let plugin_name = entry.info.name.clone();
 
-        if !Self::is_plugin_available(&plugin_name) {
+        if !PluginUtils::is_plugin_available(&plugin_name) {
             return Err(WasmrunError::from(format!(
                 "Plugin '{plugin_name}' not available"
             )));
@@ -42,7 +43,7 @@ impl ExternalPluginWrapper {
 
     #[cfg(not(target_os = "windows"))]
     fn try_load_library(plugin_name: &str) -> Result<Option<Arc<Library>>> {
-        let plugin_dir = Self::get_plugin_directory(plugin_name)?;
+        let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
 
         let lib_extensions = ["so", "dylib"];
 
@@ -69,64 +70,11 @@ impl ExternalPluginWrapper {
         Ok(None)
     }
 
-    pub fn is_plugin_available(plugin_name: &str) -> bool {
-        if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
-            if plugin_dir.exists() {
-                let cargo_toml_path = plugin_dir.join("Cargo.toml");
-                if cargo_toml_path.exists() {
-                    if Self::is_valid_wasmrun_plugin(&cargo_toml_path) {
-                        return true;
-                    }
-                    return true;
-                }
-
-                let manifest_path = plugin_dir.join("wasmrun.toml");
-                if manifest_path.exists() {
-                    return true;
-                }
-
-                let metadata_path = plugin_dir.join(".wasmrun_metadata");
-                if metadata_path.exists() {
-                    return true;
-                }
-
-                let lib_extensions = ["so", "dylib", "dll"];
-                for ext in &lib_extensions {
-                    let lib_path = plugin_dir.join(format!("lib{plugin_name}.{ext}"));
-                    if lib_path.exists() {
-                        return true;
-                    }
-                }
-
-                let src_path = plugin_dir.join("src");
-                if src_path.exists() && src_path.is_dir() {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    fn is_valid_wasmrun_plugin(cargo_toml_path: &std::path::Path) -> bool {
-        if let Ok(content) = std::fs::read_to_string(cargo_toml_path) {
-            content.contains("[wasm_plugin]")
-                || content.contains("wasm-bindgen")
-                || content.contains("tinygo")
-        } else {
-            false
-        }
-    }
-
-    fn get_plugin_directory(plugin_name: &str) -> Result<std::path::PathBuf> {
-        use crate::plugin::config::WasmrunConfig;
-        let config_dir = WasmrunConfig::config_dir()?;
-        Ok(config_dir.join("plugins").join(plugin_name))
-    }
-
     fn check_project_via_binary(&self, project_path: &str) -> bool {
         match &self.plugin_name as &str {
-            "wasmrust" => Path::new(project_path).join("Cargo.toml").exists(),
+            "wasmrust" => {
+                Path::new(project_path).join("Cargo.toml").exists()
+            }
             "wasmgo" => {
                 Path::new(project_path).join("go.mod").exists() || self.has_go_files(project_path)
             }
@@ -178,7 +126,7 @@ impl Plugin for ExternalPluginWrapper {
     }
 
     fn can_handle_project(&self, project_path: &str) -> bool {
-        if Self::is_plugin_available(&self.plugin_name) {
+        if PluginUtils::is_plugin_available(&self.plugin_name) {
             return self.check_project_via_binary(project_path);
         }
         self.check_project_via_manifest(project_path)
@@ -202,7 +150,7 @@ pub struct ExternalWasmBuilder {
 
 impl WasmBuilder for ExternalWasmBuilder {
     fn can_handle_project(&self, project_path: &str) -> bool {
-        ExternalPluginWrapper::is_plugin_available(&self.plugin_name)
+        PluginUtils::is_plugin_available(&self.plugin_name)
             && match &self.plugin_name as &str {
                 "wasmrust" => Path::new(project_path).join("Cargo.toml").exists(),
                 "wasmgo" => {
@@ -286,29 +234,7 @@ impl WasmBuilder for ExternalWasmBuilder {
     }
 
     fn check_dependencies(&self) -> Vec<String> {
-        let mut missing = Vec::new();
-
-        match &self.plugin_name as &str {
-            "wasmrust" => {
-                if !self.is_tool_available("cargo") {
-                    missing.push("cargo".to_string());
-                }
-                if !self.is_tool_available("rustc") {
-                    missing.push("rustc".to_string());
-                }
-                if !self.is_wasm_target_installed() {
-                    missing.push("wasm32-unknown-unknown target".to_string());
-                }
-            }
-            "wasmgo" => {
-                if !self.is_tool_available("tinygo") {
-                    missing.push("tinygo".to_string());
-                }
-            }
-            _ => {}
-        }
-
-        missing
+        PluginUtils::check_plugin_dependencies(&self.plugin_name)
     }
 
     fn validate_project(&self, project_path: &str) -> CompilationResult<()> {
@@ -338,7 +264,7 @@ impl ExternalWasmBuilder {
         })?;
 
         // Check if project has wasm-bindgen dependency
-        if self.has_wasm_bindgen_dependency(project_path) && self.is_tool_available("wasm-pack") {
+        if self.has_wasm_bindgen_dependency(project_path) && SystemUtils::is_tool_available("wasm-pack") {
             self.build_rust_with_wasm_pack(project_path, output_dir)
         } else {
             self.build_rust_with_cargo(project_path, output_dir)
@@ -347,11 +273,7 @@ impl ExternalWasmBuilder {
 
     fn has_wasm_bindgen_dependency(&self, project_path: &Path) -> bool {
         let cargo_toml_path = project_path.join("Cargo.toml");
-        if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
-            content.contains("wasm-bindgen")
-        } else {
-            false
-        }
+        SystemUtils::has_wasm_bindgen_dependency(&cargo_toml_path)
     }
 
     fn build_rust_with_wasm_pack(
@@ -360,7 +282,11 @@ impl ExternalWasmBuilder {
         output_dir: &Path,
     ) -> CompilationResult<BuildResult> {
         let output = Command::new("wasm-pack")
-            .args(["build", "--target", "web", "--out-dir"])
+            .args([
+                "build",
+                "--target", "web",
+                "--out-dir",
+            ])
             .arg(output_dir)
             .current_dir(project_path)
             .output()
@@ -387,9 +313,7 @@ impl ExternalWasmBuilder {
                 if let Some(ext) = path.extension() {
                     if ext == "wasm" {
                         wasm_file = Some(path);
-                    } else if ext == "js"
-                        && path.file_name() != Some(std::ffi::OsStr::new("package.js"))
-                    {
+                    } else if ext == "js" && path.file_name() != Some(std::ffi::OsStr::new("package.js")) {
                         // Skip package.js, look for the main JS file
                         js_file = Some(path);
                     }
@@ -412,11 +336,12 @@ impl ExternalWasmBuilder {
                     files.push(entry.path().to_string_lossy().to_string());
                 }
             }
-
+            
             Err(crate::error::CompilationError::BuildFailed {
                 language: "rust".to_string(),
                 reason: format!(
-                    "wasm-pack succeeded but no .wasm file was found. Generated files: {files:?}"
+                    "wasm-pack succeeded but no .wasm file was found. Generated files: {:?}",
+                    files
                 ),
             })
         }
@@ -432,8 +357,7 @@ impl ExternalWasmBuilder {
         let output = Command::new("cargo")
             .args([
                 "build",
-                "--target",
-                "wasm32-unknown-unknown",
+                "--target", "wasm32-unknown-unknown",
                 "--release",
                 "--target-dir",
             ])
@@ -504,7 +428,11 @@ impl ExternalWasmBuilder {
         let wasm_file = output_dir.join("main.wasm");
 
         let output = Command::new("tinygo")
-            .args(["build", "-target", "wasm", "-o"])
+            .args([
+                "build",
+                "-target", "wasm",
+                "-o",
+            ])
             .arg(&wasm_file)
             .arg(".")
             .current_dir(project_path)
@@ -549,31 +477,6 @@ impl ExternalWasmBuilder {
         }
         false
     }
-
-    fn is_tool_available(&self, tool: &str) -> bool {
-        let which_cmd = if cfg!(target_os = "windows") {
-            "where"
-        } else {
-            "which"
-        };
-
-        Command::new(which_cmd)
-            .arg(tool)
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
-    fn is_wasm_target_installed(&self) -> bool {
-        Command::new("rustup")
-            .args(["target", "list", "--installed"])
-            .output()
-            .map(|output| {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                stdout.contains("wasm32-unknown-unknown")
-            })
-            .unwrap_or(false)
-    }
 }
 
 pub struct ExternalPluginLoader;
@@ -582,62 +485,6 @@ impl ExternalPluginLoader {
     pub fn load(entry: &ExternalPluginEntry) -> Result<Box<dyn Plugin>> {
         let wrapper = ExternalPluginWrapper::new(PathBuf::new(), entry.clone())?;
         Ok(Box::new(wrapper))
-    }
-
-    pub fn get_plugin_directory(plugin_name: &str) -> Result<std::path::PathBuf> {
-        use crate::plugin::config::WasmrunConfig;
-        let config_dir = WasmrunConfig::config_dir()?;
-        Ok(config_dir.join("plugins").join(plugin_name))
-    }
-
-    #[allow(dead_code)]
-    pub fn is_plugin_available(plugin_name: &str) -> bool {
-        if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
-            if plugin_dir.exists() {
-                let cargo_toml_path = plugin_dir.join("Cargo.toml");
-                if cargo_toml_path.exists() {
-                    if Self::is_valid_wasmrun_plugin(&cargo_toml_path) {
-                        return true;
-                    }
-                    return true;
-                }
-
-                let manifest_path = plugin_dir.join("wasmrun.toml");
-                if manifest_path.exists() {
-                    return true;
-                }
-
-                let metadata_path = plugin_dir.join(".wasmrun_metadata");
-                if metadata_path.exists() {
-                    return true;
-                }
-
-                let lib_extensions = ["so", "dylib", "dll"];
-                for ext in &lib_extensions {
-                    let lib_path = plugin_dir.join(format!("lib{plugin_name}.{ext}"));
-                    if lib_path.exists() {
-                        return true;
-                    }
-                }
-
-                let src_path = plugin_dir.join("src");
-                if src_path.exists() && src_path.is_dir() {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    fn is_valid_wasmrun_plugin(cargo_toml_path: &std::path::Path) -> bool {
-        if let Ok(content) = std::fs::read_to_string(cargo_toml_path) {
-            content.contains("[wasm_plugin]")
-                || content.contains("wasm-bindgen")
-                || content.contains("tinygo")
-        } else {
-            false
-        }
     }
 
     pub fn create_wasmrust_entry() -> ExternalPluginEntry {
@@ -725,102 +572,27 @@ impl ExternalPluginLoader {
 }
 
 fn detect_wasmrust_version() -> Option<String> {
-    if let Ok(plugin_dir) = ExternalPluginLoader::get_plugin_directory("wasmrust") {
+    if let Ok(plugin_dir) = PluginUtils::get_plugin_directory("wasmrust") {
         let cargo_toml_path = plugin_dir.join("Cargo.toml");
-        if cargo_toml_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
-                if let Ok(parsed) = toml::from_str::<toml::Value>(&content) {
-                    if let Some(package) = parsed.get("package") {
-                        if let Some(version) = package.get("version") {
-                            if let Some(version_str) = version.as_str() {
-                                return Some(version_str.to_string());
-                            }
-                        }
-                    }
-                }
+        if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
+            if let Some(version) = SystemUtils::detect_version_from_cargo_toml(&content) {
+                return Some(version);
             }
         }
     }
 
-    if let Ok(plugin_dir) = ExternalPluginLoader::get_plugin_directory("wasmrust") {
-        let cargo_toml_path = plugin_dir.join("Cargo.toml");
-        if cargo_toml_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
-                for line in content.lines() {
-                    let line = line.trim();
-                    if line.starts_with("version") && line.contains('=') {
-                        if let Some(start) = line.find('"') {
-                            if let Some(end) = line[start + 1..].find('"') {
-                                let version = &line[start + 1..start + 1 + end];
-                                return Some(version.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    get_latest_crates_version("wasmrust")
+    SystemUtils::get_latest_crates_version("wasmrust")
 }
 
 fn detect_wasmgo_version() -> Option<String> {
-    if let Ok(plugin_dir) = ExternalPluginLoader::get_plugin_directory("wasmgo") {
+    if let Ok(plugin_dir) = PluginUtils::get_plugin_directory("wasmgo") {
         let cargo_toml_path = plugin_dir.join("Cargo.toml");
-        if cargo_toml_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
-                if let Ok(parsed) = toml::from_str::<toml::Value>(&content) {
-                    if let Some(package) = parsed.get("package") {
-                        if let Some(version) = package.get("version") {
-                            if let Some(version_str) = version.as_str() {
-                                return Some(version_str.to_string());
-                            }
-                        }
-                    }
-                }
+        if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
+            if let Some(version) = SystemUtils::detect_version_from_cargo_toml(&content) {
+                return Some(version);
             }
         }
     }
 
-    if let Ok(plugin_dir) = ExternalPluginLoader::get_plugin_directory("wasmgo") {
-        let cargo_toml_path = plugin_dir.join("Cargo.toml");
-        if cargo_toml_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
-                for line in content.lines() {
-                    let line = line.trim();
-                    if line.starts_with("version") && line.contains('=') {
-                        if let Some(start) = line.find('"') {
-                            if let Some(end) = line[start + 1..].find('"') {
-                                let version = &line[start + 1..start + 1 + end];
-                                return Some(version.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    get_latest_crates_version("wasmgo")
-}
-
-fn get_latest_crates_version(crate_name: &str) -> Option<String> {
-    if let Ok(output) = std::process::Command::new("cargo")
-        .args(["search", crate_name, "--limit", "1"])
-        .output()
-    {
-        if output.status.success() {
-            let search_output = String::from_utf8_lossy(&output.stdout);
-            if let Some(line) = search_output.lines().next() {
-                if let Some(start) = line.find('"') {
-                    if let Some(end) = line[start + 1..].find('"') {
-                        let version = &line[start + 1..start + 1 + end];
-                        return Some(version.to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    None
+    SystemUtils::get_latest_crates_version("wasmgo")
 }
