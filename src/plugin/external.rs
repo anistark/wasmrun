@@ -70,33 +70,26 @@ impl ExternalPluginWrapper {
     }
 
     pub fn is_plugin_available(plugin_name: &str) -> bool {
-        // Check if plugin directory exists with proper structure
         if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
             if plugin_dir.exists() {
-                // Primary check: Cargo.toml with plugin metadata
                 let cargo_toml_path = plugin_dir.join("Cargo.toml");
                 if cargo_toml_path.exists() {
-                    // Verify it's a wasmrun plugin by checking metadata
                     if Self::is_valid_wasmrun_plugin(&cargo_toml_path) {
                         return true;
                     }
                     return true;
                 }
 
-                // Secondary check: manifest file
                 let manifest_path = plugin_dir.join("wasmrun.toml");
                 if manifest_path.exists() {
                     return true;
                 }
 
-                // Tertiary check: metadata file
                 let metadata_path = plugin_dir.join(".wasmrun_metadata");
                 if metadata_path.exists() {
                     return true;
                 }
 
-                // Quaternary check: shared library files (for dynamic loading)
-                // TODO: Implement library builds
                 let lib_extensions = ["so", "dylib", "dll"];
                 for ext in &lib_extensions {
                     let lib_path = plugin_dir.join(format!("lib{plugin_name}.{ext}"));
@@ -105,7 +98,6 @@ impl ExternalPluginWrapper {
                     }
                 }
 
-                // If plugin directory exists with src/ folder, consider it available
                 let src_path = plugin_dir.join("src");
                 if src_path.exists() && src_path.is_dir() {
                     return true;
@@ -116,10 +108,8 @@ impl ExternalPluginWrapper {
         false
     }
 
-    /// Verify if a Cargo.toml belongs to a wasmrun plugin
     fn is_valid_wasmrun_plugin(cargo_toml_path: &std::path::Path) -> bool {
         if let Ok(content) = std::fs::read_to_string(cargo_toml_path) {
-            // Check for wasmrun plugin markers
             content.contains("[wasm_plugin]")
                 || content.contains("wasm-bindgen")
                 || content.contains("tinygo")
@@ -128,7 +118,6 @@ impl ExternalPluginWrapper {
         }
     }
 
-    /// Get plugin directory path
     fn get_plugin_directory(plugin_name: &str) -> Result<std::path::PathBuf> {
         use crate::plugin::config::WasmrunConfig;
         let config_dir = WasmrunConfig::config_dir()?;
@@ -137,12 +126,8 @@ impl ExternalPluginWrapper {
 
     fn check_project_via_binary(&self, project_path: &str) -> bool {
         match &self.plugin_name as &str {
-            "wasmrust" => {
-                // Check for Cargo.toml
-                Path::new(project_path).join("Cargo.toml").exists()
-            }
+            "wasmrust" => Path::new(project_path).join("Cargo.toml").exists(),
             "wasmgo" => {
-                // Check for go.mod or .go files
                 Path::new(project_path).join("go.mod").exists() || self.has_go_files(project_path)
             }
             _ => false,
@@ -150,17 +135,14 @@ impl ExternalPluginWrapper {
     }
 
     fn check_project_via_manifest(&self, project_path: &str) -> bool {
-        // Basic file extension checking based on plugin info
         let path = Path::new(project_path);
 
-        // Check entry files
         for entry_file in &self.info.entry_files {
             if path.join(entry_file).exists() {
                 return true;
             }
         }
 
-        // Check extensions for files in directory
         if let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries.flatten() {
                 if let Some(ext) = entry.path().extension() {
@@ -232,12 +214,17 @@ impl WasmBuilder for ExternalWasmBuilder {
     }
 
     fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        // Call the plugin binary directly if available
-        self.build_via_binary(config)
+        match &self.plugin_name as &str {
+            "wasmrust" => self.build_rust_project(config),
+            "wasmgo" => self.build_go_project(config),
+            _ => Err(crate::error::CompilationError::BuildFailed {
+                language: self.plugin_name.clone(),
+                reason: format!("Unsupported external plugin: {}", self.plugin_name),
+            }),
+        }
     }
 
     fn clean(&self, project_path: &str) -> Result<()> {
-        // Call plugin-specific clean command
         match &self.plugin_name as &str {
             "wasmrust" => {
                 let output = Command::new("cargo")
@@ -339,11 +326,214 @@ impl WasmBuilder for ExternalWasmBuilder {
 }
 
 impl ExternalWasmBuilder {
-    fn build_via_binary(&self, _config: &BuildConfig) -> CompilationResult<BuildResult> {
-        // TODO: Implement actual binary-based compilation for external plugins
-        Err(crate::error::CompilationError::BuildFailed {
-            language: self.plugin_name.clone(),
-            reason: "External plugin compilation via binary not yet implemented".to_string(),
+    fn build_rust_project(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        let project_path = Path::new(&config.project_path);
+        let output_dir = Path::new(&config.output_dir);
+
+        std::fs::create_dir_all(output_dir).map_err(|e| {
+            crate::error::CompilationError::BuildFailed {
+                language: "rust".to_string(),
+                reason: format!("Failed to create output directory: {e}"),
+            }
+        })?;
+
+        // Check if project has wasm-bindgen dependency
+        if self.has_wasm_bindgen_dependency(project_path) && self.is_tool_available("wasm-pack") {
+            self.build_rust_with_wasm_pack(project_path, output_dir)
+        } else {
+            self.build_rust_with_cargo(project_path, output_dir)
+        }
+    }
+
+    fn has_wasm_bindgen_dependency(&self, project_path: &Path) -> bool {
+        let cargo_toml_path = project_path.join("Cargo.toml");
+        if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
+            content.contains("wasm-bindgen")
+        } else {
+            false
+        }
+    }
+
+    fn build_rust_with_wasm_pack(
+        &self,
+        project_path: &Path,
+        output_dir: &Path,
+    ) -> CompilationResult<BuildResult> {
+        let output = Command::new("wasm-pack")
+            .args(["build", "--target", "web", "--out-dir"])
+            .arg(output_dir)
+            .current_dir(project_path)
+            .output()
+            .map_err(|e| crate::error::CompilationError::BuildFailed {
+                language: "rust".to_string(),
+                reason: format!("Failed to execute wasm-pack: {e}"),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(crate::error::CompilationError::BuildFailed {
+                language: "rust".to_string(),
+                reason: format!("wasm-pack build failed: {stderr}"),
+            });
+        }
+
+        // Find the generated .wasm file - wasm-pack generates files with different naming patterns
+        let mut wasm_file = None;
+        let mut js_file = None;
+
+        if let Ok(entries) = std::fs::read_dir(output_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if ext == "wasm" {
+                        wasm_file = Some(path);
+                    } else if ext == "js"
+                        && path.file_name() != Some(std::ffi::OsStr::new("package.js"))
+                    {
+                        // Skip package.js, look for the main JS file
+                        js_file = Some(path);
+                    }
+                }
+            }
+        }
+
+        if let Some(wasm_path) = wasm_file {
+            Ok(BuildResult {
+                wasm_path: wasm_path.to_string_lossy().to_string(),
+                js_path: js_file.map(|p| p.to_string_lossy().to_string()),
+                additional_files: vec![],
+                is_wasm_bindgen: true,
+            })
+        } else {
+            // List all files in output directory for debugging
+            let mut files = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(output_dir) {
+                for entry in entries.flatten() {
+                    files.push(entry.path().to_string_lossy().to_string());
+                }
+            }
+
+            Err(crate::error::CompilationError::BuildFailed {
+                language: "rust".to_string(),
+                reason: format!(
+                    "wasm-pack succeeded but no .wasm file was found. Generated files: {files:?}"
+                ),
+            })
+        }
+    }
+
+    fn build_rust_with_cargo(
+        &self,
+        project_path: &Path,
+        output_dir: &Path,
+    ) -> CompilationResult<BuildResult> {
+        let target_dir = output_dir.join("target");
+
+        let output = Command::new("cargo")
+            .args([
+                "build",
+                "--target",
+                "wasm32-unknown-unknown",
+                "--release",
+                "--target-dir",
+            ])
+            .arg(&target_dir)
+            .current_dir(project_path)
+            .output()
+            .map_err(|e| crate::error::CompilationError::BuildFailed {
+                language: "rust".to_string(),
+                reason: format!("Failed to execute cargo: {e}"),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(crate::error::CompilationError::BuildFailed {
+                language: "rust".to_string(),
+                reason: format!("Cargo build failed: {stderr}"),
+            });
+        }
+
+        let wasm_dir = target_dir.join("wasm32-unknown-unknown").join("release");
+        let mut wasm_file = None;
+
+        if let Ok(entries) = std::fs::read_dir(&wasm_dir) {
+            for entry in entries.flatten() {
+                if let Some(ext) = entry.path().extension() {
+                    if ext == "wasm" {
+                        wasm_file = Some(entry.path());
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(wasm_path) = wasm_file {
+            let final_wasm_path = output_dir.join("main.wasm");
+            std::fs::copy(&wasm_path, &final_wasm_path).map_err(|e| {
+                crate::error::CompilationError::BuildFailed {
+                    language: "rust".to_string(),
+                    reason: format!("Failed to copy wasm file: {e}"),
+                }
+            })?;
+
+            Ok(BuildResult {
+                wasm_path: final_wasm_path.to_string_lossy().to_string(),
+                js_path: None,
+                additional_files: vec![],
+                is_wasm_bindgen: false,
+            })
+        } else {
+            Err(crate::error::CompilationError::BuildFailed {
+                language: "rust".to_string(),
+                reason: "Cargo build succeeded but no .wasm file was found".to_string(),
+            })
+        }
+    }
+
+    fn build_go_project(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        let project_path = Path::new(&config.project_path);
+        let output_dir = Path::new(&config.output_dir);
+
+        std::fs::create_dir_all(output_dir).map_err(|e| {
+            crate::error::CompilationError::BuildFailed {
+                language: "go".to_string(),
+                reason: format!("Failed to create output directory: {e}"),
+            }
+        })?;
+
+        let wasm_file = output_dir.join("main.wasm");
+
+        let output = Command::new("tinygo")
+            .args(["build", "-target", "wasm", "-o"])
+            .arg(&wasm_file)
+            .arg(".")
+            .current_dir(project_path)
+            .output()
+            .map_err(|e| crate::error::CompilationError::BuildFailed {
+                language: "go".to_string(),
+                reason: format!("Failed to execute tinygo: {e}"),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(crate::error::CompilationError::BuildFailed {
+                language: "go".to_string(),
+                reason: format!("TinyGo build failed: {stderr}"),
+            });
+        }
+
+        if !wasm_file.exists() {
+            return Err(crate::error::CompilationError::BuildFailed {
+                language: "go".to_string(),
+                reason: "TinyGo build succeeded but no .wasm file was generated".to_string(),
+            });
+        }
+
+        Ok(BuildResult {
+            wasm_path: wasm_file.to_string_lossy().to_string(),
+            js_path: None,
+            additional_files: vec![],
+            is_wasm_bindgen: false,
         })
     }
 
@@ -374,7 +564,6 @@ impl ExternalWasmBuilder {
             .unwrap_or(false)
     }
 
-    /// Check if wasm target is installed for Rust
     fn is_wasm_target_installed(&self) -> bool {
         Command::new("rustup")
             .args(["target", "list", "--installed"])
@@ -395,20 +584,16 @@ impl ExternalPluginLoader {
         Ok(Box::new(wrapper))
     }
 
-    /// Get plugin directory path (public static method)
     pub fn get_plugin_directory(plugin_name: &str) -> Result<std::path::PathBuf> {
         use crate::plugin::config::WasmrunConfig;
         let config_dir = WasmrunConfig::config_dir()?;
         Ok(config_dir.join("plugins").join(plugin_name))
     }
 
-    /// Check if plugin is available by looking for library files instead of binary
     #[allow(dead_code)]
     pub fn is_plugin_available(plugin_name: &str) -> bool {
-        // Check if plugin directory exists with proper structure
         if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
             if plugin_dir.exists() {
-                // Primary check: Cargo.toml with plugin metadata
                 let cargo_toml_path = plugin_dir.join("Cargo.toml");
                 if cargo_toml_path.exists() {
                     if Self::is_valid_wasmrun_plugin(&cargo_toml_path) {
@@ -417,19 +602,16 @@ impl ExternalPluginLoader {
                     return true;
                 }
 
-                // Secondary check: manifest file
                 let manifest_path = plugin_dir.join("wasmrun.toml");
                 if manifest_path.exists() {
                     return true;
                 }
 
-                // Tertiary check: metadata file
                 let metadata_path = plugin_dir.join(".wasmrun_metadata");
                 if metadata_path.exists() {
                     return true;
                 }
 
-                // Quaternary check: shared library files (for dynamic loading)
                 let lib_extensions = ["so", "dylib", "dll"];
                 for ext in &lib_extensions {
                     let lib_path = plugin_dir.join(format!("lib{plugin_name}.{ext}"));
@@ -438,7 +620,6 @@ impl ExternalPluginLoader {
                     }
                 }
 
-                // If plugin directory exists with src/ folder, consider it available
                 let src_path = plugin_dir.join("src");
                 if src_path.exists() && src_path.is_dir() {
                     return true;
@@ -449,7 +630,6 @@ impl ExternalPluginLoader {
         false
     }
 
-    /// Verify if a Cargo.toml belongs to a wasm plugin
     fn is_valid_wasmrun_plugin(cargo_toml_path: &std::path::Path) -> bool {
         if let Ok(content) = std::fs::read_to_string(cargo_toml_path) {
             content.contains("[wasm_plugin]")
