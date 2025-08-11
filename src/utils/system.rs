@@ -20,6 +20,7 @@ impl SystemUtils {
     }
 
     /// Check if Rust wasm32-unknown-unknown target is installed
+    #[allow(dead_code)]
     pub fn is_wasm_target_installed() -> bool {
         Command::new("rustup")
             .args(["target", "list", "--installed"])
@@ -52,6 +53,7 @@ impl SystemUtils {
     }
 
     /// Detect version from Cargo.toml content
+    #[allow(dead_code)]
     pub fn detect_version_from_cargo_toml(content: &str) -> Option<String> {
         // Try parsing with toml first
         if let Ok(parsed) = toml::from_str::<toml::Value>(content) {
@@ -81,6 +83,7 @@ impl SystemUtils {
     }
 
     /// Check if project has wasm-bindgen dependency
+    #[allow(dead_code)]
     pub fn has_wasm_bindgen_dependency(cargo_toml_path: &std::path::Path) -> bool {
         if let Ok(content) = std::fs::read_to_string(cargo_toml_path) {
             content.contains("wasm-bindgen")

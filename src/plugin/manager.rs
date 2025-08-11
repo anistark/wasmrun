@@ -1,13 +1,14 @@
 //! Plugin management and registry
 
-use crate::utils::PluginUtils;
 use crate::compiler::builder::WasmBuilder;
 use crate::error::{Result, WasmrunError};
 use crate::plugin::builtin::load_all_builtin_plugins;
 use crate::plugin::config::{ExternalPluginEntry, WasmrunConfig};
 use crate::plugin::external::ExternalPluginLoader;
 use crate::plugin::installer::PluginInstaller;
+use crate::plugin::registry::PluginRegistry;
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource};
+use crate::utils::PluginUtils;
 use std::collections::HashMap;
 use std::process::Command;
 
@@ -347,11 +348,10 @@ impl PluginManager {
 
     fn detect_plugin_version_from_directory(&self, plugin_name: &str) -> Option<String> {
         // Try to get plugin directory
-        let plugin_dir =
-            match PluginUtils::get_plugin_directory(plugin_name) {
-                Ok(dir) => dir,
-                Err(_) => return None,
-            };
+        let plugin_dir = match PluginUtils::get_plugin_directory(plugin_name) {
+            Ok(dir) => dir,
+            Err(_) => return None,
+        };
 
         // Try to read version from Cargo.toml
         let cargo_toml_path = plugin_dir.join("Cargo.toml");
@@ -392,34 +392,34 @@ impl PluginManager {
     }
 
     fn reinstall_external_plugin(&mut self, plugin_name: &str, new_version: &str) -> Result<()> {
-    // Remove current plugin from memory
-    self.external_plugins.remove(plugin_name);
+        // Remove current plugin from memory
+        self.external_plugins.remove(plugin_name);
 
-    // Remove plugin directory
-    PluginInstaller::remove_plugin_directory(plugin_name)?;
+        // Remove plugin directory
+        PluginInstaller::remove_plugin_directory(plugin_name)?;
 
-    // Install the plugin again (this will get the latest version)
-    let _result = PluginInstaller::install_external_plugin(plugin_name)?;
+        // Install the plugin again (this will get the latest version)
+        let _result = PluginInstaller::install_external_plugin(plugin_name)?;
 
-    // 🔧 FIX: Update the actual plugin metadata files with the new version
-    PluginInstaller::update_plugin_metadata(plugin_name, new_version)?;
+        // 🔧 FIX: Update the actual plugin metadata files with the new version
+        PluginInstaller::update_plugin_metadata(plugin_name, new_version)?;
 
-    // Update the config with the new version
-    if let Some(entry) = self.config.external_plugins.get_mut(plugin_name) {
-        entry.info.version = new_version.to_string();
-        if let PluginSource::CratesIo { version, .. } = &mut entry.source {
-            *version = new_version.to_string();
+        // Update the config with the new version
+        if let Some(entry) = self.config.external_plugins.get_mut(plugin_name) {
+            entry.info.version = new_version.to_string();
+            if let PluginSource::CratesIo { version, .. } = &mut entry.source {
+                *version = new_version.to_string();
+            }
         }
+
+        // Save config
+        self.config.save()?;
+
+        // Reload the plugin
+        self.reload_single_plugin(plugin_name)?;
+
+        Ok(())
     }
-
-    // Save config
-    self.config.save()?;
-
-    // Reload the plugin
-    self.reload_single_plugin(plugin_name)?;
-
-    Ok(())
-}
 
     pub fn enable_plugin(&mut self, plugin_name: &str) -> Result<()> {
         if let Some(entry) = self.config.external_plugins.get_mut(plugin_name) {
@@ -481,6 +481,7 @@ impl PluginManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_plugin_source_info(&self, plugin_name: &str) -> Option<String> {
         if let Some(entry) = self.config.external_plugins.get(plugin_name) {
             match &entry.source {
@@ -630,6 +631,7 @@ impl PluginManager {
         )
     }
 
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> &PluginStats {
         &self.plugin_stats
     }
@@ -745,29 +747,17 @@ impl PluginManager {
     }
 
     pub fn register_installed_plugin(&mut self, plugin_name: &str) -> Result<()> {
-        // For external plugins, check if library files are installed instead of binary in PATH
         if !self.is_external_plugin_available(plugin_name) {
             return Err(WasmrunError::from(format!(
-                "Plugin '{plugin_name}' library files not found after installation. Expected files in plugin directory."
-            )));
+            "Plugin '{plugin_name}' library files not found after installation. Expected files in plugin directory."
+        )));
         }
 
-        // Detect plugin version
         let detected_version = self.detect_plugin_version(plugin_name);
 
-        // Create plugin entry
-        let entry = match plugin_name {
-            "wasmrust" => ExternalPluginLoader::create_wasmrust_entry(),
-            "wasmgo" => ExternalPluginLoader::create_wasmgo_entry(),
-            _ => {
-                return Err(WasmrunError::from(format!(
-                    "Plugin '{plugin_name}' registration not supported"
-                )))
-            }
-        };
+        // Use registry to create plugin entry instead of hardcoded match
+        let mut entry = PluginRegistry::create_plugin_entry(plugin_name)?;
 
-        // Update version with detected version
-        let mut entry = entry;
         entry.info.version = detected_version.clone();
         if let PluginSource::CratesIo {
             ref mut version, ..
@@ -776,17 +766,14 @@ impl PluginManager {
             *version = detected_version;
         }
 
-        // Update install path to actual plugin directory
         let plugin_dir = self.get_plugin_directory(plugin_name)?;
         entry.install_path = plugin_dir.to_string_lossy().to_string();
 
-        // Add to config and save
         self.config
             .external_plugins
             .insert(plugin_name.to_string(), entry);
         self.config.save()?;
 
-        // Try to load the plugin
         if let Some(entry) = self.config.external_plugins.get(plugin_name) {
             match ExternalPluginLoader::load(entry) {
                 Ok(plugin) => {
@@ -797,7 +784,8 @@ impl PluginManager {
                 }
                 Err(e) => {
                     eprintln!("Plugin '{plugin_name}' registered but failed to load: {e}");
-                    eprintln!("The plugin will be available for basic operations");
+                    eprintln!("   This might be due to missing dependencies or compilation issues");
+                    eprintln!("   Run 'wasmrun plugin info {plugin_name}' for more details");
                 }
             }
         }
@@ -806,72 +794,30 @@ impl PluginManager {
     }
 
     /// Check if external plugin library files are available (replaces PATH check)
-    fn is_external_plugin_available(&self, plugin_name: &str) -> bool {
-        if let Ok(plugin_dir) = self.get_plugin_directory(plugin_name) {
-            // Check for Cargo.toml with plugin metadata
-            let cargo_toml_path = plugin_dir.join("Cargo.toml");
-            if cargo_toml_path.exists() {
-                // Verify it's a valid wasmrun plugin
-                if PluginUtils::is_valid_wasmrun_plugin(&cargo_toml_path) {
-                    return true;
-                }
-            }
-
-            // Check for manifest file
-            let manifest_path = plugin_dir.join("wasmrun.toml");
-            if manifest_path.exists() {
-                return true;
-            }
-
-            // Check for metadata file
-            let metadata_path = plugin_dir.join(".wasmrun_metadata");
-            if metadata_path.exists() {
-                return true;
-            }
-
-            // Check for shared library files (for dynamic loading)
-            let lib_extensions = ["so", "dylib", "dll"];
-            for ext in &lib_extensions {
-                let lib_path = plugin_dir.join(format!("lib{plugin_name}.{ext}"));
-                if lib_path.exists() {
-                    return true;
-                }
-            }
-        }
-
-        false
+    pub fn is_external_plugin_available(&self, plugin_name: &str) -> bool {
+        PluginRegistry::is_supported_external_plugin(plugin_name)
     }
 
+    #[allow(dead_code)]
     pub fn check_plugin_health(&self, plugin_name: &str) -> Result<PluginHealthStatus> {
-        // Check if plugin exists in builtin or external
-        if let Some(plugin) = self.find_plugin_by_name(plugin_name) {
-            let builder = plugin.get_builder();
-            let missing_deps = builder.check_dependencies();
+        if !self.is_plugin_installed(plugin_name) {
+            return Ok(PluginHealthStatus::NotFound);
+        }
 
-            if missing_deps.is_empty() {
-                Ok(PluginHealthStatus::Healthy)
-            } else {
-                Ok(PluginHealthStatus::MissingDependencies(missing_deps))
-            }
-        } else if self.config.external_plugins.contains_key(plugin_name) {
-            // Plugin is in config but not loaded
-            let entry = self.config.external_plugins.get(plugin_name).unwrap();
-            if !entry.enabled {
-                Ok(PluginHealthStatus::LoadError(
-                    "Plugin is disabled".to_string(),
-                ))
-            } else {
-                // Check if library files are available instead of binary
-                if self.is_external_plugin_available(plugin_name) {
-                    Ok(PluginHealthStatus::LoadError(
-                        "Plugin library exists but failed to load".to_string(),
-                    ))
-                } else {
-                    Ok(PluginHealthStatus::NotFound)
-                }
+        // Use registry for dependency checking
+        let missing_deps = PluginRegistry::check_plugin_dependencies(plugin_name);
+
+        if !missing_deps.is_empty() {
+            return Ok(PluginHealthStatus::MissingDependencies(missing_deps));
+        }
+
+        if let Some(entry) = self.config.external_plugins.get(plugin_name) {
+            match ExternalPluginLoader::load(entry) {
+                Ok(_) => Ok(PluginHealthStatus::Healthy),
+                Err(e) => Ok(PluginHealthStatus::LoadError(e.to_string())),
             }
         } else {
-            Ok(PluginHealthStatus::NotFound)
+            Ok(PluginHealthStatus::Healthy)
         }
     }
 
@@ -928,8 +874,10 @@ impl PluginManager {
 #[derive(Debug, Clone)]
 pub enum PluginHealthStatus {
     Healthy,
+    #[allow(dead_code)]
     MissingDependencies(Vec<String>),
     NotFound,
+    #[allow(dead_code)]
     LoadError(String),
 }
 
@@ -944,5 +892,5 @@ pub enum PluginCapabilityFilter {
 }
 
 fn is_supported_external_plugin(plugin: &str) -> bool {
-    matches!(plugin, "wasmrust" | "wasmgo")
+    PluginRegistry::is_supported_external_plugin(plugin)
 }

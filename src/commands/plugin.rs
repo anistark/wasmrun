@@ -1,11 +1,10 @@
 use crate::cli::PluginSubcommands;
-use crate::error::{Result, WasmrunError};
-use crate::plugin::installer::PluginInstaller;
+use crate::error::Result;
 use crate::plugin::manager::PluginManager;
 
-pub fn handle_plugin_command(plugin_cmd: &PluginSubcommands) -> Result<()> {
-    match plugin_cmd {
-        PluginSubcommands::List { all } => run_plugin_list(*all),
+pub fn run_plugin_command(subcommand: &PluginSubcommands) -> Result<()> {
+    match subcommand {
+        PluginSubcommands::List { all: _ } => run_plugin_list(),
         PluginSubcommands::Install { plugin, version: _ } => run_plugin_install(plugin),
         PluginSubcommands::Uninstall { plugin } => run_plugin_uninstall(plugin),
         PluginSubcommands::Update { plugin } => run_plugin_update(plugin),
@@ -21,37 +20,39 @@ pub fn handle_plugin_command(plugin_cmd: &PluginSubcommands) -> Result<()> {
     }
 }
 
-pub fn run_plugin_list(_show_all: bool) -> Result<()> {
+pub fn run_plugin_list() -> Result<()> {
     let manager = PluginManager::new()?;
 
     println!(
         "\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m"
     );
-    println!("\x1b[1;34m│\x1b[0m  🔌 \x1b[1;36mWasmrun Plugins\x1b[0m                                      \x1b[1;34m│\x1b[0m");
+    println!(
+        "\x1b[1;34m│\x1b[0m  🔌 \x1b[1;36mInstalled Plugins\x1b[0m                                   \x1b[1;34m│\x1b[0m"
+    );
     println!(
         "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
     );
 
-    let stats = manager.get_stats();
-    println!("\x1b[1;34m│\x1b[0m  📊 \x1b[1;34mSummary:\x1b[0m {} built-in, {} external, {} enabled      \x1b[1;34m│\x1b[0m", 
-             stats.builtin_count, stats.external_count, stats.enabled_count);
-    println!(
-        "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
-    );
-
-    println!("\x1b[1;34m│\x1b[0m  \x1b[1;35m📦 Built-in Plugins\x1b[0m                                     \x1b[1;34m│\x1b[0m");
-
-    for plugin in manager.get_builtin_plugins() {
-        let info = plugin.info();
+    if manager.get_builtin_plugins().is_empty() && manager.get_external_plugins().is_empty() {
         println!(
-            "\x1b[1;34m│\x1b[0m    \x1b[1;32m✅ {:<25}\x1b[0m v{:<10} \x1b[0;37m{}\x1b[0m",
-            info.name, info.version, info.description
+            "\x1b[1;34m│\x1b[0m  No plugins installed                                    \x1b[1;34m│\x1b[0m"
         );
-    }
+    } else {
+        println!(
+            "\x1b[1;34m│\x1b[0m  \x1b[1;36m🔧 Built-in Plugins\x1b[0m                                    \x1b[1;34m│\x1b[0m"
+        );
 
-    if stats.external_count > 0 {
-        println!("\x1b[1;34m│\x1b[0m                                                                 \x1b[1;34m│\x1b[0m");
-        println!("\x1b[1;34m│\x1b[0m  \x1b[1;36m🌐 External Plugins\x1b[0m                                    \x1b[1;34m│\x1b[0m");
+        for plugin in manager.get_builtin_plugins() {
+            let info = plugin.info();
+            println!(
+                "\x1b[1;34m│\x1b[0m    ✅ {:<25} v{:<10} \x1b[0;37m{}\x1b[0m",
+                info.name, info.version, info.description
+            );
+        }
+
+        println!(
+            "\x1b[1;34m│\x1b[0m  \x1b[1;36m🌐 External Plugins\x1b[0m                                    \x1b[1;34m│\x1b[0m"
+        );
 
         for (name, plugin) in manager.get_external_plugins() {
             let info = plugin.info();
@@ -68,170 +69,83 @@ pub fn run_plugin_list(_show_all: bool) -> Result<()> {
     }
 
     println!(
-        "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m\n"
+        "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
     );
 
     Ok(())
 }
 
-pub fn run_plugin_install(plugin: &str) -> Result<()> {
-    println!("Installing plugin: {plugin}");
+pub fn run_plugin_search(query: &str) -> Result<()> {
+    println!("🔍 Searching for plugins: {query}");
 
-    // Check if plugin is already installed
-    let manager = PluginManager::new()?;
-    if manager.is_plugin_installed(plugin) {
-        println!("Plugin '{plugin}' is already installed");
-        return Ok(());
-    }
+    // Basic search implementation - can be enhanced later
+    let available_plugins = ["wasmrust", "wasmgo", "wasmzig", "wasmjs"];
+    let matches: Vec<&str> = available_plugins
+        .iter()
+        .filter(|plugin| plugin.to_lowercase().contains(&query.to_lowercase()))
+        .copied()
+        .collect();
 
-    // Step 1: Install the plugin library and setup directory
-    println!("📦 Setting up plugin library files...");
-    let install_result = PluginInstaller::install_external_plugin(plugin)?;
-    let plugin_dir = PluginInstaller::setup_plugin_directory(plugin)?;
-
-    println!("✅ Plugin files installed to: {}", plugin_dir.display());
-
-    // Step 2: Register plugin in wasmrun config
-    println!("📋 Registering plugin with wasmrun...");
-    let mut manager = PluginManager::new()?;
-
-    match manager.register_installed_plugin(plugin) {
-        Ok(()) => {
-            println!("✅ Plugin '{plugin}' registered successfully");
-        }
-        Err(e) => {
-            println!("⚠️  Plugin files installed but registration had issues: {e}");
-            println!("   Plugin may still be functional for basic operations");
-        }
-    }
-
-    // Step 3: Verify installation
-    println!("🔍 Verifying installation...");
-    let verification = PluginInstaller::verify_plugin_installation(plugin)?;
-
-    if verification.is_functional {
-        println!("🎉 Plugin '{plugin}' installed and verified successfully!");
-
-        // Show installation summary
-        println!("\n📋 Installation Summary:");
-        println!("   Plugin: {plugin}");
-        if !install_result.version.is_empty() {
-            println!("   Version: {}", install_result.version);
-        }
-        println!("   Location: {}", plugin_dir.display());
-        println!("   Status: Functional ✅");
-
-        // Show basic usage info
-        match plugin {
-            "wasmrust" => {
-                println!("\n💡 Usage:");
-                println!("   wasmrun compile ./rust-project");
-                println!("   wasmrun ./rust-project --watch");
-            }
-            "wasmgo" => {
-                println!("\n💡 Usage:");
-                println!("   wasmrun compile ./go-project");
-                println!("   wasmrun ./go-project --watch");
-            }
-            _ => {}
-        }
+    if matches.is_empty() {
+        println!("❌ No plugins found matching '{query}'");
     } else {
-        println!("⚠️  Plugin '{plugin}' installed but may have issues:");
-
-        if !verification.binary_available {
-            println!("   - Plugin library files not properly installed");
+        println!("\n📦 Found {} plugin(s):", matches.len());
+        for plugin in matches {
+            println!("  • {plugin}");
         }
-        if !verification.dependencies_available {
-            println!("   - Dependencies missing:");
-            match plugin {
-                "wasmrust" => {
-                    println!("     • Install: rustup target add wasm32-unknown-unknown");
-                    println!("     • Ensure cargo and rustc are available");
-                }
-                "wasmgo" => {
-                    println!("     • Install TinyGo: https://tinygo.org/getting-started/install/");
-                }
-                _ => {}
-            }
-        }
-        if !verification.directory_exists {
-            println!("   - Plugin directory structure invalid");
-        }
-
-        println!("\n🔧 Try fixing the issues above and run:");
-        println!("   wasmrun plugin install {plugin}");
+        println!("\n💡 Use 'wasmrun plugin install <plugin-name>' to install");
     }
+
+    Ok(())
+}
+
+pub fn run_plugin_install(plugin: &str) -> Result<()> {
+    let mut manager = PluginManager::new()?;
+    println!("🔄 Installing plugin: {plugin}");
+
+    manager.install_plugin(plugin)?;
+    println!("✅ Plugin '{plugin}' installed successfully");
 
     Ok(())
 }
 
 pub fn run_plugin_uninstall(plugin: &str) -> Result<()> {
-    println!("Uninstalling plugin: {plugin}");
-
     let mut manager = PluginManager::new()?;
+    println!("🗑️  Uninstalling plugin: {plugin}");
 
-    // Check if plugin is installed
-    if !manager.is_plugin_installed(plugin) {
-        println!("Plugin '{plugin}' is not installed");
-        return Ok(());
-    }
-
-    // Remove from wasmrun config
-    println!("📋 Removing plugin from wasmrun configuration...");
     manager.uninstall_plugin(plugin)?;
-
-    // Remove plugin directory
-    println!("🗂️  Removing plugin directory...");
-    PluginInstaller::remove_plugin_directory(plugin)?;
-
-    // Uninstall library
-    if should_uninstall_binary() {
-        println!("🧹 Cleaning up plugin library files...");
-        match PluginInstaller::uninstall_plugin_library(plugin) {
-            Ok(()) => println!("Plugin library '{plugin}' also removed"),
-            Err(e) => println!("Warning: Could not remove plugin library: {e}"),
-        }
-    }
-
     println!("✅ Plugin '{plugin}' uninstalled successfully");
+
     Ok(())
 }
 
 pub fn run_plugin_update(plugin: &str) -> Result<()> {
-    if plugin == "all" {
-        println!("🔄 Updating all plugins...");
-    } else {
-        println!("🔄 Checking for updates to plugin: {plugin}");
-    }
-
     let mut manager = PluginManager::new()?;
-    manager.update_plugin(plugin)?;
+    println!("🔄 Updating plugin: {plugin}");
 
-    if plugin == "all" {
-        println!("✅ All plugins have been checked for updates");
-    } else {
-        println!("✅ Plugin update process completed");
-    }
+    manager.update_plugin(plugin)?;
+    println!("✅ Plugin '{plugin}' updated successfully");
+
     Ok(())
 }
 
 pub fn run_plugin_enable(plugin: &str) -> Result<()> {
-    println!("Enabling plugin: {plugin}");
-
     let mut manager = PluginManager::new()?;
-    manager.enable_plugin(plugin)?;
+    println!("✅ Enabling plugin: {plugin}");
 
-    println!("Plugin '{plugin}' enabled");
+    manager.enable_plugin(plugin)?;
+    println!("✅ Plugin '{plugin}' enabled successfully");
+
     Ok(())
 }
 
 pub fn run_plugin_disable(plugin: &str) -> Result<()> {
-    println!("Disabling plugin: {plugin}");
-
     let mut manager = PluginManager::new()?;
-    manager.disable_plugin(plugin)?;
+    println!("❌ Disabling plugin: {plugin}");
 
-    println!("Plugin '{plugin}' disabled");
+    manager.disable_plugin(plugin)?;
+    println!("✅ Plugin '{plugin}' disabled successfully");
+
     Ok(())
 }
 
@@ -239,73 +153,19 @@ pub fn run_plugin_info(plugin: &str) -> Result<()> {
     let manager = PluginManager::new()?;
 
     if let Some(info) = manager.get_plugin_info(plugin) {
-        println!("\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m");
-        println!(
-            "\x1b[1;34m│\x1b[0m  🔌 \x1b[1;36mPlugin Information: {}\x1b[0m",
-            info.name
-        );
-        println!(
-            "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
-        );
-        println!(
-            "\x1b[1;34m│\x1b[0m  📦 \x1b[1;34mName:\x1b[0m {:<49} \x1b[1;34m│\x1b[0m",
-            info.name
-        );
-        println!(
-            "\x1b[1;34m│\x1b[0m  🏷️  \x1b[1;34mVersion:\x1b[0m {:<44} \x1b[1;34m│\x1b[0m",
-            info.version
-        );
-        println!(
-            "\x1b[1;34m│\x1b[0m  📝 \x1b[1;34mDescription:\x1b[0m {:<40} \x1b[1;34m│\x1b[0m",
-            info.description
-        );
-
-        if let Some(source_info) = manager.get_plugin_source_info(plugin) {
-            println!(
-                "\x1b[1;34m│\x1b[0m  🌐 \x1b[1;34mSource:\x1b[0m {source_info:<44} \x1b[1;34m│\x1b[0m"
-            );
-        }
-
-        let health = manager.check_plugin_health(plugin)?;
-        match health {
-            crate::plugin::manager::PluginHealthStatus::Healthy => {
-                println!("\x1b[1;34m│\x1b[0m  ✅ \x1b[1;34mStatus:\x1b[0m \x1b[1;32mHealthy\x1b[0m                              \x1b[1;34m│\x1b[0m");
-            }
-            crate::plugin::manager::PluginHealthStatus::MissingDependencies(deps) => {
-                println!("\x1b[1;34m│\x1b[0m  ⚠️  \x1b[1;34mStatus:\x1b[0m \x1b[1;33mMissing dependencies\x1b[0m                  \x1b[1;34m│\x1b[0m");
-                for dep in deps {
-                    println!("\x1b[1;34m│\x1b[0m    - {dep:<51} \x1b[1;34m│\x1b[0m");
-                }
-            }
-            crate::plugin::manager::PluginHealthStatus::NotFound => {
-                println!("\x1b[1;34m│\x1b[0m  ❌ \x1b[1;34mStatus:\x1b[0m \x1b[1;31mNot found\x1b[0m                             \x1b[1;34m│\x1b[0m");
-            }
-            crate::plugin::manager::PluginHealthStatus::LoadError(err) => {
-                println!("\x1b[1;34m│\x1b[0m  ❌ \x1b[1;34mStatus:\x1b[0m \x1b[1;31mLoad error: {err}\x1b[0m");
-            }
-        }
-
-        println!("\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m\n");
+        println!("\n🔌 Plugin Information:");
+        println!("Name: {}", info.name);
+        println!("Version: {}", info.version);
+        println!("Description: {}", info.description);
+        println!("Author: {}", info.author);
+        println!("Type: {:?}", info.plugin_type);
+        println!("Extensions: {:?}", info.extensions);
+        println!("Entry Files: {:?}", info.entry_files);
+        println!("Dependencies: {:?}", info.dependencies);
+        println!("Capabilities: {:?}", info.capabilities);
     } else {
-        return Err(WasmrunError::from(format!("Plugin '{plugin}' not found")));
+        println!("❌ Plugin '{plugin}' not found");
     }
 
     Ok(())
-}
-
-pub fn run_plugin_search(_query: &str) -> Result<()> {
-    println!("Plugin search not yet implemented");
-    Ok(())
-}
-
-fn should_uninstall_binary() -> bool {
-    println!("Do you also want to remove the plugin library files? (y/N)");
-
-    let mut input = String::new();
-    if std::io::stdin().read_line(&mut input).is_ok() {
-        let input = input.trim().to_lowercase();
-        matches!(input.as_str(), "y" | "yes")
-    } else {
-        false
-    }
 }

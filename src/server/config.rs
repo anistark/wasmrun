@@ -4,8 +4,8 @@ use std::path::Path;
 
 use crate::compiler::builder::{BuildConfig, BuilderFactory, OptimizationLevel, TargetType};
 use crate::error::{Result, ServerError, WasmrunError};
-use crate::utils::{ProjectAnalysis, WasmAnalysis};
 use crate::utils::CommandExecutor;
+use crate::utils::{ProjectAnalysis, WasmAnalysis};
 
 use super::wasm;
 

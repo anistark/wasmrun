@@ -95,7 +95,7 @@ fn main() {
         ),
 
         Some(Commands::Plugin(plugin_cmd)) => {
-            commands::handle_plugin_command(plugin_cmd).map_err(|e| match e {
+            commands::run_plugin_command(plugin_cmd).map_err(|e| match e {
                 WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
                 _ => e,
             })

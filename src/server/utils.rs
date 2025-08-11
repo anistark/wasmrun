@@ -1,6 +1,6 @@
 use crate::error::Result;
-use crate::utils::{ProjectAnalysis, WasmAnalysis};
 use crate::utils::CommandExecutor;
+use crate::utils::{ProjectAnalysis, WasmAnalysis};
 use std::fs;
 use std::net::TcpListener;
 use std::path::Path;

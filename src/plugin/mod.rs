@@ -11,6 +11,7 @@ pub mod external;
 pub mod installer;
 pub mod languages;
 pub mod manager;
+pub mod metadata;
 pub mod registry;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

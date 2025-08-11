@@ -1,9 +1,38 @@
 use crate::error::{Result, WasmrunError};
+use crate::plugin::registry::PluginRegistry;
 use crate::utils::{PluginUtils, SystemUtils};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub struct PluginInstaller;
+
+#[derive(Debug, Clone)]
+pub struct InstallationResult {
+    #[allow(dead_code)]
+    pub plugin_name: String,
+    pub version: String,
+    pub binary_installed: bool,
+    pub binary_already_installed: bool,
+}
+
+impl InstallationResult {
+    pub fn new(plugin_name: &str) -> Self {
+        Self {
+            plugin_name: plugin_name.to_string(),
+            version: String::new(),
+            binary_installed: false,
+            binary_already_installed: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct VerificationResult {
+    pub is_functional: bool,
+    pub version: String,
+    pub missing_dependencies: Vec<String>,
+    pub install_path: String,
+}
 
 impl PluginInstaller {
     pub fn install_external_plugin(plugin_name: &str) -> Result<InstallationResult> {
@@ -11,7 +40,7 @@ impl PluginInstaller {
 
         if !Self::is_supported_plugin(plugin_name) {
             return Err(WasmrunError::from(format!(
-                "Unsupported plugin: {plugin_name}. Supported: wasmrust, wasmgo"
+                "Plugin '{plugin_name}' not found or not a valid WebAssembly plugin"
             )));
         }
 
@@ -44,7 +73,8 @@ impl PluginInstaller {
                 plugin_name, result.version
             );
         } else {
-            Self::install_plugin_library(plugin_name, &plugin_dir)?;
+            Self::install_generic_plugin(plugin_name, &plugin_dir)?;
+
             result.binary_installed = true;
             result.version = SystemUtils::get_latest_crates_version(plugin_name)
                 .unwrap_or_else(|| "unknown".to_string());
@@ -66,6 +96,7 @@ impl PluginInstaller {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn setup_plugin_directory(plugin_name: &str) -> Result<PathBuf> {
         let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
 
@@ -90,8 +121,78 @@ impl PluginInstaller {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    pub fn verify_plugin_installation(plugin_name: &str) -> Result<VerificationResult> {
+        let validation = PluginUtils::validate_plugin_installation(plugin_name)?;
+
+        Ok(VerificationResult {
+            is_functional: validation.is_functional,
+            version: validation.version.unwrap_or_else(|| "unknown".to_string()),
+            missing_dependencies: validation.missing_dependencies,
+            install_path: validation.install_path.unwrap_or_default(),
+        })
+    }
+
+    #[allow(dead_code)]
+    pub fn update_generic_plugin(plugin_name: &str) -> Result<()> {
+        println!("🔄 Updating {plugin_name}...");
+
+        let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
+
+        let output = std::process::Command::new("cargo")
+            .args([
+                "install",
+                plugin_name,
+                "--force",
+                "--root",
+                &plugin_dir.to_string_lossy(),
+            ])
+            .output()
+            .map_err(|e| WasmrunError::from(format!("Failed to update plugin: {e}")))?;
+
+        if output.status.success() {
+            println!("✅ Plugin {plugin_name} updated successfully");
+
+            if let Some(latest_version) = SystemUtils::get_latest_crates_version(plugin_name) {
+                Self::update_plugin_metadata(plugin_name, &latest_version)?;
+            }
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(WasmrunError::from(format!(
+                "Plugin update failed: {stderr}"
+            )));
+        }
+
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn cleanup_generic_plugin(plugin_name: &str) -> Result<()> {
+        let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
+
+        if plugin_dir.exists() {
+            let target_dir = plugin_dir.join("target");
+            if target_dir.exists() {
+                std::fs::remove_dir_all(&target_dir).map_err(|e| {
+                    WasmrunError::from(format!("Failed to clean target directory: {e}"))
+                })?;
+            }
+
+            let pkg_dir = plugin_dir.join("pkg");
+            if pkg_dir.exists() {
+                std::fs::remove_dir_all(&pkg_dir).map_err(|e| {
+                    WasmrunError::from(format!("Failed to clean pkg directory: {e}"))
+                })?;
+            }
+
+            println!("✅ Cleaned {plugin_name} build artifacts");
+        }
+
+        Ok(())
+    }
+
     fn is_supported_plugin(plugin_name: &str) -> bool {
-        matches!(plugin_name, "wasmrust" | "wasmgo")
+        PluginRegistry::validate_plugin(plugin_name).unwrap_or(false)
     }
 
     fn is_plugin_library_installed(plugin_name: &str) -> bool {
@@ -101,7 +202,7 @@ impl PluginInstaller {
 
             if cargo_toml.exists() && src_lib.exists() {
                 if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
-                    if content.contains("[wasmrun.plugin]")
+                    if content.contains("[package.metadata.wasm_plugin]")
                         || content.contains("wasmrun")
                         || content.contains("wasm-bindgen")
                     {
@@ -133,486 +234,204 @@ impl PluginInstaller {
         false
     }
 
-    fn install_plugin_library(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
-        println!("Setting up {plugin_name} plugin library files...");
+    fn install_generic_plugin(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
+        println!("Installing {plugin_name} plugin via cargo...");
 
         std::fs::create_dir_all(plugin_dir)
             .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {e}")))?;
 
-        Self::setup_plugin_source(plugin_name, plugin_dir)?;
-        println!("Plugin '{plugin_name}' library files setup completed");
+        let output = std::process::Command::new("cargo")
+            .args([
+                "install",
+                plugin_name,
+                "--root",
+                &plugin_dir.to_string_lossy(),
+            ])
+            .output()
+            .map_err(|e| WasmrunError::from(format!("Failed to execute cargo install: {e}")))?;
 
-        Ok(())
-    }
+        if !output.status.success() {
+            let _stderr = String::from_utf8_lossy(&output.stderr);
 
-    fn setup_plugin_source(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
-        match plugin_name {
-            "wasmrust" => Self::setup_wasmrust_plugin(plugin_dir),
-            "wasmgo" => Self::setup_wasmgo_plugin(plugin_dir),
-            _ => Err(WasmrunError::from(format!(
-                "Unsupported plugin: {plugin_name}"
-            ))),
-        }
-    }
-
-    fn setup_wasmrust_plugin(plugin_dir: &Path) -> Result<()> {
-        let version = SystemUtils::get_latest_crates_version("wasmrust")
-            .unwrap_or_else(|| "0.3.0".to_string());
-
-        let cargo_toml_content = format!(
-            r#"[package]
-name = "wasmrust"
-version = "{version}"
-edition = "2021"
-description = "Rust to WebAssembly compiler plugin for wasmrun"
-authors = ["Kumar Anirudha"]
-
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-wasm-bindgen = "0.2"
-web-sys = "0.3"
-js-sys = "0.3"
-serde = {{ version = "1.0", features = ["derive"] }}
-toml = "0.8"
-
-[wasmrun.plugin]
-name = "wasmrust"
-version = "{version}"
-capabilities = ["compile_wasm", "compile_webapp", "live_reload", "optimization"]
-extensions = ["rs", "toml"]
-entry_files = ["Cargo.toml", "src/main.rs"]
-dependencies = ["cargo", "rustc"]
-"#
-        );
-
-        let cargo_toml_path = plugin_dir.join("Cargo.toml");
-        std::fs::write(&cargo_toml_path, cargo_toml_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to create Cargo.toml: {e}")))?;
-
-        let src_dir = plugin_dir.join("src");
-        std::fs::create_dir_all(&src_dir)
-            .map_err(|e| WasmrunError::from(format!("Failed to create src directory: {e}")))?;
-
-        let lib_rs_content = Self::get_wasmrust_lib_content();
-        let lib_rs_path = src_dir.join("lib.rs");
-        std::fs::write(&lib_rs_path, lib_rs_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to create lib.rs: {e}")))?;
-
-        println!("📦 Created Cargo.toml with version: {version}");
-        println!("📁 Created src/lib.rs with plugin implementation");
-        Ok(())
-    }
-
-    fn setup_wasmgo_plugin(plugin_dir: &Path) -> Result<()> {
-        let version = SystemUtils::get_latest_crates_version("wasmgo")
-            .unwrap_or_else(|| "0.3.0".to_string());
-
-        let cargo_toml_content = format!(
-            r#"[package]
-name = "wasmgo"
-version = "{version}"
-edition = "2021"
-description = "Go WebAssembly plugin for Wasmrun"
-
-[lib]
-name = "wasmgo"
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-serde = {{ version = "1.0", features = ["derive"] }}
-toml = "0.8"
-
-[wasmrun.plugin]
-name = "wasmgo"
-version = "{version}"
-capabilities = ["compile_wasm", "live_reload", "optimization"]
-extensions = ["go", "mod"]
-entry_files = ["go.mod", "main.go"]
-dependencies = ["tinygo"]
-"#
-        );
-
-        let cargo_toml_path = plugin_dir.join("Cargo.toml");
-        std::fs::write(&cargo_toml_path, cargo_toml_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to create Cargo.toml: {e}")))?;
-
-        let src_dir = plugin_dir.join("src");
-        std::fs::create_dir_all(&src_dir)
-            .map_err(|e| WasmrunError::from(format!("Failed to create src directory: {e}")))?;
-
-        let lib_rs_content = Self::get_wasmgo_lib_content();
-        let lib_rs_path = src_dir.join("lib.rs");
-        std::fs::write(&lib_rs_path, lib_rs_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to create lib.rs: {e}")))?;
-
-        println!("📦 Created Cargo.toml with version: {version}");
-        println!("📁 Created src/lib.rs with Go plugin implementation");
-        Ok(())
-    }
-
-    fn get_wasmrust_lib_content() -> &'static str {
-        r#"use std::path::Path;
-use std::process::Command;
-
-pub struct WasmRustBuilder;
-
-impl WasmRustBuilder {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn build(&self, project_path: &Path, output_path: &Path) -> Result<(), String> {
-        let cargo_toml = project_path.join("Cargo.toml");
-        if !cargo_toml.exists() {
-            return Err("No Cargo.toml found in project directory".to_string());
-        }
-
-        if Self::is_wasm_pack_available() {
-            self.build_with_wasm_pack(project_path, output_path)
+            println!("Direct cargo install failed, setting up as development plugin...");
+            Self::setup_plugin_from_source(plugin_name, plugin_dir)?;
         } else {
-            self.build_with_cargo(project_path, output_path)
-        }
-    }
-
-    fn build_with_wasm_pack(&self, project_path: &Path, output_path: &Path) -> Result<(), String> {
-        let output = Command::new("wasm-pack")
-            .args(&["build", "--target", "web", "--out-dir"])
-            .arg(output_path)
-            .current_dir(project_path)
-            .output()
-            .map_err(|e| format!("Failed to execute wasm-pack: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("wasm-pack build failed: {}", stderr));
+            println!("✅ Plugin installed successfully via cargo");
         }
 
         Ok(())
     }
 
-    fn build_with_cargo(&self, project_path: &Path, output_path: &Path) -> Result<(), String> {
-        let output = Command::new("cargo")
-            .args(&[
-                "build",
-                "--target", "wasm32-unknown-unknown",
-                "--release",
-                "--target-dir"
-            ])
-            .arg(output_path)
-            .current_dir(project_path)
-            .output()
-            .map_err(|e| format!("Failed to execute cargo: {}", e))?;
+    fn setup_plugin_from_source(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
+        println!("Setting up {plugin_name} plugin template...");
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Cargo build failed: {}", stderr));
-        }
+        // Try to get metadata to determine plugin details
+        let (extensions, entry_files, dependencies) =
+            if let Ok(metadata) = PluginRegistry::get_plugin_metadata(plugin_name) {
+                (
+                    metadata.extensions,
+                    metadata.entry_files,
+                    metadata.dependencies.tools,
+                )
+            } else {
+                // Fallback inference based on plugin name
+                Self::infer_plugin_details(plugin_name)
+            };
 
-        Ok(())
-    }
+        let cargo_toml_content = format!(
+            r#"[package]
+name = "{plugin_name}"
+version = "0.1.0"
+edition = "2021"
+description = "WebAssembly plugin for wasmrun"
 
-    fn is_wasm_pack_available() -> bool {
-        Command::new("wasm-pack")
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
-    pub fn can_handle_project(&self, path: &Path) -> bool {
-        path.join("Cargo.toml").exists()
-    }
-
-    pub fn get_supported_extensions(&self) -> Vec<&'static str> {
-        vec!["rs", "toml"]
-    }
-
-    pub fn get_entry_files(&self) -> Vec<&'static str> {
-        vec!["Cargo.toml", "src/main.rs", "src/lib.rs"]
-    }
-
-    pub fn check_dependencies(&self) -> Vec<String> {
-        let mut missing = Vec::new();
-        
-        if !Self::is_command_available("cargo") {
-            missing.push("cargo".to_string());
-        }
-        
-        if !Self::is_command_available("rustc") {
-            missing.push("rustc".to_string());
-        }
-
-        missing
-    }
-
-    fn is_command_available(cmd: &str) -> bool {
-        Command::new(cmd)
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-}
-"#
-    }
-
-    fn get_wasmgo_lib_content() -> &'static str {
-        r#"use std::path::Path;
-use std::process::Command;
-
-pub struct WasmGoBuilder;
-
-impl WasmGoBuilder {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn build(&self, project_path: &Path, output_path: &Path) -> Result<(), String> {
-        let go_mod = project_path.join("go.mod");
-        if !go_mod.exists() {
-            return Err("No go.mod found in project directory".to_string());
-        }
-
-        self.build_with_tinygo(project_path, output_path)
-    }
-
-    fn build_with_tinygo(&self, project_path: &Path, output_path: &Path) -> Result<(), String> {
-        if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create output directory: {}", e))?;
-        }
-
-        let output = Command::new("tinygo")
-            .args(&[
-                "build",
-                "-target", "wasm",
-                "-o"
-            ])
-            .arg(output_path.join("main.wasm"))
-            .arg(".")
-            .current_dir(project_path)
-            .output()
-            .map_err(|e| format!("Failed to execute tinygo: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("TinyGo build failed: {}", stderr));
-        }
-
-        Ok(())
-    }
-
-    pub fn can_handle_project(&self, path: &Path) -> bool {
-        path.join("go.mod").exists() || path.join("main.go").exists()
-    }
-
-    pub fn get_supported_extensions(&self) -> Vec<&'static str> {
-        vec!["go", "mod"]
-    }
-
-    pub fn get_entry_files(&self) -> Vec<&'static str> {
-        vec!["go.mod", "main.go"]
-    }
-
-    pub fn check_dependencies(&self) -> Vec<String> {
-        let mut missing = Vec::new();
-        
-        if !Self::is_command_available("tinygo") {
-            missing.push("tinygo".to_string());
-        }
-
-        missing
-    }
-
-    fn is_command_available(cmd: &str) -> bool {
-        Command::new(cmd)
-            .arg("version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-}
-"#
-    }
-
-    fn create_plugin_manifest(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
-        let manifest_content = match plugin_name {
-            "wasmrust" => {
-                r#"[plugin]
-name = "wasmrust"
-description = "Rust WebAssembly plugin for Wasmrun"
-extensions = ["rs", "toml"]
-entry_files = ["Cargo.toml"]
-
-[capabilities]
-compile_wasm = true
-compile_webapp = true
-live_reload = true
-optimization = true
-custom_targets = ["wasm32-unknown-unknown", "web"]
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-tools = ["cargo", "rustc", "wasm-pack"]
-"#
-            }
-            "wasmgo" => {
-                r#"[plugin]
-name = "wasmgo"
-description = "Go WebAssembly plugin for Wasmrun"
-extensions = ["go", "mod"]
-entry_files = ["go.mod", "main.go"]
+serde = {{ version = "1.0", features = ["derive"] }}
+toml = "0.8"
 
-[capabilities]
+[package.metadata.wasm_plugin]
+name = "{plugin_name}"
+extensions = {extensions:?}
+entry_files = {entry_files:?}
+
+[package.metadata.wasm_plugin.capabilities]
 compile_wasm = true
 compile_webapp = false
-live_reload = true
-optimization = true
-custom_targets = ["wasm"]
+live_reload = false
+optimization = false
+custom_targets = []
 
-[dependencies]
-tools = ["tinygo"]
+[package.metadata.wasm_plugin.dependencies]
+tools = {dependencies:?}
 "#
-            }
-            _ => return Err(WasmrunError::from(format!("Unknown plugin: {plugin_name}"))),
-        };
+        );
+
+        let cargo_toml_path = plugin_dir.join("Cargo.toml");
+        std::fs::write(&cargo_toml_path, cargo_toml_content)
+            .map_err(|e| WasmrunError::from(format!("Failed to create Cargo.toml: {e}")))?;
+
+        let src_dir = plugin_dir.join("src");
+        std::fs::create_dir_all(&src_dir)
+            .map_err(|e| WasmrunError::from(format!("Failed to create src directory: {e}")))?;
+
+        let plugin_name_pascal = Self::to_pascal_case(plugin_name);
+        let lib_rs_content = format!(
+            r#"// {plugin_name} WebAssembly plugin for wasmrun
+use std::path::Path;
+
+pub struct {plugin_name_pascal}Builder;
+
+impl {plugin_name_pascal}Builder {{
+    pub fn new() -> Self {{
+        Self
+    }}
+
+    pub fn build(&self, project_path: &Path, output_path: &Path) -> Result<(), String> {{
+        Err("Plugin not yet implemented".to_string())
+    }}
+}}
+
+#[no_mangle]
+pub extern "C" fn create_wasm_builder() -> *mut {plugin_name_pascal}Builder {{
+    Box::into_raw(Box::new({plugin_name_pascal}Builder::new()))
+}}
+
+#[no_mangle]
+pub extern "C" fn can_handle_project(path: *const std::ffi::c_char) -> bool {{
+    false
+}}
+"#,
+        );
+
+        let lib_rs_path = src_dir.join("lib.rs");
+        std::fs::write(&lib_rs_path, lib_rs_content)
+            .map_err(|e| WasmrunError::from(format!("Failed to create lib.rs: {e}")))?;
+
+        println!("📦 Created plugin template");
+        println!("⚠️  Note: This plugin template needs implementation to be functional");
+        println!(
+            "   Edit {}/src/lib.rs to add your compilation logic",
+            plugin_dir.display()
+        );
+
+        Ok(())
+    }
+
+    fn infer_plugin_details(plugin_name: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
+        match plugin_name {
+            name if name.contains("rust") => (
+                vec!["rs".to_string(), "toml".to_string()],
+                vec!["Cargo.toml".to_string(), "src/main.rs".to_string()],
+                vec!["cargo".to_string(), "rustc".to_string()],
+            ),
+            name if name.contains("go") => (
+                vec!["go".to_string(), "mod".to_string()],
+                vec!["go.mod".to_string(), "main.go".to_string()],
+                vec!["tinygo".to_string()],
+            ),
+            name if name.contains("zig") => (
+                vec!["zig".to_string()],
+                vec!["build.zig".to_string(), "src/main.zig".to_string()],
+                vec!["zig".to_string()],
+            ),
+            name if name.contains("cpp") || name.contains("cxx") => (
+                vec!["cpp".to_string(), "cxx".to_string(), "hpp".to_string()],
+                vec!["CMakeLists.txt".to_string(), "Makefile".to_string()],
+                vec!["emcc".to_string()],
+            ),
+            name if name.contains("py") || name.contains("python") => (
+                vec!["py".to_string()],
+                vec!["main.py".to_string(), "app.py".to_string()],
+                vec!["python".to_string(), "py2wasm".to_string()],
+            ),
+            _ => (
+                vec!["wasm".to_string()],
+                vec!["main.wasm".to_string()],
+                vec![],
+            ),
+        }
+    }
+
+    fn to_pascal_case(s: &str) -> String {
+        s.split(|c| c == '-' || c == '_')
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first) => {
+                        first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
+                    }
+                }
+            })
+            .collect()
+    }
+
+    #[allow(dead_code)]
+    fn create_plugin_manifest(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
+        let manifest_content = format!(
+            r#"[plugin]
+name = "{plugin_name}"
+version = "0.1.0"
+description = "WebAssembly plugin for wasmrun"
+type = "external"
+
+[build]
+command = "cargo"
+args = ["build", "--release"]
+
+[install]
+method = "cargo"
+source = "crates.io"
+"#
+        );
 
         let manifest_path = plugin_dir.join("wasmrun.toml");
         std::fs::write(&manifest_path, manifest_content)
             .map_err(|e| WasmrunError::from(format!("Failed to create plugin manifest: {e}")))?;
 
         Ok(())
-    }
-
-    pub fn uninstall_plugin_library(plugin_name: &str) -> Result<()> {
-        println!("Removing plugin library files...");
-
-        let output = Command::new("cargo")
-            .args(["uninstall", plugin_name])
-            .output();
-
-        match output {
-            Ok(result) => {
-                if !result.status.success() {
-                    println!(
-                        "Warning: cargo uninstall failed, but continuing with directory removal"
-                    );
-                }
-            }
-            Err(_) => {
-                println!("Warning: cargo not available, skipping binary uninstall");
-            }
-        }
-
-        Self::remove_plugin_directory(plugin_name)?;
-        Ok(())
-    }
-
-    pub fn verify_plugin_installation(plugin_name: &str) -> Result<PluginVerificationResult> {
-        let mut result = PluginVerificationResult::new(plugin_name);
-
-        if let Ok(plugin_dir) = PluginUtils::get_plugin_directory(plugin_name) {
-            result.directory_exists = plugin_dir.exists();
-
-            if result.directory_exists {
-                let cargo_toml_path = plugin_dir.join("Cargo.toml");
-                result.binary_available = cargo_toml_path.exists();
-
-                let manifest_path = plugin_dir.join("wasmrun.toml");
-                result.manifest_exists = manifest_path.exists();
-
-                let metadata_path = plugin_dir.join(".wasmrun_metadata");
-                result.metadata_exists = metadata_path.exists();
-
-                let src_lib_path = plugin_dir.join("src").join("lib.rs");
-                let has_source_files = src_lib_path.exists();
-
-                let missing_deps = PluginUtils::check_plugin_dependencies(plugin_name);
-                result.dependencies_available = missing_deps.is_empty();
-
-                result.is_functional = result.binary_available
-                    && result.manifest_exists
-                    && result.metadata_exists
-                    && has_source_files
-                    && result.dependencies_available;
-
-                println!("Plugin directory verification:");
-                println!("  Directory exists: {}", result.directory_exists);
-                println!("  Manifest exists: {}", result.manifest_exists);
-                println!("  Metadata exists: {}", result.metadata_exists);
-                println!("  Cargo.toml exists: {}", result.binary_available);
-                println!("  Source files exist: {has_source_files}");
-
-                if !missing_deps.is_empty() {
-                    println!("  Missing dependencies: {:?}", missing_deps);
-                    println!("  ⚠️  Some dependencies are missing, but plugin files are installed");
-                }
-
-                if !has_source_files {
-                    println!("  ❌ Source files missing in src/ directory");
-                } else if result.is_functional {
-                    println!("  ✅ All plugin files installed correctly");
-                }
-            }
-        }
-
-        println!(
-            "Plugin '{}' functional status: {}",
-            plugin_name, result.is_functional
-        );
-        Ok(result)
-    }
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-pub struct InstallationResult {
-    pub plugin_name: String,
-    pub success: bool,
-    pub version: String,
-    pub binary_installed: bool,
-    pub binary_already_installed: bool,
-    pub directory_created: bool,
-    pub message: String,
-}
-
-impl InstallationResult {
-    fn new(plugin_name: &str) -> Self {
-        Self {
-            plugin_name: plugin_name.to_string(),
-            success: false,
-            version: "unknown".to_string(),
-            binary_installed: false,
-            binary_already_installed: false,
-            directory_created: false,
-            message: String::new(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct PluginVerificationResult {
-    #[allow(dead_code)]
-    pub plugin_name: String,
-    pub binary_available: bool,
-    pub directory_exists: bool,
-    pub manifest_exists: bool,
-    pub metadata_exists: bool,
-    pub dependencies_available: bool,
-    pub is_functional: bool,
-}
-
-impl PluginVerificationResult {
-    fn new(plugin_name: &str) -> Self {
-        Self {
-            plugin_name: plugin_name.to_string(),
-            binary_available: false,
-            directory_exists: false,
-            manifest_exists: false,
-            metadata_exists: false,
-            dependencies_available: false,
-            is_functional: false,
-        }
     }
 }

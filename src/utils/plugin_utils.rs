@@ -1,86 +1,114 @@
 use crate::error::{Result, WasmrunError};
-use std::path::{Path, PathBuf};
+use crate::plugin::registry::PluginRegistry;
+use crate::utils::SystemUtils;
+use std::path::PathBuf;
 
-/// Plugin-specific utilities
 pub struct PluginUtils;
 
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct PluginValidationResult {
+    pub is_installed: bool,
+    pub is_functional: bool,
+    pub has_metadata: bool,
+    pub missing_dependencies: Vec<String>,
+    pub version: Option<String>,
+    pub install_path: Option<String>,
+}
+
 impl PluginUtils {
-    /// Get the plugin directory path
     pub fn get_plugin_directory(plugin_name: &str) -> Result<PathBuf> {
-        use crate::plugin::config::WasmrunConfig;
-        let config_dir = WasmrunConfig::config_dir()?;
-        Ok(config_dir.join("plugins").join(plugin_name))
+        let wasmrun_dir = Self::get_wasmrun_directory()?;
+        let plugin_dir = wasmrun_dir.join("plugins").join(plugin_name);
+        Ok(plugin_dir)
     }
 
-    /// Check if a plugin is available (has proper directory structure)
+    pub fn get_wasmrun_directory() -> Result<PathBuf> {
+        if let Some(home_dir) = dirs::home_dir() {
+            Ok(home_dir.join(".wasmrun"))
+        } else {
+            Err(WasmrunError::from("Could not determine home directory"))
+        }
+    }
+
     pub fn is_plugin_available(plugin_name: &str) -> bool {
         if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
-            if plugin_dir.exists() {
-                let cargo_toml_path = plugin_dir.join("Cargo.toml");
-                if cargo_toml_path.exists() {
-                    return true;
-                }
+            let cargo_toml = plugin_dir.join("Cargo.toml");
+            let src_lib = plugin_dir.join("src").join("lib.rs");
 
-                let manifest_path = plugin_dir.join("wasmrun.toml");
-                if manifest_path.exists() {
-                    return true;
-                }
+            if cargo_toml.exists() && src_lib.exists() {
+                return true;
+            }
 
-                let metadata_path = plugin_dir.join(".wasmrun_metadata");
-                if metadata_path.exists() {
-                    return true;
-                }
+            let manifest_path = plugin_dir.join("wasmrun.toml");
+            if manifest_path.exists() {
+                return true;
+            }
 
-                let src_path = plugin_dir.join("src");
-                if src_path.exists() && src_path.is_dir() {
+            let metadata_path = plugin_dir.join(".wasmrun_metadata");
+            if metadata_path.exists() {
+                return true;
+            }
+
+            let lib_extensions = ["so", "dylib", "dll"];
+            for ext in &lib_extensions {
+                let lib_path = plugin_dir.join(format!("lib{plugin_name}.{ext}"));
+                if lib_path.exists() {
                     return true;
                 }
             }
+
+            let bin_path = plugin_dir
+                .join("bin")
+                .join(format!("wasmrun-{plugin_name}"));
+            if bin_path.exists() {
+                return true;
+            }
         }
+
         false
     }
 
-    /// Detect plugin version from metadata file
     pub fn detect_plugin_version_from_metadata(plugin_name: &str) -> Option<String> {
         if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
-            let metadata_path = plugin_dir.join(".wasmrun_metadata");
-            if let Ok(content) = std::fs::read_to_string(&metadata_path) {
-                for line in content.lines() {
-                    if line.starts_with("version = ") {
-                        if let Some(version) = line.split(" = ").nth(1) {
-                            return Some(version.trim_matches('"').to_string());
+            let metadata_file = plugin_dir.join(".wasmrun_metadata");
+            if metadata_file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&metadata_file) {
+                    for line in content.lines() {
+                        if line.starts_with("version=") {
+                            return Some(line.replace("version=", "").trim().to_string());
                         }
                     }
                 }
             }
 
-            let cargo_toml_path = plugin_dir.join("Cargo.toml");
-            if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
-                return crate::utils::SystemUtils::detect_version_from_cargo_toml(&content);
+            let cargo_toml = plugin_dir.join("Cargo.toml");
+            if cargo_toml.exists() {
+                if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
+                    for line in content.lines() {
+                        if line.starts_with("version") && line.contains('=') {
+                            let version =
+                                line.split('=').nth(1)?.trim().trim_matches('"').to_string();
+                            return Some(version);
+                        }
+                    }
+                }
             }
         }
+
         None
     }
 
-    /// Check if a Cargo.toml belongs to a wasmrun plugin
-    pub fn is_valid_wasmrun_plugin(cargo_toml_path: &Path) -> bool {
-        if let Ok(content) = std::fs::read_to_string(cargo_toml_path) {
-            content.contains("[wasmrun.plugin]")
-                || content.contains("[wasm_plugin]")
-                || content.contains("wasm-bindgen")
-                || content.contains("tinygo")
-        } else {
-            false
-        }
-    }
-
-    /// Create plugin metadata file
-    pub fn create_metadata_file(plugin_name: &str, plugin_dir: &Path, version: &str) -> Result<()> {
+    pub fn create_metadata_file(
+        plugin_name: &str,
+        plugin_dir: &PathBuf,
+        version: &str,
+    ) -> Result<()> {
         let metadata_content = format!(
-            "[metadata]\ninstalled_at = \"{}\"\nversion = \"{}\"\nplugin_name = \"{}\"\ninstall_method = \"wasmrun\"\n",
-            chrono::Utc::now().to_rfc3339(),
+            "plugin_name={}\nversion={}\ninstall_date={}\n",
+            plugin_name,
             version,
-            plugin_name
+            chrono::Utc::now().to_rfc3339()
         );
 
         let metadata_path = plugin_dir.join(".wasmrun_metadata");
@@ -90,9 +118,8 @@ impl PluginUtils {
         Ok(())
     }
 
-    /// Recursively copy directory contents
     #[allow(dead_code)]
-    pub fn copy_dir_recursive(from: &Path, to: &Path) -> Result<()> {
+    pub fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> Result<()> {
         if !from.exists() {
             return Ok(());
         }
@@ -122,32 +149,72 @@ impl PluginUtils {
         Ok(())
     }
 
-    /// Check plugin dependencies based on plugin type
+    #[allow(dead_code)]
     pub fn check_plugin_dependencies(plugin_name: &str) -> Vec<String> {
-        use crate::utils::SystemUtils;
+        Self::check_generic_plugin_dependencies(plugin_name)
+    }
 
-        match plugin_name {
-            "wasmrust" => {
-                let mut missing = Vec::new();
-                if !SystemUtils::is_tool_available("cargo") {
-                    missing.push("cargo".to_string());
-                }
-                if !SystemUtils::is_tool_available("rustc") {
-                    missing.push("rustc".to_string());
-                }
-                if !SystemUtils::is_wasm_target_installed() {
-                    missing.push("wasm32-unknown-unknown target (run: rustup target add wasm32-unknown-unknown)".to_string());
-                }
-                missing
-            }
-            "wasmgo" => {
-                if SystemUtils::is_tool_available("tinygo") {
-                    vec![]
-                } else {
-                    vec!["tinygo".to_string()]
+    #[allow(dead_code)]
+    pub fn check_generic_plugin_dependencies(plugin_name: &str) -> Vec<String> {
+        let mut missing = Vec::new();
+
+        // Try to get metadata-based dependencies
+        if let Ok(metadata) = PluginRegistry::get_plugin_metadata(plugin_name) {
+            for tool in &metadata.dependencies.tools {
+                if !SystemUtils::is_tool_available(tool) {
+                    missing.push(tool.to_string()); // Fixed: changed from clone() to to_string()
                 }
             }
-            _ => vec![],
+        } else {
+            // Fallback dependency checks for known plugins
+            match plugin_name {
+                "wasmrust" => {
+                    if !SystemUtils::is_tool_available("rustc") {
+                        missing.push("rustc".to_string());
+                    }
+                    if !SystemUtils::is_tool_available("cargo") {
+                        missing.push("cargo".to_string());
+                    }
+                }
+                "wasmgo" => {
+                    if !SystemUtils::is_tool_available("tinygo") {
+                        missing.push("tinygo".to_string());
+                    }
+                }
+                _ => {}
+            }
         }
+
+        missing
+    }
+
+    #[allow(dead_code)]
+    pub fn validate_plugin_installation(plugin_name: &str) -> Result<PluginValidationResult> {
+        let mut result = PluginValidationResult {
+            is_installed: false,
+            is_functional: false,
+            has_metadata: false,
+            missing_dependencies: vec![],
+            version: None,
+            install_path: None,
+        };
+
+        if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
+            result.install_path = Some(plugin_dir.to_string_lossy().to_string());
+
+            result.is_installed = plugin_dir.exists();
+
+            if result.is_installed {
+                let metadata_path = plugin_dir.join(".wasmrun_metadata");
+                result.has_metadata = metadata_path.exists();
+
+                result.version = Self::detect_plugin_version_from_metadata(plugin_name);
+
+                result.missing_dependencies = Self::check_generic_plugin_dependencies(plugin_name);
+                result.is_functional = result.missing_dependencies.is_empty();
+            }
+        }
+
+        Ok(result)
     }
 }
