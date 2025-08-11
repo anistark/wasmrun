@@ -396,7 +396,7 @@ pub extern "C" fn can_handle_project(path: *const std::ffi::c_char) -> bool {{
     }
 
     fn to_pascal_case(s: &str) -> String {
-        s.split(|c| c == '-' || c == '_')
+        s.split(['-', '_'])
             .map(|word| {
                 let mut chars = word.chars();
                 match chars.next() {

@@ -20,10 +20,7 @@ pub struct BuildResultC {
 impl BuildConfig {
     #[allow(dead_code)]
     pub fn is_wasm_bindgen(&self) -> bool {
-        match &self.target_type {
-            crate::compiler::builder::TargetType::Web => true,
-            _ => false,
-        }
+        matches!(&self.target_type, crate::compiler::builder::TargetType::Web)
     }
 }
 

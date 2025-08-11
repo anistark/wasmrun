@@ -86,8 +86,7 @@ impl PluginRegistry {
             Ok(())
         } else {
             Err(crate::error::WasmrunError::from(format!(
-                "Plugin '{}' not found in registry",
-                name
+                "Plugin '{name}' not found in registry"
             )))
         }
     }

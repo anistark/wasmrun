@@ -162,8 +162,8 @@ impl ExternalWasmBuilder {
         let plugin_binary = format!("wasmrun-{}", self.plugin_name);
 
         let output = std::process::Command::new(&plugin_binary)
-            .args(&["build", &config.project_path])
-            .args(&["--output", &config.output_dir])
+            .args(["build", &config.project_path])
+            .args(["--output", &config.output_dir])
             .output();
 
         match output {
@@ -366,7 +366,7 @@ impl ExternalPluginLoader {
         let info = PluginInfo {
             name: plugin_name.to_string(),
             version: "0.1.0".to_string(),
-            description: format!("{} WebAssembly plugin", plugin_name),
+            description: format!("{plugin_name} WebAssembly plugin"),
             author: "Community".to_string(),
             extensions: metadata.extensions.clone(),
             entry_files: metadata.entry_files.clone(),

@@ -1,7 +1,7 @@
 use crate::error::{Result, WasmrunError};
 use crate::plugin::registry::PluginRegistry;
 use crate::utils::SystemUtils;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct PluginUtils;
 
@@ -99,11 +99,7 @@ impl PluginUtils {
         None
     }
 
-    pub fn create_metadata_file(
-        plugin_name: &str,
-        plugin_dir: &PathBuf,
-        version: &str,
-    ) -> Result<()> {
+    pub fn create_metadata_file(plugin_name: &str, plugin_dir: &Path, version: &str) -> Result<()> {
         let metadata_content = format!(
             "plugin_name={}\nversion={}\ninstall_date={}\n",
             plugin_name,
