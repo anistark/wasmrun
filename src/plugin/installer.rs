@@ -73,16 +73,22 @@ impl PluginInstaller {
                 plugin_name, result.version
             );
         } else {
-            Self::install_generic_plugin(plugin_name, &plugin_dir)?;
+            let install_result = Self::install_generic_plugin(plugin_name, &plugin_dir)?;
 
-            result.binary_installed = true;
-            result.version = SystemUtils::get_latest_crates_version(plugin_name)
-                .unwrap_or_else(|| "unknown".to_string());
+            result.binary_installed = install_result.binary_installed;
+            result.version = install_result.version.clone();
 
-            println!(
-                "Plugin '{}' library files installed successfully (v{})",
-                plugin_name, result.version
-            );
+            if install_result.binary_installed {
+                println!(
+                    "Plugin '{}' binary and library files installed successfully (v{})",
+                    plugin_name, install_result.version
+                );
+            } else {
+                println!(
+                    "Plugin '{}' template created successfully (v{})",
+                    plugin_name, install_result.version
+                );
+            }
         }
 
         Ok(result)
@@ -234,38 +240,65 @@ impl PluginInstaller {
         false
     }
 
-    fn install_generic_plugin(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
+    fn install_generic_plugin(plugin_name: &str, plugin_dir: &Path) -> Result<InstallationResult> {
         println!("Installing {plugin_name} plugin via cargo...");
+
+        let mut result = InstallationResult::new(plugin_name);
 
         std::fs::create_dir_all(plugin_dir)
             .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {e}")))?;
+
+        let wasmrun_root = dirs::home_dir()
+            .ok_or_else(|| WasmrunError::from("Could not find home directory"))?
+            .join(".wasmrun");
+
+        std::fs::create_dir_all(&wasmrun_root)
+            .map_err(|e| WasmrunError::from(format!("Failed to create .wasmrun directory: {e}")))?;
 
         let output = std::process::Command::new("cargo")
             .args([
                 "install",
                 plugin_name,
                 "--root",
-                &plugin_dir.to_string_lossy(),
+                &wasmrun_root.to_string_lossy(),
             ])
             .output()
             .map_err(|e| WasmrunError::from(format!("Failed to execute cargo install: {e}")))?;
 
-        if !output.status.success() {
-            let _stderr = String::from_utf8_lossy(&output.stderr);
+        if output.status.success() {
+            println!("✅ Plugin installed successfully via cargo to ~/.wasmrun/");
 
-            println!("Direct cargo install failed, setting up as development plugin...");
-            Self::setup_plugin_from_source(plugin_name, plugin_dir)?;
+            let bin_path = wasmrun_root.join("bin").join(plugin_name);
+            if bin_path.exists() {
+                println!("📦 Binary found at: {}", bin_path.display());
+                result.binary_installed = true;
+            } else {
+                println!(
+                    "⚠️  Binary not found in expected location: {}",
+                    bin_path.display()
+                );
+            }
+
+            result.version = SystemUtils::get_latest_crates_version(plugin_name)
+                .unwrap_or_else(|| "unknown".to_string());
+
+            Self::fetch_and_store_plugin_metadata(plugin_name, plugin_dir)?;
         } else {
-            println!("✅ Plugin installed successfully via cargo");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            println!("Direct cargo install failed: {stderr}");
+            println!("Setting up as development plugin template...");
+            Self::setup_plugin_from_source(plugin_name, plugin_dir)?;
+
+            result.version = "0.1.0".to_string();
+            result.binary_installed = false;
         }
 
-        Ok(())
+        Ok(result)
     }
 
     fn setup_plugin_from_source(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
         println!("Setting up {plugin_name} plugin template...");
 
-        // Try to get metadata to determine plugin details
         let (extensions, entry_files, dependencies) =
             if let Ok(metadata) = PluginRegistry::get_plugin_metadata(plugin_name) {
                 (
@@ -274,7 +307,6 @@ impl PluginInstaller {
                     metadata.dependencies.tools,
                 )
             } else {
-                // Fallback inference based on plugin name
                 Self::infer_plugin_details(plugin_name)
             };
 
@@ -407,6 +439,82 @@ pub extern "C" fn can_handle_project(path: *const std::ffi::c_char) -> bool {{
                 }
             })
             .collect()
+    }
+
+    /// Fetch plugin metadata from crates.io and store in plugin directory
+    fn fetch_and_store_plugin_metadata(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
+        // Try to get plugin info from crates.io
+        let metadata_result = Self::fetch_plugin_metadata_from_crates_io(plugin_name);
+
+        match metadata_result {
+            Ok(metadata) => {
+                // Store the metadata in the plugin directory for future use
+                let metadata_path = plugin_dir.join(".wasmrun_metadata");
+                let metadata_content = format!(
+                    r#"name = "{}"
+version = "{}"
+description = "{}"
+author = "{}"
+extensions = {:?}
+entry_files = {:?}
+dependencies = {:?}
+"#,
+                    metadata.name,
+                    metadata.version,
+                    metadata.description,
+                    metadata.author,
+                    metadata.extensions,
+                    metadata.entry_files,
+                    metadata.dependencies.tools
+                );
+
+                std::fs::write(&metadata_path, metadata_content)
+                    .map_err(|e| WasmrunError::from(format!("Failed to write metadata: {e}")))?;
+
+                println!("📝 Stored plugin metadata in {}", metadata_path.display());
+            }
+            Err(e) => {
+                println!("⚠️  Could not fetch detailed metadata: {e}");
+                // Create basic metadata file
+                Self::create_basic_metadata_file(plugin_name, plugin_dir)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Fetch plugin metadata by downloading and parsing Cargo.toml from crates.io
+    fn fetch_plugin_metadata_from_crates_io(
+        plugin_name: &str,
+    ) -> Result<crate::plugin::metadata::PluginMetadata> {
+        // For now, using cargo search to get basic info and infer the rest
+        // TODO: download and parse the actual Cargo.toml from crates.io
+        crate::plugin::metadata::PluginMetadata::from_crates_io(plugin_name)
+    }
+
+    /// Create basic metadata file when full metadata isn't available
+    fn create_basic_metadata_file(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
+        let version = SystemUtils::get_latest_crates_version(plugin_name)
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let metadata_path = plugin_dir.join(".wasmrun_metadata");
+        let (extensions, entry_files, dependencies) = Self::infer_plugin_details(plugin_name);
+
+        let metadata_content = format!(
+            r#"name = "{plugin_name}"
+version = "{version}"
+description = "{plugin_name} WebAssembly plugin"
+author = "Unknown"
+extensions = {extensions:?}
+entry_files = {entry_files:?}
+dependencies = {dependencies:?}
+"#
+        );
+
+        std::fs::write(&metadata_path, metadata_content)
+            .map_err(|e| WasmrunError::from(format!("Failed to write basic metadata: {e}")))?;
+
+        Ok(())
     }
 
     #[allow(dead_code)]

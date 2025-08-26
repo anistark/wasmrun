@@ -162,22 +162,26 @@ impl PluginUtils {
                 }
             }
         } else {
-            // Fallback dependency checks for known plugins
-            match plugin_name {
-                "wasmrust" => {
-                    if !SystemUtils::is_tool_available("rustc") {
-                        missing.push("rustc".to_string());
-                    }
-                    if !SystemUtils::is_tool_available("cargo") {
-                        missing.push("cargo".to_string());
-                    }
+            // Fallback dependency checks based on plugin name patterns
+            if plugin_name.contains("rust") {
+                if !SystemUtils::is_tool_available("rustc") {
+                    missing.push("rustc".to_string());
                 }
-                "wasmgo" => {
-                    if !SystemUtils::is_tool_available("tinygo") {
-                        missing.push("tinygo".to_string());
-                    }
+                if !SystemUtils::is_tool_available("cargo") {
+                    missing.push("cargo".to_string());
                 }
-                _ => {}
+            } else if plugin_name.contains("go") {
+                if !SystemUtils::is_tool_available("tinygo") {
+                    missing.push("tinygo".to_string());
+                }
+            } else if plugin_name.contains("zig") {
+                if !SystemUtils::is_tool_available("zig") {
+                    missing.push("zig".to_string());
+                }
+            } else if (plugin_name.contains("js") || plugin_name.contains("javascript"))
+                && !SystemUtils::is_tool_available("node")
+            {
+                missing.push("node".to_string());
             }
         }
 

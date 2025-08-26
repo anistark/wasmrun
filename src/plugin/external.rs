@@ -54,25 +54,34 @@ impl ExternalPluginWrapper {
     fn try_load_library(plugin_name: &str, plugin_path: &Path) -> Result<Option<Arc<Library>>> {
         let lib_extensions = ["so", "dylib"];
 
-        for ext in &lib_extensions {
-            let path = plugin_path.join(format!("lib{plugin_name}.{ext}"));
-            if path.exists() {
-                unsafe {
-                    match Library::new(&path) {
-                        Ok(library) => {
-                            if library
-                                .get::<symbols::CreateBuilderFn>(b"create_wasm_builder")
-                                .is_ok()
-                            {
-                                return Ok(Some(Arc::new(library)));
+        let search_paths = [
+            plugin_path.to_path_buf(),
+            plugin_path.join("target/release"),
+            plugin_path.join("target/debug"),
+        ];
+
+        for search_path in &search_paths {
+            for ext in &lib_extensions {
+                let path = search_path.join(format!("lib{plugin_name}.{ext}"));
+                if path.exists() {
+                    unsafe {
+                        match Library::new(&path) {
+                            Ok(library) => {
+                                if library
+                                    .get::<symbols::CreateBuilderFn>(b"create_wasm_builder")
+                                    .is_ok()
+                                {
+                                    return Ok(Some(Arc::new(library)));
+                                }
+                            }
+                            Err(_) => {
+                                continue;
                             }
                         }
-                        Err(_) => continue,
                     }
                 }
             }
         }
-
         Ok(None)
     }
 
@@ -81,7 +90,8 @@ impl ExternalPluginWrapper {
 
         // Check entry files from metadata
         for entry_file in &self.metadata.entry_files {
-            if path.join(entry_file).exists() {
+            let entry_path = path.join(entry_file);
+            if entry_path.exists() {
                 return true;
             }
         }
@@ -115,8 +125,17 @@ impl Plugin for ExternalPluginWrapper {
                         if let Ok(can_handle) = library.get::<symbols::CanHandleProjectFn>(
                             exports.can_handle_project.as_bytes(),
                         ) {
-                            let c_path = std::ffi::CString::new(path).unwrap();
-                            return can_handle(std::ptr::null(), c_path.as_ptr());
+                            if let Ok(create_builder) =
+                                library.get::<symbols::CreateBuilderFn>(b"create_wasm_builder")
+                            {
+                                let builder_ptr = create_builder();
+                                if !builder_ptr.is_null() {
+                                    let c_path = std::ffi::CString::new(path).unwrap();
+                                    let result = can_handle(builder_ptr, c_path.as_ptr());
+                                    // TODO: Free builder if needed
+                                    return result;
+                                }
+                            }
                         }
                     }
                 }
@@ -205,18 +224,29 @@ impl WasmBuilder for ExternalWasmBuilder {
             if let Some(library) = &self.library {
                 if let Some(exports) = &self.metadata.exports {
                     unsafe {
-                        if let Ok(build_fn) =
-                            library.get::<symbols::BuildFn>(exports.build.as_bytes())
+                        // Create a builder instance
+                        if let Ok(create_builder) =
+                            library.get::<symbols::CreateBuilderFn>(b"create_wasm_builder")
                         {
-                            let config_c =
-                                crate::plugin::bridge::BuildConfigC::from_build_config(config);
-                            let result_ptr = build_fn(std::ptr::null(), &config_c);
+                            let builder_ptr = create_builder();
+                            if !builder_ptr.is_null() {
+                                if let Ok(build_fn) =
+                                    library.get::<symbols::BuildFn>(exports.build.as_bytes())
+                                {
+                                    let config_c =
+                                        crate::plugin::bridge::BuildConfigC::from_build_config(
+                                            config,
+                                        );
+                                    let result_ptr = build_fn(builder_ptr, &config_c);
 
-                            if !result_ptr.is_null() {
-                                let result = crate::plugin::bridge::BuildResultC::to_build_result(
-                                    result_ptr,
-                                );
-                                return Ok(result);
+                                    if !result_ptr.is_null() {
+                                        let result =
+                                            crate::plugin::bridge::BuildResultC::to_build_result(
+                                                result_ptr,
+                                            );
+                                        return Ok(result);
+                                    }
+                                }
                             }
                         }
                     }

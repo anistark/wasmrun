@@ -142,28 +142,45 @@ Built-in plugins are compiled directly into Wasmrun and provide core language su
 | **Python** | Python | `py2wasm` | 🚧 Beta | Runtime Integration + Bundle creation |
 
 #### 2. **External Plugins** 📦
-External plugins are distributed via crates.io and can be installed as needed:
+External plugins are distributed via crates.io and installed dynamically to `~/.wasmrun/`:
 
 | Plugin | Language | Compiler | Installation | Capabilities |
 |--------|----------|----------|-------------|--------------|
 | **wasmrust** | Rust | `rustc` + `wasm-pack` | `wasmrun plugin install wasmrust` | Full WASM + Web Apps + Optimization |
 | **wasmgo** | Go | TinyGo | `wasmrun plugin install wasmgo` | WASM + Optimization + Package Support |
 
-*More external plugins coming soon!*
+**How External Plugins Work:**
+- 📦 **Cargo-like Installation**: Similar to `cargo install`, plugins are downloaded and compiled to `~/.wasmrun/`
+- 🔗 **Dynamic Loading**: Plugins are loaded as shared libraries (FFI) at runtime
+- 🎯 **Same Interface**: External plugins use identical traits as built-in plugins
+- 🔧 **Auto-detection**: Once installed, plugins automatically handle their supported project types
 
-### Plugin Installation
+### Plugin Management
 
 ```sh
-# Install external plugins for additional language support
-wasmrun plugin install wasmrust
+# Install external plugins (similar to cargo install)
+wasmrun plugin install wasmrust  # Installs to ~/.wasmrun/
 wasmrun plugin install wasmgo
 
-# View all available plugins
+# View all installed plugins
 wasmrun plugin list
 
-# Get plugin information and status
+# Get detailed plugin information
 wasmrun plugin info wasmrust
+
+# Search for available plugins
+wasmrun plugin search rust
+
+# Uninstall plugins
+wasmrun plugin uninstall wasmgo
 ```
+
+**Plugin Installation Process:**
+1. 🔍 **Discovery**: Searches crates.io for the plugin
+2. 📦 **Download**: Uses `cargo install` to build the plugin
+3. 🏠 **Storage**: Installs to `~/.wasmrun/plugins/{plugin_name}/`
+4. 📋 **Registration**: Updates wasmrun config with plugin capabilities
+5. ⚡ **Ready**: Plugin automatically handles supported projects
 
 ## 🛠️ Language Support
 
@@ -261,11 +278,12 @@ wasmrun plugin install wasmrust
 
 **"Plugin dependencies missing"**
 ```sh
-# Install missing tools for specific plugins:
+# Install missing tools for external plugins:
 rustup target add wasm32-unknown-unknown  # For wasmrust plugin
-# Install emcc for C/C++ plugin
-# Install tinygo for wasmgo plugin  
-# Install asc for AssemblyScript plugin
+go install tinygo.org/x/tinygo@latest     # For wasmgo plugin
+
+# Check plugin dependencies:
+wasmrun plugin info wasmrust  # Shows required dependencies
 ```
 
 **"Wrong plugin selected"**

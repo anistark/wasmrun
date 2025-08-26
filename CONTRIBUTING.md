@@ -117,31 +117,54 @@ pub struct PluginInfo {
 }
 ```
 
-### External Plugin Installation
+### External Plugin System
 
-External plugins are **library extensions** that integrate directly with Wasmrun, not standalone binaries. This design enables deep integration while maintaining modularity.
+External plugins are **dynamically loaded libraries** that integrate with Wasmrun via FFI (Foreign Function Interface). This approach provides:
 
-_Maybe, in future we can also support standalone binaries._
+- 🔗 **Direct Integration**: Plugins use the same traits as built-in plugins
+- 🚀 **Performance**: No subprocess overhead, direct function calls
+- 📦 **Distribution**: Available on crates.io, installed like `cargo install`
+- 🏠 **Isolation**: Installed to `~/.wasmrun/` directory
+- ⚙️ **Dynamic Loading**: Loaded at runtime via shared libraries (`.dylib`, `.so`)
 
-#### Plugin Directory Structure
+#### Plugin Installation Architecture
 
 ```sh
 ~/.wasmrun/
-├── config.toml               # Global Wasmrun configuration
-├── plugins/                  # Plugin installation directory
-│   ├── wasmrust/             # Rust plugin (external)
+├── config.toml               # Global configuration & plugin registry
+├── bin/                      # Optional binaries (if plugins provide CLI tools)
+│   ├── wasmrust              # Rust plugin binary (optional)
+│   └── wasmgo                # Go plugin binary (optional)
+├── plugins/                  # Plugin source & metadata
+│   ├── wasmrust/             # Rust plugin installation
 │   │   ├── Cargo.toml        # Plugin build configuration
-│   │   ├── src/
-│   │   │   └── lib.rs        # Rust plugin implementation
-│   │   ├── wasmrun.toml      # Plugin manifest
-│   │   └── .wasmrun_metadata # Installation metadata
-│   └── wasmgo/               # Go plugin (external)
-│       ├── Cargo.toml        # Plugin uses Rust for integration
-│       ├── src/lib.rs        # Go compilation bridge
-│       └── wasmrun.toml      # Plugin configuration
+│   │   ├── src/lib.rs        # Plugin implementation
+│   │   ├── target/release/   # Compiled artifacts
+│   │   │   └── libwasmrust.dylib # Shared library for FFI
+│   │   └── .wasmrun_metadata # Plugin capabilities & dependencies
+│   └── wasmgo/               # Go plugin installation
+│       ├── Cargo.toml        # Rust wrapper for Go compiler
+│       ├── src/lib.rs        # FFI bridge to Go toolchain
+│       ├── target/release/
+│       │   └── libwasmgo.dylib   # Shared library
+│       └── .wasmrun_metadata
 ├── cache/                    # Build artifact cache
 └── logs/                     # Plugin operation logs
 ```
+
+#### Plugin Loading Process
+
+1. **Installation**: `wasmrun plugin install wasmrust`
+   - Downloads from crates.io using `cargo install`
+   - Compiles plugin to `~/.wasmrun/plugins/wasmrust/target/release/`
+   - Extracts capabilities from plugin's `Cargo.toml` metadata
+   - Updates wasmrun config with plugin information
+
+2. **Runtime Loading**: When processing a Rust project
+   - Detects project type (`.rs` files, `Cargo.toml`)
+   - Loads `libwasmrust.dylib` dynamically via `libloading`
+   - Calls plugin functions directly via FFI interface
+   - No subprocess overhead, direct integration
 
 ## 🔧 Plugin Development Guide
 

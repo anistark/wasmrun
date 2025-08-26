@@ -1,6 +1,5 @@
 use crate::error::Result;
 use crate::plugin::config::ExternalPluginEntry;
-use crate::plugin::external::ExternalPluginLoader;
 use std::collections::HashMap;
 
 #[allow(dead_code)]
@@ -18,16 +17,8 @@ impl PluginRegistry {
 
     #[allow(dead_code)]
     pub fn get_default_external_plugins() -> Result<HashMap<String, ExternalPluginEntry>> {
-        let mut plugins = HashMap::new();
-
-        // Use generic entry creation for all external plugins
-        for plugin_name in &["wasmrust", "wasmgo", "wasmzig", "wasmjs"] {
-            if let Ok(entry) = ExternalPluginLoader::create_generic_entry(plugin_name) {
-                plugins.insert(plugin_name.to_string(), entry);
-            }
-        }
-
-        Ok(plugins)
+        // Return empty - plugins are discovered dynamically through installation
+        Ok(HashMap::new())
     }
 
     #[allow(dead_code)]
@@ -131,11 +122,6 @@ impl PluginRegistry {
     pub fn create_plugin_entry(plugin_name: &str) -> Result<ExternalPluginEntry> {
         use crate::plugin::external::ExternalPluginLoader;
         ExternalPluginLoader::create_generic_entry(plugin_name)
-    }
-
-    /// Checks if a plugin is supported
-    pub fn is_supported_external_plugin(plugin_name: &str) -> bool {
-        Self::validate_plugin(plugin_name).unwrap_or(false)
     }
 
     /// Checks plugin dependencies (stub for now)

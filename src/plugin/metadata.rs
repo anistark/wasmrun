@@ -110,6 +110,17 @@ impl PluginMetadata {
     }
 
     pub fn from_crates_io(crate_name: &str) -> Result<Self> {
+        // First try to get the plugin metadata from a locally cached Cargo.toml if available
+        if let Ok(metadata) = Self::from_cached_cargo_toml(crate_name) {
+            return Ok(metadata);
+        }
+
+        // Try to download Cargo.toml from crates.io API (future implementation)
+        if let Ok(metadata) = Self::from_crates_io_api(crate_name) {
+            return Ok(metadata);
+        }
+
+        // Fallback to basic search
         let output = std::process::Command::new("cargo")
             .args(["search", crate_name, "--limit", "1"])
             .output()
@@ -136,6 +147,71 @@ impl PluginMetadata {
             version,
             format!("{crate_name} WebAssembly plugin for wasmrun"),
             "Unknown".to_string(),
+        ))
+    }
+
+    /// Try to get metadata from a locally cached Cargo.toml (e.g., if plugin was downloaded before)
+    fn from_cached_cargo_toml(crate_name: &str) -> Result<Self> {
+        let cache_dir = dirs::home_dir()
+            .ok_or_else(|| WasmrunError::from("Could not find home directory"))?
+            .join(".wasmrun")
+            .join("cache")
+            .join(crate_name);
+
+        let cargo_toml_path = cache_dir.join("Cargo.toml");
+        if cargo_toml_path.exists() {
+            let content = std::fs::read_to_string(&cargo_toml_path).map_err(|e| {
+                WasmrunError::from(format!("Failed to read cached Cargo.toml: {e}"))
+            })?;
+            return Self::from_cargo_toml_content(&content);
+        }
+
+        Err(WasmrunError::from("No cached Cargo.toml found"))
+    }
+
+    /// Future implementation: download Cargo.toml from crates.io API
+    fn from_crates_io_api(crate_name: &str) -> Result<Self> {
+        // For now, we'll try to use `cargo show` if available
+        let output = std::process::Command::new("cargo")
+            .args(["show", crate_name])
+            .output();
+
+        if let Ok(output) = output {
+            if output.status.success() {
+                let show_output = String::from_utf8_lossy(&output.stdout);
+                // Parse the cargo show output for metadata
+                return Self::parse_cargo_show_output(crate_name, &show_output);
+            }
+        }
+
+        // For a complete implementation, this would use the crates.io API to download
+        // the crate metadata and Cargo.toml directly
+        Err(WasmrunError::from(
+            "Cargo.toml download not yet implemented",
+        ))
+    }
+
+    /// Parse cargo show output to extract metadata
+    fn parse_cargo_show_output(crate_name: &str, output: &str) -> Result<Self> {
+        let mut version = "unknown".to_string();
+        let mut description = format!("{crate_name} WebAssembly plugin");
+        let mut author = "Unknown".to_string();
+
+        for line in output.lines() {
+            if let Some(v) = line.strip_prefix("version: ") {
+                version = v.trim().to_string();
+            } else if let Some(d) = line.strip_prefix("description: ") {
+                description = d.trim().to_string();
+            } else if let Some(a) = line.strip_prefix("authors: ") {
+                author = a.trim().to_string();
+            }
+        }
+
+        Ok(Self::create_fallback_metadata(
+            crate_name.to_string(),
+            version,
+            description,
+            author,
         ))
     }
 

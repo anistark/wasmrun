@@ -105,6 +105,44 @@ impl PluginManager {
         None
     }
 
+    pub fn find_plugin_for_language(&self, language: &str) -> Option<&dyn Plugin> {
+        // Check if any external plugins support this language
+        for plugin in self.external_plugins.values() {
+            let info = plugin.info();
+            // Check if plugin supports the language based on its extensions
+            match language.to_lowercase().as_str() {
+                "rust" | "rs" => {
+                    if info.extensions.contains(&"rs".to_string())
+                        || info.extensions.contains(&"toml".to_string())
+                    {
+                        return Some(plugin.as_ref());
+                    }
+                }
+                "go" => {
+                    if info.extensions.contains(&"go".to_string())
+                        || info.extensions.contains(&"mod".to_string())
+                    {
+                        return Some(plugin.as_ref());
+                    }
+                }
+                "zig" => {
+                    if info.extensions.contains(&"zig".to_string()) {
+                        return Some(plugin.as_ref());
+                    }
+                }
+                "javascript" | "js" => {
+                    if info.extensions.contains(&"js".to_string())
+                        || info.extensions.contains(&"mjs".to_string())
+                    {
+                        return Some(plugin.as_ref());
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
     pub fn get_builder_for_project(&self, project_path: &str) -> Option<Box<dyn WasmBuilder>> {
         if let Some(plugin) = self.find_plugin_for_project(project_path) {
             Some(plugin.get_builder())
@@ -193,13 +231,11 @@ impl PluginManager {
     #[allow(dead_code)]
     pub fn get_auto_detected_plugins(&self) -> Vec<String> {
         let mut detected = Vec::new();
-        let known_plugins = ["wasmrust", "wasmgo"];
 
-        for plugin_name in &known_plugins {
-            if Self::is_external_binary_available(plugin_name)
-                && !self.config.external_plugins.contains_key(*plugin_name)
-            {
-                detected.push(plugin_name.to_string());
+        // Check if any installed external plugins are available
+        for (name, entry) in &self.config.external_plugins {
+            if entry.enabled && Self::is_external_binary_available(name) {
+                detected.push(name.clone());
             }
         }
 
@@ -307,13 +343,8 @@ impl PluginManager {
     }
 
     fn get_latest_plugin_version(&self, plugin_name: &str) -> Result<String> {
-        match plugin_name {
-            "wasmrust" => self.get_latest_crates_io_version("wasmrust"),
-            "wasmgo" => self.get_latest_crates_io_version("wasmgo"),
-            _ => Err(WasmrunError::from(format!(
-                "Don't know how to update plugin: {plugin_name}"
-            ))),
-        }
+        // Try to get version from crates.io for any plugin
+        self.get_latest_crates_io_version(plugin_name)
     }
 
     fn get_latest_crates_io_version(&self, crate_name: &str) -> Result<String> {
@@ -747,55 +778,99 @@ impl PluginManager {
     }
 
     pub fn register_installed_plugin(&mut self, plugin_name: &str) -> Result<()> {
-        if !self.is_external_plugin_available(plugin_name) {
-            return Err(WasmrunError::from(format!(
-            "Plugin '{plugin_name}' library files not found after installation. Expected files in plugin directory."
-        )));
-        }
-
-        let detected_version = self.detect_plugin_version(plugin_name);
-
-        // Use registry to create plugin entry instead of hardcoded match
-        let mut entry = PluginRegistry::create_plugin_entry(plugin_name)?;
-
-        entry.info.version = detected_version.clone();
-        if let PluginSource::CratesIo {
-            ref mut version, ..
-        } = entry.source
-        {
-            *version = detected_version;
-        }
-
         let plugin_dir = self.get_plugin_directory(plugin_name)?;
-        entry.install_path = plugin_dir.to_string_lossy().to_string();
+
+        // Load metadata from the installed plugin directory
+        let metadata_result =
+            crate::plugin::metadata::PluginMetadata::from_installed_plugin(&plugin_dir);
+
+        let (plugin_info, detected_version) = match metadata_result {
+            Ok(metadata) => {
+                println!("📋 Found plugin metadata with capabilities");
+                let plugin_info = metadata.to_plugin_info();
+                (plugin_info, metadata.version)
+            }
+            Err(_) => {
+                println!("📋 Using basic plugin registration");
+                let detected_version = self.detect_plugin_version(plugin_name);
+                let mut entry = PluginRegistry::create_plugin_entry(plugin_name)?;
+                entry.info.version = detected_version.clone();
+                (entry.info, detected_version)
+            }
+        };
+
+        // Check if binary exists in ~/.wasmrun/bin/
+        let wasmrun_root = dirs::home_dir()
+            .ok_or_else(|| WasmrunError::from("Could not find home directory"))?
+            .join(".wasmrun");
+        let binary_path = wasmrun_root.join("bin").join(plugin_name);
+
+        let executable_path = if binary_path.exists() {
+            Some(binary_path.to_string_lossy().to_string())
+        } else {
+            None
+        };
+
+        // Create the external plugin entry with enhanced metadata
+        let entry = ExternalPluginEntry {
+            info: plugin_info,
+            source: PluginSource::CratesIo {
+                name: plugin_name.to_string(),
+                version: detected_version,
+            },
+            installed_at: chrono::Utc::now().to_rfc3339(),
+            enabled: true,
+            install_path: plugin_dir.to_string_lossy().to_string(),
+            executable_path,
+        };
 
         self.config
             .external_plugins
             .insert(plugin_name.to_string(), entry);
         self.config.save()?;
 
-        if let Some(entry) = self.config.external_plugins.get(plugin_name) {
-            match ExternalPluginLoader::load(entry) {
+        // Load the plugin
+        let load_result = if let Some(entry) = self.config.external_plugins.get(plugin_name) {
+            let entry_clone = entry.clone(); // Clone to avoid borrowing issues
+            match ExternalPluginLoader::load(&entry_clone) {
                 Ok(plugin) => {
                     self.external_plugins
                         .insert(plugin_name.to_string(), plugin);
-                    self.update_stats();
-                    println!("Plugin '{plugin_name}' registered and loaded successfully");
+                    Some((entry_clone, None))
                 }
-                Err(e) => {
-                    eprintln!("Plugin '{plugin_name}' registered but failed to load: {e}");
-                    eprintln!("   This might be due to missing dependencies or compilation issues");
-                    eprintln!("   Run 'wasmrun plugin info {plugin_name}' for more details");
+                Err(e) => Some((entry_clone, Some(e))),
+            }
+        } else {
+            None
+        };
+
+        if let Some((entry, error)) = load_result {
+            self.update_stats();
+
+            if let Some(e) = error {
+                eprintln!("Plugin '{plugin_name}' registered but failed to load: {e}");
+                eprintln!("   This might be due to missing dependencies or compilation issues");
+                eprintln!("   Run 'wasmrun plugin info {plugin_name}' for more details");
+            } else {
+                let info = &entry.info;
+                println!(
+                    "🔌 Plugin '{plugin_name}' registered successfully (v{})",
+                    info.version
+                );
+                println!("   📁 Extensions: {}", info.extensions.join(", "));
+                println!("   📄 Entry files: {}", info.entry_files.join(", "));
+                println!("   🔧 Dependencies: {}", info.dependencies.join(", "));
+
+                if info.capabilities.compile_webapp {
+                    println!("   🌐 Supports web applications");
+                }
+                if info.capabilities.live_reload {
+                    println!("   ⚡ Supports live reload");
                 }
             }
         }
 
         Ok(())
-    }
-
-    /// Check if external plugin library files are available (replaces PATH check)
-    pub fn is_external_plugin_available(&self, plugin_name: &str) -> bool {
-        PluginRegistry::is_supported_external_plugin(plugin_name)
     }
 
     #[allow(dead_code)]
@@ -841,8 +916,7 @@ impl PluginManager {
             .unwrap_or(false)
     }
 
-    // TODO: Deprecate and move to installer.rs
-    #[allow(dead_code)]
+    /// Install plugin
     pub fn install_plugin(&mut self, plugin_name: &str) -> Result<()> {
         // Check if already installed
         if self.is_plugin_installed(plugin_name) {
@@ -851,22 +925,17 @@ impl PluginManager {
             )));
         }
 
-        // Check if it's a supported plugin
-        // TODO: Move to either plugin registration or open plugin registry
-        if !is_supported_external_plugin(plugin_name) {
-            return Err(WasmrunError::from(format!(
-                "Plugin '{plugin_name}' is not supported. Supported plugins: wasmrust, wasmgo"
-            )));
-        }
+        // Use the improved plugin installer
+        let install_result = PluginInstaller::install_external_plugin(plugin_name)?;
 
-        // For external plugins, check library availability instead of binary in PATH
-        if !self.is_external_plugin_available(plugin_name) {
-            return Err(WasmrunError::from(format!(
-                "Plugin '{plugin_name}' library files not found. Please ensure installation completed successfully."
-            )));
-        }
+        println!(
+            "🔌 Plugin '{}' installation completed (v{})",
+            plugin_name, install_result.version
+        );
 
+        // Register the newly installed plugin
         self.register_installed_plugin(plugin_name)?;
+
         Ok(())
     }
 }
@@ -889,8 +958,4 @@ pub enum PluginCapabilityFilter {
     LiveReload,
     Optimization,
     Extension(String),
-}
-
-fn is_supported_external_plugin(plugin: &str) -> bool {
-    PluginRegistry::is_supported_external_plugin(plugin)
 }

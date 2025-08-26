@@ -122,11 +122,14 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
             vec![
                 "rustup".to_string(),
                 "cargo".to_string(),
-                "wasmrust plugin".to_string(),
+                "External Rust plugin (install with: wasmrun plugin install wasmrust)".to_string(),
             ]
         }
         (ProjectLanguage::Go, _) => {
-            vec!["wasmgo plugin".to_string(), "tinygo".to_string()]
+            vec![
+                "External Go plugin (install with: wasmrun plugin install wasmgo)".to_string(),
+                "tinygo".to_string(),
+            ]
         }
         (ProjectLanguage::C, OperatingSystem::Windows) => {
             vec![

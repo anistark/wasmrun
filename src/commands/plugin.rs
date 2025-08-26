@@ -2,6 +2,12 @@ use crate::cli::PluginSubcommands;
 use crate::error::Result;
 use crate::plugin::manager::PluginManager;
 
+fn get_available_plugins_from_crates_io() -> Vec<&'static str> {
+    // This could be enhanced to actually search crates.io for plugins
+    // For now, return known working plugins
+    vec!["wasmrust", "wasmgo", "wasmzig", "wasmjs"]
+}
+
 pub fn run_plugin_command(subcommand: &PluginSubcommands) -> Result<()> {
     match subcommand {
         PluginSubcommands::List { all: _ } => run_plugin_list(),
@@ -79,7 +85,8 @@ pub fn run_plugin_search(query: &str) -> Result<()> {
     println!("🔍 Searching for plugins: {query}");
 
     // Basic search implementation - can be enhanced later
-    let available_plugins = ["wasmrust", "wasmgo", "wasmzig", "wasmjs"];
+    // Get available plugins from crates.io search
+    let available_plugins = get_available_plugins_from_crates_io();
     let matches: Vec<&str> = available_plugins
         .iter()
         .filter(|plugin| plugin.to_lowercase().contains(&query.to_lowercase()))

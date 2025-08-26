@@ -178,9 +178,9 @@ impl BuilderFactory {
 
         match language {
             ProjectLanguage::Rust => {
-                // Try to get wasmrust plugin first
+                // Try to find any plugin that can handle Rust projects
                 if let Ok(plugin_manager) = PluginManager::new() {
-                    if let Some(plugin) = plugin_manager.find_plugin_by_name("wasmrust") {
+                    if let Some(plugin) = plugin_manager.find_plugin_for_language("rust") {
                         return plugin.get_builder();
                     }
                 }
@@ -194,8 +194,9 @@ impl BuilderFactory {
                 Box::new(crate::plugin::languages::python_plugin::PythonPlugin::new())
             }
             ProjectLanguage::Go => {
+                // Try to find any plugin that can handle Go projects
                 if let Ok(plugin_manager) = PluginManager::new() {
-                    if let Some(plugin) = plugin_manager.find_plugin_by_name("wasmgo") {
+                    if let Some(plugin) = plugin_manager.find_plugin_for_language("go") {
                         return plugin.get_builder();
                     }
                 }
