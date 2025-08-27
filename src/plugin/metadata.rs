@@ -25,6 +25,7 @@ pub struct MetadataCapabilities {
     pub live_reload: bool,
     pub optimization: bool,
     pub custom_targets: Vec<String>,
+    pub supported_languages: Option<Vec<String>>, // Add this field
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,11 +185,8 @@ impl PluginMetadata {
             }
         }
 
-        // For a complete implementation, this would use the crates.io API to download
-        // the crate metadata and Cargo.toml directly
-        Err(WasmrunError::from(
-            "Cargo.toml download not yet implemented",
-        ))
+        // Download crate metadata from crates.io API
+        download_crate_metadata_from_api(crate_name)
     }
 
     /// Parse cargo show output to extract metadata
@@ -236,6 +234,7 @@ impl PluginMetadata {
                 live_reload: true,
                 optimization: true,
                 custom_targets: vec!["wasm32-unknown-unknown".to_string()],
+                supported_languages: Some(vec![name.clone()]), // Use plugin name as fallback
             },
             dependencies: MetadataDependencies {
                 tools: dependencies,
@@ -276,6 +275,7 @@ impl PluginMetadata {
         }
     }
 
+
     fn create_default_exports(plugin_name: &str) -> MetadataExports {
         let prefix = plugin_name.replace('-', "_");
         MetadataExports {
@@ -310,6 +310,7 @@ impl PluginMetadata {
                 live_reload: self.capabilities.live_reload,
                 optimization: self.capabilities.optimization,
                 custom_targets: self.capabilities.custom_targets.clone(),
+                supported_languages: self.capabilities.supported_languages.clone(),
             },
         }
     }
@@ -332,5 +333,95 @@ impl PluginMetadata {
         }
 
         Ok(())
+    }
+}
+
+/// Download crate metadata from crates.io API
+fn download_crate_metadata_from_api(crate_name: &str) -> Result<PluginMetadata> {
+    let output = std::process::Command::new("curl")
+        .arg("-s")
+        .arg(format!("https://crates.io/api/v1/crates/{crate_name}"))
+        .output()
+        .map_err(|e| {
+            WasmrunError::from(format!("Failed to download metadata from crates.io: {e}"))
+        })?;
+
+    if !output.status.success() {
+        return Err(WasmrunError::from(format!(
+            "Failed to query crates.io API for {crate_name}"
+        )));
+    }
+
+    let response = String::from_utf8_lossy(&output.stdout);
+    parse_crates_io_metadata_response(crate_name, &response)
+}
+
+/// Parse crates.io API response to extract metadata
+fn parse_crates_io_metadata_response(crate_name: &str, response: &str) -> Result<PluginMetadata> {
+    use serde_json::Value;
+
+    let json: Value = serde_json::from_str(response)
+        .map_err(|e| WasmrunError::from(format!("Failed to parse crates.io response: {e}")))?;
+
+    let crate_info = json["crate"]
+        .as_object()
+        .ok_or_else(|| WasmrunError::from("Invalid crates.io response format".to_string()))?;
+
+    let version = crate_info["max_version"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let description = crate_info["description"]
+        .as_str()
+        .unwrap_or(&format!("{crate_name} WebAssembly plugin"))
+        .to_string();
+
+    // Try to extract author information
+    let mut author = "Unknown".to_string();
+    if let Some(versions) = json["versions"].as_array() {
+        if let Some(latest_version) = versions.first() {
+            if let Some(published_by) = latest_version["published_by"]["name"].as_str() {
+                author = published_by.to_string();
+            }
+        }
+    }
+
+    // Try to get language support from plugin metadata
+    // For now, we can't get this from crates.io API directly
+    // This will need to be enhanced when we can access Cargo.toml metadata
+    let languages = vec!["unknown".to_string()]; // Placeholder until we can read Cargo.toml
+
+    Ok(PluginMetadata {
+        name: crate_name.to_string(),
+        version,
+        description,
+        author,
+        extensions: languages.clone(), // Map languages to extensions
+        entry_files: infer_entry_files_from_name(crate_name),   // Infer based on plugin name
+        capabilities: MetadataCapabilities {
+            compile_wasm: true,
+            compile_webapp: false,
+            live_reload: false,
+            optimization: true,
+            custom_targets: vec![],
+            supported_languages: Some(languages),
+        },
+        dependencies: MetadataDependencies {
+            tools: vec![], // Dependencies will be fetched separately if needed
+            optional_tools: None,
+        },
+        exports: None,
+        frameworks: None,
+    })
+}
+
+fn infer_entry_files_from_name(plugin_name: &str) -> Vec<String> {
+    match plugin_name {
+        name if name.contains("rust") => vec!["Cargo.toml".to_string(), "src/lib.rs".to_string()],
+        name if name.contains("go") => vec!["go.mod".to_string(), "main.go".to_string()],
+        name if name.contains("zig") => vec!["build.zig".to_string(), "src/main.zig".to_string()],
+        name if name.contains("cpp") || name.contains("cxx") => vec!["CMakeLists.txt".to_string(), "Makefile".to_string()],
+        name if name.contains("py") || name.contains("python") => vec!["main.py".to_string(), "app.py".to_string()],
+        _ => vec!["main.wasm".to_string()], // Generic fallback
     }
 }

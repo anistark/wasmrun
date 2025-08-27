@@ -33,6 +33,7 @@ impl AscPlugin {
                 live_reload: true,
                 optimization: true,
                 custom_targets: vec!["wasm".to_string()],
+                supported_languages: Some(vec!["assemblyscript".to_string(), "asc".to_string()]),
             },
         };
 

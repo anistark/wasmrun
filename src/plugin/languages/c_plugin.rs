@@ -29,6 +29,7 @@ impl CPlugin {
                 live_reload: true,
                 optimization: true,
                 custom_targets: vec!["wasm".to_string(), "web".to_string()],
+                supported_languages: Some(vec!["c".to_string(), "cpp".to_string()]),
             },
         };
 

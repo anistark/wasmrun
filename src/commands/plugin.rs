@@ -2,11 +2,60 @@ use crate::cli::PluginSubcommands;
 use crate::error::Result;
 use crate::plugin::manager::PluginManager;
 
-fn get_available_plugins_from_crates_io() -> Vec<&'static str> {
-    // This could be enhanced to actually search crates.io for plugins
-    // For now, return known working plugins
-    vec!["wasmrust", "wasmgo", "wasmzig", "wasmjs"]
-}
+// TODO: Implement plugin search with proper plugin registry system
+// These functions will be used when we have a proper plugin registry
+// fn get_available_plugins_from_crates_io() -> Vec<String> {
+//     // Try to search crates.io for wasmrun plugins
+//     search_crates_io_for_plugins().unwrap_or_else(|_| {
+//         // Fallback to known working plugins if API call fails
+//         vec!["wasmrust".to_string(), "wasmgo".to_string()]
+//     })
+// }
+
+// fn search_crates_io_for_plugins() -> Result<Vec<String>> {
+//     let output = std::process::Command::new("curl")
+//         .arg("-s")
+//         .arg("https://crates.io/api/v1/crates?q=wasmrun&sort=downloads")
+//         .output()
+//         .map_err(|e| WasmrunError::from(format!("Failed to search crates.io: {e}")))?;
+
+//     if !output.status.success() {
+//         return Err(WasmrunError::from("Failed to query crates.io API".to_string()));
+//     }
+
+//     let response = String::from_utf8_lossy(&output.stdout);
+//     parse_crates_io_response(&response)
+// }
+
+// fn parse_crates_io_response(response: &str) -> Result<Vec<String>> {
+//     use serde_json::Value;
+
+//     let json: Value = serde_json::from_str(response)
+//         .map_err(|e| WasmrunError::from(format!("Failed to parse crates.io response: {e}")))?;
+
+//     let mut plugins = Vec::new();
+
+//     if let Some(crates) = json["crates"].as_array() {
+//         for crate_info in crates.iter().take(10) { // Limit to top 10 results
+//             if let Some(name) = crate_info["name"].as_str() {
+//                 // Filter for likely wasmrun plugins
+//                 if name.contains("wasmrun") || name.contains("wasm-") {
+//                     plugins.push(name.to_string());
+//                 }
+//             }
+//         }
+//     }
+
+//     // Add known plugins if not found in search
+//     let known_plugins = ["wasmrust", "wasmgo"];
+//     for plugin in known_plugins {
+//         if !plugins.contains(&plugin.to_string()) {
+//             plugins.push(plugin.to_string());
+//         }
+//     }
+
+//     Ok(plugins)
+// }
 
 pub fn run_plugin_command(subcommand: &PluginSubcommands) -> Result<()> {
     match subcommand {
@@ -22,7 +71,8 @@ pub fn run_plugin_command(subcommand: &PluginSubcommands) -> Result<()> {
             }
         }
         PluginSubcommands::Info { plugin } => run_plugin_info(plugin),
-        PluginSubcommands::Search { query } => run_plugin_search(query),
+        // TODO: Implement plugin search with proper plugin registry system
+        // PluginSubcommands::Search { query } => run_plugin_search(query),
     }
 }
 
@@ -81,30 +131,29 @@ pub fn run_plugin_list() -> Result<()> {
     Ok(())
 }
 
-pub fn run_plugin_search(query: &str) -> Result<()> {
-    println!("🔍 Searching for plugins: {query}");
+// TODO: Implement plugin search with proper plugin registry system
+// pub fn run_plugin_search(query: &str) -> Result<()> {
+//     println!("🔍 Searching for plugins: {query}");
 
-    // Basic search implementation - can be enhanced later
-    // Get available plugins from crates.io search
-    let available_plugins = get_available_plugins_from_crates_io();
-    let matches: Vec<&str> = available_plugins
-        .iter()
-        .filter(|plugin| plugin.to_lowercase().contains(&query.to_lowercase()))
-        .copied()
-        .collect();
+//     // Get available plugins from crates.io search
+//     let available_plugins = get_available_plugins_from_crates_io();
+//     let matches: Vec<&String> = available_plugins
+//         .iter()
+//         .filter(|plugin| plugin.to_lowercase().contains(&query.to_lowercase()))
+//         .collect();
 
-    if matches.is_empty() {
-        println!("❌ No plugins found matching '{query}'");
-    } else {
-        println!("\n📦 Found {} plugin(s):", matches.len());
-        for plugin in matches {
-            println!("  • {plugin}");
-        }
-        println!("\n💡 Use 'wasmrun plugin install <plugin-name>' to install");
-    }
+//     if matches.is_empty() {
+//         println!("❌ No plugins found matching '{query}'");
+//     } else {
+//         println!("\n📦 Found {} plugin(s):", matches.len());
+//         for plugin in matches {
+//             println!("  • {plugin}");
+//         }
+//         println!("\n💡 Use 'wasmrun plugin install <plugin-name>' to install");
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 pub fn run_plugin_install(plugin: &str) -> Result<()> {
     let mut manager = PluginManager::new()?;

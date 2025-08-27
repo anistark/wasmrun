@@ -54,6 +54,7 @@ pub struct PluginCapabilities {
     pub live_reload: bool,
     pub optimization: bool,
     pub custom_targets: Vec<String>,
+    pub supported_languages: Option<Vec<String>>,
 }
 
 impl Default for PluginCapabilities {
@@ -64,6 +65,7 @@ impl Default for PluginCapabilities {
             live_reload: false,
             optimization: false,
             custom_targets: vec![],
+            supported_languages: None,
         }
     }
 }

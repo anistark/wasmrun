@@ -1,5 +1,7 @@
+use crate::compiler::ProjectLanguage;
 use crate::error::{Result, WasmrunError};
 use crate::plugin::registry::PluginRegistry;
+use crate::plugin::Plugin;
 use crate::utils::SystemUtils;
 use std::path::{Path, PathBuf};
 
@@ -216,5 +218,95 @@ impl PluginUtils {
         }
 
         Ok(result)
+    }
+
+    // Plugin Language Detection Utilities
+
+    /// Extract supported languages from a plugin's capabilities
+    /// Returns a vector of language names supported by the plugin
+    pub fn get_supported_languages(plugin: &dyn Plugin) -> Vec<String> {
+        let plugin_info = plugin.info();
+        
+        // First check if plugin has supported_languages in capabilities
+        if let Some(supported_langs) = &plugin_info.capabilities.supported_languages {
+            return supported_langs.clone();
+        }
+        
+        // Fallback to inferring from plugin name if capabilities don't specify
+        let plugin_name = plugin_info.name.to_lowercase();
+        if plugin_name.contains("rust") {
+            vec!["rust".to_string()]
+        } else if plugin_name.contains("go") {
+            vec!["go".to_string()]
+        } else if plugin_name.contains("c") || plugin_name.contains("cpp") {
+            vec!["c".to_string(), "cpp".to_string()]
+        } else if plugin_name.contains("python") || plugin_name.contains("py") {
+            vec!["python".to_string()]
+        } else if plugin_name.contains("asc") || plugin_name.contains("assemblyscript") {
+            vec!["assemblyscript".to_string(), "asc".to_string()]
+        } else {
+            // Unknown plugin, return the plugin name as the language
+            vec![plugin_info.name.clone()]
+        }
+    }
+    
+    /// Get the primary (first) language supported by a plugin
+    /// Returns the main language that the plugin is designed for
+    pub fn get_primary_language(plugin: &dyn Plugin) -> String {
+        let languages = Self::get_supported_languages(plugin);
+        languages.first().cloned().unwrap_or_else(|| "unknown".to_string())
+    }
+    
+    /// Check if a plugin supports a specific language
+    /// Case-insensitive comparison
+    pub fn supports_language(plugin: &dyn Plugin, language: &str) -> bool {
+        let supported_languages = Self::get_supported_languages(plugin);
+        let target_lang = language.to_lowercase();
+        
+        supported_languages.iter().any(|lang| lang.to_lowercase() == target_lang)
+    }
+    
+    /// Map plugin to ProjectLanguage enum for compatibility with existing code
+    /// This function handles the mapping from plugin languages to the ProjectLanguage enum
+    pub fn map_plugin_to_project_language(plugin: &dyn Plugin, project_path: &str) -> ProjectLanguage {
+        let primary_language = Self::get_primary_language(plugin);
+        
+        match primary_language.to_lowercase().as_str() {
+            "rust" => ProjectLanguage::Rust,
+            "go" => ProjectLanguage::Go,
+            "c" | "cpp" | "c++" => ProjectLanguage::C,
+            "python" | "py" => ProjectLanguage::Python,
+            "assemblyscript" | "asc" => ProjectLanguage::Asc,
+            _ => {
+                // Unknown language, fallback to project detection
+                crate::compiler::detect_project_language(project_path)
+            }
+        }
+    }
+    
+    /// Check if a plugin can handle projects of a specific language
+    /// This is useful for finding plugins when you know the target language
+    #[allow(dead_code)]
+    pub fn can_handle_language(plugin: &dyn Plugin, target_language: &str) -> bool {
+        Self::supports_language(plugin, target_language)
+    }
+    
+    /// Get a human-readable description of languages supported by a plugin
+    /// Returns a formatted string like "Rust, Go" or "C/C++"
+    #[allow(dead_code)]
+    pub fn get_languages_description(plugin: &dyn Plugin) -> String {
+        let languages = Self::get_supported_languages(plugin);
+        
+        // Handle special cases for better formatting
+        if languages.len() == 2 && languages.contains(&"c".to_string()) && languages.contains(&"cpp".to_string()) {
+            return "C/C++".to_string();
+        }
+        
+        if languages.len() == 2 && languages.contains(&"assemblyscript".to_string()) && languages.contains(&"asc".to_string()) {
+            return "AssemblyScript".to_string();
+        }
+        
+        // For other cases, just join with commas
+        languages.join(", ")
     }
 }

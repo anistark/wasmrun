@@ -178,29 +178,46 @@ impl ExternalWasmBuilder {
     }
 
     fn build_via_command(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        let plugin_binary = format!("wasmrun-{}", self.plugin_name);
+        // Try to find the plugin binary in ~/.wasmrun/bin first, then fallback to system PATH
+        let wasmrun_bin_path = dirs::home_dir()
+            .map(|home| home.join(".wasmrun").join("bin").join(&self.plugin_name))
+            .unwrap_or_else(|| PathBuf::from(&self.plugin_name));
+            
+        let plugin_binary = if wasmrun_bin_path.exists() {
+            wasmrun_bin_path.to_string_lossy().to_string()
+        } else {
+            self.plugin_name.clone()
+        };
 
         let output = std::process::Command::new(&plugin_binary)
-            .args(["build", &config.project_path])
-            .args(["--output", &config.output_dir])
+            .args(["compile", "-p", &config.project_path])
+            .args(["-o", &config.output_dir])
             .output();
 
         match output {
             Ok(result) if result.status.success() => {
-                let output_file = PathBuf::from(&config.output_dir).join("output.wasm");
-                if output_file.exists() {
-                    Ok(BuildResult {
-                        wasm_path: output_file.to_string_lossy().to_string(),
-                        js_path: None,
-                        additional_files: vec![],
-                        is_wasm_bindgen: false,
-                    })
-                } else {
-                    Err(CompilationError::BuildFailed {
-                        language: self.plugin_name.clone(),
-                        reason: "Build completed but no output file found".to_string(),
-                    })
+                // Look for any .wasm files in the output directory
+                let output_dir = PathBuf::from(&config.output_dir);
+                if let Ok(entries) = std::fs::read_dir(&output_dir) {
+                    for entry in entries {
+                        if let Ok(entry) = entry {
+                            let path = entry.path();
+                            if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
+                                return Ok(BuildResult {
+                                    wasm_path: path.to_string_lossy().to_string(),
+                                    js_path: None,
+                                    additional_files: vec![],
+                                    is_wasm_bindgen: false,
+                                });
+                            }
+                        }
+                    }
                 }
+                
+                Err(CompilationError::BuildFailed {
+                    language: self.plugin_name.clone(),
+                    reason: "Build completed but no .wasm file found in output directory".to_string(),
+                })
             }
             Ok(result) => {
                 let stderr = String::from_utf8_lossy(&result.stderr);

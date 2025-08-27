@@ -184,7 +184,8 @@ pub enum Commands {
     #[command(subcommand)]
     Plugin(PluginSubcommands),
 
-    // TODO: Implement WASM project using Wasmrun
+    // TODO: Implement project initialization command
+    // This will create new WebAssembly projects from templates (rust, go, c, asc, python)
     // /// Initialize a new Wasmrun project from template
     // #[command(alias = "new")]
     // Init {
@@ -276,12 +277,12 @@ pub enum PluginSubcommands {
         /// Plugin name
         plugin: String,
     },
-
-    /// Search for available plugins
-    Search {
-        /// Search query
-        query: String,
-    },
+    // TODO: Implement plugin search with proper plugin registry system
+    // /// Search for available plugins
+    // Search {
+    //     /// Search query
+    //     query: String,
+    // },
 }
 
 /// Argument resolution with validation

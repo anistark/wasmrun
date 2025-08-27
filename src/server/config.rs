@@ -4,6 +4,8 @@ use std::path::Path;
 
 use crate::compiler::builder::{BuildConfig, BuilderFactory, OptimizationLevel, TargetType};
 use crate::error::{Result, ServerError, WasmrunError};
+use crate::plugin::manager::PluginManager;
+use crate::utils::PluginUtils;
 use crate::utils::CommandExecutor;
 use crate::utils::{ProjectAnalysis, WasmAnalysis};
 
@@ -333,18 +335,55 @@ pub fn setup_project_compilation(
 ) -> Option<(crate::compiler::ProjectLanguage, String)> {
     ServerUtils::print_initial_project_detection(project_path);
 
+    // project detection using plugin system
+    if let Ok(plugin_manager) = PluginManager::new() {
+        if let Some(plugin) = plugin_manager.find_plugin_for_project(project_path) {
+            println!("🔌 Using plugin: {}", plugin.info().name);
+
+            // Check plugin dependencies
+            let builder = plugin.get_builder();
+            let missing_deps = builder.check_dependencies();
+            if !missing_deps.is_empty() {
+                println!(
+                    "⚠️  Plugin dependencies missing: {}",
+                    missing_deps.join(", ")
+                );
+                println!("💡 Consider installing: {}", missing_deps.join(", "));
+                println!("🔄 Falling back to built-in language detection...");
+            } else {
+                // Map plugin to language type for compatibility with existing code
+                let lang = PluginUtils::map_plugin_to_project_language(plugin, project_path);
+
+                let temp_dir = std::env::temp_dir().join("wasmrun_temp");
+                let temp_output_dir = temp_dir.to_str().unwrap_or("/tmp").to_string();
+
+                if !temp_dir.exists() {
+                    if let Err(e) = std::fs::create_dir_all(&temp_dir) {
+                        println!("❌ Failed to create temporary directory: {e}");
+                        return None;
+                    }
+                }
+
+                return Some((lang, temp_output_dir));
+            }
+        }
+    }
+
+    // Fallback to legacy language detection
     let lang = if let Some(lang_override) = language_override {
         match lang_override.to_lowercase().as_str() {
             "rust" | "rs" => crate::compiler::ProjectLanguage::Rust,
             "c" | "cpp" | "c++" => crate::compiler::ProjectLanguage::C,
             "asc" | "assemblyscript" => crate::compiler::ProjectLanguage::Asc,
             "python" | "py" => crate::compiler::ProjectLanguage::Python,
+            "go" => crate::compiler::ProjectLanguage::Go,
             _ => {
                 println!("⚠️  Unknown language override: {lang_override}");
                 crate::compiler::detect_project_language(project_path)
             }
         }
     } else {
+        println!("🔍 Using built-in language detection...");
         crate::compiler::detect_project_language(project_path)
     };
 
@@ -376,10 +415,46 @@ pub fn compile_project(
         target_type: TargetType::Standard,
     };
 
+    // First try plugin-based compilation
+    if let Ok(plugin_manager) = PluginManager::new() {
+        if let Some(plugin) = plugin_manager.find_plugin_for_project(project_path) {
+            let builder = plugin.get_builder();
+
+            // Check dependencies first
+            let missing_deps = builder.check_dependencies();
+            if !missing_deps.is_empty() {
+                println!(
+                    "⚠️  Plugin dependencies missing: {}",
+                    missing_deps.join(", ")
+                );
+                println!("💡 Install missing tools or use built-in compiler");
+                println!("🔄 Falling back to built-in compilation...");
+            } else {
+                println!("🔌 Compiling with plugin: {}", plugin.info().name);
+                match builder.build(&config) {
+                    Ok(result) => {
+                        println!("✅ Plugin compilation successful!");
+                        println!("📦 WASM file: {}", result.wasm_path);
+                        if let Some(ref js_path) = result.js_path {
+                            println!("📦 JS file: {js_path}");
+                        }
+                        return Some((result.wasm_path, result.is_wasm_bindgen, result.js_path));
+                    }
+                    Err(e) => {
+                        println!("❌ Plugin compilation failed: {e:?}");
+                        println!("🔄 Falling back to built-in compilation...");
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback to built-in compilation system
+    println!("🔧 Using built-in compiler for {lang:?}");
     let builder = BuilderFactory::create_builder(&lang);
     match builder.build(&config) {
         Ok(result) => {
-            println!("✅ Compilation successful!");
+            println!("✅ Built-in compilation successful!");
             println!("📦 WASM file: {}", result.wasm_path);
             if let Some(ref js_path) = result.js_path {
                 println!("📦 JS file: {js_path}");
@@ -387,7 +462,7 @@ pub fn compile_project(
             Some((result.wasm_path, result.is_wasm_bindgen, result.js_path))
         }
         Err(e) => {
-            println!("❌ Compilation failed: {e}");
+            println!("❌ Built-in compilation failed: {e}");
             None
         }
     }
@@ -492,3 +567,4 @@ pub enum PortStatus {
         alternative: Option<u16>,
     },
 }
+

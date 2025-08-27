@@ -29,6 +29,7 @@ impl PythonPlugin {
                 live_reload: true,
                 optimization: false,
                 custom_targets: vec!["wasm".into(), "web".into()],
+                supported_languages: Some(vec!["python".to_string()]),
             },
         };
 

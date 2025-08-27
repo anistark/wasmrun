@@ -106,40 +106,20 @@ impl PluginManager {
     }
 
     pub fn find_plugin_for_language(&self, language: &str) -> Option<&dyn Plugin> {
-        // Check if any external plugins support this language
+        // Check external plugins first using the common utility
         for plugin in self.external_plugins.values() {
-            let info = plugin.info();
-            // Check if plugin supports the language based on its extensions
-            match language.to_lowercase().as_str() {
-                "rust" | "rs" => {
-                    if info.extensions.contains(&"rs".to_string())
-                        || info.extensions.contains(&"toml".to_string())
-                    {
-                        return Some(plugin.as_ref());
-                    }
-                }
-                "go" => {
-                    if info.extensions.contains(&"go".to_string())
-                        || info.extensions.contains(&"mod".to_string())
-                    {
-                        return Some(plugin.as_ref());
-                    }
-                }
-                "zig" => {
-                    if info.extensions.contains(&"zig".to_string()) {
-                        return Some(plugin.as_ref());
-                    }
-                }
-                "javascript" | "js" => {
-                    if info.extensions.contains(&"js".to_string())
-                        || info.extensions.contains(&"mjs".to_string())
-                    {
-                        return Some(plugin.as_ref());
-                    }
-                }
-                _ => {}
+            if PluginUtils::supports_language(plugin.as_ref(), language) {
+                return Some(plugin.as_ref());
             }
         }
+        
+        // Check built-in plugins
+        for plugin in &self.builtin_plugins {
+            if PluginUtils::supports_language(plugin.as_ref(), language) {
+                return Some(plugin.as_ref());
+            }
+        }
+        
         None
     }
 
@@ -196,31 +176,24 @@ impl PluginManager {
     }
 
     pub fn get_plugin_by_language(&self, language: &str) -> Option<&dyn Plugin> {
-        let normalized = language.to_lowercase();
-
-        let plugin_name = match normalized.as_str() {
-            "rust" | "rs" => "wasmrust",
-            "go" => "wasmgo",
-            "c" | "cpp" | "c++" | "cc" | "cxx" => "c",
-            "assemblyscript" | "asc" | "as" => "assemblyscript",
-            "python" | "py" => "python",
-            "javascript" | "js" | "typescript" | "ts" => "javascript",
-            _ => &normalized,
-        };
-
-        self.find_plugin_by_name(plugin_name)
+        // Use the common utility function to find plugins that support the language
+        self.find_plugin_for_language(language)
     }
 
     #[allow(dead_code)]
     pub fn get_available_languages(&self) -> Vec<String> {
         let mut languages = Vec::new();
 
+        // Get languages from built-in plugins
         for plugin in &self.builtin_plugins {
-            languages.push(plugin.info().name.clone());
+            let plugin_languages = PluginUtils::get_supported_languages(plugin.as_ref());
+            languages.extend(plugin_languages);
         }
 
+        // Get languages from external plugins
         for plugin in self.external_plugins.values() {
-            languages.push(plugin.info().name.clone());
+            let plugin_languages = PluginUtils::get_supported_languages(plugin.as_ref());
+            languages.extend(plugin_languages);
         }
 
         languages.sort();
@@ -769,8 +742,8 @@ impl PluginManager {
             return true;
         }
 
-        // Check if it's an external plugin in config
-        if self.config.external_plugins.contains_key(plugin_name) {
+        // Check if it's an external plugin that's actually loaded and functional
+        if self.external_plugins.contains_key(plugin_name) {
             return true;
         }
 

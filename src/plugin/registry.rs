@@ -109,13 +109,11 @@ impl PluginRegistry {
         Ok(!search_output.trim().is_empty())
     }
 
-    /// Gets plugin metadata (stub for now - implement when metadata system is ready)
+    /// Gets plugin metadata from crates.io
     pub fn get_plugin_metadata(
-        _plugin_name: &str,
+        plugin_name: &str,
     ) -> Result<crate::plugin::metadata::PluginMetadata> {
-        Err(crate::error::WasmrunError::from(
-            "Plugin metadata not yet implemented".to_string(),
-        ))
+        fetch_plugin_metadata_from_crates_io(plugin_name)
     }
 
     /// Creates a plugin entry
@@ -124,9 +122,119 @@ impl PluginRegistry {
         ExternalPluginLoader::create_generic_entry(plugin_name)
     }
 
-    /// Checks plugin dependencies (stub for now)
+    /// Checks plugin dependencies from crates.io
     #[allow(dead_code)]
-    pub fn check_plugin_dependencies(_plugin_name: &str) -> Vec<String> {
-        vec![] // Return empty for now - implement when dependency system is ready
+    pub fn check_plugin_dependencies(plugin_name: &str) -> Vec<String> {
+        fetch_plugin_dependencies_from_crates_io(plugin_name).unwrap_or_default()
     }
+}
+
+fn fetch_plugin_metadata_from_crates_io(
+    plugin_name: &str,
+) -> Result<crate::plugin::metadata::PluginMetadata> {
+    use crate::error::WasmrunError;
+
+    let output = std::process::Command::new("curl")
+        .arg("-s")
+        .arg(format!("https://crates.io/api/v1/crates/{plugin_name}"))
+        .output()
+        .map_err(|e| WasmrunError::from(format!("Failed to fetch metadata from crates.io: {e}")))?;
+
+    if !output.status.success() {
+        return Err(WasmrunError::from(format!(
+            "Failed to query crates.io for {plugin_name}"
+        )));
+    }
+
+    let response = String::from_utf8_lossy(&output.stdout);
+    parse_crate_metadata(&response, plugin_name)
+}
+
+fn parse_crate_metadata(
+    response: &str,
+    plugin_name: &str,
+) -> Result<crate::plugin::metadata::PluginMetadata> {
+    use crate::error::WasmrunError;
+    use crate::plugin::metadata::PluginMetadata;
+    use serde_json::Value;
+
+    let json: Value = serde_json::from_str(response)
+        .map_err(|e| WasmrunError::from(format!("Failed to parse crates.io response: {e}")))?;
+
+    let crate_info = json["crate"]
+        .as_object()
+        .ok_or_else(|| WasmrunError::from("Invalid crates.io response format".to_string()))?;
+
+    let version = crate_info["max_version"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let description = crate_info["description"]
+        .as_str()
+        .unwrap_or("No description")
+        .to_string();
+
+    Ok(PluginMetadata {
+        name: plugin_name.to_string(),
+        version,
+        description,
+        author: crate_info["id"].as_str().unwrap_or("unknown").to_string(),
+        extensions: vec![],
+        entry_files: vec![],
+        capabilities: crate::plugin::metadata::MetadataCapabilities {
+            compile_wasm: true,
+            compile_webapp: false,
+            live_reload: false,
+            optimization: true,
+            custom_targets: vec![],
+            supported_languages: None,
+        },
+        dependencies: crate::plugin::metadata::MetadataDependencies {
+            tools: fetch_plugin_dependencies_from_crates_io(plugin_name).unwrap_or_default(),
+            optional_tools: None,
+        },
+        exports: None,
+        frameworks: None,
+    })
+}
+
+fn fetch_plugin_dependencies_from_crates_io(plugin_name: &str) -> Result<Vec<String>> {
+    use crate::error::WasmrunError;
+
+    let output = std::process::Command::new("curl")
+        .arg("-s")
+        .arg(format!(
+            "https://crates.io/api/v1/crates/{plugin_name}/dependencies"
+        ))
+        .output()
+        .map_err(|e| {
+            WasmrunError::from(format!("Failed to fetch dependencies from crates.io: {e}"))
+        })?;
+
+    if !output.status.success() {
+        return Ok(vec![]);
+    }
+
+    let response = String::from_utf8_lossy(&output.stdout);
+    parse_crate_dependencies(&response)
+}
+
+fn parse_crate_dependencies(response: &str) -> Result<Vec<String>> {
+    use crate::error::WasmrunError;
+    use serde_json::Value;
+
+    let json: Value = serde_json::from_str(response)
+        .map_err(|e| WasmrunError::from(format!("Failed to parse dependencies response: {e}")))?;
+
+    let mut dependencies = Vec::new();
+
+    if let Some(deps) = json["dependencies"].as_array() {
+        for dep in deps.iter() {
+            if let Some(name) = dep["crate_id"].as_str() {
+                dependencies.push(name.to_string());
+            }
+        }
+    }
+
+    Ok(dependencies)
 }

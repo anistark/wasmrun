@@ -152,6 +152,8 @@ impl PluginInstaller {
                 "--force",
                 "--root",
                 &plugin_dir.to_string_lossy(),
+                "--features",
+                "cli",
             ])
             .output()
             .map_err(|e| WasmrunError::from(format!("Failed to update plugin: {e}")))?;
@@ -261,6 +263,8 @@ impl PluginInstaller {
                 plugin_name,
                 "--root",
                 &wasmrun_root.to_string_lossy(),
+                "--features",
+                "cli",
             ])
             .output()
             .map_err(|e| WasmrunError::from(format!("Failed to execute cargo install: {e}")))?;
@@ -362,7 +366,17 @@ impl {plugin_name_pascal}Builder {{
     }}
 
     pub fn build(&self, project_path: &Path, output_path: &Path) -> Result<(), String> {{
-        Err("Plugin not yet implemented".to_string())
+        // Basic implementation that delegates to system tools
+        let project_path_str = project_path.to_str().ok_or("Invalid project path")?;
+        let output_path_str = output_path.to_str().ok_or("Invalid output path")?;
+        
+        println!("Building {{}} project at: {{}}", "{plugin_name}", project_path_str);
+        println!("Output will be written to: {{}}", output_path_str);
+        
+        // TODO: Implement actual build logic for {plugin_name}
+        // This is a basic template - customize for specific language requirements
+        
+        Err("Build logic not yet implemented for this plugin".to_string())
     }}
 }}
 

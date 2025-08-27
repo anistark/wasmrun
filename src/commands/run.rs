@@ -6,8 +6,6 @@ use crate::error::{Result, WasmrunError};
 use crate::plugin::manager::PluginManager;
 use crate::utils::PathResolver;
 use std::path::Path;
-use std::thread;
-use std::time::Duration;
 
 pub fn handle_run_command(
     path: &Option<String>,
@@ -60,16 +58,23 @@ fn run_wasm_file(wasm_path: &str, port: Option<u16>, verbose: bool) -> Result<()
         println!("🎯 Running WASM file: {wasm_path}");
     }
 
-    // Create a simple server config
+    // Create server config and run the server
     let server_port = port.unwrap_or(8420);
 
     if verbose {
         println!("🚀 Starting server on port {server_port}");
     }
 
-    // For now, just indicate success - actual server implementation would go here
-    println!("✅ Server would start on port {server_port} for file: {wasm_path}");
-    Ok(())
+    let server_config = crate::server::ServerConfig {
+        wasm_path: wasm_path.to_string(),
+        js_path: None,
+        port: server_port,
+        watch_mode: false,
+        project_path: None,
+        output_dir: None,
+    };
+
+    crate::server::run_server(server_config)
 }
 
 fn run_project_directory(
@@ -263,11 +268,36 @@ fn run_with_watch(
     println!("🚀 Server would start on port {server_port} for file: {primary_file}");
     println!("👀 Watching for changes... (press Ctrl+C to stop)");
 
-    // Simple watch loop simulation
+    // Set up file watcher
+    let watcher = crate::watcher::ProjectWatcher::new(project_path)
+        .map_err(|e| WasmrunError::from(format!("Failed to create file watcher: {e}")))?;
+
     loop {
-        thread::sleep(Duration::from_secs(1));
-        // In a real implementation, you'd use a file watcher here
-        // For now, just keep the loop running
+        if let Some(events_result) = watcher.wait_for_change() {
+            match events_result {
+                Ok(events) => {
+                    if watcher.should_recompile(&events) {
+                        println!("📂 Files changed, recompiling...");
+
+                        // Recompile the project
+                        match builder.build(&config) {
+                            Ok(result) => {
+                                let new_primary_file =
+                                    result.js_path.as_ref().unwrap_or(&result.wasm_path);
+                                println!("✅ Recompilation completed: {new_primary_file}");
+                            }
+                            Err(e) => {
+                                eprintln!("❌ Recompilation failed: {e:?}");
+                                println!("👀 Continuing to watch for changes...");
+                            }
+                        }
+                    }
+                }
+                Err(errors) => {
+                    eprintln!("⚠️ File watcher errors: {errors:?}");
+                }
+            }
+        }
     }
 }
 
@@ -310,9 +340,33 @@ fn run_with_watch_legacy(
     println!("🚀 Server would start on port {server_port} for file: {initial_file}");
     println!("👀 Watching for changes... (press Ctrl+C to stop)");
 
-    // Simple watch loop simulation
+    // Set up file watcher
+    let watcher = crate::watcher::ProjectWatcher::new(project_path)
+        .map_err(|e| WasmrunError::from(format!("Failed to create file watcher: {e}")))?;
+
     loop {
-        thread::sleep(Duration::from_secs(1));
-        // In a real implementation, you'd use a file watcher here
+        if let Some(events_result) = watcher.wait_for_change() {
+            match events_result {
+                Ok(events) => {
+                    if watcher.should_recompile(&events) {
+                        println!("📂 Files changed, recompiling...");
+
+                        // Recompile the project
+                        match crate::compiler::compile_for_execution(project_path, output_dir) {
+                            Ok(result_file) => {
+                                println!("✅ Recompilation completed: {result_file}");
+                            }
+                            Err(e) => {
+                                eprintln!("❌ Recompilation failed: {e}");
+                                println!("👀 Continuing to watch for changes...");
+                            }
+                        }
+                    }
+                }
+                Err(errors) => {
+                    eprintln!("⚠️ File watcher errors: {errors:?}");
+                }
+            }
+        }
     }
 }
