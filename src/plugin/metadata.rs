@@ -275,7 +275,6 @@ impl PluginMetadata {
         }
     }
 
-
     fn create_default_exports(plugin_name: &str) -> MetadataExports {
         let prefix = plugin_name.replace('-', "_");
         MetadataExports {
@@ -397,7 +396,7 @@ fn parse_crates_io_metadata_response(crate_name: &str, response: &str) -> Result
         description,
         author,
         extensions: languages.clone(), // Map languages to extensions
-        entry_files: infer_entry_files_from_name(crate_name),   // Infer based on plugin name
+        entry_files: infer_entry_files_from_name(crate_name), // Infer based on plugin name
         capabilities: MetadataCapabilities {
             compile_wasm: true,
             compile_webapp: false,
@@ -420,8 +419,12 @@ fn infer_entry_files_from_name(plugin_name: &str) -> Vec<String> {
         name if name.contains("rust") => vec!["Cargo.toml".to_string(), "src/lib.rs".to_string()],
         name if name.contains("go") => vec!["go.mod".to_string(), "main.go".to_string()],
         name if name.contains("zig") => vec!["build.zig".to_string(), "src/main.zig".to_string()],
-        name if name.contains("cpp") || name.contains("cxx") => vec!["CMakeLists.txt".to_string(), "Makefile".to_string()],
-        name if name.contains("py") || name.contains("python") => vec!["main.py".to_string(), "app.py".to_string()],
+        name if name.contains("cpp") || name.contains("cxx") => {
+            vec!["CMakeLists.txt".to_string(), "Makefile".to_string()]
+        }
+        name if name.contains("py") || name.contains("python") => {
+            vec!["main.py".to_string(), "app.py".to_string()]
+        }
         _ => vec!["main.wasm".to_string()], // Generic fallback
     }
 }

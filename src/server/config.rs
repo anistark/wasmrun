@@ -5,8 +5,8 @@ use std::path::Path;
 use crate::compiler::builder::{BuildConfig, BuilderFactory, OptimizationLevel, TargetType};
 use crate::error::{Result, ServerError, WasmrunError};
 use crate::plugin::manager::PluginManager;
-use crate::utils::PluginUtils;
 use crate::utils::CommandExecutor;
+use crate::utils::PluginUtils;
 use crate::utils::{ProjectAnalysis, WasmAnalysis};
 
 use super::wasm;
@@ -567,4 +567,3 @@ pub enum PortStatus {
         alternative: Option<u16>,
     },
 }
-

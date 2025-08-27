@@ -112,14 +112,14 @@ impl PluginManager {
                 return Some(plugin.as_ref());
             }
         }
-        
+
         // Check built-in plugins
         for plugin in &self.builtin_plugins {
             if PluginUtils::supports_language(plugin.as_ref(), language) {
                 return Some(plugin.as_ref());
             }
         }
-        
+
         None
     }
 

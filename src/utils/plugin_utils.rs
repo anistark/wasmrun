@@ -226,12 +226,12 @@ impl PluginUtils {
     /// Returns a vector of language names supported by the plugin
     pub fn get_supported_languages(plugin: &dyn Plugin) -> Vec<String> {
         let plugin_info = plugin.info();
-        
+
         // First check if plugin has supported_languages in capabilities
         if let Some(supported_langs) = &plugin_info.capabilities.supported_languages {
             return supported_langs.clone();
         }
-        
+
         // Fallback to inferring from plugin name if capabilities don't specify
         let plugin_name = plugin_info.name.to_lowercase();
         if plugin_name.contains("rust") {
@@ -249,28 +249,36 @@ impl PluginUtils {
             vec![plugin_info.name.clone()]
         }
     }
-    
+
     /// Get the primary (first) language supported by a plugin
     /// Returns the main language that the plugin is designed for
     pub fn get_primary_language(plugin: &dyn Plugin) -> String {
         let languages = Self::get_supported_languages(plugin);
-        languages.first().cloned().unwrap_or_else(|| "unknown".to_string())
+        languages
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string())
     }
-    
+
     /// Check if a plugin supports a specific language
     /// Case-insensitive comparison
     pub fn supports_language(plugin: &dyn Plugin, language: &str) -> bool {
         let supported_languages = Self::get_supported_languages(plugin);
         let target_lang = language.to_lowercase();
-        
-        supported_languages.iter().any(|lang| lang.to_lowercase() == target_lang)
+
+        supported_languages
+            .iter()
+            .any(|lang| lang.to_lowercase() == target_lang)
     }
-    
+
     /// Map plugin to ProjectLanguage enum for compatibility with existing code
     /// This function handles the mapping from plugin languages to the ProjectLanguage enum
-    pub fn map_plugin_to_project_language(plugin: &dyn Plugin, project_path: &str) -> ProjectLanguage {
+    pub fn map_plugin_to_project_language(
+        plugin: &dyn Plugin,
+        project_path: &str,
+    ) -> ProjectLanguage {
         let primary_language = Self::get_primary_language(plugin);
-        
+
         match primary_language.to_lowercase().as_str() {
             "rust" => ProjectLanguage::Rust,
             "go" => ProjectLanguage::Go,
@@ -283,29 +291,35 @@ impl PluginUtils {
             }
         }
     }
-    
+
     /// Check if a plugin can handle projects of a specific language
     /// This is useful for finding plugins when you know the target language
     #[allow(dead_code)]
     pub fn can_handle_language(plugin: &dyn Plugin, target_language: &str) -> bool {
         Self::supports_language(plugin, target_language)
     }
-    
+
     /// Get a human-readable description of languages supported by a plugin
     /// Returns a formatted string like "Rust, Go" or "C/C++"
     #[allow(dead_code)]
     pub fn get_languages_description(plugin: &dyn Plugin) -> String {
         let languages = Self::get_supported_languages(plugin);
-        
+
         // Handle special cases for better formatting
-        if languages.len() == 2 && languages.contains(&"c".to_string()) && languages.contains(&"cpp".to_string()) {
+        if languages.len() == 2
+            && languages.contains(&"c".to_string())
+            && languages.contains(&"cpp".to_string())
+        {
             return "C/C++".to_string();
         }
-        
-        if languages.len() == 2 && languages.contains(&"assemblyscript".to_string()) && languages.contains(&"asc".to_string()) {
+
+        if languages.len() == 2
+            && languages.contains(&"assemblyscript".to_string())
+            && languages.contains(&"asc".to_string())
+        {
             return "AssemblyScript".to_string();
         }
-        
+
         // For other cases, just join with commas
         languages.join(", ")
     }
