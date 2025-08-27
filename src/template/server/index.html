@@ -23,6 +23,7 @@
             <div class="tabs">
                 <button class="tab-button active" data-tab="console">Console</button>
                 <!-- <button class="tab-button" data-tab="filesystem">Filesystem</button> -->
+                <button class="tab-button" data-tab="playground">Playground</button>
                 <button class="tab-button" data-tab="info">Module Info</button>
             </div>
             
@@ -34,6 +35,18 @@
                 <div id="filesystem-tab" class="tab-pane">
                     <div class="wasi-explorer">
                         <p>No filesystem available. This module may not use WASI.</p>
+                    </div>
+                </div>
+                
+                <div id="playground-tab" class="tab-pane">
+                    <div class="playground-container">
+                        <div class="playground-header">
+                            <h3>Function Playground</h3>
+                            <p>Interact with the WASM module's exported functions</p>
+                        </div>
+                        <div id="playground-content" class="playground-content">
+                            <p>Loading WASM module to generate playground...</p>
+                        </div>
                     </div>
                 </div>
                 

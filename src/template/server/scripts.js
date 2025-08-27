@@ -179,6 +179,7 @@ async function loadWasmWithRetries(retries = 5) {
                 updateStatus('✅ WASM Module loaded successfully!');
                 
                 updateModuleInfo(module, isWasiModule);
+                createPlaygroundUI(module, instance);
                 
                 // For WASI modules, initialize and run
                 if (isWasiModule && wasi) {
@@ -779,6 +780,233 @@ function setupLiveReload() {
         clearInterval(reloadInterval);
     });
 }
+
+// Create the playground UI for interacting with WASM functions
+function createPlaygroundUI(module, instance) {
+    const playgroundContent = document.getElementById('playground-content');
+    if (!playgroundContent) return;
+    
+    try {
+        const exports = WebAssembly.Module.exports(module);
+        const functionExports = exports.filter(exp => exp.kind === 'function');
+        
+        if (functionExports.length === 0) {
+            playgroundContent.innerHTML = `
+                <div class="no-functions-message">
+                    <h4>No Functions Available</h4>
+                    <p>This WASM module doesn't export any callable functions.</p>
+                    <p>Only exported functions can be called from the playground.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        playgroundContent.innerHTML = '';
+        log(`Creating playground for ${functionExports.length} exported functions`, 'info');
+        
+        functionExports.forEach(funcExport => {
+            const funcName = funcExport.name;
+            const func = instance.exports[funcName];
+            
+            if (typeof func !== 'function') return;
+            
+            // Try to determine function signature
+            const signature = getFunctionSignature(funcName, func);
+            const paramCount = signature.paramCount;
+            const description = getFunctionDescription(funcName);
+            
+            // Create function group element
+            const functionGroup = document.createElement('div');
+            functionGroup.className = 'function-group';
+            functionGroup.innerHTML = `
+                <div class="function-header">
+                    <h4 class="function-name">${funcName}()</h4>
+                    <div class="function-signature">${signature.display}</div>
+                    <p class="function-description">${description}</p>
+                </div>
+                <div class="function-form">
+                    ${createParameterInputs(funcName, paramCount)}
+                    <div class="function-controls">
+                        <button class="call-button" onclick="callWasmFunction('${funcName}', ${paramCount})">
+                            Call Function
+                        </button>
+                        <div class="function-result" id="result-${funcName}"></div>
+                    </div>
+                </div>
+            `;
+            
+            playgroundContent.appendChild(functionGroup);
+        });
+        
+        log('Playground UI created successfully', 'success');
+        
+    } catch (error) {
+        log(`Error creating playground UI: ${error.message}`, 'error');
+        playgroundContent.innerHTML = `
+            <div class="no-functions-message">
+                <h4>Error Creating Playground</h4>
+                <p>Failed to analyze WASM module functions: ${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+// Generate parameter inputs for a function
+function createParameterInputs(funcName, paramCount) {
+    if (paramCount === 0) {
+        return '<p style="color: #a6adc8; font-style: italic; margin: 0;">This function takes no parameters.</p>';
+    }
+    
+    let html = '';
+    for (let i = 0; i < paramCount; i++) {
+        html += `
+            <div class="parameter-group">
+                <label class="parameter-label">param${i}</label>
+                <input 
+                    type="number" 
+                    class="parameter-input" 
+                    id="${funcName}-param-${i}" 
+                    placeholder="Enter number (i32/i64/f32/f64)" 
+                    value="0"
+                    step="any"
+                >
+                <span class="parameter-type">Number (WASM supports i32, i64, f32, f64)</span>
+            </div>
+        `;
+    }
+    return html;
+}
+
+// Try to determine function signature (basic inference)
+function getFunctionSignature(funcName, func) {
+    // WebAssembly functions don't expose their signature directly in the browser
+    // We'll make educated guesses based on common patterns
+    let paramCount = 0;
+    
+    // Try calling with different argument counts to determine arity
+    // This is a hack but works for simple cases
+    try {
+        // Try to determine parameter count by attempting calls with increasing arguments
+        for (let i = 0; i <= 10; i++) {
+            try {
+                const args = new Array(i).fill(0);
+                func.apply(null, args);
+                paramCount = i;
+                break; // If no error, this is likely the correct parameter count
+            } catch (e) {
+                if (e.message.includes('arity mismatch') || e.message.includes('function signature')) {
+                    continue; // Try with more parameters
+                } else {
+                    paramCount = i;
+                    break; // Other error, assume this parameter count is correct
+                }
+            }
+        }
+    } catch (e) {
+        // If all fails, assume no parameters
+        paramCount = 0;
+    }
+    
+    // Generate display signature
+    const params = paramCount === 0 ? '' : `param0: number${paramCount > 1 ? `, param1: number`.repeat(paramCount - 1) : ''}`;
+    const display = `${funcName}(${params}) -> number`;
+    
+    return { paramCount, display };
+}
+
+// Get a description for common function names
+function getFunctionDescription(funcName) {
+    const descriptions = {
+        'add': 'Adds two numbers together',
+        'subtract': 'Subtracts the second number from the first',
+        'multiply': 'Multiplies two numbers',
+        'divide': 'Divides the first number by the second',
+        'factorial': 'Calculates the factorial of a number',
+        'fibonacci': 'Calculates the nth Fibonacci number',
+        'isPrime': 'Checks if a number is prime',
+        'sqrt': 'Calculates the square root of a number',
+        'pow': 'Raises the first number to the power of the second',
+        'gcd': 'Finds the greatest common divisor of two numbers',
+        'lcm': 'Finds the least common multiple of two numbers',
+        'abs': 'Returns the absolute value of a number',
+        'min': 'Returns the minimum of two numbers',
+        'max': 'Returns the maximum of two numbers',
+        'sum': 'Calculates the sum of numbers',
+        'main': 'Main entry point function',
+        'test': 'Test function',
+        'calculate': 'Performs a calculation',
+        'compute': 'Computes a result',
+        'process': 'Processes input data',
+        'convert': 'Converts between formats',
+        'validate': 'Validates input',
+        'parse': 'Parses input data',
+        'format': 'Formats output data'
+    };
+    
+    // Try exact match first
+    if (descriptions[funcName]) {
+        return descriptions[funcName];
+    }
+    
+    // Try partial matches
+    for (const [key, desc] of Object.entries(descriptions)) {
+        if (funcName.toLowerCase().includes(key)) {
+            return desc;
+        }
+    }
+    
+    // Default description
+    return `Custom function: ${funcName}`;
+}
+
+// Call a WASM function with parameters from the UI
+function callWasmFunction(funcName, paramCount) {
+    const resultElement = document.getElementById(`result-${funcName}`);
+    const callButton = document.querySelector(`.call-button[onclick*="${funcName}"]`);
+    
+    if (!window.wasmInstance) {
+        resultElement.textContent = 'Error: WASM instance not available';
+        resultElement.className = 'function-result error';
+        return;
+    }
+    
+    try {
+        // Disable button during execution
+        callButton.disabled = true;
+        callButton.textContent = 'Calling...';
+        
+        // Collect parameters
+        const args = [];
+        for (let i = 0; i < paramCount; i++) {
+            const input = document.getElementById(`${funcName}-param-${i}`);
+            const value = parseFloat(input.value) || 0;
+            args.push(value);
+        }
+        
+        log(`Calling ${funcName}(${args.join(', ')})`, 'info');
+        
+        // Call the function
+        const result = window.wasmInstance.exports[funcName].apply(null, args);
+        
+        // Display result
+        resultElement.textContent = `Result: ${result}`;
+        resultElement.className = 'function-result';
+        
+        log(`${funcName}() returned: ${result}`, 'success');
+        
+    } catch (error) {
+        resultElement.textContent = `Error: ${error.message}`;
+        resultElement.className = 'function-result error';
+        log(`Error calling ${funcName}(): ${error.message}`, 'error');
+    } finally {
+        // Re-enable button
+        callButton.disabled = false;
+        callButton.textContent = 'Call Function';
+    }
+}
+
+// Make callWasmFunction globally available
+window.callWasmFunction = callWasmFunction;
 
 // Start loading the WASM file
 loadWasmWithRetries();
