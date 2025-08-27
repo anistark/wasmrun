@@ -21,6 +21,7 @@ clean:
     cargo clean
     rm -rf examples || true
     rm -rf example.* || true
+    find . -name ".DS_Store" -type f -delete || true
 
 # Run with a test WASM file (replace with your test file path)
 run WASM_FILE="./examples/simple.wasm":
