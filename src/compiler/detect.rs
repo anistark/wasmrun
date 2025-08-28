@@ -1,3 +1,4 @@
+use crate::{debug_enter, debug_exit, debug_println};
 use std::fmt;
 use std::fs;
 use std::path::Path;
@@ -25,24 +26,39 @@ pub enum OperatingSystem {
 
 /// Detect project language
 pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
+    debug_enter!("detect_project_language", "project_path={}", project_path);
     let path = Path::new(project_path);
 
     if !path.exists() || !path.is_dir() {
+        debug_println!(
+            "Project path validation failed: exists={}, is_dir={}",
+            path.exists(),
+            path.is_dir()
+        );
         eprintln!("❌ Project path does not exist or is not a directory: {project_path}");
+        debug_exit!("detect_project_language", ProjectLanguage::Unknown);
         return ProjectLanguage::Unknown;
     }
 
+    debug_println!("Checking for language-specific configuration files");
     if path.join("Cargo.toml").exists() {
+        debug_println!("Found Cargo.toml - detected Rust project");
+        debug_exit!("detect_project_language", ProjectLanguage::Rust);
         return ProjectLanguage::Rust;
     }
 
     if path.join("go.mod").exists() {
+        debug_println!("Found go.mod - detected Go project");
+        debug_exit!("detect_project_language", ProjectLanguage::Go);
         return ProjectLanguage::Go;
     } else if let Ok(entries) = fs::read_dir(path) {
+        debug_println!("Scanning directory for Go source files");
         for entry in entries.flatten() {
             if let Some(extension) = entry.path().extension() {
                 let ext = extension.to_string_lossy().to_lowercase();
                 if ext == "go" {
+                    debug_println!("Found .go file - detected Go project");
+                    debug_exit!("detect_project_language", ProjectLanguage::Go);
                     return ProjectLanguage::Go;
                 }
             }

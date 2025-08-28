@@ -9,6 +9,7 @@ use crate::plugin::installer::PluginInstaller;
 use crate::plugin::registry::PluginRegistry;
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginSource};
 use crate::utils::PluginUtils;
+use crate::{debug_enter, debug_exit, debug_println};
 use std::collections::HashMap;
 use std::process::Command;
 
@@ -30,7 +31,15 @@ pub struct PluginManager {
 
 impl PluginManager {
     pub fn new() -> Result<Self> {
+        debug_enter!("PluginManager::new");
+
+        debug_println!("Loading wasmrun configuration");
         let config = WasmrunConfig::load().unwrap_or_default();
+        debug_println!(
+            "Configuration loaded with {} external plugins configured",
+            config.external_plugins.len()
+        );
+
         let mut manager = Self {
             builtin_plugins: vec![],
             external_plugins: HashMap::new(),
@@ -43,8 +52,16 @@ impl PluginManager {
             },
         };
 
+        debug_println!("Loading all plugins");
         manager.load_all_plugins()?;
         manager.update_stats();
+        debug_println!(
+            "Plugin manager initialized with {} builtin and {} external plugins",
+            manager.plugin_stats.builtin_count,
+            manager.plugin_stats.external_count
+        );
+
+        debug_exit!("PluginManager::new");
         Ok(manager)
     }
 

@@ -1,4 +1,5 @@
 use crate::error::{Result, ServerError, WasmrunError};
+use crate::{debug_enter, debug_exit, debug_println};
 use std::path::Path;
 
 mod config;
@@ -12,28 +13,39 @@ pub use utils::{ServerInfo, ServerUtils};
 const PID_FILE: &str = "/tmp/wasmrun_server.pid";
 
 pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
+    debug_enter!("run_wasm_file", "path={}, port={}", path, port);
+
     if cfg!(test) {
+        debug_println!("Test mode enabled, skipping server startup");
         return Ok(());
     }
 
     let path_obj = std::path::Path::new(path);
+    debug_println!("Checking file extension for path: {}", path);
 
     if !path_obj.extension().is_some_and(|ext| ext == "wasm") {
         if path_obj.extension().is_some_and(|ext| ext == "js") {
+            debug_println!("Detected JS file, delegating to handle_js_file");
             return handle_js_file(path, port);
         }
 
+        debug_println!("File is not WASM or JS: {:?}", path_obj.extension());
         return Err(WasmrunError::Server(ServerError::RequestHandlingFailed {
             reason: format!("Not a WASM file: {path}"),
         }));
     }
 
+    debug_println!("Handling port conflict for port {}", port);
     let final_port = ServerUtils::handle_port_conflict(port)?;
+    debug_println!("Using port: {}", final_port);
 
+    debug_println!("Checking for wasm-bindgen file");
     if handle_wasm_bindgen_file(path_obj, path, final_port)? {
+        debug_exit!("run_wasm_file", "handled as wasm-bindgen file");
         return Ok(());
     }
 
+    debug_println!("Creating server info for WASM file");
     let server_info = ServerInfo::for_wasm_file(path, final_port, false)?;
     server_info.print_server_startup();
 
@@ -42,13 +54,19 @@ pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
         .ok_or_else(|| WasmrunError::path(format!("Invalid path: {path}")))?
         .to_string_lossy()
         .to_string();
+    debug_println!("WASM filename: {}", wasm_filename);
 
-    wasm::serve_wasm_file(path, final_port, &wasm_filename).map_err(|e| {
+    debug_println!("Starting WASM server");
+    let result = wasm::serve_wasm_file(path, final_port, &wasm_filename).map_err(|e| {
+        debug_println!("WASM server failed: {:?}", e);
         WasmrunError::Server(ServerError::startup_failed(
             final_port,
             format!("Server error: {e}"),
         ))
-    })
+    });
+
+    debug_exit!("run_wasm_file");
+    result
 }
 
 pub fn run_project(
@@ -57,13 +75,25 @@ pub fn run_project(
     language_override: Option<String>,
     watch: bool,
 ) -> Result<()> {
+    debug_enter!(
+        "run_project",
+        "path={}, port={}, language_override={:?}, watch={}",
+        path,
+        port,
+        language_override,
+        watch
+    );
+
     if cfg!(test) {
+        debug_println!("Test mode enabled, skipping project server startup");
         return Ok(());
     }
 
     let path_obj = std::path::Path::new(path);
+    debug_println!("Checking path type: {:?}", path_obj);
 
     if path_obj.is_file() && path_obj.extension().is_some_and(|ext| ext == "wasm") {
+        debug_println!("Path is a WASM file, delegating to run_wasm_file");
         println!("\n\x1b[1;34m╭\x1b[0m");
         println!("  ℹ️  \x1b[1;34mDetected WASM file: {path}\x1b[0m");
         println!("  \x1b[0;37mRunning the WASM file directly...\x1b[0m");
