@@ -685,6 +685,103 @@ tests/
     └── server_tests.rs
 ```
 
+## 🐛 Debug Mode for Development
+
+Wasmrun includes a comprehensive debug mode that provides detailed logging to help with development and troubleshooting.
+
+### Using Debug Mode
+
+Enable debug logging with the `--debug` flag:
+
+```sh
+# Enable debug mode for any command
+wasmrun --debug
+```
+
+### Debug Output Types
+
+Debug mode provides several types of logging information:
+
+1. **🔍 DEBUG** - General debug information with file and line numbers
+2. **🔬 TRACE** - Very detailed tracing for complex operations
+3. **🚪 ENTER** - Function entry points with parameters
+4. **🚶 EXIT** - Function exit points with return values
+5. **⏱️ TIME** - Performance timing for slow operations
+
+### Debug Categories
+
+Debug logs are organized by system component:
+
+- **CLI & Arguments**: Command parsing and validation
+- **Plugin System**: Plugin loading, detection, and execution
+- **Server Operations**: HTTP server startup, request handling
+- **Compilation**: Build processes, tool detection, file operations
+- **File Operations**: Path resolution, file validation
+
+### Using Debug Logs for Development
+
+When developing plugins or debugging issues:
+
+```sh
+# Debug a specific operation
+wasmrun --debug compile ./my-project 2> debug.log
+
+# Debug plugin detection
+wasmrun --debug plugin list --all 2> plugin_debug.log
+
+# Debug server startup issues
+wasmrun --debug run ./project --port 3000 2> server_debug.log
+```
+
+### Debug Output Example
+
+```
+🚪 ENTER [main.rs:35] main - args = Args { command: Some(Run { ... }), debug: true }
+🔍 DEBUG [main.rs:97] Processing run command: port=8420, language=None, watch=false
+🚪 ENTER [server/mod.rs:77] run_project - path=./project, port=8420, language_override=None, watch=false
+🔍 DEBUG [server/mod.rs:86] Checking path type: "./project"
+🔍 DEBUG [detect.rs:28] detect_project_language - project_path=./project
+🔍 DEBUG [detect.rs:39] Checking for language-specific configuration files
+🔍 DEBUG [detect.rs:41] Found Cargo.toml - detected Rust project
+🚶 EXIT  [detect.rs:43] detect_project_language -> Rust
+⏱️ TIME  [server/mod.rs:134] Project compilation took 2.34s
+🚶 EXIT  [main.rs:164] main - exit code: 0
+```
+
+### Contributing Debug Improvements
+
+When adding debug logging to your code:
+
+```rust
+use crate::{debug_enter, debug_exit, debug_println, debug_time, trace_println};
+
+pub fn my_function(param: &str) -> Result<String> {
+    debug_enter!("my_function", "param={}", param);
+    
+    // Add detailed debug info for complex operations
+    debug_println!("Processing parameter: {}", param);
+    
+    // Use trace for very detailed logs
+    trace_println!("Internal state: {:?}", internal_state);
+    
+    // Time expensive operations
+    let result = debug_time!("expensive_operation", {
+        expensive_computation(param)
+    });
+    
+    debug_exit!("my_function", &result);
+    Ok(result)
+}
+```
+
+### Debug Best Practices
+
+1. **Function Boundaries**: Use `debug_enter!` and `debug_exit!` for important functions
+2. **Error Contexts**: Add debug info before operations that might fail
+3. **Performance**: Use `debug_time!` for potentially slow operations
+4. **State Changes**: Log important state transitions
+5. **File Operations**: Debug file paths and validation results
+
 ## 🔧 Advanced Development Topics
 
 ### Plugin System Architecture

@@ -51,7 +51,7 @@ pub struct Args {
     pub watch: bool,
 
     /// Enable debug output with detailed information
-    #[arg(long, help = "Show detailed debug information")]
+    #[arg(long, global = true, help = "Show detailed debug information")]
     pub debug: bool,
 }
 

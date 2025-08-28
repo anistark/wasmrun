@@ -13,7 +13,7 @@ default:
     @echo "\nCurrent version: {{version}}"
 
 # Build the project in debug mode
-build:
+build: format lint test
     cargo build --release
 
 # Clean the project

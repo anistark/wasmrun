@@ -8,10 +8,12 @@ static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
 /// Enable debug logging
 pub fn enable_debug() {
     DEBUG_ENABLED.store(true, Ordering::Relaxed);
+    if DEBUG_ENABLED.load(Ordering::Relaxed) {
+        eprintln!("🔍 \x1b[36mDEBUG\x1b[0m [debug.rs:11] Debug mode enabled for Wasmrun session");
+    }
 }
 
 /// Check if debug logging is enabled
-#[allow(dead_code)]
 pub fn is_debug_enabled() -> bool {
     DEBUG_ENABLED.load(Ordering::Relaxed)
 }
@@ -21,9 +23,92 @@ pub fn is_debug_enabled() -> bool {
 macro_rules! debug_println {
     ($($arg:tt)*) => {
         if $crate::debug::is_debug_enabled() {
-            println!("🔍 Debug: {}", format_args!($($arg)*));
+            eprintln!("🔍 \x1b[36mDEBUG\x1b[0m [{}:{}] {}",
+                file!().split('/').last().unwrap_or("unknown"),
+                line!(),
+                format_args!($($arg)*));
         }
     };
+}
+
+/// Trace-level debug - for very detailed debugging
+#[macro_export]
+macro_rules! trace_println {
+    ($($arg:tt)*) => {
+        if $crate::debug::is_debug_enabled() {
+            eprintln!("🔬 \x1b[90mTRACE\x1b[0m [{}:{}] {}",
+                file!().split('/').last().unwrap_or("unknown"),
+                line!(),
+                format_args!($($arg)*));
+        }
+    };
+}
+
+/// Debug function entry - logs when entering a function
+#[macro_export]
+macro_rules! debug_enter {
+    ($func_name:expr) => {
+        if $crate::debug::is_debug_enabled() {
+            eprintln!("🚪 \x1b[32mENTER\x1b[0m [{}:{}] {}",
+                file!().split('/').last().unwrap_or("unknown"),
+                line!(),
+                $func_name);
+        }
+    };
+    ($func_name:expr, $($arg:tt)*) => {
+        if $crate::debug::is_debug_enabled() {
+            eprintln!("🚪 \x1b[32mENTER\x1b[0m [{}:{}] {} - {}",
+                file!().split('/').last().unwrap_or("unknown"),
+                line!(),
+                $func_name,
+                format_args!($($arg)*));
+        }
+    };
+}
+
+/// Debug function exit - logs when exiting a function
+#[macro_export]
+macro_rules! debug_exit {
+    ($func_name:expr) => {
+        if $crate::debug::is_debug_enabled() {
+            eprintln!(
+                "🚶 \x1b[33mEXIT\x1b[0m  [{}:{}] {}",
+                file!().split('/').last().unwrap_or("unknown"),
+                line!(),
+                $func_name
+            );
+        }
+    };
+    ($func_name:expr, $result:expr) => {
+        if $crate::debug::is_debug_enabled() {
+            eprintln!(
+                "🚶 \x1b[33mEXIT\x1b[0m  [{}:{}] {} -> {:?}",
+                file!().split('/').last().unwrap_or("unknown"),
+                line!(),
+                $func_name,
+                $result
+            );
+        }
+    };
+}
+
+/// Debug timing - measure execution time
+#[macro_export]
+macro_rules! debug_time {
+    ($name:expr, $block:block) => {{
+        let start = std::time::Instant::now();
+        let result = $block;
+        if $crate::debug::is_debug_enabled() {
+            eprintln!(
+                "⏱️  \x1b[35mTIME\x1b[0m  [{}:{}] {} took {:?}",
+                file!().split('/').last().unwrap_or("unknown"),
+                line!(),
+                $name,
+                start.elapsed()
+            );
+        }
+        result
+    }};
 }
 
 /// Info print - always shown to users
