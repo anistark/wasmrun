@@ -12,7 +12,7 @@ use crate::plugin::manager::PluginManager;
 use crate::utils::PathResolver;
 
 /// Compile a WASM file from a project directory using plugin system
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future project compilation interface
 pub fn create_wasm_from_project(project_path: &str, output_dir: &str) -> Result<String> {
     PathResolver::ensure_output_directory(output_dir)?;
 

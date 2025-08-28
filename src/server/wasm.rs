@@ -75,7 +75,7 @@ pub fn handle_wasm_bindgen_files(
 }
 
 /// Inspect a WebAssembly file for wasm-bindgen patterns
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future wasm-bindgen pattern detection
 fn check_for_wasm_bindgen_patterns(wasm_bytes: &[u8]) -> bool {
     // Convert the binary to a string for pattern matching
     let wasm_content = String::from_utf8_lossy(wasm_bytes);
@@ -87,7 +87,7 @@ fn check_for_wasm_bindgen_patterns(wasm_bytes: &[u8]) -> bool {
 }
 
 /// Look for a corresponding JS file for a WASM file
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future JS file discovery for WASM modules
 fn find_corresponding_js_file(wasm_path: &Path) -> Option<String> {
     let js_path = wasm_path.with_extension("js");
     if js_path.exists() {

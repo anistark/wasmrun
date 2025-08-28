@@ -16,7 +16,7 @@ pub enum ProjectLanguage {
 
 /// Supported OS
 #[derive(Debug, PartialEq)]
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future OS-specific compilation features
 pub enum OperatingSystem {
     Windows,
     MacOS,

@@ -294,7 +294,7 @@ pub struct ResolvedArgs {
     pub watch: bool,
     #[allow(dead_code)] // TODO: Used for debug output control
     pub debug: bool,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Used for command validation and processing
     pub command: Option<Commands>,
 }
 
@@ -314,7 +314,7 @@ impl ResolvedArgs {
     }
 
     /// Validate the resolved arguments
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future argument validation system
     pub fn validate(&self) -> Result<()> {
         // Validate port range
         if self.port == 0 {
@@ -355,7 +355,7 @@ impl ResolvedArgs {
 
 /// Command-specific argument resolution
 pub trait CommandArgs {
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future path resolution trait implementation
     fn resolve_path(&self) -> String;
 }
 
@@ -404,7 +404,7 @@ impl CommandArgs for Commands {
 pub struct CommandValidator;
 
 impl CommandValidator {
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future compile command validation
     pub fn validate_compile_args(
         path: &Option<String>,
         positional_path: &Option<String>,
@@ -428,7 +428,7 @@ impl CommandValidator {
         Ok(wasm_path)
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future run command validation
     pub fn validate_run_args(
         path: &Option<String>,
         positional_path: &Option<String>,
@@ -445,7 +445,7 @@ impl CommandValidator {
         Ok((project_path, port))
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future init command validation
     pub fn validate_init_args(
         name: &Option<String>,
         template: &str,
@@ -509,7 +509,7 @@ fn print_styled_version() {
 }
 
 /// Argument parsing with validation
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future validated argument parsing system
 pub fn get_validated_args() -> Result<ResolvedArgs> {
     let args = get_args();
     let resolved = ResolvedArgs::from_args(args)?;

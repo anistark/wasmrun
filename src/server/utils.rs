@@ -11,7 +11,7 @@ pub fn content_type_header(value: &str) -> tiny_http::Header {
 }
 
 /// Find WASM files in a directory
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future WASM file discovery system
 pub fn find_wasm_files(dir_path: &Path) -> Vec<String> {
     let mut wasm_files = Vec::new();
 
@@ -276,7 +276,7 @@ impl ServerInfo {
 pub struct ServerUtils;
 
 impl ServerUtils {
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future file metadata system
     pub fn get_file_info(path: &str) -> Result<FileInfo> {
         let path_obj = Path::new(path);
         let metadata = fs::metadata(path)?;
@@ -345,7 +345,7 @@ impl ServerUtils {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future file metadata system
 pub struct FileInfo {
     pub filename: String,
     pub absolute_path: String,
@@ -360,7 +360,7 @@ pub enum PortStatus {
 }
 
 /// Get Server Info
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future server information display
 pub fn print_server_info(
     url: &str,
     port: u16,
@@ -385,7 +385,7 @@ pub fn print_server_info(
 }
 
 /// Basic server info printing
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future basic server info display
 fn print_basic_server_info(
     url: &str,
     port: u16,

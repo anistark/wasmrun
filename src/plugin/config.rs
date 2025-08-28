@@ -94,7 +94,7 @@ impl WasmrunConfig {
         }
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future plugin cache directory management
     pub fn cache_dir() -> Result<PathBuf> {
         let config = Self::load_or_default()?;
 
@@ -164,7 +164,7 @@ impl WasmrunConfig {
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future initial configuration setup
     pub fn create_initial_config() -> Result<()> {
         let config_path = Self::config_path()?;
 
@@ -222,7 +222,7 @@ impl WasmrunConfig {
     }
 
     // External plugin management
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future external plugin installation
     pub fn add_external_plugin(
         &mut self,
         name: String,
@@ -251,7 +251,7 @@ impl WasmrunConfig {
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future plugin installation checking
     pub fn is_external_plugin_installed(&self, name: &str) -> bool {
         self.external_plugins.contains_key(name)
     }
@@ -261,7 +261,7 @@ impl WasmrunConfig {
         self.external_plugins.get(name)
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future plugin listing functionality
     pub fn get_external_plugins(&self) -> Vec<&PluginInfo> {
         self.external_plugins
             .values()
@@ -269,7 +269,7 @@ impl WasmrunConfig {
             .collect()
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future plugin enable/disable functionality
     pub fn set_external_plugin_enabled(&mut self, name: &str, enabled: bool) -> Result<()> {
         if let Some(entry) = self.external_plugins.get_mut(name) {
             entry.enabled = enabled;
@@ -282,7 +282,7 @@ impl WasmrunConfig {
         }
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future plugin metadata update functionality
     pub fn update_external_plugin_metadata(&mut self, name: &str, info: PluginInfo) -> Result<()> {
         if let Some(entry) = self.external_plugins.get_mut(name) {
             entry.info = info;
@@ -295,7 +295,7 @@ impl WasmrunConfig {
         }
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future plugin validation system
     pub fn validate_external_plugins(&mut self) -> Result<Vec<String>> {
         let mut missing_plugins = Vec::new();
         let plugin_dir = Self::plugin_dir()?;
@@ -321,7 +321,7 @@ impl WasmrunConfig {
         Ok(missing_plugins)
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future plugin statistics system
     pub fn get_external_plugin_stats(&self) -> (usize, usize, usize, Vec<String>) {
         let total = self.external_plugins.len();
         let enabled = self.external_plugins.values().filter(|e| e.enabled).count();
@@ -341,26 +341,26 @@ impl WasmrunConfig {
     }
 
     // Plugin-specific configuration
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future plugin-specific configuration
     pub fn get_plugin_config(&self, plugin_name: &str) -> Option<&toml::Value> {
         self.plugin_configs.get(plugin_name)
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future plugin-specific configuration
     pub fn set_plugin_config(&mut self, plugin_name: String, config: toml::Value) -> Result<()> {
         self.plugin_configs.insert(plugin_name, config);
         self.save()?;
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future plugin-specific configuration
     pub fn remove_plugin_config(&mut self, plugin_name: &str) -> Result<()> {
         self.plugin_configs.remove(plugin_name);
         self.save()?;
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future configuration display functionality
     pub fn print_config(&self) -> Result<()> {
         let config_toml = toml::to_string_pretty(self)
             .map_err(|e| WasmrunError::from(format!("Failed to serialize config: {e}")))?;
@@ -372,7 +372,7 @@ impl WasmrunConfig {
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future configuration reset functionality
     pub fn reset(&mut self) -> Result<()> {
         *self = Self::default();
         self.save()?;

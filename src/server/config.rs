@@ -12,7 +12,7 @@ use crate::utils::{ProjectAnalysis, WasmAnalysis};
 use super::wasm;
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future server configuration system
 pub struct ServerConfig {
     pub wasm_path: String,
     pub js_path: Option<String>,
@@ -22,7 +22,7 @@ pub struct ServerConfig {
     pub output_dir: Option<String>,
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future HTTP header utilities
 pub fn content_type_header(value: &str) -> tiny_http::Header {
     tiny_http::Header::from_bytes(&b"Content-Type"[..], value.as_bytes()).unwrap()
 }
@@ -58,7 +58,7 @@ pub fn is_port_available(port: u16) -> bool {
     TcpListener::bind(format!("0.0.0.0:{port}")).is_ok()
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future asset directory validation
 pub fn check_assets_directory() {
     if let Ok(metadata) = fs::metadata("./assets") {
         if metadata.is_dir() {
@@ -71,7 +71,7 @@ pub fn check_assets_directory() {
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future MIME type detection
 pub fn determine_content_type(path: &Path) -> &'static str {
     match path.extension().and_then(|ext| ext.to_str()) {
         Some("html") => "text/html",
@@ -101,7 +101,7 @@ pub struct ServerInfo {
 #[derive(Debug)]
 pub enum ContentType {
     WasmFile(WasmAnalysis),
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future project-based content serving
     Project(ProjectAnalysis),
 }
 
@@ -118,7 +118,7 @@ impl ServerInfo {
         })
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future project-based content serving
     pub fn for_project(project_path: &str, port: u16, watch_mode: bool) -> Result<Self> {
         let analysis = ProjectAnalysis::analyze(project_path)?;
         let content_type = ContentType::Project(analysis);
@@ -170,7 +170,7 @@ impl ServerInfo {
 pub struct ServerUtils;
 
 impl ServerUtils {
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future port conflict resolution
     pub fn handle_port_conflict(requested_port: u16) -> Result<u16> {
         if is_port_available(requested_port) {
             return Ok(requested_port);
@@ -289,7 +289,7 @@ impl ServerUtils {
         }
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future file metadata system (duplicate of server/utils.rs)
     pub fn get_file_info(path: &str) -> Result<FileInfo> {
         let path_obj = Path::new(path);
         let metadata = fs::metadata(path)?;
@@ -315,7 +315,7 @@ impl ServerUtils {
         })
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future enhanced port availability checking
     pub fn check_port_availability(port: u16) -> PortStatus {
         if is_port_available(port) {
             PortStatus::Available
@@ -551,7 +551,7 @@ pub fn run_server(config: ServerConfig) -> Result<()> {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Future file metadata system (duplicate of server/utils.rs)
 pub struct FileInfo {
     pub filename: String,
     pub absolute_path: String,
@@ -562,7 +562,7 @@ pub struct FileInfo {
 #[derive(Debug)]
 pub enum PortStatus {
     Available,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Future port status with alternatives
     Unavailable {
         alternative: Option<u16>,
     },
