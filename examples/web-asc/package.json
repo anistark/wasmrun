@@ -1,0 +1,19 @@
+{
+  "name": "web-asc",
+  "version": "1.0.0",
+  "description": "AssemblyScript WebAssembly web application example",
+  "main": "index.js",
+  "scripts": {
+    "build": "asc assembly/index.ts --target release --outFile build/optimized.wasm --textFile build/optimized.wat --bindings esm --exportStart _start",
+    "build:debug": "asc assembly/index.ts --target debug --outFile build/debug.wasm --textFile build/debug.wat --sourceMap --debug",
+    "serve": "npx serve .",
+    "dev": "npm run build && npm run serve"
+  },
+  "devDependencies": {
+    "assemblyscript": "^0.27.0",
+    "serve": "^14.2.0"
+  },
+  "dependencies": {
+    "@assemblyscript/loader": "^0.27.0"
+  }
+}

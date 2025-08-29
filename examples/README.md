@@ -31,6 +31,16 @@ This directory contains example projects demonstrating how to create WebAssembly
 - **Functions**: `greet()`, `fibonacci()`, `isPrime()`, `reverseString()`, `power()`
 - **Build**: Uses AssemblyScript compiler
 
+### 🌐 AssemblyScript Web App (`web-asc/`)
+- **Features**: Interactive web application, DOM manipulation, real-time calculations
+- **Functions**: `greet()`, `fibonacci()`, `isPrime()`, `reverseString()`, `power()`, `validateEmail()`, `calculateArea()`
+- **Build**: AssemblyScript with web interface and performance testing
+
+### 🦀 Leptos Web App (`web-leptos/`)
+- **Features**: Reactive components, client-side routing, state management
+- **Functions**: Counter, todo list, interactive forms with Leptos framework
+- **Build**: Rust Leptos framework compiled to WebAssembly
+
 ## Quick Start
 
 Examples work with standard wasmrun commands:
@@ -42,6 +52,8 @@ wasmrun run examples/go-hello
 wasmrun run examples/python-hello
 wasmrun run examples/c-hello
 wasmrun run examples/asc-hello
+wasmrun run examples/web-asc
+wasmrun run examples/web-leptos
 
 # Compile only
 wasmrun compile examples/rust-hello
@@ -84,6 +96,13 @@ Each example contains:
 - TypeScript-like syntax with WebAssembly performance
 - Produces optimized `.wasm` files
 - Good balance between ease of use and performance
+- `web-asc` demonstrates interactive web applications with real-time calculations
+
+### Leptos (Rust Web Framework)
+- Reactive component system with fine-grained updates
+- Client-side routing and state management
+- Full-stack Rust development compiled to WebAssembly
+- `web-leptos` showcases modern web app architecture with Rust
 
 ## Contributing
 

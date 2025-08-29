@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AssemblyScript Web App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .demo-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        input, button, select {
+            margin: 5px;
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        input, select {
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+        }
+        .result {
+            margin: 10px 0;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 5px;
+            border-left: 4px solid #4CAF50;
+        }
+        .error {
+            border-left-color: #f44336;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 AssemblyScript Web Application</h1>
+        
+        <div class="grid">
+            <div class="demo-section">
+                <h3>👋 Greeting</h3>
+                <input type="text" id="nameInput" placeholder="Enter your name" value="World">
+                <button onclick="testGreeting()">Greet Me!</button>
+                <div id="greetResult" class="result"></div>
+            </div>
+
+            <div class="demo-section">
+                <h3>🧮 Math Operations</h3>
+                <input type="number" id="fibInput" placeholder="Fibonacci number" value="10" min="0" max="40">
+                <button onclick="testFibonacci()">Calculate Fibonacci</button>
+                <div id="fibResult" class="result"></div>
+            </div>
+
+            <div class="demo-section">
+                <h3>🔢 Prime Checker</h3>
+                <input type="number" id="primeInput" placeholder="Enter a number" value="17" min="1">
+                <button onclick="testPrime()">Check Prime</button>
+                <div id="primeResult" class="result"></div>
+            </div>
+
+            <div class="demo-section">
+                <h3>🔄 String Reverser</h3>
+                <input type="text" id="stringInput" placeholder="Enter text to reverse" value="AssemblyScript">
+                <button onclick="testReverse()">Reverse String</button>
+                <div id="reverseResult" class="result"></div>
+            </div>
+
+            <div class="demo-section">
+                <h3>📧 Email Validator</h3>
+                <input type="email" id="emailInput" placeholder="Enter email address" value="test@example.com">
+                <button onclick="testEmail()">Validate Email</button>
+                <div id="emailResult" class="result"></div>
+            </div>
+
+            <div class="demo-section">
+                <h3>📐 Area Calculator</h3>
+                <select id="shapeSelect">
+                    <option value="rectangle">Rectangle</option>
+                    <option value="triangle">Triangle</option>
+                    <option value="circle">Circle (width = radius)</option>
+                </select><br>
+                <input type="number" id="widthInput" placeholder="Width/Radius" value="10" step="0.1">
+                <input type="number" id="heightInput" placeholder="Height" value="5" step="0.1">
+                <button onclick="testArea()">Calculate Area</button>
+                <div id="areaResult" class="result"></div>
+            </div>
+        </div>
+
+        <div class="demo-section">
+            <h3>🔧 WebAssembly Performance Test</h3>
+            <button onclick="performanceTest()">Run Performance Test</button>
+            <div id="perfResult" class="result"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { instantiate } from "./build/optimized.js";
+
+        let wasm;
+        
+        async function init() {
+            try {
+                wasm = await instantiate();
+                console.log("✅ AssemblyScript WebAssembly module loaded successfully!");
+                
+                // Make functions globally available
+                window.wasm = wasm;
+                window.testGreeting = testGreeting;
+                window.testFibonacci = testFibonacci;
+                window.testPrime = testPrime;
+                window.testReverse = testReverse;
+                window.testEmail = testEmail;
+                window.testArea = testArea;
+                window.performanceTest = performanceTest;
+                
+            } catch (error) {
+                console.error("❌ Failed to load WebAssembly module:", error);
+                document.body.innerHTML = `<div style="color: red; text-align: center; padding: 50px;">
+                    <h2>Failed to load WebAssembly module</h2>
+                    <p>${error.message}</p>
+                    <p>Make sure to build the project first: <code>npm run build</code></p>
+                </div>`;
+            }
+        }
+
+        function testGreeting() {
+            const name = document.getElementById('nameInput').value || 'World';
+            const result = wasm.greet(name);
+            document.getElementById('greetResult').innerHTML = `<strong>Result:</strong> ${result}`;
+        }
+
+        function testFibonacci() {
+            const n = parseInt(document.getElementById('fibInput').value) || 10;
+            if (n > 40) {
+                document.getElementById('fibResult').innerHTML = `<strong class="error">Error:</strong> Please enter a number ≤ 40 for performance reasons`;
+                return;
+            }
+            const start = performance.now();
+            const result = wasm.fibonacci(n);
+            const end = performance.now();
+            document.getElementById('fibResult').innerHTML = `<strong>Result:</strong> fibonacci(${n}) = ${result}<br><small>Computed in ${(end - start).toFixed(2)}ms</small>`;
+        }
+
+        function testPrime() {
+            const n = parseInt(document.getElementById('primeInput').value) || 17;
+            const result = wasm.isPrime(n);
+            document.getElementById('primeResult').innerHTML = `<strong>Result:</strong> ${n} is ${result ? '' : 'not '}a prime number`;
+        }
+
+        function testReverse() {
+            const text = document.getElementById('stringInput').value || 'AssemblyScript';
+            const result = wasm.reverseString(text);
+            document.getElementById('reverseResult').innerHTML = `<strong>Original:</strong> ${text}<br><strong>Reversed:</strong> ${result}`;
+        }
+
+        function testEmail() {
+            const email = document.getElementById('emailInput').value || 'test@example.com';
+            const result = wasm.validateEmail(email);
+            document.getElementById('emailResult').innerHTML = `<strong>Email:</strong> ${email}<br><strong>Valid:</strong> ${result ? '✅ Yes' : '❌ No'}`;
+        }
+
+        function testArea() {
+            const shape = document.getElementById('shapeSelect').value;
+            const width = parseFloat(document.getElementById('widthInput').value) || 10;
+            const height = parseFloat(document.getElementById('heightInput').value) || 5;
+            const result = wasm.calculateArea(shape, width, height);
+            const unit = shape === 'circle' ? `(radius: ${width})` : `(${width} × ${height})`;
+            document.getElementById('areaResult').innerHTML = `<strong>Shape:</strong> ${shape} ${unit}<br><strong>Area:</strong> ${result.toFixed(2)} square units`;
+        }
+
+        function performanceTest() {
+            const iterations = 1000000;
+            console.log(`Starting performance test: ${iterations} iterations`);
+            
+            const start = performance.now();
+            for (let i = 0; i < iterations; i++) {
+                wasm.power(2, 10);
+            }
+            const end = performance.now();
+            
+            const duration = end - start;
+            const opsPerSecond = Math.round(iterations / (duration / 1000));
+            
+            document.getElementById('perfResult').innerHTML = `
+                <strong>Performance Test Results:</strong><br>
+                ${iterations.toLocaleString()} operations in ${duration.toFixed(2)}ms<br>
+                <strong>Speed:</strong> ${opsPerSecond.toLocaleString()} operations/second
+            `;
+        }
+
+        // Initialize when page loads
+        init();
+    </script>
+</body>
+</html>

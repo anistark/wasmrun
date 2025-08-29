@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leptos WebAssembly App</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            min-height: 100vh;
+            backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            text-align: center;
+            color: #4a5568;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            color: #2d3748;
+            margin: 20px 0;
+        }
+
+        h3 {
+            color: #4a5568;
+            margin: 15px 0 10px 0;
+        }
+
+        p {
+            line-height: 1.6;
+            margin: 10px 0;
+            color: #4a5568;
+        }
+
+        ul {
+            padding-left: 20px;
+            line-height: 1.8;
+        }
+
+        li {
+            color: #4a5568;
+            margin: 5px 0;
+        }
+
+        /* Hero Section */
+        .hero-section {
+            text-align: center;
+            padding: 40px 20px;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+
+        /* Forms and Inputs */
+        input, button, select {
+            padding: 12px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        button:hover {
+            background: #5a67d8;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        /* Navigation */
+        .navigation {
+            text-align: center;
+            margin: 40px 0;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .nav-button, .back-link {
+            display: inline-block;
+            padding: 15px 25px;
+            background: #4299e1;
+            color: white;
+            text-decoration: none;
+            border-radius: 10px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(66, 153, 225, 0.3);
+        }
+
+        .nav-button:hover, .back-link:hover {
+            background: #3182ce;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(66, 153, 225, 0.4);
+        }
+
+        .back-link {
+            background: #718096;
+            margin-bottom: 20px;
+        }
+
+        .back-link:hover {
+            background: #4a5568;
+        }
+
+        /* Counter Styles */
+        .counter-section {
+            text-align: center;
+            padding: 30px;
+        }
+
+        .counter-display {
+            margin: 30px 0;
+        }
+
+        .counter-display h2 {
+            font-size: 3em;
+            color: #2d3748;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .counter-controls {
+            margin: 20px 0;
+        }
+
+        .counter-controls input {
+            width: 100px;
+            text-align: center;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 30px 0;
+        }
+
+        .button-group button {
+            padding: 15px 25px;
+            font-size: 18px;
+            min-width: 100px;
+        }
+
+        .increment {
+            background: #48bb78;
+        }
+
+        .increment:hover {
+            background: #38a169;
+        }
+
+        .decrement {
+            background: #f56565;
+        }
+
+        .decrement:hover {
+            background: #e53e3e;
+        }
+
+        .reset {
+            background: #718096;
+        }
+
+        .reset:hover {
+            background: #4a5568;
+        }
+
+        .counter-info {
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(72, 187, 120, 0.1);
+            border-radius: 10px;
+        }
+
+        /* Todo Styles */
+        .todo-section {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .todo-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .todo-input input {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .todo-stats {
+            text-align: center;
+            margin: 20px 0;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .todo-list {
+            background: #f7fafc;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .todo-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            margin: 10px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+
+        .todo-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .todo-item.completed {
+            opacity: 0.6;
+            background: #f0fff4;
+        }
+
+        .todo-item.completed .todo-text {
+            text-decoration: line-through;
+            color: #718096;
+        }
+
+        .todo-text {
+            flex: 1;
+            font-size: 16px;
+            color: #2d3748;
+        }
+
+        .delete-btn {
+            background: #f56565;
+            padding: 8px 12px;
+            font-size: 14px;
+            min-width: auto;
+        }
+
+        .delete-btn:hover {
+            background: #e53e3e;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #718096;
+            font-style: italic;
+        }
+
+        /* Info Section */
+        .info-section {
+            background: rgba(72, 187, 120, 0.1);
+            border-radius: 15px;
+            padding: 25px;
+            margin: 30px 0;
+            border-left: 5px solid #48bb78;
+        }
+
+        .greeting-section {
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 10px;
+            padding: 25px;
+            margin: 20px 0;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+
+            .counter-display h2 {
+                font-size: 2em;
+            }
+
+            .nav-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .button-group {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .todo-input {
+                flex-direction: column;
+            }
+
+            .todo-input input {
+                min-width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module">
+        import init, { main } from './pkg/web_leptos.js';
+        
+        async function run() {
+            try {
+                await init();
+                main();
+                console.log("🦀 Leptos WebAssembly application loaded successfully!");
+            } catch (error) {
+                console.error("Failed to load WebAssembly module:", error);
+                document.getElementById('root').innerHTML = `
+                    <div style="padding: 50px; text-align: center; color: #e53e3e;">
+                        <h2>Failed to Load Application</h2>
+                        <p>${error.message}</p>
+                        <p>Make sure to build the project first with wasmrun or wasm-pack</p>
+                    </div>
+                `;
+            }
+        }
+        
+        run();
+    </script>
+</body>
+</html>
