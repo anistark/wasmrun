@@ -7,8 +7,8 @@ mod handler;
 mod utils;
 mod wasm;
 
-pub use config::{run_server, ServerConfig};
-pub use utils::{ServerInfo, ServerUtils};
+pub use config::{run_server, ServerConfig, ServerInfo};
+pub use utils::ServerUtils;
 
 const PID_FILE: &str = "/tmp/wasmrun_server.pid";
 

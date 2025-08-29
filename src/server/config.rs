@@ -1,14 +1,12 @@
-use std::fs;
-use std::net::TcpListener;
 use std::path::Path;
 
 use crate::compiler::builder::{BuildConfig, BuilderFactory, OptimizationLevel, TargetType};
 use crate::error::{Result, ServerError, WasmrunError};
 use crate::plugin::manager::PluginManager;
-use crate::utils::CommandExecutor;
 use crate::utils::PluginUtils;
 use crate::utils::{ProjectAnalysis, WasmAnalysis};
 
+use super::utils::{find_wasm_files, is_port_available, ServerUtils};
 use super::wasm;
 
 #[derive(Debug)]
@@ -20,74 +18,6 @@ pub struct ServerConfig {
     pub watch_mode: bool,
     pub project_path: Option<String>,
     pub output_dir: Option<String>,
-}
-
-#[allow(dead_code)] // TODO: Future HTTP header utilities
-pub fn content_type_header(value: &str) -> tiny_http::Header {
-    tiny_http::Header::from_bytes(&b"Content-Type"[..], value.as_bytes()).unwrap()
-}
-
-pub fn find_wasm_files(dir_path: &Path) -> Vec<String> {
-    let mut wasm_files = Vec::new();
-
-    if dir_path.is_dir() {
-        if let Ok(entries) = fs::read_dir(dir_path) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-
-                if path.is_file() {
-                    if let Some(extension) = path.extension() {
-                        if extension.to_string_lossy().to_lowercase() == "wasm" {
-                            if let Some(file_name) = path.to_str() {
-                                wasm_files.push(file_name.to_string());
-                            }
-                        }
-                    }
-                } else if path.is_dir() {
-                    let mut sub_wasm_files = find_wasm_files(&path);
-                    wasm_files.append(&mut sub_wasm_files);
-                }
-            }
-        }
-    }
-
-    wasm_files
-}
-
-pub fn is_port_available(port: u16) -> bool {
-    TcpListener::bind(format!("0.0.0.0:{port}")).is_ok()
-}
-
-#[allow(dead_code)] // TODO: Future asset directory validation
-pub fn check_assets_directory() {
-    if let Ok(metadata) = fs::metadata("./assets") {
-        if metadata.is_dir() {
-            eprintln!("📁 The assets directory exists, but the specific file wasn't found");
-        } else {
-            eprintln!("❌ Found 'assets' but it's not a directory!");
-        }
-    } else {
-        eprintln!("❌ The assets directory doesn't exist at the expected location!");
-    }
-}
-
-#[allow(dead_code)] // TODO: Future MIME type detection
-pub fn determine_content_type(path: &Path) -> &'static str {
-    match path.extension().and_then(|ext| ext.to_str()) {
-        Some("html") => "text/html",
-        Some("css") => "text/css",
-        Some("js") => "application/javascript",
-        Some("json") => "application/json",
-        Some("wasm") => "application/wasm",
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("svg") => "image/svg+xml",
-        Some("ico") => "image/x-icon",
-        Some("txt") => "text/plain",
-        Some("md") => "text/markdown",
-        Some("map") => "application/json",
-        _ => "application/octet-stream",
-    }
 }
 
 pub struct ServerInfo {
@@ -132,198 +62,120 @@ impl ServerInfo {
         })
     }
 
+    /// Print comprehensive server startup details
     pub fn print_server_startup(&self) {
-        println!("\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m");
-        println!("\x1b[1;34m│\x1b[0m  🌐 \x1b[1;36mWasmrun Server Started\x1b[0m                               \x1b[1;34m│\x1b[0m");
-        println!(
-            "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
-        );
+        print!("\x1b[2J\x1b[H");
+        self.print_header();
 
         match &self.content_type {
             ContentType::WasmFile(analysis) => {
                 analysis.print_analysis();
+                self.print_wasm_server_info();
             }
             ContentType::Project(analysis) => {
                 analysis.print_analysis();
+                self.print_project_server_info();
             }
         }
 
+        // Print server details
+        self.print_server_details();
+
+        // Open browser
+        self.open_browser();
+    }
+
+    fn print_header(&self) {
+        println!("\n\x1b[1;32m");
+        println!("   ██╗    ██╗ █████╗ ███████╗███╗   ███╗██████╗ ██╗   ██╗███╗   ██╗");
+        println!("   ██║    ██║██╔══██╗██╔════╝████╗ ████║██╔══██╗██║   ██║████╗  ██║");
+        println!("   ██║ █╗ ██║███████║███████╗██╔████╔██║██████╔╝██║   ██║██╔██╗ ██║");
+        println!("   ██║███╗██║██╔══██║╚════██║██║╚██╔╝██║██╔══██╗██║   ██║██║╚██╗██║");
+        println!("   ╚███╔███╔╝██║  ██║███████║██║ ╚═╝ ██║██║  ██║╚██████╔╝██║ ╚████║");
+        println!("    ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝");
+        println!("\x1b[0m");
+        println!("   \x1b[1;34m🌟 WebAssembly Development Server\x1b[0m");
+
+        let content_description = match &self.content_type {
+            ContentType::WasmFile(analysis) => analysis.get_summary(),
+            ContentType::Project(analysis) => analysis.get_summary(),
+        };
+
+        println!("   \x1b[0;37m{content_description}\x1b[0m\n");
+    }
+
+    fn print_wasm_server_info(&self) {
+        println!(
+            "\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m"
+        );
+        println!("\x1b[1;34m│\x1b[0m  🚀 \x1b[1;36mWASM Server Configuration\x1b[0m                              \x1b[1;34m│\x1b[0m");
         println!(
             "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
         );
-        println!("\x1b[1;34m│\x1b[0m  🌐 \x1b[1;34mURL:\x1b[0m \x1b[1;32m{:<53}\x1b[0m \x1b[1;34m│\x1b[0m", self.url);
-        println!("\x1b[1;34m│\x1b[0m  🔌 \x1b[1;34mPort:\x1b[0m \x1b[1;33m{:<52}\x1b[0m \x1b[1;34m│\x1b[0m", self.port);
-        println!("\x1b[1;34m│\x1b[0m  🆔 \x1b[1;34mPID:\x1b[0m \x1b[1;37m{:<53}\x1b[0m \x1b[1;34m│\x1b[0m", self.server_pid);
+        println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mServer Mode:\x1b[0m \x1b[1;32mWASM File Execution\x1b[0m                     \x1b[1;34m│\x1b[0m");
+        println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mRuntime:\x1b[0m \x1b[1;33mBrowser-based with full WASI support\x1b[0m         \x1b[1;34m│\x1b[0m");
+        println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mFeatures:\x1b[0m \x1b[1;32mVirtual filesystem, Console I/O, Debugging\x1b[0m   \x1b[1;34m│\x1b[0m");
+        println!(
+            "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
+        );
+    }
+
+    fn print_project_server_info(&self) {
+        println!(
+            "\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m"
+        );
+        println!("\x1b[1;34m│\x1b[0m  🚀 \x1b[1;36mProject Development Server\x1b[0m                             \x1b[1;34m│\x1b[0m");
+        println!(
+            "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
+        );
+        println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mServer Mode:\x1b[0m \x1b[1;32mCompile & Run\x1b[0m                              \x1b[1;34m│\x1b[0m");
+        println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mBuild System:\x1b[0m \x1b[1;33mAutomatic compilation to WASM\x1b[0m           \x1b[1;34m│\x1b[0m");
 
         if self.watch_mode {
-            println!("\x1b[1;34m│\x1b[0m  👁️  \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32mEnabled\x1b[0m                              \x1b[1;34m│\x1b[0m");
+            println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mWatch Mode:\x1b[0m \x1b[1;32m✓ Live reload on file changes\x1b[0m             \x1b[1;34m│\x1b[0m");
+        } else {
+            println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mWatch Mode:\x1b[0m \x1b[0;37mDisabled\x1b[0m                                 \x1b[1;34m│\x1b[0m");
         }
 
+        println!("\x1b[1;34m│\x1b[0m  \x1b[1;34mFeatures:\x1b[0m \x1b[1;32mFull WASI support, Debug console, Hot reload\x1b[0m \x1b[1;34m│\x1b[0m");
+        println!(
+            "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
+        );
+    }
+
+    fn print_server_details(&self) {
+        println!("\n\x1b[1;34m╭─────────────────────────────────────────────────────────────────╮\x1b[0m");
+        println!("\x1b[1;34m│\x1b[0m  🅦 \x1b[1;36mWasmrun Server\x1b[0m                                     \x1b[1;34m│\x1b[0m");
         println!(
             "\x1b[1;34m├─────────────────────────────────────────────────────────────────┤\x1b[0m"
         );
-        println!("\x1b[1;34m│\x1b[0m  💡 \x1b[1;37mPress Ctrl+C to stop the server\x1b[0m                        \x1b[1;34m│\x1b[0m");
-        println!("\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m\n");
-    }
-}
+        println!("\x1b[1;34m│\x1b[0m  🚀 \x1b[1;34mServer URL:\x1b[0m \x1b[4;36m{:<47}\x1b[0m \x1b[1;34m│\x1b[0m", self.url);
+        println!("\x1b[1;34m│\x1b[0m  🔌 \x1b[1;34mPort:\x1b[0m \x1b[1;33m{:<55}\x1b[0m \x1b[1;34m│\x1b[0m", self.port);
+        println!("\x1b[1;34m│\x1b[0m  ℹ️ \x1b[1;34mProcess ID:\x1b[0m \x1b[1;33m{:<47}\x1b[0m \x1b[1;34m│\x1b[0m", self.server_pid);
 
-pub struct ServerUtils;
-
-impl ServerUtils {
-    #[allow(dead_code)] // TODO: Future port conflict resolution
-    pub fn handle_port_conflict(requested_port: u16) -> Result<u16> {
-        if is_port_available(requested_port) {
-            return Ok(requested_port);
-        }
-
-        println!("\n\x1b[1;34m╭\x1b[0m");
-        println!("  ⚠️  \x1b[1;33mPort {requested_port} is already in use\x1b[0m");
-        println!("  🔍 \x1b[0;37mSearching for available port...\x1b[0m");
-
-        for port in (requested_port + 1)..=(requested_port + 100) {
-            if is_port_available(port) {
-                println!("  ✅ \x1b[1;32mUsing port {port} instead\x1b[0m");
-                println!("\x1b[1;34m╰\x1b[0m\n");
-                return Ok(port);
-            }
-        }
-
-        Err(WasmrunError::Server(ServerError::RequestHandlingFailed {
-            reason: format!(
-                "No available ports in range {}-{}",
-                requested_port,
-                requested_port + 100
-            ),
-        }))
-    }
-
-    pub fn print_initial_project_detection(project_path: &str) {
-        println!("\n\x1b[1;34m╭\x1b[0m");
-        println!("  🔍 \x1b[1;34mAnalyzing project:\x1b[0m \x1b[1;33m{project_path}\x1b[0m");
-
-        let lang = crate::compiler::detect_project_language(project_path);
-
-        match crate::plugin::manager::PluginManager::new() {
-            Ok(plugin_manager) => {
-                if let Some(plugin) = plugin_manager.find_plugin_for_project(project_path) {
-                    println!(
-                        "  🔌 \x1b[1;34mPlugin:\x1b[0m \x1b[1;32m{} v{}\x1b[0m",
-                        plugin.info().name,
-                        plugin.info().version
-                    );
-
-                    if matches!(
-                        plugin.info().plugin_type,
-                        crate::plugin::PluginType::External
-                    ) {
-                        println!("  📦 \x1b[1;34mType:\x1b[0m \x1b[1;36mExternal Plugin\x1b[0m");
-                    } else {
-                        println!("  📦 \x1b[1;34mType:\x1b[0m \x1b[1;35mBuilt-in Plugin\x1b[0m");
-                    }
-                } else {
-                    match lang {
-                        crate::compiler::ProjectLanguage::Rust => {
-                            println!("\n  ⚠️  \x1b[1;33mRust plugin not found\x1b[0m");
-                            println!("  💡 \x1b[1;33mInstall the wasmrust plugin:\x1b[0m");
-                            println!("     \x1b[1;37mwasmrun plugin install wasmrust\x1b[0m");
-                            println!("\n  ℹ️  \x1b[1;34mAfter installation, wasmrust will be auto-detected\x1b[0m");
-                            println!("\x1b[1;34m╰\x1b[0m\n");
-                            return;
-                        }
-                        crate::compiler::ProjectLanguage::C
-                        | crate::compiler::ProjectLanguage::Asc
-                        | crate::compiler::ProjectLanguage::Python => {
-                            println!("  🔧 \x1b[1;34mUsing built-in plugin\x1b[0m");
-                        }
-                        _ => {}
-                    }
-                }
-
-                let (builtin_count, external_count, _enabled_count) =
-                    plugin_manager.plugin_counts();
-                if external_count > 0 {
-                    println!(
-                        "  📊 \x1b[1;34mPlugins:\x1b[0m {builtin_count} built-in, {external_count} external"
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("  ⚠️ Warning: Failed to initialize plugin manager: {e}");
-            }
-        }
-
-        let temp_dir = std::env::temp_dir().join("wasmrun_temp");
-        let temp_output_dir = temp_dir.to_str().unwrap_or("/tmp").to_string();
-
-        if !temp_dir.exists() {
-            if let Err(e) = std::fs::create_dir_all(&temp_dir) {
-                println!("  ❌ \x1b[1;31mFailed to create temporary directory: {e}\x1b[0m");
-                println!("\x1b[1;34m╰\x1b[0m");
-                return;
-            }
-        }
-
-        println!("  📁 \x1b[1;34mOutput Directory:\x1b[0m \x1b[1;33m{temp_output_dir}\x1b[0m");
-        println!("\x1b[1;34m╰\x1b[0m\n");
-
-        if matches!(
-            lang,
-            crate::compiler::ProjectLanguage::C
-                | crate::compiler::ProjectLanguage::Asc
-                | crate::compiler::ProjectLanguage::Python
-        ) {
-            crate::compiler::print_system_info();
-            let os = crate::compiler::detect_operating_system();
-            let missing_tools = crate::compiler::get_missing_tools(&lang, &os);
-            if !missing_tools.is_empty() {
-                println!("\n\x1b[1;34m╭\x1b[0m");
-                println!("  ⚠️  \x1b[1;33mMissing Required Tools:\x1b[0m");
-                for tool in &missing_tools {
-                    println!("     \x1b[1;31m• {tool}\x1b[0m");
-                }
-                println!(
-                    "\n  \x1b[0;37mPlease install the required tools to compile this project.\x1b[0m"
-                );
-                println!("\x1b[1;34m╰\x1b[0m\n");
-            }
-        }
-    }
-
-    #[allow(dead_code)] // TODO: Future file metadata system (duplicate of server/utils.rs)
-    pub fn get_file_info(path: &str) -> Result<FileInfo> {
-        let path_obj = Path::new(path);
-        let metadata = fs::metadata(path)?;
-
-        let filename = path_obj
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        let absolute_path = fs::canonicalize(path)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| path.to_string());
-
-        let file_size_bytes = metadata.len();
-        let file_size = CommandExecutor::format_file_size(file_size_bytes);
-
-        Ok(FileInfo {
-            filename,
-            absolute_path,
-            file_size,
-            file_size_bytes,
-        })
-    }
-
-    #[allow(dead_code)] // TODO: Future enhanced port availability checking
-    pub fn check_port_availability(port: u16) -> PortStatus {
-        if is_port_available(port) {
-            PortStatus::Available
+        let status = if self.watch_mode {
+            "\x1b[1;32m🔄 Active (watching for changes)\x1b[0m"
         } else {
-            let alternatives = (port + 1..port + 10).find(|&p| is_port_available(p));
-            PortStatus::Unavailable {
-                alternative: alternatives,
-            }
+            "\x1b[1;32m✓ Running\x1b[0m"
+        };
+        println!("\x1b[1;34m│\x1b[0m  ⚫️ \x1b[1;34mStatus:\x1b[0m {status:<47} \x1b[1;34m│\x1b[0m");
+
+        println!(
+            "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
+        );
+    }
+
+    fn open_browser(&self) {
+        println!("\n🌐 \x1b[1;36mOpening browser...\x1b[0m");
+
+        if let Err(e) = webbrowser::open(&self.url) {
+            println!("❗ \x1b[1;33mFailed to open browser automatically: {e}\x1b[0m");
+            println!(
+                "🔗 \x1b[1;34mManually open:\x1b[0m \x1b[4;36m{}\x1b[0m",
+                self.url
+            );
+        } else {
+            println!("✅ \x1b[1;32mBrowser opened successfully!\x1b[0m");
         }
     }
 }
@@ -354,22 +206,22 @@ pub fn setup_project_compilation(
                 // Map plugin to language type for compatibility with existing code
                 let lang = PluginUtils::map_plugin_to_project_language(plugin, project_path);
 
-                let temp_dir = std::env::temp_dir().join("wasmrun_temp");
-                let temp_output_dir = temp_dir.to_str().unwrap_or("/tmp").to_string();
-
-                if !temp_dir.exists() {
-                    if let Err(e) = std::fs::create_dir_all(&temp_dir) {
+                use crate::utils::PathResolver;
+                
+                let temp_output_dir = match PathResolver::create_temp_directory("wasmrun_temp") {
+                    Ok(dir) => dir,
+                    Err(e) => {
                         println!("❌ Failed to create temporary directory: {e}");
                         return None;
                     }
-                }
+                };
 
                 return Some((lang, temp_output_dir));
             }
         }
     }
 
-    // Fallback to legacy language detection
+    // Legacy language detection. Remove in future versions.
     let lang = if let Some(lang_override) = language_override {
         match lang_override.to_lowercase().as_str() {
             "rust" | "rs" => crate::compiler::ProjectLanguage::Rust,
@@ -387,15 +239,15 @@ pub fn setup_project_compilation(
         crate::compiler::detect_project_language(project_path)
     };
 
-    let temp_dir = std::env::temp_dir().join("wasmrun_temp");
-    let temp_output_dir = temp_dir.to_str().unwrap_or("/tmp").to_string();
-
-    if !temp_dir.exists() {
-        if let Err(e) = std::fs::create_dir_all(&temp_dir) {
+    use crate::utils::PathResolver;
+    
+    let temp_output_dir = match PathResolver::create_temp_directory("wasmrun_temp") {
+        Ok(dir) => dir,
+        Err(e) => {
             println!("❌ Failed to create temporary directory: {e}");
             return None;
         }
-    }
+    };
 
     Some((lang, temp_output_dir))
 }

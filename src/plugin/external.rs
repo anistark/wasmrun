@@ -358,7 +358,6 @@ impl WasmBuilder for ExternalWasmBuilder {
             }
         }
 
-        // Fallback: clean common build artifacts
         let project_path = Path::new(project_path);
         let build_dirs = ["target", "build", "dist", "out"];
 

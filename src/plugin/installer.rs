@@ -27,7 +27,7 @@ impl InstallationResult {
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct VerificationResult {
+pub struct PluginVerificationResult {
     pub is_functional: bool,
     pub version: String,
     pub missing_dependencies: Vec<String>,
@@ -128,10 +128,10 @@ impl PluginInstaller {
     }
 
     #[allow(dead_code)]
-    pub fn verify_plugin_installation(plugin_name: &str) -> Result<VerificationResult> {
+    pub fn verify_plugin_installation(plugin_name: &str) -> Result<PluginVerificationResult> {
         let validation = PluginUtils::validate_plugin_installation(plugin_name)?;
 
-        Ok(VerificationResult {
+        Ok(PluginVerificationResult {
             is_functional: validation.is_functional,
             version: validation.version.unwrap_or_else(|| "unknown".to_string()),
             missing_dependencies: validation.missing_dependencies,

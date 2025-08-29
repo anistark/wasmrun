@@ -121,7 +121,7 @@ impl PluginMetadata {
             return Ok(metadata);
         }
 
-        // Fallback to basic search
+        // Basic search
         let output = std::process::Command::new("cargo")
             .args(["search", crate_name, "--limit", "1"])
             .output()
@@ -425,6 +425,6 @@ fn infer_entry_files_from_name(plugin_name: &str) -> Vec<String> {
         name if name.contains("py") || name.contains("python") => {
             vec!["main.py".to_string(), "app.py".to_string()]
         }
-        _ => vec!["main.wasm".to_string()], // Generic fallback
+        _ => vec!["main.wasm".to_string()],
     }
 }

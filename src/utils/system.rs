@@ -66,7 +66,7 @@ impl SystemUtils {
             }
         }
 
-        // Fallback to line-by-line parsing
+        // Line-by-line parsing
         for line in content.lines() {
             let line = line.trim();
             if line.starts_with("version") && line.contains('=') {

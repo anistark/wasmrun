@@ -176,54 +176,16 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
 
 /// Check if a tool is installed and available in the system path
 pub fn is_tool_installed(tool_name: &str) -> bool {
-    if tool_name == "wasm-pack" {
-        let check_command = if cfg!(target_os = "windows") {
-            "where wasm-pack"
-        } else {
-            "which wasm-pack"
-        };
-
-        let wasm_pack_installed = std::process::Command::new(if cfg!(target_os = "windows") {
-            "cmd"
-        } else {
-            "sh"
-        })
-        .args(if cfg!(target_os = "windows") {
-            ["/c", check_command]
-        } else {
-            ["-c", check_command]
-        })
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false);
-
-        if !wasm_pack_installed {
-            println!("⚠️ wasm-pack is not installed. It's required for wasm-bindgen projects.");
-            println!("  To install wasm-pack, run: cargo install wasm-pack");
-        }
-
-        return wasm_pack_installed;
+    use crate::utils::CommandExecutor;
+    
+    let is_installed = CommandExecutor::is_tool_installed(tool_name);
+    
+    if tool_name == "wasm-pack" && !is_installed {
+        println!("⚠️ wasm-pack is not installed. It's required for wasm-bindgen projects.");
+        println!("  To install wasm-pack, run: cargo install wasm-pack");
     }
-
-    let command = if cfg!(target_os = "windows") {
-        format!("where {tool_name}")
-    } else {
-        format!("which {tool_name}")
-    };
-
-    std::process::Command::new(if cfg!(target_os = "windows") {
-        "cmd"
-    } else {
-        "sh"
-    })
-    .args(if cfg!(target_os = "windows") {
-        ["/c", &command]
-    } else {
-        ["-c", &command]
-    })
-    .output()
-    .map(|output| output.status.success())
-    .unwrap_or(false)
+    
+    is_installed
 }
 
 /// Get missing tools for a given language
