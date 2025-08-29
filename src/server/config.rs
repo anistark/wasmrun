@@ -166,6 +166,11 @@ impl ServerInfo {
     }
 
     fn open_browser(&self) {
+        if cfg!(test) {
+            println!("🌐 \x1b[1;36mTest mode: Skipping browser opening...\x1b[0m");
+            return;
+        }
+
         println!("\n🌐 \x1b[1;36mOpening browser...\x1b[0m");
 
         if let Err(e) = webbrowser::open(&self.url) {

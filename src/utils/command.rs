@@ -121,3 +121,124 @@ impl CommandExecutor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use std::fs::File;
+    use std::io::Write;
+
+    #[test]
+    fn test_is_tool_installed_with_existing_tool() {
+        // Test with a tool that should exist on most systems
+        assert!(CommandExecutor::is_tool_installed("echo"));
+    }
+
+    #[test]
+    fn test_is_tool_installed_with_nonexistent_tool() {
+        // Test with a tool that shouldn't exist
+        assert!(!CommandExecutor::is_tool_installed("nonexistent_tool_12345"));
+    }
+
+    #[test]
+    fn test_execute_command_success() {
+        let temp_dir = tempdir().unwrap();
+        let result = CommandExecutor::execute_command(
+            "echo",
+            &["hello"],
+            temp_dir.path().to_str().unwrap(),
+            false,
+        );
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
+    }
+
+    #[test]
+    fn test_execute_command_failure() {
+        let temp_dir = tempdir().unwrap();
+        let result = CommandExecutor::execute_command(
+            "nonexistent_command_12345",
+            &[],
+            temp_dir.path().to_str().unwrap(),
+            false,
+        );
+        assert!(result.is_err());
+        match result {
+            Err(CompilationError::ToolExecutionFailed { tool, .. }) => {
+                assert_eq!(tool, "nonexistent_command_12345");
+            }
+            _ => panic!("Expected ToolExecutionFailed error"),
+        }
+    }
+
+    #[test]
+    fn test_copy_to_output() {
+        let temp_dir = tempdir().unwrap();
+        let source_file = temp_dir.path().join("source.wasm");
+        let mut file = File::create(&source_file).unwrap();
+        file.write_all(b"test wasm content").unwrap();
+
+        let output_dir = temp_dir.path().join("output");
+        std::fs::create_dir(&output_dir).unwrap();
+
+        let result = CommandExecutor::copy_to_output(
+            source_file.to_str().unwrap(),
+            output_dir.to_str().unwrap(),
+            "Test",
+        );
+        
+        assert!(result.is_ok());
+        let output_path = result.unwrap();
+        assert!(std::path::Path::new(&output_path).exists());
+        assert!(output_path.ends_with("source.wasm"));
+    }
+
+    #[test]
+    fn test_copy_to_output_invalid_source() {
+        let temp_dir = tempdir().unwrap();
+        let result = CommandExecutor::copy_to_output(
+            "/nonexistent/source.wasm",
+            temp_dir.path().to_str().unwrap(),
+            "Test",
+        );
+        
+        assert!(result.is_err());
+        match result {
+            Err(CompilationError::BuildFailed { language, .. }) => {
+                assert_eq!(language, "Test");
+            }
+            _ => panic!("Expected BuildFailed error"),
+        }
+    }
+
+    #[test]
+    fn test_format_file_size_bytes() {
+        assert_eq!(CommandExecutor::format_file_size(0), "0 bytes");
+        assert_eq!(CommandExecutor::format_file_size(1), "1 bytes");
+        assert_eq!(CommandExecutor::format_file_size(1023), "1023 bytes");
+    }
+
+    #[test]
+    fn test_format_file_size_kilobytes() {
+        assert_eq!(CommandExecutor::format_file_size(1024), "1.00 KB");
+        assert_eq!(CommandExecutor::format_file_size(1536), "1.50 KB");
+        assert_eq!(CommandExecutor::format_file_size(1024 * 1024 - 1), "1024.00 KB");
+    }
+
+    #[test]
+    fn test_format_file_size_megabytes() {
+        assert_eq!(CommandExecutor::format_file_size(1024 * 1024), "1.00 MB");
+        assert_eq!(CommandExecutor::format_file_size(1536 * 1024), "1.50 MB");
+        assert_eq!(CommandExecutor::format_file_size(1024 * 1024 * 1024 - 1), "1024.00 MB");
+    }
+
+    #[test]
+    fn test_format_file_size_gigabytes() {
+        assert_eq!(CommandExecutor::format_file_size(1024 * 1024 * 1024), "1.00 GB");
+        assert_eq!(CommandExecutor::format_file_size(1536 * 1024 * 1024), "1.50 GB");
+        assert_eq!(CommandExecutor::format_file_size(2048 * 1024 * 1024), "2.00 GB");
+    }
+}

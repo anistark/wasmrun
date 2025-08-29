@@ -387,3 +387,225 @@ fn truncate_string(s: &str, max_len: usize) -> String {
         format!("{}...", &s[..max_len.saturating_sub(3)])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use std::fs::File;
+    use std::io::Write;
+    use crate::commands::VerificationResult;
+
+    const VALID_WASM_BYTES: [u8; 8] = [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+
+    fn create_wasm_file_with_extension(content: &[u8]) -> tempfile::NamedTempFile {
+        let mut temp_file = tempfile::Builder::new()
+            .suffix(".wasm")
+            .tempfile()
+            .unwrap();
+        temp_file.write_all(content).unwrap();
+        temp_file
+    }
+
+    fn create_mock_verification_result() -> VerificationResult {
+        VerificationResult {
+            valid_magic: true,
+            file_size: 100,
+            section_count: 3,
+            sections: vec![],
+            has_export_section: true,
+            export_names: vec!["main".to_string(), "test_func".to_string()],
+            has_start_section: false,
+            start_function_index: None,
+            has_memory_section: true,
+            memory_limits: Some((1, Some(10))),
+            has_table_section: false,
+            function_count: 5,
+        }
+    }
+
+    #[test]
+    fn test_module_type_display() {
+        assert_eq!(format!("{}", ModuleType::StandardWasm), "Standard WebAssembly");
+        assert_eq!(format!("{}", ModuleType::WasmBindgen), "WASM-Bindgen Module");
+        assert_eq!(format!("{}", ModuleType::WasiModule), "WASI Module");
+        assert_eq!(format!("{}", ModuleType::WebApplication), "Web Application");
+        assert_eq!(format!("{}", ModuleType::Unknown), "Unknown");
+    }
+
+    #[test]
+    fn test_extract_entry_points() {
+        let verification = VerificationResult {
+            export_names: vec!["main".to_string(), "init".to_string(), "other".to_string()],
+            has_start_section: true,
+            start_function_index: Some(0),
+            ..create_mock_verification_result()
+        };
+
+        let entry_points = extract_entry_points(&verification);
+        assert!(entry_points.contains(&"main".to_string()));
+        assert!(entry_points.contains(&"init".to_string()));
+        assert!(!entry_points.contains(&"other".to_string()));
+        assert!(entry_points.iter().any(|p| p.contains("_start")));
+    }
+
+    #[test]
+    fn test_is_entry_point() {
+        assert!(is_entry_point("main"));
+        assert!(is_entry_point("_start"));
+        assert!(is_entry_point("start"));
+        assert!(is_entry_point("init"));
+        assert!(is_entry_point("run"));
+        assert!(is_entry_point("execute"));
+        assert!(is_entry_point("_initialize"));
+        assert!(!is_entry_point("other"));
+        assert!(!is_entry_point(""));
+    }
+
+    #[test]
+    fn test_detect_wasm_bindgen() {
+        let temp_dir = tempdir().unwrap();
+        let wasm_path = temp_dir.path().join("test.wasm");
+        let js_path = temp_dir.path().join("test.js");
+        
+        // Create WASM file
+        File::create(&wasm_path).unwrap();
+        
+        // Create JS file with wasm-bindgen content
+        let mut js_file = File::create(&js_path).unwrap();
+        js_file.write_all(b"import * as wasm_bindgen from './test_bg.wasm';").unwrap();
+        
+        let result = detect_wasm_bindgen(&wasm_path);
+        assert!(result);
+    }
+
+    #[test]
+    fn test_detect_wasm_bindgen_no_js() {
+        let temp_dir = tempdir().unwrap();
+        let wasm_path = temp_dir.path().join("test.wasm");
+        File::create(&wasm_path).unwrap();
+        
+        let result = detect_wasm_bindgen(&wasm_path);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_determine_module_type_wasm_bindgen() {
+        let verification = Some(create_mock_verification_result());
+        let module_type = determine_module_type(&verification, true, false);
+        assert!(matches!(module_type, ModuleType::WasmBindgen));
+    }
+
+    #[test]
+    fn test_determine_module_type_wasi() {
+        let verification = Some(create_mock_verification_result());
+        let module_type = determine_module_type(&verification, false, true);
+        assert!(matches!(module_type, ModuleType::WasiModule));
+    }
+
+    #[test]
+    fn test_determine_module_type_standard() {
+        let verification = Some(create_mock_verification_result());
+        let module_type = determine_module_type(&verification, false, false);
+        assert!(matches!(module_type, ModuleType::StandardWasm));
+    }
+
+    #[test]
+    fn test_determine_module_type_unknown() {
+        let module_type = determine_module_type(&None, false, false);
+        assert!(matches!(module_type, ModuleType::Unknown));
+    }
+
+    #[test]
+    fn test_truncate_string_short() {
+        let result = truncate_string("short", 10);
+        assert_eq!(result, "short");
+    }
+
+    #[test]
+    fn test_truncate_string_long() {
+        let result = truncate_string("this is a very long string", 10);
+        assert_eq!(result, "this is...");
+    }
+
+    #[test]
+    fn test_truncate_string_exact() {
+        let result = truncate_string("exactly10!", 10);
+        assert_eq!(result, "exactly10!");
+    }
+
+    #[test]
+    fn test_wasm_analysis_invalid_file() {
+        let temp_file = create_wasm_file_with_extension(&[0x00, 0x00, 0x00, 0x00]);
+        let result = WasmAnalysis::analyze(temp_file.path().to_str().unwrap());
+        
+        // Should still succeed but with invalid WASM
+        assert!(result.is_ok());
+        let analysis = result.unwrap();
+        assert!(!analysis.is_valid);
+    }
+
+    #[test]
+    fn test_wasm_analysis_get_summary_invalid() {
+        let temp_file = create_wasm_file_with_extension(&[0x00, 0x00, 0x00, 0x00]);
+        let analysis = WasmAnalysis::analyze(temp_file.path().to_str().unwrap()).unwrap();
+        
+        let summary = analysis.get_summary();
+        assert!(summary.contains("❌"));
+        assert!(summary.contains("Invalid"));
+    }
+
+    #[test]
+    fn test_wasm_analysis_get_summary_valid() {
+        let temp_file = create_wasm_file_with_extension(&VALID_WASM_BYTES);
+        let analysis = WasmAnalysis::analyze(temp_file.path().to_str().unwrap()).unwrap();
+        
+        let summary = analysis.get_summary();
+        assert!(summary.contains("⚡") || summary.contains("🔧") || summary.contains("🌐") || summary.contains("📱"));
+    }
+
+    #[test]
+    fn test_project_analysis_with_rust_project() {
+        let temp_dir = tempdir().unwrap();
+        let cargo_toml = temp_dir.path().join("Cargo.toml");
+        let mut file = File::create(&cargo_toml).unwrap();
+        file.write_all(b"[package]\nname = \"test\"").unwrap();
+        
+        let result = ProjectAnalysis::analyze(temp_dir.path().to_str().unwrap());
+        assert!(result.is_ok());
+        let analysis = result.unwrap();
+        assert_eq!(analysis.language, crate::compiler::ProjectLanguage::Rust);
+        assert!(analysis.build_files.contains(&"Cargo.toml".to_string()));
+        assert!(analysis.has_cargo_toml);
+    }
+
+    #[test]
+    fn test_project_analysis_with_entry_files() {
+        let temp_dir = tempdir().unwrap();
+        
+        // Create entry file
+        let main_rs = temp_dir.path().join("main.rs");
+        File::create(&main_rs).unwrap();
+        
+        let result = ProjectAnalysis::analyze(temp_dir.path().to_str().unwrap());
+        assert!(result.is_ok());
+        let analysis = result.unwrap();
+        assert!(analysis.entry_files.contains(&"main.rs".to_string()));
+    }
+
+    #[test]
+    fn test_project_analysis_nonexistent_dir() {
+        let result = ProjectAnalysis::analyze("/nonexistent/directory");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_project_analysis_get_summary() {
+        let temp_dir = tempdir().unwrap();
+        let analysis = ProjectAnalysis::analyze(temp_dir.path().to_str().unwrap()).unwrap();
+        
+        let summary = analysis.get_summary();
+        assert!(summary.contains("project"));
+        assert!(summary.contains("❓") || summary.contains("🦀") || summary.contains("🐹") || summary.contains("🔧"));
+    }
+}

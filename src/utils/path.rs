@@ -228,3 +228,185 @@ impl<T> Pipe<T> for T {
         f(self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::{tempdir, NamedTempFile};
+    use std::fs::File;
+
+    #[test]
+    fn test_resolve_input_path_with_positional() {
+        let result = PathResolver::resolve_input_path(Some("test.wasm".to_string()), None);
+        assert_eq!(result, "test.wasm");
+    }
+
+    #[test]
+    fn test_resolve_input_path_with_flag() {
+        let result = PathResolver::resolve_input_path(None, Some("flag.wasm".to_string()));
+        assert_eq!(result, "flag.wasm");
+    }
+
+    #[test]
+    fn test_resolve_input_path_with_both() {
+        let result = PathResolver::resolve_input_path(Some("positional.wasm".to_string()), Some("flag.wasm".to_string()));
+        assert_eq!(result, "positional.wasm");
+    }
+
+    #[test]
+    fn test_resolve_input_path_with_neither() {
+        let result = PathResolver::resolve_input_path(None, None);
+        assert_eq!(result, "./");
+    }
+
+    #[test]
+    fn test_has_extension_wasm() {
+        assert!(PathResolver::has_extension("test.wasm", "wasm"));
+        assert!(PathResolver::has_extension("test.WASM", "wasm"));
+        assert!(!PathResolver::has_extension("test.js", "wasm"));
+        assert!(!PathResolver::has_extension("test", "wasm"));
+    }
+
+    #[test]
+    fn test_get_extension() {
+        assert_eq!(PathResolver::get_extension("test.wasm"), Some("wasm".to_string()));
+        assert_eq!(PathResolver::get_extension("test.WASM"), Some("wasm".to_string()));
+        assert_eq!(PathResolver::get_extension("test"), None);
+    }
+
+    #[test]
+    fn test_validate_file_exists_with_valid_file() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let result = PathResolver::validate_file_exists(temp_file.path().to_str().unwrap());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_file_exists_with_nonexistent_file() {
+        let result = PathResolver::validate_file_exists("/nonexistent/file.wasm");
+        assert!(result.is_err());
+        match result {
+            Err(WasmrunError::FileNotFound { path }) => {
+                assert_eq!(path, "/nonexistent/file.wasm");
+            }
+            _ => panic!("Expected FileNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_directory_exists_with_valid_dir() {
+        let temp_dir = tempdir().unwrap();
+        let result = PathResolver::validate_directory_exists(temp_dir.path().to_str().unwrap());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_directory_exists_with_nonexistent_dir() {
+        let result = PathResolver::validate_directory_exists("/nonexistent/dir");
+        assert!(result.is_err());
+        match result {
+            Err(WasmrunError::DirectoryNotFound { path }) => {
+                assert_eq!(path, "/nonexistent/dir");
+            }
+            _ => panic!("Expected DirectoryNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_wasm_file_with_valid_wasm() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let new_path = temp_file.path().with_extension("wasm");
+        std::fs::rename(temp_file.path(), &new_path).unwrap();
+        
+        let result = PathResolver::validate_wasm_file(new_path.to_str().unwrap());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_wasm_file_with_wrong_extension() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let result = PathResolver::validate_wasm_file(temp_file.path().to_str().unwrap());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_filename() {
+        let result = PathResolver::get_filename("/path/to/file.wasm");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "file.wasm");
+    }
+
+    #[test]
+    fn test_get_filename_invalid_path() {
+        let result = PathResolver::get_filename("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_join_paths() {
+        let result = PathResolver::join_paths("/base/path", "file.wasm");
+        assert_eq!(result, "/base/path/file.wasm");
+    }
+
+    #[test]
+    fn test_ensure_output_directory() {
+        let temp_dir = tempdir().unwrap();
+        let new_dir = temp_dir.path().join("new_output_dir");
+        let result = PathResolver::ensure_output_directory(new_dir.to_str().unwrap());
+        assert!(result.is_ok());
+        assert!(new_dir.exists());
+    }
+
+    #[test]
+    fn test_find_files_with_extension() {
+        let temp_dir = tempdir().unwrap();
+        
+        // Create test files
+        File::create(temp_dir.path().join("test1.wasm")).unwrap();
+        File::create(temp_dir.path().join("test2.wasm")).unwrap();
+        File::create(temp_dir.path().join("test3.js")).unwrap();
+        
+        let result = PathResolver::find_files_with_extension(temp_dir.path().to_str().unwrap(), "wasm");
+        assert!(result.is_ok());
+        let files = result.unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().all(|f| f.ends_with(".wasm")));
+    }
+
+    #[test]
+    fn test_find_entry_file() {
+        let temp_dir = tempdir().unwrap();
+        File::create(temp_dir.path().join("main.rs")).unwrap();
+        
+        let candidates = ["lib.rs", "main.rs", "src/main.rs"];
+        let result = PathResolver::find_entry_file(temp_dir.path().to_str().unwrap(), &candidates);
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("main.rs"));
+    }
+
+    #[test]
+    fn test_is_safe_path() {
+        assert!(PathResolver::is_safe_path("safe/path/file.wasm"));
+        assert!(PathResolver::is_safe_path("./file.wasm"));
+        assert!(!PathResolver::is_safe_path("../dangerous/path"));
+        assert!(!PathResolver::is_safe_path("/path/../dangerous"));
+    }
+
+    #[test]
+    fn test_format_file_size() {
+        use crate::utils::CommandExecutor;
+        
+        assert_eq!(CommandExecutor::format_file_size(500), "500 bytes");
+        assert_eq!(CommandExecutor::format_file_size(1536), "1.50 KB");
+        assert_eq!(CommandExecutor::format_file_size(1536 * 1024), "1.50 MB");
+        assert_eq!(CommandExecutor::format_file_size(1536 * 1024 * 1024), "1.50 GB");
+    }
+
+    #[test]
+    fn test_create_temp_directory() {
+        let result = PathResolver::create_temp_directory("wasmrun_test");
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(Path::new(&path).exists());
+    }
+}

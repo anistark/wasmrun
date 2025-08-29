@@ -681,3 +681,239 @@ fn resolve_and_validate_wasm_path(
 
     Ok(resolved_path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+    use std::io::Write;
+
+    const VALID_WASM_BYTES: [u8; 8] = [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+    const INVALID_WASM_BYTES: [u8; 8] = [0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+
+    fn create_wasm_file(content: &[u8]) -> NamedTempFile {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(content).unwrap();
+        temp_file
+    }
+
+    fn create_wasm_file_with_extension(content: &[u8]) -> tempfile::NamedTempFile {
+        let mut temp_file = tempfile::Builder::new()
+            .suffix(".wasm")
+            .tempfile()
+            .unwrap();
+        temp_file.write_all(content).unwrap();
+        temp_file
+    }
+
+    #[test]
+    fn test_is_entry_point() {
+        assert!(is_entry_point("main"));
+        assert!(is_entry_point("_start"));
+        assert!(is_entry_point("start"));
+        assert!(is_entry_point("init"));
+        assert!(is_entry_point("run"));
+        assert!(is_entry_point("execute"));
+        assert!(is_entry_point("_initialize"));
+        assert!(!is_entry_point("other_function"));
+        assert!(!is_entry_point(""));
+    }
+
+    #[test]
+    fn test_verify_wasm_valid_magic() {
+        let temp_file = create_wasm_file(&VALID_WASM_BYTES);
+        let result = verify_wasm(temp_file.path().to_str().unwrap());
+        
+        assert!(result.is_ok());
+        let verification = result.unwrap();
+        assert!(verification.valid_magic);
+        assert_eq!(verification.file_size, 8);
+    }
+
+    #[test]
+    fn test_verify_wasm_invalid_magic() {
+        let temp_file = create_wasm_file(&INVALID_WASM_BYTES);
+        let result = verify_wasm(temp_file.path().to_str().unwrap());
+        
+        assert!(result.is_ok());
+        let verification = result.unwrap();
+        assert!(!verification.valid_magic);
+        assert_eq!(verification.file_size, 8);
+        assert_eq!(verification.section_count, 0);
+    }
+
+    #[test]
+    fn test_verify_wasm_file_not_found() {
+        let result = verify_wasm("/nonexistent/file.wasm");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("File not found"));
+    }
+
+    #[test]
+    fn test_verify_wasm_file_too_small() {
+        let temp_file = create_wasm_file(&[0x00, 0x61, 0x73]); // Only 3 bytes
+        let result = verify_wasm(temp_file.path().to_str().unwrap());
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("too small"));
+    }
+
+    #[test]
+    fn test_verify_wasm_with_sections() {
+        // Create a more complex WASM with type section
+        let mut wasm_content = VALID_WASM_BYTES.to_vec();
+        // Add a minimal type section (id=1, size=1, empty content)
+        wasm_content.extend_from_slice(&[0x01, 0x01, 0x00]);
+        
+        let temp_file = create_wasm_file(&wasm_content);
+        let result = verify_wasm(temp_file.path().to_str().unwrap());
+        
+        assert!(result.is_ok());
+        let verification = result.unwrap();
+        assert!(verification.valid_magic);
+        assert_eq!(verification.section_count, 1);
+    }
+
+    #[test]
+    fn test_verify_wasm_with_export_section() {
+        // Create WASM with export section containing "main" export
+        let mut wasm_content = VALID_WASM_BYTES.to_vec();
+        // Add export section (id=7) with "main" function export
+        let export_section = [
+            0x07, // Export section id
+            0x08, // Section size
+            0x01, // Export count = 1
+            0x04, // Name length = 4
+            b'm', b'a', b'i', b'n', // Name = "main"
+            0x00, // Export kind = function
+            0x00, // Function index = 0
+        ];
+        wasm_content.extend_from_slice(&export_section);
+        
+        let temp_file = create_wasm_file(&wasm_content);
+        let result = verify_wasm(temp_file.path().to_str().unwrap());
+        
+        assert!(result.is_ok());
+        let verification = result.unwrap();
+        assert!(verification.valid_magic);
+        assert!(verification.has_export_section);
+        assert_eq!(verification.export_names.len(), 1);
+        assert_eq!(verification.export_names[0], "main");
+    }
+
+    #[test]
+    fn test_verify_wasm_with_start_section() {
+        // Create WASM with start section
+        let mut wasm_content = VALID_WASM_BYTES.to_vec();
+        // Add start section (id=8) with function index 0
+        let start_section = [
+            0x08, // Start section id
+            0x01, // Section size
+            0x00, // Function index = 0
+        ];
+        wasm_content.extend_from_slice(&start_section);
+        
+        let temp_file = create_wasm_file(&wasm_content);
+        let result = verify_wasm(temp_file.path().to_str().unwrap());
+        
+        assert!(result.is_ok());
+        let verification = result.unwrap();
+        assert!(verification.valid_magic);
+        assert!(verification.has_start_section);
+        assert_eq!(verification.start_function_index, Some(0));
+    }
+
+    #[test]
+    fn test_verify_wasm_with_memory_section() {
+        // Create WASM with memory section
+        let mut wasm_content = VALID_WASM_BYTES.to_vec();
+        // Add memory section (id=5) with initial size
+        let memory_section = [
+            0x05, // Memory section id
+            0x03, // Section size
+            0x01, // Memory count = 1
+            0x00, // Flags (no maximum)
+            0x01, // Initial size = 1 page
+        ];
+        wasm_content.extend_from_slice(&memory_section);
+        
+        let temp_file = create_wasm_file(&wasm_content);
+        let result = verify_wasm(temp_file.path().to_str().unwrap());
+        
+        assert!(result.is_ok());
+        let verification = result.unwrap();
+        assert!(verification.valid_magic);
+        assert!(verification.has_memory_section);
+        assert_eq!(verification.memory_limits, Some((1, None)));
+    }
+
+    #[test]
+    fn test_read_leb128_u32() {
+        let data = vec![0x80, 0x01]; // 128 in LEB128 format
+        let mut cursor = Cursor::new(data);
+        let result = read_leb128_u32(&mut cursor);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 128);
+    }
+
+    #[test]
+    fn test_read_leb128_u32_overflow() {
+        // Create a LEB128 that would overflow u32
+        let data = vec![0x80, 0x80, 0x80, 0x80, 0x80, 0x01];
+        let mut cursor = Cursor::new(data);
+        let result = read_leb128_u32(&mut cursor);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cursor_read_u8() {
+        let data = vec![0x42];
+        let mut cursor = Cursor::new(data);
+        let result = cursor.read_u8();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0x42);
+    }
+
+    #[test]
+    fn test_cursor_read_u8_eof() {
+        let data = vec![];
+        let mut cursor = Cursor::new(data);
+        let result = cursor.read_u8();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_and_validate_wasm_path() {
+        let temp_file = create_wasm_file_with_extension(&VALID_WASM_BYTES);
+        let path = temp_file.path().to_str().unwrap().to_string();
+        
+        let result = resolve_and_validate_wasm_path(&Some(path.clone()), &None);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), path);
+    }
+
+    #[test]
+    fn test_resolve_and_validate_wasm_path_positional() {
+        let temp_file = create_wasm_file_with_extension(&VALID_WASM_BYTES);
+        let path = temp_file.path().to_str().unwrap().to_string();
+        
+        let result = resolve_and_validate_wasm_path(&None, &Some(path.clone()));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), path);
+    }
+
+    #[test]
+    fn test_resolve_and_validate_wasm_path_empty_file() {
+        let temp_file = create_wasm_file_with_extension(&[]);
+        let path = temp_file.path().to_str().unwrap().to_string();
+        
+        let result = resolve_and_validate_wasm_path(&Some(path), &None);
+        assert!(result.is_err());
+        match result {
+            Err(WasmrunError::Wasm(WasmError::ValidationFailed { reason })) => {
+                assert!(reason.contains("empty"));
+            }
+            _ => panic!("Expected ValidationFailed error"),
+        }
+    }
+}

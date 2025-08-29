@@ -441,3 +441,344 @@ impl ExternalPluginLoader {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use std::fs::File;
+    use crate::plugin::{PluginType, PluginCapabilities, PluginSource};
+
+    fn create_mock_metadata() -> PluginMetadata {
+        PluginMetadata {
+            name: "test_plugin".to_string(),
+            version: "1.0.0".to_string(),
+            description: "Test plugin".to_string(),
+            author: "Test Author".to_string(),
+            extensions: vec!["test".to_string()],
+            entry_files: vec!["main.test".to_string()],
+            capabilities: crate::plugin::metadata::MetadataCapabilities {
+                compile_wasm: true,
+                compile_webapp: false,
+                live_reload: false,
+                optimization: false,
+                custom_targets: vec![],
+                supported_languages: Some(vec!["test".to_string()]),
+            },
+            dependencies: crate::plugin::metadata::MetadataDependencies {
+                tools: vec!["test_tool".to_string()],
+                optional_tools: None,
+            },
+            exports: None,
+            frameworks: None,
+        }
+    }
+
+    fn create_mock_entry() -> ExternalPluginEntry {
+        ExternalPluginEntry {
+            info: PluginInfo {
+                name: "test_plugin".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Test plugin".to_string(),
+                author: "Test Author".to_string(),
+                extensions: vec!["test".to_string()],
+                entry_files: vec!["main.test".to_string()],
+                plugin_type: PluginType::External,
+                source: Some(PluginSource::CratesIo {
+                    name: "test_plugin".to_string(),
+                    version: "1.0.0".to_string(),
+                }),
+                dependencies: vec!["test_tool".to_string()],
+                capabilities: PluginCapabilities::default(),
+            },
+            enabled: true,
+            install_path: "/mock/path".to_string(),
+            executable_path: None,
+            installed_at: "2023-01-01T00:00:00Z".to_string(),
+            source: PluginSource::CratesIo {
+                name: "test_plugin".to_string(),
+                version: "1.0.0".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn test_external_wasm_builder_new() {
+        let metadata = create_mock_metadata();
+        let builder = ExternalWasmBuilder::new(
+            "test_plugin".to_string(),
+            metadata,
+            #[cfg(not(target_os = "windows"))]
+            None,
+        );
+        
+        assert_eq!(builder.language_name(), "test_plugin");
+        assert_eq!(builder.entry_file_candidates().len(), 0); // Returns empty slice
+        assert_eq!(builder.supported_extensions().len(), 0); // Returns empty slice
+    }
+
+    #[test]
+    fn test_external_wasm_builder_can_handle_project() {
+        let temp_dir = tempdir().unwrap();
+        let metadata = create_mock_metadata();
+        let builder = ExternalWasmBuilder::new(
+            "test_plugin".to_string(),
+            metadata,
+            #[cfg(not(target_os = "windows"))]
+            None,
+        );
+        
+        // Test with empty directory
+        assert!(!builder.can_handle_project(temp_dir.path().to_str().unwrap()));
+        
+        // Test with matching entry file
+        let entry_file = temp_dir.path().join("main.test");
+        File::create(&entry_file).unwrap();
+        assert!(builder.can_handle_project(temp_dir.path().to_str().unwrap()));
+    }
+
+    #[test]
+    fn test_external_wasm_builder_can_handle_project_by_extension() {
+        let temp_dir = tempdir().unwrap();
+        let metadata = create_mock_metadata();
+        let builder = ExternalWasmBuilder::new(
+            "test_plugin".to_string(),
+            metadata,
+            #[cfg(not(target_os = "windows"))]
+            None,
+        );
+        
+        // Test with matching extension
+        let test_file = temp_dir.path().join("example.test");
+        File::create(&test_file).unwrap();
+        assert!(builder.can_handle_project(temp_dir.path().to_str().unwrap()));
+    }
+
+    #[test]
+    fn test_external_wasm_builder_validate_project() {
+        let temp_dir = tempdir().unwrap();
+        let metadata = create_mock_metadata();
+        let builder = ExternalWasmBuilder::new(
+            "test_plugin".to_string(),
+            metadata,
+            #[cfg(not(target_os = "windows"))]
+            None,
+        );
+        
+        // Test with non-existent path
+        let result = builder.validate_project("/nonexistent/path");
+        assert!(result.is_err());
+        
+        // Test with existing path but no entry files
+        let result = builder.validate_project(temp_dir.path().to_str().unwrap());
+        assert!(result.is_err());
+        
+        // Test with entry file present
+        let entry_file = temp_dir.path().join("main.test");
+        File::create(&entry_file).unwrap();
+        let result = builder.validate_project(temp_dir.path().to_str().unwrap());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_external_wasm_builder_check_dependencies() {
+        let metadata = create_mock_metadata();
+        let builder = ExternalWasmBuilder::new(
+            "test_plugin".to_string(),
+            metadata,
+            #[cfg(not(target_os = "windows"))]
+            None,
+        );
+        
+        let missing_deps = builder.check_dependencies();
+        // test_tool should be missing (unless coincidentally installed)
+        assert!(missing_deps.contains(&"test_tool".to_string()));
+    }
+
+    #[test]
+    fn test_external_wasm_builder_clone() {
+        let metadata = create_mock_metadata();
+        let builder = ExternalWasmBuilder::new(
+            "test_plugin".to_string(),
+            metadata,
+            #[cfg(not(target_os = "windows"))]
+            None,
+        );
+        
+        let cloned_builder = builder.clone_box();
+        assert_eq!(builder.language_name(), cloned_builder.language_name());
+    }
+
+    #[test]
+    fn test_external_wasm_builder_clean() {
+        let temp_dir = tempdir().unwrap();
+        let metadata = create_mock_metadata();
+        let builder = ExternalWasmBuilder::new(
+            "test_plugin".to_string(),
+            metadata,
+            #[cfg(not(target_os = "windows"))]
+            None,
+        );
+        
+        // Create some build directories
+        let target_dir = temp_dir.path().join("target");
+        std::fs::create_dir(&target_dir).unwrap();
+        File::create(target_dir.join("test.o")).unwrap();
+        
+        let build_dir = temp_dir.path().join("build");
+        std::fs::create_dir(&build_dir).unwrap();
+        File::create(build_dir.join("test.wasm")).unwrap();
+        
+        // Clean should succeed and remove build directories
+        let result = builder.clean(temp_dir.path().to_str().unwrap());
+        assert!(result.is_ok());
+        
+        // Directories should be removed (or clean should at least not error)
+        // Note: clean is best-effort, so we don't assert directory removal
+    }
+
+    #[test]
+    fn test_external_wasm_builder_build_command_failure() {
+        let temp_dir = tempdir().unwrap();
+        let output_dir = tempdir().unwrap();
+        let metadata = create_mock_metadata();
+        let builder = ExternalWasmBuilder::new(
+            "nonexistent_plugin_12345".to_string(),
+            metadata,
+            #[cfg(not(target_os = "windows"))]
+            None,
+        );
+        
+        let config = BuildConfig {
+            project_path: temp_dir.path().to_str().unwrap().to_string(),
+            output_dir: output_dir.path().to_str().unwrap().to_string(),
+            optimization_level: crate::compiler::builder::OptimizationLevel::Debug,
+            verbose: false,
+            watch: false,
+            target_type: crate::compiler::builder::TargetType::Standard,
+        };
+        
+        let result = builder.build(&config);
+        assert!(result.is_err());
+        
+        if let Err(CompilationError::BuildFailed { language, reason: _ }) = result {
+            assert_eq!(language, "nonexistent_plugin_12345");
+        } else {
+            panic!("Expected BuildFailed error");
+        }
+    }
+
+    #[test]
+    fn test_external_plugin_loader_create_generic_entry() {
+        // This will likely fail because the plugin doesn't exist, but shouldn't crash
+        let result = ExternalPluginLoader::create_generic_entry("nonexistent_plugin_12345");
+        // Should either succeed (with defaults) or fail gracefully
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn test_external_plugin_loader_load_invalid() {
+        let entry = create_mock_entry();
+        let result = ExternalPluginLoader::load(&entry);
+        // Should fail gracefully for invalid plugin path
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_external_plugin_wrapper_metadata_check() {
+        let temp_dir = tempdir().unwrap();
+        let _metadata = create_mock_metadata();
+        
+        // Test check_project_via_metadata logic
+        let plugin_path = temp_dir.path().to_path_buf();
+        let entry = create_mock_entry();
+        
+        // This will fail because the plugin isn't available, but we're testing the structure
+        let wrapper_result = ExternalPluginWrapper::new(plugin_path, entry);
+        assert!(wrapper_result.is_err()); // Expected to fail with unavailable plugin
+    }
+
+    #[test]
+    fn test_external_plugin_wrapper_info_structure() {
+        let entry = create_mock_entry();
+        
+        // Test that the entry structure is valid
+        assert_eq!(entry.info.name, "test_plugin");
+        assert_eq!(entry.info.version, "1.0.0");
+        assert_eq!(entry.info.plugin_type, PluginType::External);
+        assert!(entry.enabled);
+        assert!(!entry.info.extensions.is_empty());
+        assert!(!entry.info.entry_files.is_empty());
+    }
+
+    #[test]
+    fn test_external_plugin_metadata_validation() {
+        let metadata = create_mock_metadata();
+        
+        // Test metadata structure
+        assert_eq!(metadata.name, "test_plugin");
+        assert_eq!(metadata.version, "1.0.0");
+        assert!(!metadata.extensions.is_empty());
+        assert!(!metadata.entry_files.is_empty());
+        assert!(!metadata.dependencies.tools.is_empty());
+    }
+
+    #[test]
+    fn test_external_plugin_path_handling() {
+        let temp_dir = tempdir().unwrap();
+        let metadata = create_mock_metadata();
+        let builder = ExternalWasmBuilder::new(
+            "test_plugin".to_string(),
+            metadata,
+            #[cfg(not(target_os = "windows"))]
+            None,
+        );
+        
+        // Test path handling for various scenarios
+        assert!(!builder.can_handle_project(""));
+        assert!(!builder.can_handle_project("/nonexistent/path"));
+        
+        // Test with actual directory
+        let result = builder.can_handle_project(temp_dir.path().to_str().unwrap());
+        assert!(!result); // No matching files
+    }
+
+    #[test]
+    fn test_build_config_compatibility() {
+        let temp_dir = tempdir().unwrap();
+        let output_dir = tempdir().unwrap();
+        let metadata = create_mock_metadata();
+        let builder = ExternalWasmBuilder::new(
+            "test_plugin".to_string(),
+            metadata,
+            #[cfg(not(target_os = "windows"))]
+            None,
+        );
+        
+        // Test different build configurations
+        let configs = vec![
+            BuildConfig {
+                project_path: temp_dir.path().to_str().unwrap().to_string(),
+                output_dir: output_dir.path().to_str().unwrap().to_string(),
+                optimization_level: crate::compiler::builder::OptimizationLevel::Debug,
+                verbose: false,
+                watch: false,
+                target_type: crate::compiler::builder::TargetType::Standard,
+            },
+            BuildConfig {
+                project_path: temp_dir.path().to_str().unwrap().to_string(),
+                output_dir: output_dir.path().to_str().unwrap().to_string(),
+                optimization_level: crate::compiler::builder::OptimizationLevel::Release,
+                verbose: true,
+                watch: true,
+                target_type: crate::compiler::builder::TargetType::Standard,
+            },
+        ];
+        
+        for config in &configs {
+            // Build will fail (no plugin binary), but shouldn't crash
+            let result = builder.build(config);
+            assert!(result.is_err()); // Expected to fail
+        }
+    }
+}

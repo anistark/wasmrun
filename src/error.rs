@@ -323,3 +323,144 @@ impl From<&str> for WasmrunError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wasmrun_error_path() {
+        let error = WasmrunError::path("test path error");
+        match error {
+            WasmrunError::Path { message } => {
+                assert_eq!(message, "test path error");
+            }
+            _ => panic!("Expected Path error variant"),
+        }
+    }
+
+    #[test]
+    fn test_wasmrun_error_file_not_found() {
+        let error = WasmrunError::file_not_found("/path/to/file.wasm");
+        match error {
+            WasmrunError::FileNotFound { path } => {
+                assert_eq!(path, "/path/to/file.wasm");
+            }
+            _ => panic!("Expected FileNotFound error variant"),
+        }
+    }
+
+    #[test]
+    fn test_wasmrun_error_directory_not_found() {
+        let error = WasmrunError::directory_not_found("/path/to/dir");
+        match error {
+            WasmrunError::DirectoryNotFound { path } => {
+                assert_eq!(path, "/path/to/dir");
+            }
+            _ => panic!("Expected DirectoryNotFound error variant"),
+        }
+    }
+
+    #[test]
+    fn test_wasmrun_error_invalid_file_format() {
+        let error = WasmrunError::invalid_file_format("file.txt", "not a wasm file");
+        match error {
+            WasmrunError::InvalidFileFormat { path, reason } => {
+                assert_eq!(path, "file.txt");
+                assert_eq!(reason, "not a wasm file");
+            }
+            _ => panic!("Expected InvalidFileFormat error variant"),
+        }
+    }
+
+    #[test]
+    fn test_wasmrun_error_language_detection() {
+        let error = WasmrunError::language_detection("could not detect language");
+        match error {
+            WasmrunError::LanguageDetection { message } => {
+                assert_eq!(message, "could not detect language");
+            }
+            _ => panic!("Expected LanguageDetection error variant"),
+        }
+    }
+
+    #[test]
+    fn test_wasmrun_error_missing_tools() {
+        let tools = vec!["cargo".to_string(), "rustup".to_string()];
+        let error = WasmrunError::missing_tools(tools.clone());
+        match error {
+            WasmrunError::MissingTools { tools: error_tools } => {
+                assert_eq!(error_tools, tools);
+            }
+            _ => panic!("Expected MissingTools error variant"),
+        }
+    }
+
+    #[test]
+    fn test_wasmrun_error_is_recoverable() {
+        assert!(!WasmrunError::file_not_found("test").is_recoverable());
+        assert!(!WasmrunError::directory_not_found("test").is_recoverable());
+        assert!(!WasmrunError::missing_tools(vec!["tool".to_string()]).is_recoverable());
+    }
+
+    #[test]
+    fn test_wasmrun_error_user_message() {
+        let error = WasmrunError::file_not_found("test.wasm");
+        let message = error.user_message();
+        assert!(message.contains("test.wasm"));
+        assert!(message.contains("💡"));
+    }
+
+    #[test]
+    fn test_wasmrun_error_from_str() {
+        let error = WasmrunError::from("test error");
+        match error {
+            WasmrunError::Path { message } => {
+                assert_eq!(message, "test error");
+            }
+            _ => panic!("Expected Path error variant"),
+        }
+    }
+
+    #[test]
+    fn test_wasm_error_validation_failed() {
+        let error = WasmError::validation_failed("invalid magic bytes");
+        match error {
+            WasmError::ValidationFailed { reason } => {
+                assert_eq!(reason, "invalid magic bytes");
+            }
+            _ => panic!("Expected ValidationFailed error variant"),
+        }
+    }
+
+    #[test]
+    fn test_compilation_error_build_failed() {
+        let error = CompilationError::build_failed("Rust", "cargo build failed");
+        match error {
+            CompilationError::BuildFailed { language, reason } => {
+                assert_eq!(language, "Rust");
+                assert_eq!(reason, "cargo build failed");
+            }
+            _ => panic!("Expected BuildFailed error variant"),
+        }
+    }
+
+    #[test]
+    fn test_server_error_startup_failed() {
+        let error = ServerError::startup_failed(8080, "port already in use");
+        match error {
+            ServerError::StartupFailed { port, reason } => {
+                assert_eq!(port, 8080);
+                assert_eq!(reason, "port already in use");
+            }
+            _ => panic!("Expected StartupFailed error variant"),
+        }
+    }
+
+    #[test]
+    fn test_command_error_invalid_arguments() {
+        let error = CommandError::invalid_arguments("missing file path");
+        let CommandError::InvalidArguments { message } = error;
+        assert_eq!(message, "missing file path");
+    }
+}
