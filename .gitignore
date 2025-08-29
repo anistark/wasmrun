@@ -6,8 +6,7 @@ debug
 .DS_Store
 
 # testing
-examples
-example.*
+_tests
 
 # Custom files
 NOTES.md

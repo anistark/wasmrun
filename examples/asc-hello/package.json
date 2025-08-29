@@ -1,0 +1,16 @@
+{
+  "name": "asc-hello",
+  "version": "1.0.0",
+  "description": "AssemblyScript WebAssembly Hello World Example",
+  "main": "index.js",
+  "scripts": {
+    "asbuild:untouched": "asc assembly/index.ts --target debug",
+    "asbuild:optimized": "asc assembly/index.ts --target release",
+    "asbuild": "npm run asbuild:optimized",
+    "build": "npm run asbuild"
+  },
+  "devDependencies": {
+    "assemblyscript": "^0.27.0"
+  },
+  "dependencies": {}
+}

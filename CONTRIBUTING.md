@@ -883,6 +883,50 @@ entry_files = ["main.ext", "app.ext"]
 file_extensions = ["ext", "extension"]
 ```
 
+## 📚 Examples Development Guide
+
+The `examples/` directory contains sample WebAssembly projects for different programming languages. These serve as learning resources and testing grounds for Wasmrun's capabilities.
+
+### Available Examples
+
+| Language | Directory | Capabilities |
+| --- | --- | --- |
+| 🦀 **Rust** | `rust-hello/` | wasm-bindgen, browser APIs, memory management |
+| 🐹 **Go** | `go-hello/` | syscall/js, concurrency, time operations |
+| 🐍 **Python** | `python-hello/` | Pyodide runtime, scientific computing, JSON |
+| 🔧 **C** | `c-hello/` | Emscripten, math library, manual memory |
+| 🚀 **AssemblyScript** | `asc-hello/` | TypeScript syntax, performance optimization |
+
+### Testing Examples
+
+Examples work with standard wasmrun commands:
+
+```sh
+# Test compilation and running
+wasmrun examples/rust-hello
+wasmrun compile examples/go-hello
+
+# Verify WASM output
+wasmrun verify examples/rust-hello/target/wasm32-unknown-unknown/release/*.wasm
+```
+
+### Creating a New Example
+
+When adding a new language example:
+
+1. **Create directory**: `examples/language-hello/`
+2. **Add source code** with standard functions: `greet()`, `fibonacci()`, `sum_array()`
+3. **Include build config**: Language-specific (Cargo.toml, package.json, etc.)
+4. **Write README.md** with usage instructions
+5. **Test**: `wasmrun run examples/language-hello`
+
+### Example Requirements
+
+- Works with standard wasmrun commands
+- Implements common functions for consistency  
+- Includes comprehensive README.md
+- Tests successfully in browser console
+
 ## 📄 License
 
 By contributing to Wasmrun, you agree that your contributions will be licensed under the project's [MIT license](./LICENSE).
