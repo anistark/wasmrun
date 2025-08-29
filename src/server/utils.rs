@@ -137,7 +137,7 @@ impl ServerUtils {
         }
 
         use crate::utils::PathResolver;
-        
+
         let temp_output_dir = match PathResolver::create_temp_directory("wasmrun_temp") {
             Ok(dir) => dir,
             Err(e) => {

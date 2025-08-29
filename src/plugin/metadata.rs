@@ -385,10 +385,8 @@ fn parse_crates_io_metadata_response(crate_name: &str, response: &str) -> Result
         }
     }
 
-    // Try to get language support from plugin metadata
-    // For now, we can't get this from crates.io API directly
-    // This will need to be enhanced when we can access Cargo.toml metadata
-    let languages = vec!["unknown".to_string()]; // Placeholder until we can read Cargo.toml
+    // Get language support from plugin metadata
+    let languages = infer_supported_languages_from_name(crate_name);
 
     Ok(PluginMetadata {
         name: crate_name.to_string(),
@@ -427,4 +425,122 @@ fn infer_entry_files_from_name(plugin_name: &str) -> Vec<String> {
         }
         _ => vec!["main.wasm".to_string()],
     }
+}
+
+/// Infer supported languages from plugin name and try to read Cargo.toml if available
+fn infer_supported_languages_from_name(plugin_name: &str) -> Vec<String> {
+    // Read from plugin's Cargo.toml
+    if let Ok(plugin_dir) = crate::utils::PluginUtils::get_plugin_directory(plugin_name) {
+        let cargo_toml_path = plugin_dir.join("Cargo.toml");
+        if cargo_toml_path.exists() {
+            if let Ok(languages) = extract_languages_from_cargo_toml(&cargo_toml_path) {
+                if !languages.is_empty() {
+                    return languages;
+                }
+            }
+        }
+    }
+
+    match plugin_name {
+        name if name.contains("rust") || name.contains("rs") => vec!["rust".to_string()],
+        name if name.contains("go") => vec!["go".to_string()],
+        name if name.contains("zig") => vec!["zig".to_string()],
+        name if name.contains("cpp") || name.contains("cxx") || name.contains("c++") => {
+            vec!["cpp".to_string(), "c".to_string()]
+        }
+        name if name.contains("py") || name.contains("python") => vec!["python".to_string()],
+        name if name.contains("js") || name.contains("javascript") => {
+            vec!["javascript".to_string()]
+        }
+        name if name.contains("ts") || name.contains("typescript") => {
+            vec!["typescript".to_string()]
+        }
+        name if name.contains("asc") || name.contains("assemblyscript") => {
+            vec!["assemblyscript".to_string()]
+        }
+        name if name.contains("wat") || name.contains("wasm") => {
+            vec!["wat".to_string(), "wasm".to_string()]
+        }
+        _ => {
+            if plugin_name.ends_with("-rust")
+                || plugin_name.starts_with("wasm") && plugin_name.contains("rust")
+            {
+                vec!["rust".to_string()]
+            } else {
+                vec!["unknown".to_string()]
+            }
+        }
+    }
+}
+
+/// Extract supported languages from Cargo.toml metadata
+fn extract_languages_from_cargo_toml(cargo_toml_path: &std::path::Path) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(cargo_toml_path)
+        .map_err(|e| WasmrunError::Config(crate::error::ConfigError::ParseError {
+            message: format!("Failed to read Cargo.toml: {e}"),
+        }))?;
+
+    let mut languages = Vec::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+
+        if line.contains("[package.metadata.wasmrun]") {
+            continue;
+        }
+
+        if line.starts_with("languages") && line.contains('=') {
+            if let Some(langs_part) = line.split('=').nth(1) {
+                let langs_str = langs_part
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('[')
+                    .trim_matches(']');
+                for lang in langs_str.split(',') {
+                    let lang = lang.trim().trim_matches('"').trim_matches('\'');
+                    if !lang.is_empty() {
+                        languages.push(lang.to_string());
+                    }
+                }
+            }
+        }
+
+        if line.starts_with("keywords") && line.contains('=') {
+            if let Some(keywords_part) = line.split('=').nth(1) {
+                let keywords_str = keywords_part
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('[')
+                    .trim_matches(']');
+                for keyword in keywords_str.split(',') {
+                    let keyword = keyword
+                        .trim()
+                        .trim_matches('"')
+                        .trim_matches('\'')
+                        .to_lowercase();
+                    match keyword.as_str() {
+                        "rust" | "rustlang" => languages.push("rust".to_string()),
+                        "go" | "golang" => languages.push("go".to_string()),
+                        "c" => languages.push("c".to_string()),
+                        "cpp" | "c++" => languages.push("cpp".to_string()),
+                        "python" | "py" => languages.push("python".to_string()),
+                        "javascript" | "js" => languages.push("javascript".to_string()),
+                        "typescript" | "ts" => languages.push("typescript".to_string()),
+                        "zig" => languages.push("zig".to_string()),
+                        "assemblyscript" | "asc" => languages.push("assemblyscript".to_string()),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    languages.sort();
+    languages.dedup();
+
+    if languages.is_empty() && content.contains("[dependencies]") {
+        languages.push("rust".to_string());
+    }
+
+    Ok(languages)
 }

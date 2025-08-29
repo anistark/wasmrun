@@ -177,14 +177,14 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
 /// Check if a tool is installed and available in the system path
 pub fn is_tool_installed(tool_name: &str) -> bool {
     use crate::utils::CommandExecutor;
-    
+
     let is_installed = CommandExecutor::is_tool_installed(tool_name);
-    
+
     if tool_name == "wasm-pack" && !is_installed {
         println!("⚠️ wasm-pack is not installed. It's required for wasm-bindgen projects.");
         println!("  To install wasm-pack, run: cargo install wasm-pack");
     }
-    
+
     is_installed
 }
 

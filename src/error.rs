@@ -150,8 +150,21 @@ pub enum CommandError {
 /// Configuration errors
 #[derive(Error, Debug)]
 pub enum ConfigError {
-    #[error("Configuration error")]
-    _Placeholder,
+    /// Invalid configuration value
+    #[error("Invalid configuration value: {message}")]
+    InvalidValue { message: String },
+
+    /// Missing required configuration
+    #[error("Missing required configuration: {key}")]
+    MissingRequired { key: String },
+
+    /// Configuration parse error
+    #[error("Failed to parse configuration: {message}")]
+    ParseError { message: String },
+
+    /// Configuration file not found
+    #[error("Configuration file not found: {path}")]
+    FileNotFound { path: String },
 }
 
 /// Result type alias for Wasmrun operations

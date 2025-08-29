@@ -177,7 +177,7 @@ impl PathResolver {
     /// Get file size in a human-readable format
     pub fn get_file_size_human(path: &str) -> Result<String> {
         use crate::utils::CommandExecutor;
-        
+
         let metadata = fs::metadata(path).map_err(|e| {
             WasmrunError::add_context(format!("Getting file metadata for {path}"), e)
         })?;
@@ -188,13 +188,13 @@ impl PathResolver {
     /// Create and ensure a temporary directory for wasmrun operations
     pub fn create_temp_directory(name: &str) -> Result<String> {
         let temp_dir = std::env::temp_dir().join(name);
-        
+
         if !temp_dir.exists() {
             std::fs::create_dir_all(&temp_dir).map_err(|e| {
                 WasmrunError::add_context(format!("Creating temporary directory {name}"), e)
             })?;
         }
-        
+
         Ok(temp_dir.to_str().unwrap_or("/tmp").to_string())
     }
 

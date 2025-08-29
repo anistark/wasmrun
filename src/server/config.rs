@@ -207,7 +207,7 @@ pub fn setup_project_compilation(
                 let lang = PluginUtils::map_plugin_to_project_language(plugin, project_path);
 
                 use crate::utils::PathResolver;
-                
+
                 let temp_output_dir = match PathResolver::create_temp_directory("wasmrun_temp") {
                     Ok(dir) => dir,
                     Err(e) => {
@@ -240,7 +240,7 @@ pub fn setup_project_compilation(
     };
 
     use crate::utils::PathResolver;
-    
+
     let temp_output_dir = match PathResolver::create_temp_directory("wasmrun_temp") {
         Ok(dir) => dir,
         Err(e) => {

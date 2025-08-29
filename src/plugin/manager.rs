@@ -34,7 +34,7 @@ impl PluginManager {
         debug_enter!("PluginManager::new");
 
         debug_println!("Loading wasmrun configuration");
-        let config = WasmrunConfig::load().unwrap_or_default();
+        let config = WasmrunConfig::load_or_default()?;
         debug_println!(
             "Configuration loaded with {} external plugins configured",
             config.external_plugins.len()
