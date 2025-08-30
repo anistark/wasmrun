@@ -216,9 +216,9 @@ impl fmt::Display for ProjectLanguage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs::File;
     use std::io::Write;
+    use tempfile::tempdir;
 
     fn create_test_file(dir: &std::path::Path, filename: &str, content: &str) {
         let file_path = dir.join(filename);
@@ -230,7 +230,7 @@ mod tests {
     fn test_detect_rust_project_with_cargo_toml() {
         let temp_dir = tempdir().unwrap();
         create_test_file(temp_dir.path(), "Cargo.toml", "[package]\nname = \"test\"");
-        
+
         let result = detect_project_language(temp_dir.path().to_str().unwrap());
         assert_eq!(result, ProjectLanguage::Rust);
     }
@@ -239,7 +239,7 @@ mod tests {
     fn test_detect_go_project_with_go_mod() {
         let temp_dir = tempdir().unwrap();
         create_test_file(temp_dir.path(), "go.mod", "module test");
-        
+
         let result = detect_project_language(temp_dir.path().to_str().unwrap());
         assert_eq!(result, ProjectLanguage::Go);
     }
@@ -248,7 +248,7 @@ mod tests {
     fn test_detect_go_project_with_go_files() {
         let temp_dir = tempdir().unwrap();
         create_test_file(temp_dir.path(), "main.go", "package main\n\nfunc main() {}");
-        
+
         let result = detect_project_language(temp_dir.path().to_str().unwrap());
         assert_eq!(result, ProjectLanguage::Go);
     }
@@ -257,7 +257,7 @@ mod tests {
     fn test_detect_python_project_with_pyproject_toml() {
         let temp_dir = tempdir().unwrap();
         create_test_file(temp_dir.path(), "pyproject.toml", "[build-system]");
-        
+
         let result = detect_project_language(temp_dir.path().to_str().unwrap());
         assert_eq!(result, ProjectLanguage::Python);
     }
@@ -266,7 +266,7 @@ mod tests {
     fn test_detect_python_project_with_setup_py() {
         let temp_dir = tempdir().unwrap();
         create_test_file(temp_dir.path(), "setup.py", "from setuptools import setup");
-        
+
         let result = detect_project_language(temp_dir.path().to_str().unwrap());
         assert_eq!(result, ProjectLanguage::Python);
     }
@@ -275,7 +275,7 @@ mod tests {
     fn test_detect_python_project_with_py_files() {
         let temp_dir = tempdir().unwrap();
         create_test_file(temp_dir.path(), "main.py", "print('hello')");
-        
+
         let result = detect_project_language(temp_dir.path().to_str().unwrap());
         assert_eq!(result, ProjectLanguage::Python);
     }
@@ -283,8 +283,12 @@ mod tests {
     #[test]
     fn test_detect_asc_project_with_package_json() {
         let temp_dir = tempdir().unwrap();
-        create_test_file(temp_dir.path(), "package.json", r#"{"scripts": {"asc": "asc"}}"#);
-        
+        create_test_file(
+            temp_dir.path(),
+            "package.json",
+            r#"{"scripts": {"asc": "asc"}}"#,
+        );
+
         let result = detect_project_language(temp_dir.path().to_str().unwrap());
         assert_eq!(result, ProjectLanguage::Asc);
     }
@@ -292,8 +296,12 @@ mod tests {
     #[test]
     fn test_detect_c_project_with_c_files() {
         let temp_dir = tempdir().unwrap();
-        create_test_file(temp_dir.path(), "main.c", "#include <stdio.h>\nint main() { return 0; }");
-        
+        create_test_file(
+            temp_dir.path(),
+            "main.c",
+            "#include <stdio.h>\nint main() { return 0; }",
+        );
+
         let result = detect_project_language(temp_dir.path().to_str().unwrap());
         assert_eq!(result, ProjectLanguage::C);
     }
@@ -302,7 +310,7 @@ mod tests {
     fn test_detect_unknown_project() {
         let temp_dir = tempdir().unwrap();
         create_test_file(temp_dir.path(), "readme.txt", "This is a readme");
-        
+
         let result = detect_project_language(temp_dir.path().to_str().unwrap());
         assert_eq!(result, ProjectLanguage::Unknown);
     }
@@ -319,7 +327,10 @@ mod tests {
         // We can't test specific OS values since tests run on different platforms
         // But we can ensure it returns a valid enum variant
         match os {
-            OperatingSystem::Windows | OperatingSystem::MacOS | OperatingSystem::Linux | OperatingSystem::Other => {
+            OperatingSystem::Windows
+            | OperatingSystem::MacOS
+            | OperatingSystem::Linux
+            | OperatingSystem::Other => {
                 // Valid OS detected
             }
         }
@@ -329,31 +340,41 @@ mod tests {
     fn test_get_recommended_tools_rust() {
         let tools = get_recommended_tools(&ProjectLanguage::Rust, &OperatingSystem::Linux);
         // Since tool installation depends on the system, we just check structure
-        assert!(tools.iter().any(|t| t.contains("cargo") || t.contains("rustup") || t.contains("Rust")));
+        assert!(tools
+            .iter()
+            .any(|t| t.contains("cargo") || t.contains("rustup") || t.contains("Rust")));
     }
 
     #[test]
     fn test_get_recommended_tools_go() {
         let tools = get_recommended_tools(&ProjectLanguage::Go, &OperatingSystem::Linux);
-        assert!(tools.iter().any(|t| t.contains("tinygo") || t.contains("Go")));
+        assert!(tools
+            .iter()
+            .any(|t| t.contains("tinygo") || t.contains("Go")));
     }
 
     #[test]
     fn test_get_recommended_tools_c_linux() {
         let tools = get_recommended_tools(&ProjectLanguage::C, &OperatingSystem::Linux);
-        assert!(tools.iter().any(|t| t.contains("emscripten") || t.contains("clang") || t.contains("gcc")));
+        assert!(tools
+            .iter()
+            .any(|t| t.contains("emscripten") || t.contains("clang") || t.contains("gcc")));
     }
 
     #[test]
     fn test_get_recommended_tools_c_windows() {
         let tools = get_recommended_tools(&ProjectLanguage::C, &OperatingSystem::Windows);
-        assert!(tools.iter().any(|t| t.contains("emscripten") || t.contains("mingw") || t.contains("msvc")));
+        assert!(tools
+            .iter()
+            .any(|t| t.contains("emscripten") || t.contains("mingw") || t.contains("msvc")));
     }
 
     #[test]
     fn test_get_recommended_tools_asc() {
         let tools = get_recommended_tools(&ProjectLanguage::Asc, &OperatingSystem::Linux);
-        assert!(tools.iter().any(|t| t.contains("node") || t.contains("npm") || t.contains("asc")));
+        assert!(tools
+            .iter()
+            .any(|t| t.contains("node") || t.contains("npm") || t.contains("asc")));
     }
 
     #[test]
@@ -366,7 +387,7 @@ mod tests {
     fn test_is_tool_installed() {
         // Test with a tool that should exist on most systems
         assert!(is_tool_installed("echo"));
-        
+
         // Test with a tool that shouldn't exist
         assert!(!is_tool_installed("nonexistent_tool_12345"));
     }

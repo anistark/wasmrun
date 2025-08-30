@@ -445,9 +445,9 @@ impl ExternalPluginLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use crate::plugin::{PluginCapabilities, PluginSource, PluginType};
     use std::fs::File;
-    use crate::plugin::{PluginType, PluginCapabilities, PluginSource};
+    use tempfile::tempdir;
 
     fn create_mock_metadata() -> PluginMetadata {
         PluginMetadata {
@@ -511,7 +511,7 @@ mod tests {
             #[cfg(not(target_os = "windows"))]
             None,
         );
-        
+
         assert_eq!(builder.language_name(), "test_plugin");
         assert_eq!(builder.entry_file_candidates().len(), 0); // Returns empty slice
         assert_eq!(builder.supported_extensions().len(), 0); // Returns empty slice
@@ -527,10 +527,10 @@ mod tests {
             #[cfg(not(target_os = "windows"))]
             None,
         );
-        
+
         // Test with empty directory
         assert!(!builder.can_handle_project(temp_dir.path().to_str().unwrap()));
-        
+
         // Test with matching entry file
         let entry_file = temp_dir.path().join("main.test");
         File::create(&entry_file).unwrap();
@@ -547,7 +547,7 @@ mod tests {
             #[cfg(not(target_os = "windows"))]
             None,
         );
-        
+
         // Test with matching extension
         let test_file = temp_dir.path().join("example.test");
         File::create(&test_file).unwrap();
@@ -564,15 +564,15 @@ mod tests {
             #[cfg(not(target_os = "windows"))]
             None,
         );
-        
+
         // Test with non-existent path
         let result = builder.validate_project("/nonexistent/path");
         assert!(result.is_err());
-        
+
         // Test with existing path but no entry files
         let result = builder.validate_project(temp_dir.path().to_str().unwrap());
         assert!(result.is_err());
-        
+
         // Test with entry file present
         let entry_file = temp_dir.path().join("main.test");
         File::create(&entry_file).unwrap();
@@ -589,7 +589,7 @@ mod tests {
             #[cfg(not(target_os = "windows"))]
             None,
         );
-        
+
         let missing_deps = builder.check_dependencies();
         // test_tool should be missing (unless coincidentally installed)
         assert!(missing_deps.contains(&"test_tool".to_string()));
@@ -604,7 +604,7 @@ mod tests {
             #[cfg(not(target_os = "windows"))]
             None,
         );
-        
+
         let cloned_builder = builder.clone_box();
         assert_eq!(builder.language_name(), cloned_builder.language_name());
     }
@@ -619,20 +619,20 @@ mod tests {
             #[cfg(not(target_os = "windows"))]
             None,
         );
-        
+
         // Create some build directories
         let target_dir = temp_dir.path().join("target");
         std::fs::create_dir(&target_dir).unwrap();
         File::create(target_dir.join("test.o")).unwrap();
-        
+
         let build_dir = temp_dir.path().join("build");
         std::fs::create_dir(&build_dir).unwrap();
         File::create(build_dir.join("test.wasm")).unwrap();
-        
+
         // Clean should succeed and remove build directories
         let result = builder.clean(temp_dir.path().to_str().unwrap());
         assert!(result.is_ok());
-        
+
         // Directories should be removed (or clean should at least not error)
         // Note: clean is best-effort, so we don't assert directory removal
     }
@@ -648,7 +648,7 @@ mod tests {
             #[cfg(not(target_os = "windows"))]
             None,
         );
-        
+
         let config = BuildConfig {
             project_path: temp_dir.path().to_str().unwrap().to_string(),
             output_dir: output_dir.path().to_str().unwrap().to_string(),
@@ -657,11 +657,15 @@ mod tests {
             watch: false,
             target_type: crate::compiler::builder::TargetType::Standard,
         };
-        
+
         let result = builder.build(&config);
         assert!(result.is_err());
-        
-        if let Err(CompilationError::BuildFailed { language, reason: _ }) = result {
+
+        if let Err(CompilationError::BuildFailed {
+            language,
+            reason: _,
+        }) = result
+        {
             assert_eq!(language, "nonexistent_plugin_12345");
         } else {
             panic!("Expected BuildFailed error");
@@ -688,11 +692,11 @@ mod tests {
     fn test_external_plugin_wrapper_metadata_check() {
         let temp_dir = tempdir().unwrap();
         let _metadata = create_mock_metadata();
-        
+
         // Test check_project_via_metadata logic
         let plugin_path = temp_dir.path().to_path_buf();
         let entry = create_mock_entry();
-        
+
         // This will fail because the plugin isn't available, but we're testing the structure
         let wrapper_result = ExternalPluginWrapper::new(plugin_path, entry);
         assert!(wrapper_result.is_err()); // Expected to fail with unavailable plugin
@@ -701,7 +705,7 @@ mod tests {
     #[test]
     fn test_external_plugin_wrapper_info_structure() {
         let entry = create_mock_entry();
-        
+
         // Test that the entry structure is valid
         assert_eq!(entry.info.name, "test_plugin");
         assert_eq!(entry.info.version, "1.0.0");
@@ -714,7 +718,7 @@ mod tests {
     #[test]
     fn test_external_plugin_metadata_validation() {
         let metadata = create_mock_metadata();
-        
+
         // Test metadata structure
         assert_eq!(metadata.name, "test_plugin");
         assert_eq!(metadata.version, "1.0.0");
@@ -733,11 +737,11 @@ mod tests {
             #[cfg(not(target_os = "windows"))]
             None,
         );
-        
+
         // Test path handling for various scenarios
         assert!(!builder.can_handle_project(""));
         assert!(!builder.can_handle_project("/nonexistent/path"));
-        
+
         // Test with actual directory
         let result = builder.can_handle_project(temp_dir.path().to_str().unwrap());
         assert!(!result); // No matching files
@@ -754,7 +758,7 @@ mod tests {
             #[cfg(not(target_os = "windows"))]
             None,
         );
-        
+
         // Test different build configurations
         let configs = vec![
             BuildConfig {
@@ -774,7 +778,7 @@ mod tests {
                 target_type: crate::compiler::builder::TargetType::Standard,
             },
         ];
-        
+
         for config in &configs {
             // Build will fail (no plugin binary), but shouldn't crash
             let result = builder.build(config);

@@ -300,16 +300,16 @@ fn print_basic_server_info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs::File;
     use std::io::Write;
+    use tempfile::tempdir;
 
     #[test]
     fn test_content_type_header() {
         let header = content_type_header("text/html");
         assert_eq!(header.field.as_str().to_ascii_lowercase(), "content-type");
         assert_eq!(header.value.as_str(), "text/html");
-        
+
         let header = content_type_header("application/wasm");
         assert_eq!(header.value.as_str(), "application/wasm");
     }
@@ -324,12 +324,12 @@ mod tests {
     #[test]
     fn test_find_wasm_files_with_wasm_files() {
         let temp_dir = tempdir().unwrap();
-        
+
         // Create some WASM files
         File::create(temp_dir.path().join("test1.wasm")).unwrap();
         File::create(temp_dir.path().join("test2.wasm")).unwrap();
         File::create(temp_dir.path().join("other.js")).unwrap(); // Non-WASM file
-        
+
         let wasm_files = find_wasm_files(temp_dir.path());
         assert_eq!(wasm_files.len(), 2);
         assert!(wasm_files.iter().all(|f| f.ends_with(".wasm")));
@@ -340,11 +340,11 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let sub_dir = temp_dir.path().join("subdir");
         std::fs::create_dir(&sub_dir).unwrap();
-        
+
         // Create WASM files in subdirectory
         File::create(sub_dir.join("nested.wasm")).unwrap();
         File::create(temp_dir.path().join("root.wasm")).unwrap();
-        
+
         let wasm_files = find_wasm_files(temp_dir.path());
         assert_eq!(wasm_files.len(), 2);
         assert!(wasm_files.iter().any(|f| f.contains("nested.wasm")));
@@ -355,7 +355,7 @@ mod tests {
     fn test_is_port_available() {
         // Test with a port that's likely available (high number)
         assert!(is_port_available(65432));
-        
+
         // Test multiple times to ensure consistency
         assert!(is_port_available(65433));
         assert!(is_port_available(65434));
@@ -365,9 +365,9 @@ mod tests {
     fn test_is_port_available_system_ports() {
         // Test some well-known ports that might be in use
         // These tests are not deterministic but shouldn't crash
-        let _result = is_port_available(80);   // HTTP
-        let _result = is_port_available(443);  // HTTPS
-        let _result = is_port_available(22);   // SSH
+        let _result = is_port_available(80); // HTTP
+        let _result = is_port_available(443); // HTTPS
+        let _result = is_port_available(22); // SSH
     }
 
     #[test]
@@ -388,10 +388,15 @@ mod tests {
             ("source.map", "application/json"),
             ("unknown.xyz", "application/octet-stream"),
         ];
-        
+
         for (filename, expected) in test_cases {
             let path = std::path::Path::new(filename);
-            assert_eq!(determine_content_type(&path), expected, "Failed for {}", filename);
+            assert_eq!(
+                determine_content_type(&path),
+                expected,
+                "Failed for {}",
+                filename
+            );
         }
     }
 
@@ -409,10 +414,15 @@ mod tests {
             ("MODULE.wasm", "application/wasm"),
             ("Image.png", "image/png"),
         ];
-        
+
         for (filename, expected) in test_cases {
             let path = std::path::Path::new(filename);
-            assert_eq!(determine_content_type(&path), expected, "Failed for {}", filename);
+            assert_eq!(
+                determine_content_type(&path),
+                expected,
+                "Failed for {}",
+                filename
+            );
         }
     }
 
@@ -428,7 +438,7 @@ mod tests {
         // Test available port
         let result = ServerUtils::check_port_availability(65435);
         assert!(matches!(result, PortStatus::Available));
-        
+
         // Test pattern with higher ports
         for port in 65400..65410 {
             let result = ServerUtils::check_port_availability(port);
@@ -454,10 +464,10 @@ mod tests {
     #[test]
     fn test_server_utils_print_initial_project_detection() {
         let temp_dir = tempdir().unwrap();
-        
+
         // Should not crash even with invalid directory
         ServerUtils::print_initial_project_detection(temp_dir.path().to_str().unwrap());
-        
+
         // Should not crash with non-existent directory
         ServerUtils::print_initial_project_detection("/nonexistent/directory");
     }
@@ -468,10 +478,10 @@ mod tests {
         let test_file = temp_dir.path().join("test.txt");
         let mut file = File::create(&test_file).unwrap();
         file.write_all(b"Hello, World!").unwrap();
-        
+
         let result = ServerUtils::get_file_info(test_file.to_str().unwrap());
         assert!(result.is_ok());
-        
+
         let file_info = result.unwrap();
         assert_eq!(file_info.filename, "test.txt");
         assert!(file_info.absolute_path.contains("test.txt"));
@@ -490,8 +500,9 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let test_wasm = temp_dir.path().join("test.wasm");
         let mut file = File::create(&test_wasm).unwrap();
-        file.write_all(&[0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00]).unwrap(); // Valid WASM header
-        
+        file.write_all(&[0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+            .unwrap(); // Valid WASM header
+
         // Should not crash
         print_server_info(
             "http://localhost:8080",
@@ -501,7 +512,7 @@ mod tests {
             test_wasm.to_str().unwrap(),
             false,
         );
-        
+
         // Test with watch mode
         print_server_info(
             "http://localhost:8081",
@@ -524,7 +535,7 @@ mod tests {
             "/path/to/test.wasm",
             false,
         );
-        
+
         print_basic_server_info(
             "http://localhost:8081",
             8081,
@@ -533,7 +544,7 @@ mod tests {
             "/path/to/test.wasm",
             true,
         );
-        
+
         // Should complete without panicking
     }
 }

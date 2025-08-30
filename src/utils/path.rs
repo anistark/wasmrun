@@ -232,8 +232,8 @@ impl<T> Pipe<T> for T {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::{tempdir, NamedTempFile};
     use std::fs::File;
+    use tempfile::{tempdir, NamedTempFile};
 
     #[test]
     fn test_resolve_input_path_with_positional() {
@@ -249,7 +249,10 @@ mod tests {
 
     #[test]
     fn test_resolve_input_path_with_both() {
-        let result = PathResolver::resolve_input_path(Some("positional.wasm".to_string()), Some("flag.wasm".to_string()));
+        let result = PathResolver::resolve_input_path(
+            Some("positional.wasm".to_string()),
+            Some("flag.wasm".to_string()),
+        );
         assert_eq!(result, "positional.wasm");
     }
 
@@ -269,8 +272,14 @@ mod tests {
 
     #[test]
     fn test_get_extension() {
-        assert_eq!(PathResolver::get_extension("test.wasm"), Some("wasm".to_string()));
-        assert_eq!(PathResolver::get_extension("test.WASM"), Some("wasm".to_string()));
+        assert_eq!(
+            PathResolver::get_extension("test.wasm"),
+            Some("wasm".to_string())
+        );
+        assert_eq!(
+            PathResolver::get_extension("test.WASM"),
+            Some("wasm".to_string())
+        );
         assert_eq!(PathResolver::get_extension("test"), None);
     }
 
@@ -317,7 +326,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let new_path = temp_file.path().with_extension("wasm");
         std::fs::rename(temp_file.path(), &new_path).unwrap();
-        
+
         let result = PathResolver::validate_wasm_file(new_path.to_str().unwrap());
         assert!(result.is_ok());
     }
@@ -360,13 +369,14 @@ mod tests {
     #[test]
     fn test_find_files_with_extension() {
         let temp_dir = tempdir().unwrap();
-        
+
         // Create test files
         File::create(temp_dir.path().join("test1.wasm")).unwrap();
         File::create(temp_dir.path().join("test2.wasm")).unwrap();
         File::create(temp_dir.path().join("test3.js")).unwrap();
-        
-        let result = PathResolver::find_files_with_extension(temp_dir.path().to_str().unwrap(), "wasm");
+
+        let result =
+            PathResolver::find_files_with_extension(temp_dir.path().to_str().unwrap(), "wasm");
         assert!(result.is_ok());
         let files = result.unwrap();
         assert_eq!(files.len(), 2);
@@ -377,7 +387,7 @@ mod tests {
     fn test_find_entry_file() {
         let temp_dir = tempdir().unwrap();
         File::create(temp_dir.path().join("main.rs")).unwrap();
-        
+
         let candidates = ["lib.rs", "main.rs", "src/main.rs"];
         let result = PathResolver::find_entry_file(temp_dir.path().to_str().unwrap(), &candidates);
         assert!(result.is_some());
@@ -395,11 +405,14 @@ mod tests {
     #[test]
     fn test_format_file_size() {
         use crate::utils::CommandExecutor;
-        
+
         assert_eq!(CommandExecutor::format_file_size(500), "500 bytes");
         assert_eq!(CommandExecutor::format_file_size(1536), "1.50 KB");
         assert_eq!(CommandExecutor::format_file_size(1536 * 1024), "1.50 MB");
-        assert_eq!(CommandExecutor::format_file_size(1536 * 1024 * 1024), "1.50 GB");
+        assert_eq!(
+            CommandExecutor::format_file_size(1536 * 1024 * 1024),
+            "1.50 GB"
+        );
     }
 
     #[test]

@@ -109,31 +109,45 @@ impl WasmrunConfig {
         let config_path = Self::config_path()?;
 
         if !config_path.exists() {
-            return Err(WasmrunError::Config(crate::error::ConfigError::FileNotFound {
-                path: format!("{}. Run 'wasmrun init' to create it.", config_path.display()),
-            }));
+            return Err(WasmrunError::Config(
+                crate::error::ConfigError::FileNotFound {
+                    path: format!(
+                        "{}. Run 'wasmrun init' to create it.",
+                        config_path.display()
+                    ),
+                },
+            ));
         }
 
         if config_path.is_dir() {
-            return Err(WasmrunError::Config(crate::error::ConfigError::InvalidValue {
-                message: format!("Config path is a directory, not a file: {}", config_path.display()),
-            }));
+            return Err(WasmrunError::Config(
+                crate::error::ConfigError::InvalidValue {
+                    message: format!(
+                        "Config path is a directory, not a file: {}",
+                        config_path.display()
+                    ),
+                },
+            ));
         }
 
-        let config_content = fs::read_to_string(&config_path)
-            .map_err(|e| WasmrunError::Config(crate::error::ConfigError::ParseError {
+        let config_content = fs::read_to_string(&config_path).map_err(|e| {
+            WasmrunError::Config(crate::error::ConfigError::ParseError {
                 message: format!("Failed to read config file: {e}"),
-            }))?;
+            })
+        })?;
 
-        let config: Self = toml::from_str(&config_content)
-            .map_err(|e| WasmrunError::Config(crate::error::ConfigError::ParseError {
+        let config: Self = toml::from_str(&config_content).map_err(|e| {
+            WasmrunError::Config(crate::error::ConfigError::ParseError {
                 message: format!("Failed to parse TOML config file: {e}"),
-            }))?;
+            })
+        })?;
 
         if config.version.is_empty() {
-            return Err(WasmrunError::Config(crate::error::ConfigError::MissingRequired {
-                key: "version".to_string(),
-            }));
+            return Err(WasmrunError::Config(
+                crate::error::ConfigError::MissingRequired {
+                    key: "version".to_string(),
+                },
+            ));
         }
 
         config.validate_and_setup()
@@ -159,15 +173,17 @@ impl WasmrunConfig {
             })?;
         }
 
-        let config_content = toml::to_string_pretty(self)
-            .map_err(|e| WasmrunError::Config(crate::error::ConfigError::ParseError {
+        let config_content = toml::to_string_pretty(self).map_err(|e| {
+            WasmrunError::Config(crate::error::ConfigError::ParseError {
                 message: format!("Failed to serialize config to TOML: {e}"),
-            }))?;
+            })
+        })?;
 
-        fs::write(&config_path, config_content)
-            .map_err(|e| WasmrunError::Config(crate::error::ConfigError::ParseError {
+        fs::write(&config_path, config_content).map_err(|e| {
+            WasmrunError::Config(crate::error::ConfigError::ParseError {
                 message: format!("Failed to write config file: {e}"),
-            }))?;
+            })
+        })?;
 
         Ok(())
     }
@@ -219,12 +235,14 @@ impl WasmrunConfig {
         match self.version.as_str() {
             env!("CARGO_PKG_VERSION") => {}
             _ => {
-                return Err(WasmrunError::Config(crate::error::ConfigError::InvalidValue {
-                    message: format!(
-                        "Unsupported config version: {}. Please update Wasmrun.",
-                        self.version
-                    ),
-                }));
+                return Err(WasmrunError::Config(
+                    crate::error::ConfigError::InvalidValue {
+                        message: format!(
+                            "Unsupported config version: {}. Please update Wasmrun.",
+                            self.version
+                        ),
+                    },
+                ));
             }
         }
 

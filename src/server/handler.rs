@@ -5,9 +5,10 @@ use std::path::Path;
 use tiny_http::{Request, Response};
 
 use super::utils::{check_assets_directory, content_type_header, determine_content_type};
-use crate::template::{generate_html, generate_html_wasm_bindgen};
+use crate::template::{TemplateManager, TemplateType};
 
 /// Handle an incoming HTTP request
+#[allow(clippy::too_many_arguments)]
 pub fn handle_request(
     request: Request,
     js_filename: Option<&str>,
@@ -15,6 +16,8 @@ pub fn handle_request(
     wasm_path: &str,
     watch_mode: bool,
     clients_to_reload: &mut Vec<String>,
+    template_manager: &TemplateManager,
+    template_type: &TemplateType,
 ) {
     let url = request.url().to_string();
     let client_addr = match request.remote_addr() {
@@ -26,12 +29,20 @@ pub fn handle_request(
 
     if url == "/" {
         // Serve the main HTML page
-        let html = if let Some(js_file) = js_filename {
-            // This is a wasm-bindgen project
-            generate_html_wasm_bindgen(js_file, wasm_filename)
+        let html = if watch_mode {
+            template_manager.generate_html_with_watch_mode(template_type, wasm_filename, true)
         } else {
-            // Regular wasm file
-            generate_html(wasm_filename)
+            template_manager.generate_html(template_type, wasm_filename)
+        };
+
+        let html = match html {
+            Ok(html) => html,
+            Err(e) => {
+                eprintln!("❗ Error generating HTML: {e}");
+                format!(
+                    "<html><body><h1>Error</h1><p>Failed to generate HTML: {e}</p></body></html>"
+                )
+            }
         };
 
         let response = Response::from_string(html).with_header(content_type_header("text/html"));

@@ -391,18 +391,15 @@ fn truncate_string(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use crate::commands::VerificationResult;
     use std::fs::File;
     use std::io::Write;
-    use crate::commands::VerificationResult;
+    use tempfile::tempdir;
 
     const VALID_WASM_BYTES: [u8; 8] = [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
 
     fn create_wasm_file_with_extension(content: &[u8]) -> tempfile::NamedTempFile {
-        let mut temp_file = tempfile::Builder::new()
-            .suffix(".wasm")
-            .tempfile()
-            .unwrap();
+        let mut temp_file = tempfile::Builder::new().suffix(".wasm").tempfile().unwrap();
         temp_file.write_all(content).unwrap();
         temp_file
     }
@@ -426,8 +423,14 @@ mod tests {
 
     #[test]
     fn test_module_type_display() {
-        assert_eq!(format!("{}", ModuleType::StandardWasm), "Standard WebAssembly");
-        assert_eq!(format!("{}", ModuleType::WasmBindgen), "WASM-Bindgen Module");
+        assert_eq!(
+            format!("{}", ModuleType::StandardWasm),
+            "Standard WebAssembly"
+        );
+        assert_eq!(
+            format!("{}", ModuleType::WasmBindgen),
+            "WASM-Bindgen Module"
+        );
         assert_eq!(format!("{}", ModuleType::WasiModule), "WASI Module");
         assert_eq!(format!("{}", ModuleType::WebApplication), "Web Application");
         assert_eq!(format!("{}", ModuleType::Unknown), "Unknown");
@@ -467,14 +470,16 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let wasm_path = temp_dir.path().join("test.wasm");
         let js_path = temp_dir.path().join("test.js");
-        
+
         // Create WASM file
         File::create(&wasm_path).unwrap();
-        
+
         // Create JS file with wasm-bindgen content
         let mut js_file = File::create(&js_path).unwrap();
-        js_file.write_all(b"import * as wasm_bindgen from './test_bg.wasm';").unwrap();
-        
+        js_file
+            .write_all(b"import * as wasm_bindgen from './test_bg.wasm';")
+            .unwrap();
+
         let result = detect_wasm_bindgen(&wasm_path);
         assert!(result);
     }
@@ -484,7 +489,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let wasm_path = temp_dir.path().join("test.wasm");
         File::create(&wasm_path).unwrap();
-        
+
         let result = detect_wasm_bindgen(&wasm_path);
         assert!(!result);
     }
@@ -538,7 +543,7 @@ mod tests {
     fn test_wasm_analysis_invalid_file() {
         let temp_file = create_wasm_file_with_extension(&[0x00, 0x00, 0x00, 0x00]);
         let result = WasmAnalysis::analyze(temp_file.path().to_str().unwrap());
-        
+
         // Should still succeed but with invalid WASM
         assert!(result.is_ok());
         let analysis = result.unwrap();
@@ -549,7 +554,7 @@ mod tests {
     fn test_wasm_analysis_get_summary_invalid() {
         let temp_file = create_wasm_file_with_extension(&[0x00, 0x00, 0x00, 0x00]);
         let analysis = WasmAnalysis::analyze(temp_file.path().to_str().unwrap()).unwrap();
-        
+
         let summary = analysis.get_summary();
         assert!(summary.contains("❌"));
         assert!(summary.contains("Invalid"));
@@ -559,9 +564,14 @@ mod tests {
     fn test_wasm_analysis_get_summary_valid() {
         let temp_file = create_wasm_file_with_extension(&VALID_WASM_BYTES);
         let analysis = WasmAnalysis::analyze(temp_file.path().to_str().unwrap()).unwrap();
-        
+
         let summary = analysis.get_summary();
-        assert!(summary.contains("⚡") || summary.contains("🔧") || summary.contains("🌐") || summary.contains("📱"));
+        assert!(
+            summary.contains("⚡")
+                || summary.contains("🔧")
+                || summary.contains("🌐")
+                || summary.contains("📱")
+        );
     }
 
     #[test]
@@ -570,7 +580,7 @@ mod tests {
         let cargo_toml = temp_dir.path().join("Cargo.toml");
         let mut file = File::create(&cargo_toml).unwrap();
         file.write_all(b"[package]\nname = \"test\"").unwrap();
-        
+
         let result = ProjectAnalysis::analyze(temp_dir.path().to_str().unwrap());
         assert!(result.is_ok());
         let analysis = result.unwrap();
@@ -582,11 +592,11 @@ mod tests {
     #[test]
     fn test_project_analysis_with_entry_files() {
         let temp_dir = tempdir().unwrap();
-        
+
         // Create entry file
         let main_rs = temp_dir.path().join("main.rs");
         File::create(&main_rs).unwrap();
-        
+
         let result = ProjectAnalysis::analyze(temp_dir.path().to_str().unwrap());
         assert!(result.is_ok());
         let analysis = result.unwrap();
@@ -603,9 +613,14 @@ mod tests {
     fn test_project_analysis_get_summary() {
         let temp_dir = tempdir().unwrap();
         let analysis = ProjectAnalysis::analyze(temp_dir.path().to_str().unwrap()).unwrap();
-        
+
         let summary = analysis.get_summary();
         assert!(summary.contains("project"));
-        assert!(summary.contains("❓") || summary.contains("🦀") || summary.contains("🐹") || summary.contains("🔧"));
+        assert!(
+            summary.contains("❓")
+                || summary.contains("🦀")
+                || summary.contains("🐹")
+                || summary.contains("🔧")
+        );
     }
 }

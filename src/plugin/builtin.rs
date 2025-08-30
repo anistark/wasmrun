@@ -195,18 +195,18 @@ pub fn get_builtin_plugin_by_name(_name: &str) -> Option<PluginInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs::File;
+    use tempfile::tempdir;
 
     #[test]
     fn test_load_all_builtin_plugins() {
         let mut plugins = Vec::new();
         let result = load_all_builtin_plugins(&mut plugins);
-        
+
         assert!(result.is_ok());
         assert!(!plugins.is_empty());
         assert!(plugins.len() >= 3); // At least C, ASC, and Python plugins
-        
+
         // Verify all plugins are builtin type
         for plugin in &plugins {
             assert_eq!(plugin.info().plugin_type, PluginType::Builtin);
@@ -218,9 +218,9 @@ mod tests {
     fn test_builtin_plugin_names() {
         let mut plugins = Vec::new();
         load_all_builtin_plugins(&mut plugins).unwrap();
-        
+
         let plugin_names: Vec<&str> = plugins.iter().map(|p| p.info().name.as_str()).collect();
-        
+
         // Check that we have the expected builtin plugins
         assert!(plugin_names.contains(&"c"));
         assert!(plugin_names.contains(&"asc"));
@@ -231,22 +231,26 @@ mod tests {
     fn test_builtin_plugin_extensions() {
         let mut plugins = Vec::new();
         load_all_builtin_plugins(&mut plugins).unwrap();
-        
+
         for plugin in &plugins {
             let info = plugin.info();
-            
+
             // Each plugin should support at least one extension
             assert!(!info.extensions.is_empty());
-            
+
             // Check specific plugin extensions
             match info.name.as_str() {
                 "c" => {
-                    assert!(info.extensions.contains(&"c".to_string()) || 
-                           info.extensions.contains(&"cpp".to_string()));
+                    assert!(
+                        info.extensions.contains(&"c".to_string())
+                            || info.extensions.contains(&"cpp".to_string())
+                    );
                 }
                 "asc" => {
-                    assert!(info.extensions.contains(&"ts".to_string()) || 
-                           info.extensions.contains(&"asc".to_string()));
+                    assert!(
+                        info.extensions.contains(&"ts".to_string())
+                            || info.extensions.contains(&"asc".to_string())
+                    );
                 }
                 "python" => {
                     assert!(info.extensions.contains(&"py".to_string()));
@@ -260,10 +264,10 @@ mod tests {
     fn test_builtin_plugin_entry_files() {
         let mut plugins = Vec::new();
         load_all_builtin_plugins(&mut plugins).unwrap();
-        
+
         for plugin in &plugins {
             let info = plugin.info();
-            
+
             // Each plugin should have at least one entry file candidate
             assert!(!info.entry_files.is_empty());
         }
@@ -273,22 +277,22 @@ mod tests {
     fn test_builtin_plugin_can_handle_project() {
         let mut plugins = Vec::new();
         load_all_builtin_plugins(&mut plugins).unwrap();
-        
+
         let temp_dir = tempdir().unwrap();
-        
+
         // Test with an empty directory
         for plugin in &plugins {
             let can_handle = plugin.can_handle_project(temp_dir.path().to_str().unwrap());
             assert!(!can_handle); // Empty directory shouldn't be handled
         }
-        
+
         // Create a C file and test C plugin
         let c_file = temp_dir.path().join("main.c");
         File::create(&c_file).unwrap();
-        
+
         let c_plugin = plugins.iter().find(|p| p.info().name == "c").unwrap();
         assert!(c_plugin.can_handle_project(temp_dir.path().to_str().unwrap()));
-        
+
         // Python plugin should not handle C project
         let python_plugin = plugins.iter().find(|p| p.info().name == "python").unwrap();
         assert!(!python_plugin.can_handle_project(temp_dir.path().to_str().unwrap()));
@@ -298,16 +302,16 @@ mod tests {
     fn test_builtin_plugin_get_builder() {
         let mut plugins = Vec::new();
         load_all_builtin_plugins(&mut plugins).unwrap();
-        
+
         for plugin in &plugins {
             let builder = plugin.get_builder();
-            
+
             // Builder should have valid language name
             assert!(!builder.language_name().is_empty());
-            
+
             // Builder should have extension support
             assert!(!builder.supported_extensions().is_empty());
-            
+
             // Builder should have entry file candidates
             assert!(!builder.entry_file_candidates().is_empty());
         }
@@ -317,20 +321,22 @@ mod tests {
     fn test_builtin_plugin_capabilities() {
         let mut plugins = Vec::new();
         load_all_builtin_plugins(&mut plugins).unwrap();
-        
+
         for plugin in &plugins {
             let capabilities = &plugin.info().capabilities;
-            
+
             // All builtin plugins should at least support WASM compilation
             assert!(capabilities.compile_wasm);
-            
+
             // Test that capabilities struct is properly initialized
             // (This ensures we don't get default/uninitialized values)
             match plugin.info().name.as_str() {
                 "c" | "asc" | "python" => {
                     // These plugins should have reasonable capabilities
-                    assert!(!capabilities.custom_targets.is_empty() || 
-                           capabilities.custom_targets.is_empty()); // Either is acceptable
+                    assert!(
+                        !capabilities.custom_targets.is_empty()
+                            || capabilities.custom_targets.is_empty()
+                    ); // Either is acceptable
                 }
                 _ => {}
             }
@@ -342,7 +348,7 @@ mod tests {
         assert!(is_builtin_plugin("c"));
         assert!(is_builtin_plugin("asc"));
         assert!(is_builtin_plugin("python"));
-        
+
         assert!(!is_builtin_plugin("rust"));
         assert!(!is_builtin_plugin("go"));
         assert!(!is_builtin_plugin("nonexistent"));
@@ -355,14 +361,14 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let c_file = temp_dir.path().join("main.c");
         File::create(&c_file).unwrap();
-        
+
         let c_plugin = Arc::new(CPlugin::new());
         let wrapped_plugin = BuiltinPlugin::new(c_plugin);
-        
+
         // Test that wrapping preserves functionality
         assert_eq!(wrapped_plugin.info().plugin_type, PluginType::Builtin);
         assert!(wrapped_plugin.can_handle_project(temp_dir.path().to_str().unwrap()));
-        
+
         let builder = wrapped_plugin.get_builder();
         assert!(!builder.language_name().is_empty());
     }
@@ -371,21 +377,27 @@ mod tests {
     fn test_builtin_builder_wrapper() {
         let mut plugins = Vec::new();
         load_all_builtin_plugins(&mut plugins).unwrap();
-        
+
         let temp_dir = tempdir().unwrap();
-        
+
         for plugin in &plugins {
             let builder = plugin.get_builder();
             let cloned_builder = builder.clone_box();
-            
+
             // Test that cloning works
             assert_eq!(builder.language_name(), cloned_builder.language_name());
-            assert_eq!(builder.supported_extensions(), cloned_builder.supported_extensions());
-            assert_eq!(builder.entry_file_candidates(), cloned_builder.entry_file_candidates());
-            
+            assert_eq!(
+                builder.supported_extensions(),
+                cloned_builder.supported_extensions()
+            );
+            assert_eq!(
+                builder.entry_file_candidates(),
+                cloned_builder.entry_file_candidates()
+            );
+
             // Test dependency checking doesn't crash
             let _deps = builder.check_dependencies();
-            
+
             // Test project validation
             let validation_result = builder.validate_project(temp_dir.path().to_str().unwrap());
             // Validation may succeed or fail, but shouldn't crash
@@ -405,10 +417,10 @@ mod tests {
         let result = get_builtin_plugin_by_name("c");
         // Currently returns None, but shouldn't crash
         assert!(result.is_none());
-        
+
         let result = get_builtin_plugin_by_name("nonexistent");
         assert!(result.is_none());
-        
+
         let result = get_builtin_plugin_by_name("");
         assert!(result.is_none());
     }

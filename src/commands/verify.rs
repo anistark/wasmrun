@@ -685,8 +685,8 @@ fn resolve_and_validate_wasm_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     const VALID_WASM_BYTES: [u8; 8] = [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
     const INVALID_WASM_BYTES: [u8; 8] = [0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
@@ -698,10 +698,7 @@ mod tests {
     }
 
     fn create_wasm_file_with_extension(content: &[u8]) -> tempfile::NamedTempFile {
-        let mut temp_file = tempfile::Builder::new()
-            .suffix(".wasm")
-            .tempfile()
-            .unwrap();
+        let mut temp_file = tempfile::Builder::new().suffix(".wasm").tempfile().unwrap();
         temp_file.write_all(content).unwrap();
         temp_file
     }
@@ -723,7 +720,7 @@ mod tests {
     fn test_verify_wasm_valid_magic() {
         let temp_file = create_wasm_file(&VALID_WASM_BYTES);
         let result = verify_wasm(temp_file.path().to_str().unwrap());
-        
+
         assert!(result.is_ok());
         let verification = result.unwrap();
         assert!(verification.valid_magic);
@@ -734,7 +731,7 @@ mod tests {
     fn test_verify_wasm_invalid_magic() {
         let temp_file = create_wasm_file(&INVALID_WASM_BYTES);
         let result = verify_wasm(temp_file.path().to_str().unwrap());
-        
+
         assert!(result.is_ok());
         let verification = result.unwrap();
         assert!(!verification.valid_magic);
@@ -753,7 +750,7 @@ mod tests {
     fn test_verify_wasm_file_too_small() {
         let temp_file = create_wasm_file(&[0x00, 0x61, 0x73]); // Only 3 bytes
         let result = verify_wasm(temp_file.path().to_str().unwrap());
-        
+
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("too small"));
     }
@@ -764,10 +761,10 @@ mod tests {
         let mut wasm_content = VALID_WASM_BYTES.to_vec();
         // Add a minimal type section (id=1, size=1, empty content)
         wasm_content.extend_from_slice(&[0x01, 0x01, 0x00]);
-        
+
         let temp_file = create_wasm_file(&wasm_content);
         let result = verify_wasm(temp_file.path().to_str().unwrap());
-        
+
         assert!(result.is_ok());
         let verification = result.unwrap();
         assert!(verification.valid_magic);
@@ -789,10 +786,10 @@ mod tests {
             0x00, // Function index = 0
         ];
         wasm_content.extend_from_slice(&export_section);
-        
+
         let temp_file = create_wasm_file(&wasm_content);
         let result = verify_wasm(temp_file.path().to_str().unwrap());
-        
+
         assert!(result.is_ok());
         let verification = result.unwrap();
         assert!(verification.valid_magic);
@@ -812,10 +809,10 @@ mod tests {
             0x00, // Function index = 0
         ];
         wasm_content.extend_from_slice(&start_section);
-        
+
         let temp_file = create_wasm_file(&wasm_content);
         let result = verify_wasm(temp_file.path().to_str().unwrap());
-        
+
         assert!(result.is_ok());
         let verification = result.unwrap();
         assert!(verification.valid_magic);
@@ -836,10 +833,10 @@ mod tests {
             0x01, // Initial size = 1 page
         ];
         wasm_content.extend_from_slice(&memory_section);
-        
+
         let temp_file = create_wasm_file(&wasm_content);
         let result = verify_wasm(temp_file.path().to_str().unwrap());
-        
+
         assert!(result.is_ok());
         let verification = result.unwrap();
         assert!(verification.valid_magic);
@@ -886,7 +883,7 @@ mod tests {
     fn test_resolve_and_validate_wasm_path() {
         let temp_file = create_wasm_file_with_extension(&VALID_WASM_BYTES);
         let path = temp_file.path().to_str().unwrap().to_string();
-        
+
         let result = resolve_and_validate_wasm_path(&Some(path.clone()), &None);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), path);
@@ -896,7 +893,7 @@ mod tests {
     fn test_resolve_and_validate_wasm_path_positional() {
         let temp_file = create_wasm_file_with_extension(&VALID_WASM_BYTES);
         let path = temp_file.path().to_str().unwrap().to_string();
-        
+
         let result = resolve_and_validate_wasm_path(&None, &Some(path.clone()));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), path);
@@ -906,7 +903,7 @@ mod tests {
     fn test_resolve_and_validate_wasm_path_empty_file() {
         let temp_file = create_wasm_file_with_extension(&[]);
         let path = temp_file.path().to_str().unwrap().to_string();
-        
+
         let result = resolve_and_validate_wasm_path(&Some(path), &None);
         assert!(result.is_err());
         match result {

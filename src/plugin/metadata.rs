@@ -475,10 +475,11 @@ fn infer_supported_languages_from_name(plugin_name: &str) -> Vec<String> {
 
 /// Extract supported languages from Cargo.toml metadata
 fn extract_languages_from_cargo_toml(cargo_toml_path: &std::path::Path) -> Result<Vec<String>> {
-    let content = std::fs::read_to_string(cargo_toml_path)
-        .map_err(|e| WasmrunError::Config(crate::error::ConfigError::ParseError {
+    let content = std::fs::read_to_string(cargo_toml_path).map_err(|e| {
+        WasmrunError::Config(crate::error::ConfigError::ParseError {
             message: format!("Failed to read Cargo.toml: {e}"),
-        }))?;
+        })
+    })?;
 
     let mut languages = Vec::new();
 

@@ -3,11 +3,15 @@ use std::path::Path;
 use tiny_http::Server;
 
 use super::handler;
+use crate::template::{TemplateManager, TemplateType};
 
 /// Simple server for non-watching mode
 pub fn serve_wasm_file(wasm_path: &str, port: u16, wasm_filename: &str) -> Result<(), String> {
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {e}"))?;
+
+    let template_manager = TemplateManager::default();
+    let template_type = TemplateType::Console;
 
     let mut clients_to_reload = Vec::new();
     for request in server.incoming_requests() {
@@ -18,6 +22,8 @@ pub fn serve_wasm_file(wasm_path: &str, port: u16, wasm_filename: &str) -> Resul
             wasm_path,
             false,
             &mut clients_to_reload,
+            &template_manager,
+            &template_type,
         );
     }
 
@@ -41,6 +47,9 @@ pub fn serve_wasm_bindgen_files(
         .to_string_lossy()
         .to_string();
 
+    let template_manager = TemplateManager::default();
+    let template_type = TemplateType::App; // Use App template for wasm-bindgen projects
+
     let mut clients_to_reload = Vec::new();
 
     for request in server.incoming_requests() {
@@ -51,6 +60,8 @@ pub fn serve_wasm_bindgen_files(
             wasm_path,
             false,
             &mut clients_to_reload,
+            &template_manager,
+            &template_type,
         );
     }
 

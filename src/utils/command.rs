@@ -125,9 +125,9 @@ impl CommandExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::fs::File;
     use std::io::Write;
+    use tempfile::tempdir;
 
     #[test]
     fn test_is_tool_installed_with_existing_tool() {
@@ -138,7 +138,9 @@ mod tests {
     #[test]
     fn test_is_tool_installed_with_nonexistent_tool() {
         // Test with a tool that shouldn't exist
-        assert!(!CommandExecutor::is_tool_installed("nonexistent_tool_12345"));
+        assert!(!CommandExecutor::is_tool_installed(
+            "nonexistent_tool_12345"
+        ));
     }
 
     #[test]
@@ -189,7 +191,7 @@ mod tests {
             output_dir.to_str().unwrap(),
             "Test",
         );
-        
+
         assert!(result.is_ok());
         let output_path = result.unwrap();
         assert!(std::path::Path::new(&output_path).exists());
@@ -204,7 +206,7 @@ mod tests {
             temp_dir.path().to_str().unwrap(),
             "Test",
         );
-        
+
         assert!(result.is_err());
         match result {
             Err(CompilationError::BuildFailed { language, .. }) => {
@@ -225,20 +227,35 @@ mod tests {
     fn test_format_file_size_kilobytes() {
         assert_eq!(CommandExecutor::format_file_size(1024), "1.00 KB");
         assert_eq!(CommandExecutor::format_file_size(1536), "1.50 KB");
-        assert_eq!(CommandExecutor::format_file_size(1024 * 1024 - 1), "1024.00 KB");
+        assert_eq!(
+            CommandExecutor::format_file_size(1024 * 1024 - 1),
+            "1024.00 KB"
+        );
     }
 
     #[test]
     fn test_format_file_size_megabytes() {
         assert_eq!(CommandExecutor::format_file_size(1024 * 1024), "1.00 MB");
         assert_eq!(CommandExecutor::format_file_size(1536 * 1024), "1.50 MB");
-        assert_eq!(CommandExecutor::format_file_size(1024 * 1024 * 1024 - 1), "1024.00 MB");
+        assert_eq!(
+            CommandExecutor::format_file_size(1024 * 1024 * 1024 - 1),
+            "1024.00 MB"
+        );
     }
 
     #[test]
     fn test_format_file_size_gigabytes() {
-        assert_eq!(CommandExecutor::format_file_size(1024 * 1024 * 1024), "1.00 GB");
-        assert_eq!(CommandExecutor::format_file_size(1536 * 1024 * 1024), "1.50 GB");
-        assert_eq!(CommandExecutor::format_file_size(2048 * 1024 * 1024), "2.00 GB");
+        assert_eq!(
+            CommandExecutor::format_file_size(1024 * 1024 * 1024),
+            "1.00 GB"
+        );
+        assert_eq!(
+            CommandExecutor::format_file_size(1536 * 1024 * 1024),
+            "1.50 GB"
+        );
+        assert_eq!(
+            CommandExecutor::format_file_size(2048 * 1024 * 1024),
+            "2.00 GB"
+        );
     }
 }

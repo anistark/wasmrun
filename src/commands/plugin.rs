@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn test_plugin_command_error_handling() {
         // Test that plugin commands handle various error conditions gracefully
-        
+
         // Empty plugin name
         let result = run_plugin_install("");
         assert!(result.is_err());
@@ -375,7 +375,7 @@ mod tests {
         // This test ensures the list command produces expected output format
         let result = run_plugin_list();
         assert!(result.is_ok());
-        
+
         // The function should complete without panicking, even with no plugins
     }
 }
