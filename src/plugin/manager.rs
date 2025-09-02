@@ -1,9 +1,9 @@
 //! Plugin management and registry
 
 use crate::compiler::builder::WasmBuilder;
+use crate::config::{ExternalPluginEntry, WasmrunConfig};
 use crate::error::{Result, WasmrunError};
 use crate::plugin::builtin::load_all_builtin_plugins;
-use crate::plugin::config::{ExternalPluginEntry, WasmrunConfig};
 use crate::plugin::external::ExternalPluginLoader;
 use crate::plugin::installer::PluginInstaller;
 use crate::plugin::registry::PluginRegistry;
@@ -887,7 +887,7 @@ impl PluginManager {
     }
 
     fn get_plugin_directory(&self, plugin_name: &str) -> Result<std::path::PathBuf> {
-        let config_dir = crate::plugin::config::WasmrunConfig::config_dir()?;
+        let config_dir = crate::config::WasmrunConfig::config_dir()?;
         Ok(config_dir.join("plugins").join(plugin_name))
     }
 

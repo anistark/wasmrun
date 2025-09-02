@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::compiler::builder::{BuildConfig, BuildResult, WasmBuilder};
+use crate::config::ExternalPluginEntry;
 use crate::error::{CompilationError, CompilationResult, Result, WasmrunError};
-use crate::plugin::config::ExternalPluginEntry;
 use crate::plugin::metadata::PluginMetadata;
 use crate::plugin::{Plugin, PluginInfo};
 use crate::utils::{PluginUtils, SystemUtils};

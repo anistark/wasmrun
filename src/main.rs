@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod compiler;
+mod config;
 mod debug;
 mod error;
 mod plugin;

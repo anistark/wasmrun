@@ -65,7 +65,7 @@ fn run_wasm_file(wasm_path: &str, port: Option<u16>, verbose: bool) -> Result<()
         println!("🚀 Starting server on port {server_port}");
     }
 
-    let server_config = crate::server::ServerConfig {
+    let server_config = crate::config::ServerConfig {
         wasm_path: wasm_path.to_string(),
         js_path: None,
         port: server_port,
@@ -74,7 +74,7 @@ fn run_wasm_file(wasm_path: &str, port: Option<u16>, verbose: bool) -> Result<()
         output_dir: None,
     };
 
-    crate::server::run_server(server_config)
+    crate::config::run_server(server_config)
 }
 
 fn run_project_directory(
