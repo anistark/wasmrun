@@ -1,9 +1,7 @@
 //! Debug logging system for Wasmrun
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
-/// Global debug flag that can be set via CLI
-static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
+use crate::config::DEBUG_ENABLED;
+use std::sync::atomic::Ordering;
 
 /// Enable debug logging
 pub fn enable_debug() {

@@ -6,8 +6,9 @@ use crate::plugin::manager::PluginManager;
 use crate::utils::PluginUtils;
 use crate::utils::{ProjectAnalysis, WasmAnalysis};
 
-use super::utils::{find_wasm_files, is_port_available, ServerUtils};
-use super::wasm;
+use crate::server::utils::{find_wasm_files, is_port_available};
+use crate::server::wasm;
+use crate::server::{is_server_running, stop_existing_server, ServerUtils};
 
 #[derive(Debug)]
 #[allow(dead_code)] // TODO: Future server configuration system
@@ -326,8 +327,8 @@ pub fn compile_project(
 }
 
 pub fn run_server(config: ServerConfig) -> Result<()> {
-    if super::is_server_running() {
-        match super::stop_existing_server() {
+    if is_server_running() {
+        match stop_existing_server() {
             Ok(_) => println!("💀 Existing server stopped successfully."),
             Err(e) => eprintln!("❗ Warning when stopping existing server: {e}"),
         }

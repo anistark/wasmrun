@@ -1,5 +1,5 @@
+use crate::config::ExternalPluginEntry;
 use crate::error::Result;
-use crate::plugin::config::ExternalPluginEntry;
 use std::collections::HashMap;
 
 #[allow(dead_code)]

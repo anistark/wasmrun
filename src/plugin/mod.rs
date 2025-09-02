@@ -6,7 +6,6 @@ use std::path::PathBuf;
 
 pub mod bridge;
 pub mod builtin;
-pub mod config;
 pub mod external;
 pub mod installer;
 pub mod languages;

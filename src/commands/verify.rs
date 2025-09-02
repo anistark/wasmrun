@@ -1,12 +1,10 @@
 use crate::cli::CommandValidator;
+use crate::config::WASM_MAGIC_BYTES;
 use crate::error::{Result, WasmError, WasmrunError};
 use crate::utils::PathResolver;
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
-
-// Magic bytes for WebAssembly binary format
-const WASM_MAGIC_BYTES: [u8; 8] = [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
 
 /// WASM section
 #[derive(Debug)]

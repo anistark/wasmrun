@@ -1,16 +1,16 @@
+use crate::config::{compile_project, run_server, setup_project_compilation, PID_FILE};
 use crate::error::{Result, ServerError, WasmrunError};
 use crate::{debug_enter, debug_exit, debug_println};
 use std::path::Path;
 
-mod config;
 mod handler;
-mod utils;
-mod wasm;
+pub mod utils;
+pub mod wasm;
 
-pub use config::{run_server, ServerConfig, ServerInfo};
 pub use utils::ServerUtils;
 
-const PID_FILE: &str = "/tmp/wasmrun_server.pid";
+// Re-export from config module for backward compatibility
+pub use crate::config::{ServerConfig, ServerInfo};
 
 pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
     debug_enter!("run_wasm_file", "path={}, port={}", path, port);
@@ -121,14 +121,14 @@ pub fn run_project(
     let server_info = ServerInfo::for_project(path, final_port, watch)?;
     server_info.print_server_startup();
 
-    let (lang, temp_output_dir) = config::setup_project_compilation(path, language_override, watch)
+    let (lang, temp_output_dir) = setup_project_compilation(path, language_override, watch)
         .ok_or_else(|| {
             WasmrunError::language_detection(format!(
                 "Failed to setup compilation for project: {path}"
             ))
         })?;
 
-    let result = config::compile_project(path, &temp_output_dir, lang, watch).ok_or_else(|| {
+    let result = compile_project(path, &temp_output_dir, lang, watch).ok_or_else(|| {
         WasmrunError::Compilation(crate::error::CompilationError::build_failed(
             "project".to_string(),
             "Compilation failed",
@@ -156,7 +156,7 @@ pub fn run_project(
         println!("⚡ Running standard WASM project");
     }
 
-    config::run_server(server_config).map_err(|e| {
+    run_server(server_config).map_err(|e| {
         WasmrunError::Server(ServerError::startup_failed(
             final_port,
             format!("Project server error: {e}"),
@@ -370,7 +370,7 @@ fn search_for_js_files(
                             if cfg!(test) {
                                 return Ok(true);
                             }
-                            config::run_server(ServerConfig {
+                            run_server(ServerConfig {
                                 wasm_path: path.to_string(),
                                 js_path: Some(entry_path.to_str().unwrap().to_string()),
                                 port,
