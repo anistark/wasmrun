@@ -201,20 +201,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **v0.10.x**: Project rename and external plugin system
 - **v0.11.x**: Configuration refactoring and examples
 
-[Unreleased]: https://github.com/anistark/wasmrun/compare/v0.11.3...HEAD
-[0.11.3]: https://github.com/anistark/wasmrun/compare/v0.10.14...v0.11.3
-[0.10.14]: https://github.com/anistark/wasmrun/compare/v0.10.2...v0.10.14
-[0.10.2]: https://github.com/anistark/wasmrun/compare/v0.10.1...v0.10.2
-[0.10.1]: https://github.com/anistark/wasmrun/compare/v0.9.6...v0.10.1
-[0.9.6]: https://github.com/anistark/wasmrun/compare/v0.8.2...v0.9.6
-[0.8.2]: https://github.com/anistark/wasmrun/compare/v0.7.2...v0.8.2
-[0.7.2]: https://github.com/anistark/wasmrun/compare/v0.6.4...v0.7.2
-[0.6.4]: https://github.com/anistark/wasmrun/compare/v0.4.0...v0.6.4
-[0.4.0]: https://github.com/anistark/wasmrun/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/anistark/wasmrun/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/anistark/wasmrun/compare/v0.1.4...v0.2.0
-[0.1.4]: https://github.com/anistark/wasmrun/compare/v0.1.3...v0.1.4
-[0.1.3]: https://github.com/anistark/wasmrun/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/anistark/wasmrun/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/anistark/wasmrun/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/anistark/wasmrun/releases/tag/v0.1.0
+Checkout all [releases](https://github.com/anistark/wasmrun/releases) and [tags](https://github.com/anistark/wasmrun/tags).

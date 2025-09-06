@@ -128,7 +128,7 @@ wasmrun stop
 
 ## 🏗️ Plugin Architecture
 
-Wasmrun's modular plugin architecture enables seamless integration of different programming languages and compilation toolchains into a unified development experience.
+Wasmrun's modular plugin architecture enables seamless integration of different programming languages and compilation toolchains into a unified development experience. Here's a detailed guide on [wasmrun plugin architecture](https://blog.anirudha.dev/wasmrun-plugin-architecture).
 
 ### Plugin Types
 
