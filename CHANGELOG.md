@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated dependencies
 
-## [0.11.3] - 2025-09-03
+## [0.11.3](https://github.com/anistark/wasmrun/releases/tag/v0.11.3) - 2025-09-03
 
 ### Changed
 - **BREAKING**: Refactored configuration and constants to dedicated config module
@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved error classification and handling
 - OS junk file cleanup on clean command
 
-## [0.10.14] - 2025-08-27
+## [0.10.14](https://github.com/anistark/wasmrun/releases/tag/v0.10.14) - 2025-08-27
 
 ### Fixed
 - External plugin execution and installation issues
@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - OS junk files are now properly cleaned up
 
-## [0.10.2] - 2025-06-30
+## [0.10.2](https://github.com/anistark/wasmrun/releases/tag/v0.10.2) - 2025-06-30
 
 ### Fixed
 - Configuration version handling
@@ -54,13 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated logo and visual designs
 - Enhanced external plugin system
 
-## [0.10.1] - 2025-06-28
+## [0.10.1](https://github.com/anistark/wasmrun/releases/tag/v0.10.1) - 2025-06-28
 
 ### Fixed
 - Code formatting issues
 - Minor linting problems
 
-## [0.9.6] - 2025-06-23
+## [0.9.6](https://github.com/anistark/wasmrun/releases/tag/v0.9.6) - 2025-06-23
 
 ### Added
 - **NEW FEATURE**: Python support via py2wasm integration
@@ -74,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced plugin system for Python support
 - Updated documentation for Python integration
 
-## [0.8.2] - 2025-06-01
+## [0.8.2](https://github.com/anistark/wasmrun/releases/tag/v0.8.2) - 2025-06-01
 
 ### Added
 - Enhanced CLI output with better user experience
@@ -84,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved command-line interface presentation
 - Better error messages and user feedback
 
-## [0.7.2] - 2025-05-21
+## [0.7.2](https://github.com/anistark/wasmrun/releases/tag/v0.7.2) - 2025-05-21
 
 ### Fixed
 - Web output rendering issues
@@ -95,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Modularized server architecture
 - Improved project structure documentation
 
-## [0.6.4] - 2025-05-09
+## [0.6.4](https://github.com/anistark/wasmrun/releases/tag/v0.6.4) - 2025-05-09
 
 ### Added
 - **MAJOR FEATURE**: AOT (Ahead-of-Time) compilation support
@@ -108,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced language detection and compilation pipeline
 - Improved WebAssembly runtime capabilities
 
-## [0.4.0] - 2025-05-06
+## [0.4.0](https://github.com/anistark/wasmrun/releases/tag/v0.4.0) - 2025-05-06
 
 ### Added
 - **BREAKING**: WASI (WebAssembly System Interface) support
@@ -121,7 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced asset handling for subdirectories
 - Improved path information in documentation
 
-## [0.3.0] - 2025-05-05
+## [0.3.0](https://github.com/anistark/wasmrun/releases/tag/v0.3.0) - 2025-05-05
 
 ### Added
 - **NEW FEATURE**: Compilation command (`compile`)
@@ -132,7 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Asset handling for subdirectories
 - Web page rendering issues
 
-## [0.2.0] - 2025-05-03
+## [0.2.0](https://github.com/anistark/wasmrun/releases/tag/v0.2.0) - 2025-05-03
 
 ### Added
 - **BREAKING**: Compile command foundation (work in progress)
@@ -143,7 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated project name and branding
 - Improved command structure
 
-## [0.1.4] - 2025-04-28
+## [0.1.4](https://github.com/anistark/wasmrun/releases/tag/v0.1.4) - 2025-04-28
 
 ### Added
 - Enhanced terminal user interface
@@ -153,24 +153,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lint warnings resolved
 - Code quality improvements
 
-## [0.1.3] - 2025-04-27
+## [0.1.3](https://github.com/anistark/wasmrun/releases/tag/v0.1.3) - 2025-04-27
 
 ### Fixed
 - Publishing pipeline issues
 - GitHub release automation
 
-## [0.1.2] - 2025-04-27
+## [0.1.2](https://github.com/anistark/wasmrun/releases/tag/v0.1.2) - 2025-04-27
 
 ### Fixed
 - GitHub release title formatting
 - Release automation improvements
 
-## [0.1.1] - 2025-04-27
+## [0.1.1](https://github.com/anistark/wasmrun/releases/tag/v0.1.1) - 2025-04-27
 
 ### Fixed
 - Git tagging issues in CI/CD pipeline
 
-## [0.1.0] - 2025-04-27
+## [0.1.0](https://github.com/anistark/wasmrun/releases/tag/v0.1.0) - 2025-04-27
 
 ### Added
 - Initial release of wasmrun
