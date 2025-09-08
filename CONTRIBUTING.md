@@ -49,14 +49,8 @@ src/
 │   ├── handler.rs            # HTTP request handling
 │   ├── wasm.rs               # WASM file serving
 │   └── utils.rs              # Server utilities
-├── template/                 # HTML, CSS, and JavaScript templates
-│   ├── mod.rs                # Template module exports
-│   └── server/               # WASM runner interface templates
-│       ├── mod.rs            # Server template exports
-│       ├── index.html        # Main HTML template
-│       ├── scripts.js        # JavaScript utilities
-│       ├── style.css         # CSS styles
-│       └── wasmrun_wasi_impl.js  # WASI implementation
+├── template.rs               # Template management system for web UI
+│   # Templates are stored in root templates/ directory
 └── utils/                    # Shared utilities and helpers
     ├── mod.rs                # Utility module exports
     ├── command.rs            # Shared command execution utilities
@@ -522,8 +516,9 @@ Wasmrun uses a `justfile` for common development tasks:
 # Development commands
 just build           # Build in release mode
 just test            # Run all tests
-just format          # Format code with rustfmt
-just lint            # Run clippy lints
+just format          # Format both Rust and TypeScript/JavaScript code
+just lint            # Run clippy lints and ESLint
+just type-check      # Run TypeScript type checking
 just clean           # Clean build artifacts
 
 # Plugin testing commands
@@ -535,14 +530,47 @@ just prepare-publish # Prepare for publishing
 just publish         # Publish to crates.io and GitHub
 ```
 
+### UI Development Workflow
+
+The `wasmrun-ui` is built with [Preact](https://preactjs.com/), [TypeScript](https://www.typescriptlang.org/), and [Tailwind CSS](https://tailwindcss.com/):
+
+```sh
+# UI development setup (from ui/ directory)
+cd ui
+pnpm install         # Install UI dependencies
+pnpm dev             # Start UI development server
+
+# UI development commands (from project root)
+just format          # Formats both Rust and TypeScript code
+just lint            # Lints both Rust and TypeScript code  
+just type-check      # Runs TypeScript type checking
+
+# UI is automatically built and embedded during main build
+just build           # Does all checks and builds with ui
+```
+
+### UI Component Development
+
+When working on UI components:
+
+1. **Component Structure**: Follow existing patterns in `ui/src/components/`
+2. **Styling**: Use Tailwind CSS classes for consistent design
+3. **Type Safety**: Ensure all props and state are properly typed
+4. **Testing**: Components are tested through integration tests
+5. **Hooks**: Use React hooks following established patterns (`useCallback`, `useEffect`)
+
+The UI is embedded into the Rust binary during build, so changes require a full rebuild to test in wasmrun.
+
 ### Code Style Guidelines
 
-1. **Formatting**: Use `rustfmt` with default settings (`just format`)
-2. **Linting**: All clippy warnings must be addressed (`just lint`)
-3. **Error Handling**: Use the centralized `WasmrunError` types in `src/error.rs`
-4. **Documentation**: Add doc comments for public APIs and complex logic
-5. **Testing**: Add tests for new functionality, ensure they don't hang
-6. **Plugin Integration**: Use shared utilities from `utils/` modules
+1. **Formatting**: Use `rustfmt` and `prettier` with default settings (`just format`)
+2. **Linting**: All clippy warnings and ESLint errors must be addressed (`just lint`)
+3. **Type Checking**: All TypeScript code must pass type checking (`just type-check`)
+4. **Error Handling**: Use the centralized `WasmrunError` types in `src/error.rs`
+5. **Documentation**: Add doc comments for public APIs and complex logic
+6. **Testing**: Add tests for new functionality, ensure they don't hang
+7. **Plugin Integration**: Use shared utilities from `utils/` modules
+8. **UI Components**: Follow React hooks best practices and TypeScript typing conventions
 
 ### File Organization Guidelines
 
@@ -552,7 +580,8 @@ When adding new functionality:
 - **Plugin Languages**: Add to `src/plugin/languages/` for built-in plugins
 - **Server Features**: Add to `src/server/` for web server functionality
 - **Utilities**: Add to `src/utils/` for shared functionality
-- **Templates**: Add to `src/template/` for HTML/CSS/JS resources
+- **Templates**: Managed via `src/template.rs`, files stored in root `templates/` directory
+- **UI Components**: Add to `ui/` directory for React/TypeScript web interface components
 - **Tests**: Co-locate with the module being tested or in `tests/` for integration tests
 
 ## 🚀 Contributing Process
@@ -594,12 +623,14 @@ just test             # Run tests
 ### PR Review Checklist
 
 - [ ] Code follows style guidelines (`just format` && `just lint`)
+- [ ] TypeScript code passes type checking (`just type-check`)
 - [ ] All tests pass (`just test`)
 - [ ] New functionality includes tests
 - [ ] Documentation is updated if needed
 - [ ] No hanging server tests (cfg!(test) guards added)
 - [ ] Error messages are user-friendly
 - [ ] Performance impact is considered
+- [ ] UI changes work in all supported modes (console, app)
 
 ## 🐛 Bug Reports
 
@@ -661,6 +692,11 @@ cargo test --lib                         # Unit tests
 cargo test --test integration            # Integration tests
 cargo test plugin::                      # Plugin tests
 cargo test server:: -- --test-threads=1  # Server tests (single-threaded)
+
+# UI-related testing
+just type-check
+just lint
+just format
 ```
 
 ### Test Data and Examples
