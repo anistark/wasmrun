@@ -79,12 +79,23 @@ impl TemplateManager {
         let css = self.read_template_file(&template_path, "style.css")?;
         let js = self.read_template_file(&template_path, "scripts.js")?;
 
-        // WASI JS is only needed for console template
+        // Load WASI JS
         let wasi_js = match template_type {
+            // TODO: Replace wasmrun_wasi_impl.js with some library or CDN link in the future
             TemplateType::Console => {
-                Some(self.read_template_file(&template_path, "wasmrun_wasi_impl.js")?)
+                if template_path.join("wasmrun_wasi_impl.js").exists() {
+                    Some(self.read_template_file(&template_path, "wasmrun_wasi_impl.js")?)
+                } else {
+                    None
+                }
             }
-            TemplateType::App => None,
+            TemplateType::App => {
+                if template_path.join("wasmrun_wasi_impl.js").exists() {
+                    Some(self.read_template_file(&template_path, "wasmrun_wasi_impl.js")?)
+                } else {
+                    None
+                }
+            }
         };
 
         Ok(Template {

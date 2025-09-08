@@ -1,6 +1,7 @@
 # Build files
 target
 debug
+templates/*
 
 # MacOS
 .DS_Store
@@ -8,5 +9,10 @@ debug
 # testing
 _tests
 
-# Custom files
+# UI build dependencies
+ui/node_modules
+ui/dist
+
+# Custom files. Internal notes.
 NOTES.md
+*_IMPLEMENTATION.md

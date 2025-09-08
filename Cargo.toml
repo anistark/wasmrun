@@ -1,6 +1,6 @@
 [package]
 name = "wasmrun"
-version = "0.11.3"
+version = "0.12.0"
 edition = "2021"
 description = "A WebAssembly Runtime"
 license = "MIT"
@@ -9,7 +9,7 @@ repository = "https://github.com/anistark/wasmrun"
 readme = "README.md"
 keywords = ["wasm", "webassembly", "browser", "runtime", "cli"]
 categories = ["command-line-utilities", "development-tools", "wasm"]
-include = ["src/**", "assets/**", "Cargo.toml", "README.md", "LICENSE"]
+include = ["src/**", "templates/**", "assets/**", "build.rs", "Cargo.toml", "README.md", "LICENSE"]
 documentation = "https://docs.rs/wasmrun"
 rust-version = "1.70.0"
 
@@ -34,6 +34,9 @@ libloading = "0.8"
 
 [dev-dependencies]
 tempfile = "3.21.0"
+
+[build-dependencies]
+regex = "1.11.2"
 
 [[bin]]
 name = "wasmrun"
