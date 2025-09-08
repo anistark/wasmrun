@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply h-full;
+  }
+
+  body {
+    @apply h-full bg-dark-bg text-dark-text font-sans leading-relaxed;
+  }
+
+  * {
+    @apply box-border;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-dark-accent2 text-dark-bg hover:bg-opacity-90 focus:ring-dark-accent2;
+  }
+
+  .btn-secondary {
+    @apply bg-dark-surface3 text-dark-textMuted hover:bg-opacity-80 focus:ring-dark-surface3;
+  }
+
+  .status-success {
+    @apply text-dark-success;
+  }
+
+  .status-error {
+    @apply text-dark-error;
+  }
+
+  .status-info {
+    @apply text-dark-info;
+  }
+
+  .status-warning {
+    @apply text-dark-warning;
+  }
+}

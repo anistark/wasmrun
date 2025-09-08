@@ -13,7 +13,7 @@ default:
     @echo "\nCurrent version: {{version}}"
 
 # Build the project in debug mode
-build: format lint test
+build: format lint test type-check
     cargo build --release
 
 # Clean the project
@@ -39,21 +39,29 @@ stop:
 test:
     cargo test
 
+# Run TypeScript type checking
+type-check:
+    cd ui && pnpm type-check
+
 # Check code formatting
 check-format:
     cargo fmt -- --check
+    cd ui && pnpm format:check
 
 # Format code
 format:
     cargo fmt
+    cd ui && pnpm format
 
 # Run clippy lints
 lint:
     cargo clippy -- -D warnings
+    cd ui && pnpm lint
 
 # Run clippy lints
 lint-fix:
     cargo clippy --fix
+    cd ui && pnpm lint:fix
 
 # Build documentation
 docs:
