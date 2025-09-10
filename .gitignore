@@ -9,6 +9,11 @@ templates/*
 # testing
 _tests
 
+# Example build files
+examples/*/target
+examples/*/debug
+examples/*/dist/*
+
 # UI build dependencies
 ui/node_modules
 ui/dist
