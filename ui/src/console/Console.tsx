@@ -1,21 +1,15 @@
 import { useState, useEffect, useCallback } from 'preact/hooks'
 import { ConsoleLayout } from '@/layouts/ConsoleLayout'
-import { StatusBar } from '@/components/StatusBar'
 import { LogContainer } from '@/components/LogContainer'
 import { FunctionPlayground } from '@/components/FunctionPlayground'
 import { ModuleInfo } from '@/components/ModuleInfo'
-import { StatusMessage, LogEntry, ExportedFunction, WasmModuleInfo, TabItem } from '@/types'
+import { LogEntry, ExportedFunction, WasmModuleInfo, TabItem } from '@/types'
 import { log, loadWasmModule, analyzeWasmModule } from '@/utils/wasm'
 
 // These will be replaced by the Rust template processor
 declare const FILENAME: string
 
 export function Console() {
-  const [status, setStatus] = useState<StatusMessage>({
-    message: '⏳ Loading WASM module...',
-    type: 'info',
-  })
-
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [moduleInfo, setModuleInfo] = useState<WasmModuleInfo | null>(null)
   const [exportedFunctions, setExportedFunctions] = useState<ExportedFunction[]>([])
@@ -57,21 +51,11 @@ export function Console() {
 
       setExportedFunctions(functions)
 
-      setStatus({
-        message: '✅ WASM Module loaded successfully!',
-        type: 'success',
-      })
-
       addLog('✅ WASM module loaded successfully!', 'success')
       addLog(`Found ${functions.length} exported functions`, 'info')
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       console.error('❌ Error loading WASM module:', error)
-
-      setStatus({
-        message: '❌ Error loading WASM module',
-        type: 'error',
-      })
 
       addLog(`❌ Error loading WASM module: ${errorMessage}`, 'error')
     }
@@ -140,15 +124,8 @@ export function Console() {
   }
 
   return (
-    <ConsoleLayout title="Wasmrun" tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
-      <div class="px-8 py-4 border-b border-light-surface3 dark:border-dark-surface3">
-        <h2 class="text-2xl font-medium text-light-textMuted dark:text-dark-textMuted mb-4">
-          Running: {FILENAME}
-        </h2>
-        <StatusBar status={status} />
-      </div>
-
-      <div class="flex-1 p-8">{renderActiveTabContent()}</div>
+    <ConsoleLayout title="Wasmrun" filename={FILENAME} tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
+      <div class="flex-1">{renderActiveTabContent()}</div>
     </ConsoleLayout>
   )
 }

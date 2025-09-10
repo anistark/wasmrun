@@ -5,6 +5,7 @@ import clsx from 'clsx'
 
 interface ConsoleLayoutProps {
   title: string
+  filename?: string
   children: ComponentChildren
   tabs?: TabItem[]
   activeTab?: string
@@ -13,6 +14,7 @@ interface ConsoleLayoutProps {
 
 export function ConsoleLayout({
   title,
+  filename,
   children,
   tabs,
   activeTab,
@@ -32,7 +34,14 @@ export function ConsoleLayout({
                 class="w-10 h-10"
               />
             </div>
-            <h1 class="ml-4 text-3xl font-semibold text-light-text dark:text-dark-text">{title}</h1>
+            <div class="ml-4">
+              <h1 class="text-3xl font-semibold text-light-text dark:text-dark-text">{title}</h1>
+              {filename && (
+                <p class="text-sm text-light-textDim dark:text-dark-textDim mt-1">
+                  Running: <span class="font-mono text-light-textMuted dark:text-dark-textMuted">{filename}</span>
+                </p>
+              )}
+            </div>
           </div>
           <ThemeToggle />
         </div>
