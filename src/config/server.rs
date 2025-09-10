@@ -398,9 +398,6 @@ pub fn run_server(config: ServerConfig) -> Result<()> {
         .to_string_lossy()
         .to_string();
 
-    let server_info = ServerInfo::for_wasm_file(&config.wasm_path, config.port, config.watch_mode)?;
-    server_info.print_server_startup();
-
     wasm::serve_wasm_file(&config.wasm_path, config.port, &wasm_filename).map_err(|e| {
         WasmrunError::Server(ServerError::RequestHandlingFailed {
             reason: format!("Server startup failed: {e}"),
