@@ -174,7 +174,7 @@ export function Console() {
   }
 
   return (
-    <ConsoleLayout title="Wasmrun" filename={FILENAME} tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
+    <ConsoleLayout filename={FILENAME} tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
       <div class="flex-1">{renderActiveTabContent()}</div>
     </ConsoleLayout>
   )
