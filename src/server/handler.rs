@@ -6,6 +6,7 @@ use tiny_http::{Request, Response};
 
 use super::utils::{check_assets_directory, content_type_header, determine_content_type};
 use crate::template::{TemplateManager, TemplateType};
+use crate::commands::verify_wasm;
 
 /// Handle an incoming HTTP request
 #[allow(clippy::too_many_arguments)]
@@ -79,6 +80,8 @@ pub fn handle_request(
                 eprintln!("❗ Error sending reload response: {e}");
             }
         }
+    } else if url == "/api/module-info" {
+        serve_module_info(request, wasm_path);
     } else if url.starts_with("/assets/") {
         serve_asset(request, &url);
     } else {
@@ -217,6 +220,60 @@ pub fn serve_asset(request: Request, url: &str) {
                 .with_header(content_type_header("text/plain"));
             if let Err(e) = request.respond(response) {
                 eprintln!("‼️ Error sending asset error response: {e}");
+            }
+        }
+    }
+}
+
+/// Serve WASM module information as JSON
+pub fn serve_module_info(request: Request, wasm_path: &str) {
+    match verify_wasm(wasm_path) {
+        Ok(verification_result) => {
+            // Convert VerificationResult to JSON
+            let json_response = serde_json::json!({
+                "valid_magic": verification_result.valid_magic,
+                "file_size": verification_result.file_size,
+                "section_count": verification_result.section_count,
+                "sections": verification_result.sections.iter().map(|s| serde_json::json!({
+                    "id": s.id,
+                    "name": s.name,
+                    "size": s.size
+                })).collect::<Vec<_>>(),
+                "has_export_section": verification_result.has_export_section,
+                "export_names": verification_result.export_names,
+                "has_start_section": verification_result.has_start_section,
+                "start_function_index": verification_result.start_function_index,
+                "has_memory_section": verification_result.has_memory_section,
+                "memory_limits": verification_result.memory_limits,
+                "has_table_section": verification_result.has_table_section,
+                "function_count": verification_result.function_count
+            });
+
+            println!("📊 Serving module info for: {}", wasm_path);
+            
+            let response = Response::from_string(json_response.to_string())
+                .with_header(content_type_header("application/json"))
+                .with_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], b"*").unwrap());
+            
+            if let Err(e) = request.respond(response) {
+                eprintln!("❗ Error sending module info response: {e}");
+            }
+        }
+        Err(error) => {
+            eprintln!("❗ Error analyzing WASM module {}: {}", wasm_path, error);
+            
+            let error_response = serde_json::json!({
+                "error": error,
+                "valid_magic": false
+            });
+
+            let response = Response::from_string(error_response.to_string())
+                .with_status_code(500)
+                .with_header(content_type_header("application/json"))
+                .with_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], b"*").unwrap());
+            
+            if let Err(e) = request.respond(response) {
+                eprintln!("❗ Error sending error response: {e}");
             }
         }
     }

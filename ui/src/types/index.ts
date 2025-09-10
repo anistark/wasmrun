@@ -7,16 +7,21 @@ export interface WasmSectionInfo {
   name: string
   id: number
   size: number
-  offset: string
 }
 
 export interface WasmInspectionInfo {
-  magicBytes: string
-  version: number
+  valid_magic: boolean
+  file_size: number
+  section_count: number
   sections: WasmSectionInfo[]
-  totalSections: number
-  isValid: boolean
-  warnings: string[]
+  has_export_section: boolean
+  export_names: string[]
+  has_start_section: boolean
+  start_function_index?: number
+  has_memory_section: boolean
+  memory_limits?: [number, number | null]
+  has_table_section: boolean
+  function_count: number
 }
 
 export interface PluginInfo {
