@@ -33,6 +33,15 @@ export function FunctionPlayground({ functions, onFunctionCall }: FunctionPlaygr
           case 'f32':
           case 'f64':
             return parseFloat(value) || 0.0
+          case 'array':
+            try {
+              // Parse JSON array format like "[1, 2, 3, 4, 5]"
+              return JSON.parse(value)
+            } catch {
+              // Fallback: split by comma and convert to numbers
+              return value.split(',').map(v => parseInt(v.trim())).filter(n => !isNaN(n))
+            }
+          case 'string':
           default:
             return value
         }
@@ -108,7 +117,7 @@ export function FunctionPlayground({ functions, onFunctionCall }: FunctionPlaygr
                   data-param={param.name}
                   defaultValue={param.value || ''}
                   class="w-full px-3 py-2 bg-light-bg dark:bg-dark-bg text-light-textMuted dark:text-dark-textMuted border border-light-surface3 dark:border-dark-surface3 rounded focus:outline-none focus:border-light-accent dark:focus:border-dark-accent font-mono text-sm"
-                  placeholder={`Enter ${param.type} value`}
+                  placeholder={param.type === 'array' ? 'e.g., [1, 2, 3]' : param.type === 'string' ? 'Enter text' : `Enter ${param.type} number`}
                 />
               </div>
             ))}

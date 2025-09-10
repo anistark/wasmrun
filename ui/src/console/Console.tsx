@@ -13,7 +13,7 @@ export function Console() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [moduleInfo, setModuleInfo] = useState<WasmModuleInfo | null>(null)
   const [exportedFunctions, setExportedFunctions] = useState<ExportedFunction[]>([])
-  const [wasmInstance] = useState<WebAssembly.Instance | null>(null)
+  const [wasmInstance, setWasmInstance] = useState<WebAssembly.Instance | null>(null)
   const [activeTab, setActiveTab] = useState('console')
 
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
@@ -28,6 +28,31 @@ export function Console() {
       const module = await loadWasmModule(FILENAME)
       const analysis = analyzeWasmModule(module)
 
+      // Instantiate the WASM module to create a runnable instance
+      // For wasm-bindgen modules, we need to provide the proper imports
+      let instance: WebAssembly.Instance
+      
+      try {
+        // Try to instantiate without imports first
+        instance = new WebAssembly.Instance(module, {})
+      } catch {
+        // If that fails, try with basic imports for wasm-bindgen
+        const imports = {
+          wbg: {
+            __wbg_log_8b68cfc62b396cc3: (arg0: number, arg1: number) => {
+              // This would extract string from memory - simplified for now
+              console.log(`WASM log: ${arg0}, ${arg1}`)
+            },
+            __wbindgen_init_externref_table: () => {
+              // Initialize external reference table
+            }
+          }
+        }
+        instance = new WebAssembly.Instance(module, imports)
+      }
+      
+      setWasmInstance(instance)
+
       // Create basic module info
       const moduleInfo: WasmModuleInfo = {
         name: FILENAME,
@@ -39,15 +64,40 @@ export function Console() {
 
       setModuleInfo(moduleInfo)
 
-      // Extract callable functions
+      // Extract callable functions with proper parameter definitions
       const functions: ExportedFunction[] = (analysis.exports || [])
         .filter(name => name !== 'memory' && !name.startsWith('__'))
-        .map(name => ({
-          name,
-          signature: `${name}() -> unknown`,
-          parameters: [], // TODO: Extract actual parameters if available
-          description: `Exported function: ${name}`,
-        }))
+        .map(name => {
+          // Define parameters for known functions
+          let parameters: any[] = []
+          let signature = `${name}() -> unknown`
+          
+          switch (name) {
+            case 'greet':
+              parameters = [{ name: 'name', type: 'string', value: 'World' }]
+              signature = 'greet(name: string) -> void'
+              break
+            case 'fibonacci':
+              parameters = [{ name: 'n', type: 'i32', value: '10' }]
+              signature = 'fibonacci(n: u32) -> u32'
+              break
+            case 'sum_array':
+              parameters = [{ name: 'numbers', type: 'array', value: '[1, 2, 3, 4, 5]' }]
+              signature = 'sum_array(numbers: i32[]) -> i32'
+              break
+            default:
+              // For unknown functions, try to guess if they might have parameters
+              parameters = []
+              break
+          }
+          
+          return {
+            name,
+            signature,
+            parameters,
+            description: `Exported function: ${name}`,
+          }
+        })
 
       setExportedFunctions(functions)
 
