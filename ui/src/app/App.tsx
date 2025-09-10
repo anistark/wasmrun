@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'preact/hooks'
 import { BaseLayout } from '@/layouts/BaseLayout'
 import { StatusBar } from '@/components/StatusBar'
-import { ThemeToggle } from '@/components/ThemeToggle'
 import { StatusMessage } from '@/types'
 import { loadWasmModule } from '@/utils/wasm'
 
