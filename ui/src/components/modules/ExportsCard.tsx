@@ -21,7 +21,7 @@ export function ExportsCard({ moduleInfo }: ExportsCardProps) {
         )}
       </div>
       
-      <div class="max-h-48 overflow-y-auto">
+      <div class="overflow-y-auto">
         {moduleInfo?.exports && moduleInfo.exports.length > 0 ? (
           <div class="space-y-2">
             {moduleInfo.exports.map((exp, idx) => (

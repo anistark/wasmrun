@@ -128,7 +128,7 @@ export function WasiSupportCard() {
         
         {/* Features Grid */}
         <div class="max-h-56 overflow-y-auto">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="grid grid-cols-2 sm:grid-cols-6 gap-3">
             {getFilteredFeatures().map((feature, idx) => (
               <div
                 key={idx}
