@@ -4,7 +4,6 @@ import { ThemeToggle } from '@/components/ThemeToggle'
 import clsx from 'clsx'
 
 interface ConsoleLayoutProps {
-  title: string
   filename?: string
   children: ComponentChildren
   tabs?: TabItem[]
@@ -13,7 +12,6 @@ interface ConsoleLayoutProps {
 }
 
 export function ConsoleLayout({
-  title,
   filename,
   children,
   tabs,
@@ -27,21 +25,23 @@ export function ConsoleLayout({
           <div class="flex items-center">
             <div class="flex items-center justify-center">
               <img
-                src="/assets/logo.png"
-                alt="Wasmrun Logo"
+                src="/assets/logo-text.png"
+                alt="Wasmrun"
                 width="40"
                 height="40"
-                class="w-10 h-10"
+                class="w-auto h-10"
               />
             </div>
-            <div class="ml-4">
-              <h1 class="text-3xl font-semibold text-light-text dark:text-dark-text">{title}</h1>
-              {filename && (
-                <p class="text-sm text-light-textDim dark:text-dark-textDim mt-1">
-                  Running: <span class="font-mono text-light-textMuted dark:text-dark-textMuted">{filename}</span>
-                </p>
-              )}
-            </div>
+          </div>
+          <div class="flex-1 flex justify-center items-center">
+            {filename && (
+              <p class="text-sm text-light-textDim dark:text-dark-textDim mt-1">
+                Running:{' '}
+                <span class="font-mono text-green-500 dark:text-green-400">
+                  {filename}
+                </span>
+              </p>
+            )}
           </div>
           <ThemeToggle />
         </div>
