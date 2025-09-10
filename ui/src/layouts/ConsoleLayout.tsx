@@ -11,14 +11,26 @@ interface ConsoleLayoutProps {
   onTabChange?: (tabId: string) => void
 }
 
-export function ConsoleLayout({ title, children, tabs, activeTab, onTabChange }: ConsoleLayoutProps) {
+export function ConsoleLayout({
+  title,
+  children,
+  tabs,
+  activeTab,
+  onTabChange,
+}: ConsoleLayoutProps) {
   return (
     <div class="min-h-screen flex flex-col bg-light-bg dark:bg-dark-bg text-light-text dark:text-dark-text">
       <header class="bg-light-surface dark:bg-dark-surface shadow-lg">
         <div class="flex items-center justify-between px-8 py-4">
           <div class="flex items-center">
             <div class="flex items-center justify-center">
-              <img src="/assets/logo.png" alt="Wasmrun Logo" width="40" height="40" class="w-10 h-10" />
+              <img
+                src="/assets/logo.png"
+                alt="Wasmrun Logo"
+                width="40"
+                height="40"
+                class="w-10 h-10"
+              />
             </div>
             <h1 class="ml-4 text-3xl font-semibold text-light-text dark:text-dark-text">{title}</h1>
           </div>
@@ -33,8 +45,10 @@ export function ConsoleLayout({ title, children, tabs, activeTab, onTabChange }:
                 class={clsx('px-6 py-3 text-sm font-medium transition-colors duration-200', {
                   'bg-light-surface dark:bg-dark-surface border-b-2 border-light-accent2 dark:border-dark-accent text-light-textMuted dark:text-dark-textMuted':
                     activeTab === tab.id,
-                  'text-light-textMuted dark:text-dark-textMuted hover:bg-light-surface3 dark:hover:bg-dark-surface3': activeTab !== tab.id && !tab.disabled,
-                  'text-light-textDim dark:text-dark-textDim cursor-not-allowed opacity-50': tab.disabled,
+                  'text-light-textMuted dark:text-dark-textMuted hover:bg-light-surface3 dark:hover:bg-dark-surface3':
+                    activeTab !== tab.id && !tab.disabled,
+                  'text-light-textDim dark:text-dark-textDim cursor-not-allowed opacity-50':
+                    tab.disabled,
                 })}
                 disabled={tab.disabled}
               >
@@ -58,10 +72,14 @@ export function ConsoleLayout({ title, children, tabs, activeTab, onTabChange }:
                 height="32"
                 class="w-8 h-8 mr-2"
               />
-              <span class="text-lg font-semibold text-light-textMuted dark:text-dark-textMuted">Wasmrun</span>
+              <span class="text-lg font-semibold text-light-textMuted dark:text-dark-textMuted">
+                Wasmrun
+              </span>
             </div>
 
-            <p class="text-sm text-light-textDim dark:text-dark-textDim mb-4 lg:mb-0">Powered by Wasmrun</p>
+            <p class="text-sm text-light-textDim dark:text-dark-textDim mb-4 lg:mb-0">
+              Powered by Wasmrun
+            </p>
 
             <div class="flex gap-4">
               <a

@@ -6,7 +6,7 @@ import '@/styles/globals.css'
 render(
   <ThemeProvider>
     <Console />
-  </ThemeProvider>, 
+  </ThemeProvider>,
   document.getElementById('root')!
 )
 
