@@ -81,9 +81,6 @@ impl ServerInfo {
 
         // Print server details
         self.print_server_details();
-
-        // Open browser
-        self.open_browser();
     }
 
     fn print_header(&self) {
@@ -166,24 +163,6 @@ impl ServerInfo {
         );
     }
 
-    fn open_browser(&self) {
-        if cfg!(test) {
-            println!("🌐 \x1b[1;36mTest mode: Skipping browser opening...\x1b[0m");
-            return;
-        }
-
-        println!("\n🌐 \x1b[1;36mOpening browser...\x1b[0m");
-
-        if let Err(e) = webbrowser::open(&self.url) {
-            println!("❗ \x1b[1;33mFailed to open browser automatically: {e}\x1b[0m");
-            println!(
-                "🔗 \x1b[1;34mManually open:\x1b[0m \x1b[4;36m{}\x1b[0m",
-                self.url
-            );
-        } else {
-            println!("✅ \x1b[1;32mBrowser opened successfully!\x1b[0m");
-        }
-    }
 }
 
 pub fn setup_project_compilation(

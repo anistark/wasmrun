@@ -15,6 +15,9 @@ pub fn serve_wasm_file_with_project(wasm_path: &str, port: u16, wasm_filename: &
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {e}"))?;
 
+    // Server is now ready, start browser opening in background
+    crate::server::utils::open_browser_when_ready(port);
+
     let template_manager = TemplateManager::default();
     let template_type = TemplateType::Console;
 
@@ -56,6 +59,9 @@ pub fn serve_wasm_bindgen_files_with_project(
 ) -> Result<(), String> {
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {e}"))?;
+
+    // Server is now ready, start browser opening in background
+    crate::server::utils::open_browser_when_ready(port);
 
     let js_path_obj = Path::new(js_path);
     let js_filename = js_path_obj
