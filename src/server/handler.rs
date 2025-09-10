@@ -7,6 +7,7 @@ use tiny_http::{Request, Response};
 use super::utils::{check_assets_directory, content_type_header, determine_content_type};
 use crate::template::{TemplateManager, TemplateType};
 use crate::commands::verify_wasm;
+use crate::plugin::manager::PluginManager;
 
 /// Handle an incoming HTTP request
 #[allow(clippy::too_many_arguments)]
@@ -15,6 +16,7 @@ pub fn handle_request(
     js_filename: Option<&str>,
     wasm_filename: &str,
     wasm_path: &str,
+    project_path: Option<&str>,
     watch_mode: bool,
     clients_to_reload: &mut Vec<String>,
     template_manager: &TemplateManager,
@@ -81,7 +83,7 @@ pub fn handle_request(
             }
         }
     } else if url == "/api/module-info" {
-        serve_module_info(request, wasm_path);
+        serve_module_info(request, wasm_path, project_path);
     } else if url.starts_with("/assets/") {
         serve_asset(request, &url);
     } else {
@@ -226,11 +228,39 @@ pub fn serve_asset(request: Request, url: &str) {
 }
 
 /// Serve WASM module information as JSON
-pub fn serve_module_info(request: Request, wasm_path: &str) {
+pub fn serve_module_info(request: Request, wasm_path: &str, project_path: Option<&str>) {
     match verify_wasm(wasm_path) {
         Ok(verification_result) => {
+            // Get plugin information for the project
+            let plugin_info = if let Ok(plugin_manager) = PluginManager::new() {
+                if let Some(project_path) = project_path {
+                    println!("🔍 Looking for plugin for project: {}", project_path);
+                    
+                    // Find the plugin used for this project
+                    if let Some(plugin) = plugin_manager.find_plugin_for_project(project_path) {
+                        let info = plugin.info();
+                        println!("✅ Found plugin: {} v{}", info.name, info.version);
+                        Some(serde_json::json!({
+                            "name": info.name,
+                            "version": info.version,
+                            "description": info.description,
+                            "type": if plugin_manager.get_external_plugins().contains_key(&info.name) { "external" } else { "builtin" }
+                        }))
+                    } else {
+                        println!("❌ No plugin found for project: {}", project_path);
+                        None
+                    }
+                } else {
+                    println!("❌ No project path provided, unable to detect plugin");
+                    None
+                }
+            } else {
+                println!("❌ Failed to create plugin manager");
+                None
+            };
+            
             // Convert VerificationResult to JSON
-            let json_response = serde_json::json!({
+            let mut json_response = serde_json::json!({
                 "valid_magic": verification_result.valid_magic,
                 "file_size": verification_result.file_size,
                 "section_count": verification_result.section_count,
@@ -248,6 +278,11 @@ pub fn serve_module_info(request: Request, wasm_path: &str) {
                 "has_table_section": verification_result.has_table_section,
                 "function_count": verification_result.function_count
             });
+            
+            // Add plugin info if available
+            if let Some(plugin) = plugin_info {
+                json_response["plugin"] = plugin;
+            }
 
             println!("📊 Serving module info for: {}", wasm_path);
             

@@ -22,6 +22,7 @@ export interface WasmInspectionInfo {
   memory_limits?: [number, number | null]
   has_table_section: boolean
   function_count: number
+  plugin?: PluginInfo
 }
 
 export interface PluginInfo {

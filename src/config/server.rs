@@ -398,7 +398,7 @@ pub fn run_server(config: ServerConfig) -> Result<()> {
         .to_string_lossy()
         .to_string();
 
-    wasm::serve_wasm_file(&config.wasm_path, config.port, &wasm_filename).map_err(|e| {
+    wasm::serve_wasm_file_with_project(&config.wasm_path, config.port, &wasm_filename, config.project_path.as_deref()).map_err(|e| {
         WasmrunError::Server(ServerError::RequestHandlingFailed {
             reason: format!("Server startup failed: {e}"),
         })
