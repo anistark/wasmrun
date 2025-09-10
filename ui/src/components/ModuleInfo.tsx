@@ -68,30 +68,30 @@ export function ModuleInfo({ moduleInfo }: ModuleInfoProps) {
   return (
     <div class="space-y-6">
       <div>
-        <h3 class="text-xl font-medium text-dark-textMuted mb-4">WebAssembly Module Information</h3>
+        <h3 class="text-xl font-medium text-light-textMuted dark:text-dark-textMuted mb-4">WebAssembly Module Information</h3>
 
         {moduleInfo ? (
-          <div class="bg-dark-surface2 rounded-lg p-4 border border-dark-surface3">
+          <div class="bg-light-surface2 dark:bg-dark-surface2 rounded-lg p-4 border border-light-surface3 dark:border-dark-surface3">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
-                <h4 class="font-medium text-dark-textMuted mb-2">Module Details</h4>
+                <h4 class="font-medium text-light-textMuted dark:text-dark-textMuted mb-2">Module Details</h4>
                 <div class="space-y-1 text-sm">
                   <div>
-                    <span class="text-dark-textDim">Name:</span> {moduleInfo.name}
+                    <span class="text-light-textDim dark:text-dark-textDim">Name:</span> {moduleInfo.name}
                   </div>
                   <div>
-                    <span class="text-dark-textDim">Size:</span> {formatBytes(moduleInfo.size)}
+                    <span class="text-light-textDim dark:text-dark-textDim">Size:</span> {formatBytes(moduleInfo.size)}
                   </div>
                   <div>
-                    <span class="text-dark-textDim">WASI Support:</span>{' '}
+                    <span class="text-light-textDim dark:text-dark-textDim">WASI Support:</span>{' '}
                     {moduleInfo.isWasi ? 'Yes' : 'No'}
                   </div>
                 </div>
               </div>
 
               <div>
-                <h4 class="font-medium text-dark-textMuted mb-2">Exports</h4>
-                <div class="text-sm text-dark-textDim max-h-32 overflow-y-auto">
+                <h4 class="font-medium text-light-textMuted dark:text-dark-textMuted mb-2">Exports</h4>
+                <div class="text-sm text-light-textDim dark:text-dark-textDim max-h-32 overflow-y-auto">
                   {moduleInfo.exports.length > 0 ? (
                     <ul class="space-y-1 font-mono">
                       {moduleInfo.exports.map((exp, idx) => (
@@ -107,8 +107,8 @@ export function ModuleInfo({ moduleInfo }: ModuleInfoProps) {
 
             {moduleInfo.imports.length > 0 && (
               <div>
-                <h4 class="font-medium text-dark-textMuted mb-2">Imports</h4>
-                <div class="text-sm text-dark-textDim max-h-32 overflow-y-auto">
+                <h4 class="font-medium text-light-textMuted dark:text-dark-textMuted mb-2">Imports</h4>
+                <div class="text-sm text-light-textDim dark:text-dark-textDim max-h-32 overflow-y-auto">
                   <ul class="space-y-1 font-mono">
                     {moduleInfo.imports.map((imp, idx) => (
                       <li key={idx}>• {imp}</li>
@@ -119,15 +119,15 @@ export function ModuleInfo({ moduleInfo }: ModuleInfoProps) {
             )}
           </div>
         ) : (
-          <div class="bg-dark-surface2 rounded-lg p-4 border border-dark-surface3 text-center">
-            <p class="text-dark-textDim">Module will be analyzed after loading...</p>
+          <div class="bg-light-surface2 dark:bg-dark-surface2 rounded-lg p-4 border border-light-surface3 dark:border-dark-surface3 text-center">
+            <p class="text-light-textDim dark:text-dark-textDim">Module will be analyzed after loading...</p>
           </div>
         )}
       </div>
 
       <div>
-        <h3 class="text-xl font-medium text-dark-textMuted mb-4">WASI Support</h3>
-        <p class="text-sm text-dark-textDim mb-4">
+        <h3 class="text-xl font-medium text-light-textMuted dark:text-dark-textMuted mb-4">WASI Support</h3>
+        <p class="text-sm text-light-textDim dark:text-dark-textDim mb-4">
           Wasmrun includes a full WASI implementation for running WebAssembly System Interface
           modules directly in your browser.
         </p>
@@ -135,18 +135,18 @@ export function ModuleInfo({ moduleInfo }: ModuleInfoProps) {
         <div class="overflow-x-auto">
           <table class="w-full border-collapse">
             <thead>
-              <tr class="bg-dark-surface2">
-                <th class="text-left p-3 font-medium border-b border-dark-surface3">Feature</th>
-                <th class="text-left p-3 font-medium border-b border-dark-surface3">Status</th>
-                <th class="text-left p-3 font-medium border-b border-dark-surface3">Description</th>
+              <tr class="bg-light-surface2 dark:bg-dark-surface2">
+                <th class="text-left p-3 font-medium border-b border-light-surface3 dark:border-dark-surface3">Feature</th>
+                <th class="text-left p-3 font-medium border-b border-light-surface3 dark:border-dark-surface3">Status</th>
+                <th class="text-left p-3 font-medium border-b border-light-surface3 dark:border-dark-surface3">Description</th>
               </tr>
             </thead>
             <tbody>
               {WASI_FEATURES.map((feature, idx) => (
                 <tr key={idx}>
-                  <td class="p-3 border-b border-dark-surface3 font-medium">{feature.name}</td>
+                  <td class="p-3 border-b border-light-surface3 dark:border-dark-surface3 font-medium">{feature.name}</td>
                   <td
-                    class={`p-3 border-b border-dark-surface3 font-medium ${
+                    class={`p-3 border-b border-light-surface3 dark:border-dark-surface3 font-medium ${
                       feature.status === 'supported'
                         ? 'text-green-400'
                         : feature.status === 'partial'
@@ -160,7 +160,7 @@ export function ModuleInfo({ moduleInfo }: ModuleInfoProps) {
                         ? 'Partial'
                         : 'Unsupported'}
                   </td>
-                  <td class="p-3 border-b border-dark-surface3 text-sm text-dark-textDim">
+                  <td class="p-3 border-b border-light-surface3 dark:border-dark-surface3 text-sm text-light-textDim dark:text-dark-textDim">
                     {feature.description}
                   </td>
                 </tr>

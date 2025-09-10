@@ -20,6 +20,22 @@ export default {
           error: '#ff5555',
           warning: '#f9e2af',
           info: '#8be9fd'
+        },
+        // Light theme colors
+        light: {
+          bg: '#ffffff',
+          surface: '#f8fafc',
+          surface2: '#f1f5f9',
+          surface3: '#e2e8f0',
+          text: '#1e293b',
+          textMuted: '#475569',
+          textDim: '#64748b',
+          accent: '#0ea5e9',
+          accent2: '#3b82f6',
+          success: '#22c55e',
+          error: '#ef4444',
+          warning: '#f59e0b',
+          info: '#06b6d4'
         }
       },
       fontFamily: {
