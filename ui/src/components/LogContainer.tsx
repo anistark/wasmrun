@@ -7,7 +7,7 @@ interface LogContainerProps {
   height?: string
 }
 
-export function LogContainer({ logs, height = 'h-80' }: LogContainerProps) {
+export function LogContainer({ logs, height = 'h-full' }: LogContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
