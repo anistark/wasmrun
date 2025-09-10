@@ -142,7 +142,7 @@ pub fn run_project(
         js_path,
         port: final_port,
         watch_mode: watch,
-        project_path: if watch { Some(path.to_string()) } else { None },
+        project_path: Some(path.to_string()),
         output_dir: if watch {
             Some(temp_output_dir.to_string())
         } else {

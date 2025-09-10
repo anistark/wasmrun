@@ -7,6 +7,11 @@ use crate::template::{TemplateManager, TemplateType};
 
 /// Simple server for non-watching mode
 pub fn serve_wasm_file(wasm_path: &str, port: u16, wasm_filename: &str) -> Result<(), String> {
+    serve_wasm_file_with_project(wasm_path, port, wasm_filename, None)
+}
+
+/// Simple server for non-watching mode with optional project path
+pub fn serve_wasm_file_with_project(wasm_path: &str, port: u16, wasm_filename: &str, project_path: Option<&str>) -> Result<(), String> {
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {e}"))?;
 
@@ -20,6 +25,7 @@ pub fn serve_wasm_file(wasm_path: &str, port: u16, wasm_filename: &str) -> Resul
             None,
             wasm_filename,
             wasm_path,
+            project_path,
             false,
             &mut clients_to_reload,
             &template_manager,
@@ -36,6 +42,17 @@ pub fn serve_wasm_bindgen_files(
     js_path: &str,
     port: u16,
     wasm_filename: &str,
+) -> Result<(), String> {
+    serve_wasm_bindgen_files_with_project(wasm_path, js_path, port, wasm_filename, None)
+}
+
+/// Server for wasm-bindgen files with optional project path
+pub fn serve_wasm_bindgen_files_with_project(
+    wasm_path: &str,
+    js_path: &str,
+    port: u16,
+    wasm_filename: &str,
+    project_path: Option<&str>,
 ) -> Result<(), String> {
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {e}"))?;
@@ -58,6 +75,7 @@ pub fn serve_wasm_bindgen_files(
             Some(&js_filename),
             wasm_filename,
             wasm_path,
+            project_path,
             false,
             &mut clients_to_reload,
             &template_manager,

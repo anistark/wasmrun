@@ -5,12 +5,12 @@ interface PluginCardProps {
 }
 
 export function PluginCard({ moduleInfo }: PluginCardProps) {
-  // Mock plugin data for now - in real implementation this would come from the server
-  const pluginInfo = moduleInfo?.plugin || {
-    name: 'wasmrust',
-    version: '0.3.1',
-    type: 'external' as const,
-    description: 'Rust WebAssembly compilation plugin with wasm-bindgen support',
+  // Get real plugin data from inspection results
+  const pluginInfo = moduleInfo?.inspection?.plugin || moduleInfo?.plugin || {
+    name: 'unknown',
+    version: '0.0.0',
+    type: 'builtin' as const,
+    description: 'Plugin information unavailable',
   }
 
   return (
