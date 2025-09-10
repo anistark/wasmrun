@@ -25,11 +25,29 @@ export interface WasmInspectionInfo {
   plugin?: PluginInfo
 }
 
+export interface PluginCapabilities {
+  compile_wasm: boolean
+  compile_webapp: boolean
+  live_reload: boolean
+  optimization: boolean
+  custom_targets: string[]
+}
+
+export interface PluginSource {
+  type: 'crates.io' | 'local' | 'git'
+  url?: string
+  path?: string
+  branch?: string
+}
+
 export interface PluginInfo {
   name: string
   version: string
   type: 'built-in' | 'external'
   description?: string
+  author?: string
+  source?: PluginSource
+  capabilities?: PluginCapabilities
 }
 
 export interface WasmModuleInfo {

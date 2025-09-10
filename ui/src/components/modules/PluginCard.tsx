@@ -5,12 +5,23 @@ interface PluginCardProps {
 }
 
 export function PluginCard({ moduleInfo }: PluginCardProps) {
-  // Get real plugin data from inspection results
   const pluginInfo = moduleInfo?.inspection?.plugin || moduleInfo?.plugin || {
     name: 'unknown',
     version: '0.0.0',
     type: 'builtin' as const,
     description: 'Plugin information unavailable',
+    author: undefined,
+    source: undefined,
+    capabilities: undefined,
+  }
+
+  const getSourceEmoji = (source?: { type: string }) => {
+    switch (source?.type) {
+      case 'crates.io': return '🦀'
+      case 'local': return '💻'
+      case 'git': return '🌐'
+      default: return '📦'
+    }
   }
 
   return (
@@ -24,8 +35,20 @@ export function PluginCard({ moduleInfo }: PluginCardProps) {
       
       <div class="space-y-4">
         <div class="flex items-center justify-center">
-          <div class="w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center">
-            <span class="text-white text-2xl font-bold">
+          <div class="w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center p-2">
+            <img 
+              src="/assets/logo-w.png"
+              alt="Plugin" 
+              class="w-full h-full object-contain"
+              onError={(e) => {
+                // Fallback to text if image fails to load
+                const img = e.currentTarget as HTMLImageElement;
+                const fallback = img.nextElementSibling as HTMLSpanElement;
+                img.style.display = 'none';
+                if (fallback) fallback.style.display = 'flex';
+              }}
+            />
+            <span class="text-white text-2xl font-bold hidden">
               {pluginInfo.name.slice(0, 2).toUpperCase()}
             </span>
           </div>
@@ -49,6 +72,30 @@ export function PluginCard({ moduleInfo }: PluginCardProps) {
               {pluginInfo.type === 'external' ? 'External' : 'Built-in'}
             </span>
           </div>
+          {(pluginInfo.author || pluginInfo.source) && (
+            <div class="flex items-center justify-center gap-3 text-xs text-light-textDim dark:text-dark-textDim">
+              {pluginInfo.author && (
+                <span>by {pluginInfo.author}</span>
+              )}
+              {pluginInfo.source && (
+                <span class="flex items-center gap-1">
+                  {getSourceEmoji(pluginInfo.source)}
+                  {pluginInfo.source.url ? (
+                    <a 
+                      href={pluginInfo.source.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      class="hover:text-blue-500"
+                    >
+                      {pluginInfo.source.type}
+                    </a>
+                  ) : (
+                    <span>{pluginInfo.source.type}</span>
+                  )}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         
         <div class="p-3 bg-light-surface3 dark:bg-dark-surface3 rounded-lg">
@@ -57,14 +104,67 @@ export function PluginCard({ moduleInfo }: PluginCardProps) {
           </p>
         </div>
         
-        <div class="grid grid-cols-2 gap-2 text-center">
-          <div class="p-2 bg-green-50 dark:bg-green-900/20 rounded">
-            <div class="text-lg font-bold text-green-600 dark:text-green-400">✓</div>
-            <div class="text-xs text-green-700 dark:text-green-300">Active</div>
+        <div class="space-y-2">
+          <div class="text-xs font-medium text-light-textDim dark:text-dark-textDim text-center">
+            Capabilities
           </div>
-          <div class="p-2 bg-blue-50 dark:bg-blue-900/20 rounded">
-            <div class="text-lg font-bold text-blue-600 dark:text-blue-400">⚡</div>
-            <div class="text-xs text-blue-700 dark:text-blue-300">Optimized</div>
+          <div class="grid grid-cols-2 gap-2 text-center">
+            <div class={`p-2 rounded ${pluginInfo.capabilities?.compile_wasm 
+              ? 'bg-green-50 dark:bg-green-900/20' 
+              : 'bg-gray-50 dark:bg-gray-900/20'}`}>
+              <div class={`text-lg font-bold ${pluginInfo.capabilities?.compile_wasm 
+                ? 'text-green-600 dark:text-green-400' 
+                : 'text-gray-400 dark:text-gray-600'}`}>
+                {pluginInfo.capabilities?.compile_wasm ? '🔨' : '❌'}
+              </div>
+              <div class={`text-xs ${pluginInfo.capabilities?.compile_wasm 
+                ? 'text-green-700 dark:text-green-300' 
+                : 'text-gray-500 dark:text-gray-400'}`}>
+                WASM
+              </div>
+            </div>
+            <div class={`p-2 rounded ${pluginInfo.capabilities?.optimization 
+              ? 'bg-blue-50 dark:bg-blue-900/20' 
+              : 'bg-gray-50 dark:bg-gray-900/20'}`}>
+              <div class={`text-lg font-bold ${pluginInfo.capabilities?.optimization 
+                ? 'text-blue-600 dark:text-blue-400' 
+                : 'text-gray-400 dark:text-gray-600'}`}>
+                {pluginInfo.capabilities?.optimization ? '⚡' : '❌'}
+              </div>
+              <div class={`text-xs ${pluginInfo.capabilities?.optimization 
+                ? 'text-blue-700 dark:text-blue-300' 
+                : 'text-gray-500 dark:text-gray-400'}`}>
+                Optimize
+              </div>
+            </div>
+            <div class={`p-2 rounded ${pluginInfo.capabilities?.live_reload 
+              ? 'bg-purple-50 dark:bg-purple-900/20' 
+              : 'bg-gray-50 dark:bg-gray-900/20'}`}>
+              <div class={`text-lg font-bold ${pluginInfo.capabilities?.live_reload 
+                ? 'text-purple-600 dark:text-purple-400' 
+                : 'text-gray-400 dark:text-gray-600'}`}>
+                {pluginInfo.capabilities?.live_reload ? '🔄' : '❌'}
+              </div>
+              <div class={`text-xs ${pluginInfo.capabilities?.live_reload 
+                ? 'text-purple-700 dark:text-purple-300' 
+                : 'text-gray-500 dark:text-gray-400'}`}>
+                Hot Reload
+              </div>
+            </div>
+            <div class={`p-2 rounded ${pluginInfo.capabilities?.compile_webapp 
+              ? 'bg-orange-50 dark:bg-orange-900/20' 
+              : 'bg-gray-50 dark:bg-gray-900/20'}`}>
+              <div class={`text-lg font-bold ${pluginInfo.capabilities?.compile_webapp 
+                ? 'text-orange-600 dark:text-orange-400' 
+                : 'text-gray-400 dark:text-gray-600'}`}>
+                {pluginInfo.capabilities?.compile_webapp ? '🌐' : '❌'}
+              </div>
+              <div class={`text-xs ${pluginInfo.capabilities?.compile_webapp 
+                ? 'text-orange-700 dark:text-orange-300' 
+                : 'text-gray-500 dark:text-gray-400'}`}>
+                WebApp
+              </div>
+            </div>
           </div>
         </div>
       </div>

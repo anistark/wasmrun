@@ -244,7 +244,33 @@ pub fn serve_module_info(request: Request, wasm_path: &str, project_path: Option
                             "name": info.name,
                             "version": info.version,
                             "description": info.description,
-                            "type": if plugin_manager.get_external_plugins().contains_key(&info.name) { "external" } else { "builtin" }
+                            "author": info.author,
+                            "type": if plugin_manager.get_external_plugins().contains_key(&info.name) { "external" } else { "builtin" },
+                            "source": info.source.as_ref().map(|s| match s {
+                                crate::plugin::PluginSource::CratesIo { name, version: _ } => 
+                                    serde_json::json!({
+                                        "type": "crates.io",
+                                        "url": format!("https://crates.io/crates/{}", name)
+                                    }),
+                                crate::plugin::PluginSource::Local { path } => 
+                                    serde_json::json!({
+                                        "type": "local", 
+                                        "path": path.to_string_lossy()
+                                    }),
+                                crate::plugin::PluginSource::Git { url, branch } => 
+                                    serde_json::json!({
+                                        "type": "git",
+                                        "url": url,
+                                        "branch": branch
+                                    })
+                            }),
+                            "capabilities": {
+                                "compile_wasm": info.capabilities.compile_wasm,
+                                "compile_webapp": info.capabilities.compile_webapp,
+                                "live_reload": info.capabilities.live_reload,
+                                "optimization": info.capabilities.optimization,
+                                "custom_targets": info.capabilities.custom_targets
+                            }
                         }))
                     } else {
                         println!("❌ No plugin found for project: {}", project_path);
