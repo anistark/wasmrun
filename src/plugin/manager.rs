@@ -72,7 +72,7 @@ impl PluginManager {
             if entry.enabled {
                 match ExternalPluginLoader::load(entry) {
                     Ok(plugin) => {
-                        println!("✅ Loaded external plugin: {name}");
+                        debug_println!("Loaded external plugin: {name}");
                         self.external_plugins.insert(name.clone(), plugin);
                     }
                     Err(e) => {

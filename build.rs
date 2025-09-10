@@ -8,19 +8,19 @@ fn main() {
     println!("cargo:rerun-if-changed=ui/vite.config.ts");
 
     if env::var("SKIP_UI_BUILD").is_ok() {
-        println!("cargo:warning=Skipping UI build (SKIP_UI_BUILD set)");
+        eprintln!("Skipping UI build (SKIP_UI_BUILD set)");
         return;
     }
 
     let ui_dir = Path::new("ui");
     if !ui_dir.exists() {
-        println!("cargo:warning=UI directory not found, skipping UI build");
+        eprintln!("UI directory not found, skipping UI build");
         return;
     }
 
     let node_modules = ui_dir.join("node_modules");
     if !node_modules.exists() {
-        println!("cargo:warning=Installing UI dependencies...");
+        eprintln!("Installing UI dependencies...");
         let output = Command::new("pnpm")
             .arg("install")
             .current_dir(ui_dir)
@@ -35,7 +35,7 @@ fn main() {
         }
     }
 
-    println!("cargo:warning=Building console UI...");
+    eprintln!("Building console UI...");
     let console_output = Command::new("pnpm")
         .args(["vite", "build"])
         .env("VITE_TEMPLATE", "console")
@@ -51,7 +51,7 @@ fn main() {
         );
     }
 
-    println!("cargo:warning=Building app UI...");
+    eprintln!("Building app UI...");
     let app_output = Command::new("pnpm")
         .args(["vite", "build"])
         .env("VITE_TEMPLATE", "app")
@@ -68,7 +68,7 @@ fn main() {
     }
 
     reorganize_build_output();
-    println!("cargo:warning=UI build completed successfully!");
+    eprintln!("UI build completed successfully!");
 }
 
 fn reorganize_build_output() {
@@ -78,7 +78,7 @@ fn reorganize_build_output() {
     let target_dir = Path::new("templates");
 
     if !temp_dir.exists() {
-        println!("cargo:warning=Temp build directory not found, skipping reorganization");
+        eprintln!("Temp build directory not found, skipping reorganization");
         return;
     }
 
@@ -105,8 +105,8 @@ fn process_template_v2(template_build_dir: &Path, target_dir: &Path, template_na
     let target_template_dir = target_dir.join(template_name);
     let _ = fs::create_dir_all(&target_template_dir);
 
-    println!(
-        "cargo:warning=Processing template '{template_name}' from {template_build_dir:?} to {target_template_dir:?}"
+    eprintln!(
+        "Processing template '{template_name}' from {template_build_dir:?} to {target_template_dir:?}"
     );
 
     let html_src = template_build_dir.join(format!("src/{template_name}/index.html"));
