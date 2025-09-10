@@ -392,10 +392,9 @@ mod tests {
         for (filename, expected) in test_cases {
             let path = std::path::Path::new(filename);
             assert_eq!(
-                determine_content_type(&path),
+                determine_content_type(path),
                 expected,
-                "Failed for {}",
-                filename
+                "Failed for {filename}"
             );
         }
     }
@@ -403,7 +402,7 @@ mod tests {
     #[test]
     fn test_determine_content_type_no_extension() {
         let path = std::path::Path::new("filename_without_extension");
-        assert_eq!(determine_content_type(&path), "application/octet-stream");
+        assert_eq!(determine_content_type(path), "application/octet-stream");
     }
 
     #[test]
@@ -418,10 +417,9 @@ mod tests {
         for (filename, expected) in test_cases {
             let path = std::path::Path::new(filename);
             assert_eq!(
-                determine_content_type(&path),
+                determine_content_type(path),
                 expected,
-                "Failed for {}",
-                filename
+                "Failed for {filename}"
             );
         }
     }

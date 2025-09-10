@@ -560,7 +560,7 @@ mod tests {
 
         let result = handle_wasm_bindgen_file(bg_wasm.as_path(), bg_wasm.to_str().unwrap(), 8080);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true); // Should detect as wasm-bindgen
+        assert!(result.unwrap()); // Should detect as wasm-bindgen
     }
 
     #[test]
@@ -572,7 +572,7 @@ mod tests {
         let result =
             handle_wasm_bindgen_file(wasm_file.as_path(), wasm_file.to_str().unwrap(), 8080);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false); // Regular WASM file
+        assert!(!result.unwrap()); // Regular WASM file
     }
 
     #[test]
@@ -593,7 +593,7 @@ mod tests {
             "test_bg.wasm",
         );
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true); // Should find JS file
+        assert!(result.unwrap()); // Should find JS file
     }
 
     #[test]
