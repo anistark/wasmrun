@@ -47,6 +47,30 @@ export function detectWasiModule(wasmBytes: ArrayBuffer): boolean {
   }
 }
 
+function createWasmImports(memory?: WebAssembly.Memory): any {
+  const cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true })
+
+  function getStringFromMemory(ptr: number, len: number): string {
+    if (!memory) {
+      return `[WASM String: ptr=${ptr}, len=${len}]`
+    }
+    const bytes = new Uint8Array(memory.buffer, ptr, len)
+    return cachedTextDecoder.decode(bytes)
+  }
+
+  return {
+    wbg: {
+      __wbg_log_8b68cfc62b396cc3: function (arg0: number, arg1: number) {
+        const message = getStringFromMemory(arg0, arg1)
+        console.log(message)
+      },
+      __wbindgen_init_externref_table: function () {
+        // Initialize external reference table - stub implementation
+      },
+    },
+  }
+}
+
 export async function loadWasmModule(filename: string): Promise<WebAssembly.Module> {
   try {
     // For wasm-bindgen projects
@@ -57,8 +81,17 @@ export async function loadWasmModule(filename: string): Promise<WebAssembly.Modu
 
     // For regular WASM modules
     const response = await fetch(filename)
-    const result = await WebAssembly.instantiateStreaming(response)
-    return result.module
+
+    try {
+      const result = await WebAssembly.instantiateStreaming(response.clone(), {})
+      return result.module
+    } catch (importError: any) {
+      console.log('Trying with imports due to error:', importError.message)
+
+      const imports = createWasmImports()
+      const result = await WebAssembly.instantiateStreaming(response, imports)
+      return result.module
+    }
   } catch (error) {
     console.error('Error loading WASM module:', error)
     throw error

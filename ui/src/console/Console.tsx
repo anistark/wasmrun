@@ -129,7 +129,9 @@ export function Console() {
       case 'console':
         return <LogContainer logs={logs} />
       case 'playground':
-        return <FunctionPlayground functions={exportedFunctions} onFunctionCall={handleFunctionCall} />
+        return (
+          <FunctionPlayground functions={exportedFunctions} onFunctionCall={handleFunctionCall} />
+        )
       case 'info':
         return <ModuleInfo moduleInfo={moduleInfo} />
       default:
@@ -138,20 +140,15 @@ export function Console() {
   }
 
   return (
-    <ConsoleLayout 
-      title="Wasmrun" 
-      tabs={tabs} 
-      activeTab={activeTab} 
-      onTabChange={setActiveTab}
-    >
+    <ConsoleLayout title="Wasmrun" tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
       <div class="px-8 py-4 border-b border-light-surface3 dark:border-dark-surface3">
-        <h2 class="text-2xl font-medium text-light-textMuted dark:text-dark-textMuted mb-4">Running: {FILENAME}</h2>
+        <h2 class="text-2xl font-medium text-light-textMuted dark:text-dark-textMuted mb-4">
+          Running: {FILENAME}
+        </h2>
         <StatusBar status={status} />
       </div>
 
-      <div class="flex-1 p-8">
-        {renderActiveTabContent()}
-      </div>
+      <div class="flex-1 p-8">{renderActiveTabContent()}</div>
     </ConsoleLayout>
   )
 }

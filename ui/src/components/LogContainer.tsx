@@ -37,7 +37,9 @@ export function LogContainer({ logs, height = 'h-full' }: LogContainerProps) {
               'text-light-warning dark:text-dark-warning': log.type === 'warning',
             })}
           >
-            <span class="text-light-textDim dark:text-dark-textDim">[{log.timestamp.toLocaleTimeString()}]</span>{' '}
+            <span class="text-light-textDim dark:text-dark-textDim">
+              [{log.timestamp.toLocaleTimeString()}]
+            </span>{' '}
             {log.message}
           </div>
         ))

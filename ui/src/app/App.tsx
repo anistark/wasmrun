@@ -54,12 +54,16 @@ export function App() {
       <div class="flex-1 relative overflow-hidden">
         {wasmError ? (
           <div class="p-8 m-8 border-2 border-light-error dark:border-dark-error rounded-lg">
-            <h2 class="text-light-error dark:text-dark-error text-2xl font-semibold mb-4">Error Loading WASM Module</h2>
+            <h2 class="text-light-error dark:text-dark-error text-2xl font-semibold mb-4">
+              Error Loading WASM Module
+            </h2>
             <p class="mb-4">There was an error loading the WASM module:</p>
             <pre class="bg-light-bg dark:bg-dark-bg p-4 rounded overflow-auto border border-light-surface3 dark:border-dark-surface3 text-sm font-mono">
               {wasmError}
             </pre>
-            <p class="mt-4 text-light-textDim dark:text-dark-textDim">Check the browser console for more details.</p>
+            <p class="mt-4 text-light-textDim dark:text-dark-textDim">
+              Check the browser console for more details.
+            </p>
           </div>
         ) : (
           <div id="wasm-app" class="w-full h-full overflow-auto">
