@@ -1,4 +1,4 @@
-import { LogEntry, WasmModuleInfo } from '@/types'
+import { LogEntry, WasmModuleInfo, WasmInspectionInfo } from '@/types'
 
 export function log(message: string, type: LogEntry['type'] = 'info'): LogEntry {
   const entry: LogEntry = {
@@ -116,5 +116,27 @@ export function analyzeWasmModule(module: WebAssembly.Module): Partial<WasmModul
   } catch (err) {
     console.error('Error analyzing WASM module:', err)
     return {}
+  }
+}
+
+export async function fetchModuleInspection(): Promise<WasmInspectionInfo | null> {
+  try {
+    const response = await fetch('/api/module-info')
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    
+    const data = await response.json()
+    
+    if (data.error) {
+      console.error('Module inspection error:', data.error)
+      return null
+    }
+    
+    return data as WasmInspectionInfo
+  } catch (error) {
+    console.error('Error fetching module inspection:', error)
+    return null
   }
 }

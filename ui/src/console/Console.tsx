@@ -4,7 +4,7 @@ import { LogContainer } from '@/components/LogContainer'
 import { FunctionPlayground } from '@/components/FunctionPlayground'
 import { ModuleInfo } from '@/components/ModuleInfo'
 import { LogEntry, ExportedFunction, WasmModuleInfo, TabItem } from '@/types'
-import { log, loadWasmModule, analyzeWasmModule } from '@/utils/wasm'
+import { log, loadWasmModule, analyzeWasmModule, fetchModuleInspection } from '@/utils/wasm'
 
 // These will be replaced by the Rust template processor
 declare const FILENAME: string
@@ -53,16 +53,27 @@ export function Console() {
       
       setWasmInstance(instance)
 
-      // Create basic module info
+      // Fetch real inspection data from backend
+      addLog('Analyzing WASM module structure...')
+      const inspection = await fetchModuleInspection()
+      
+      // Create module info with real inspection data
       const moduleInfo: WasmModuleInfo = {
         name: FILENAME,
-        size: 0, // Will be updated when we get the actual bytes
+        size: inspection?.file_size || 0,
         imports: analysis.imports || [],
         exports: analysis.exports || [],
         isWasi: analysis.isWasi || false,
+        inspection,
       }
 
       setModuleInfo(moduleInfo)
+      
+      if (inspection) {
+        addLog(`Module analysis complete: ${inspection.section_count} sections, ${inspection.function_count} functions`, 'success')
+      } else {
+        addLog('Module analysis failed - using basic info only', 'warning')
+      }
 
       // Extract callable functions with proper parameter definitions
       const functions: ExportedFunction[] = (analysis.exports || [])
