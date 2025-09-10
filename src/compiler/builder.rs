@@ -177,15 +177,7 @@ impl BuilderFactory {
         use crate::compiler::ProjectLanguage;
 
         match language {
-            ProjectLanguage::Rust => {
-                // Try to find any plugin that can handle Rust projects
-                if let Ok(plugin_manager) = PluginManager::new() {
-                    if let Some(plugin) = plugin_manager.find_plugin_for_language("rust") {
-                        return plugin.get_builder();
-                    }
-                }
-                Box::new(UnknownBuilder)
-            }
+            ProjectLanguage::Rust => Box::new(UnknownBuilder),
             ProjectLanguage::C => Box::new(crate::plugin::languages::c_plugin::CPlugin::new()),
             ProjectLanguage::Asc => {
                 Box::new(crate::plugin::languages::asc_plugin::AscPlugin::new())
@@ -193,15 +185,7 @@ impl BuilderFactory {
             ProjectLanguage::Python => {
                 Box::new(crate::plugin::languages::python_plugin::PythonPlugin::new())
             }
-            ProjectLanguage::Go => {
-                // Try to find any plugin that can handle Go projects
-                if let Ok(plugin_manager) = PluginManager::new() {
-                    if let Some(plugin) = plugin_manager.find_plugin_for_language("go") {
-                        return plugin.get_builder();
-                    }
-                }
-                Box::new(UnknownBuilder)
-            }
+            ProjectLanguage::Go => Box::new(UnknownBuilder),
             ProjectLanguage::Unknown => Box::new(UnknownBuilder),
         }
     }
