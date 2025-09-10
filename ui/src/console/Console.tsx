@@ -4,7 +4,6 @@ import { StatusBar } from '@/components/StatusBar'
 import { LogContainer } from '@/components/LogContainer'
 import { FunctionPlayground } from '@/components/FunctionPlayground'
 import { ModuleInfo } from '@/components/ModuleInfo'
-import { Tabs } from '@/components/Tabs'
 import { StatusMessage, LogEntry, ExportedFunction, WasmModuleInfo, TabItem } from '@/types'
 import { log, loadWasmModule, analyzeWasmModule } from '@/utils/wasm'
 
@@ -21,6 +20,7 @@ export function Console() {
   const [moduleInfo, setModuleInfo] = useState<WasmModuleInfo | null>(null)
   const [exportedFunctions, setExportedFunctions] = useState<ExportedFunction[]>([])
   const [wasmInstance] = useState<WebAssembly.Instance | null>(null)
+  const [activeTab, setActiveTab] = useState('console')
 
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
     const logEntry = log(message, type)
@@ -124,15 +124,33 @@ export function Console() {
     },
   ]
 
+  const renderActiveTabContent = () => {
+    switch (activeTab) {
+      case 'console':
+        return <LogContainer logs={logs} />
+      case 'playground':
+        return <FunctionPlayground functions={exportedFunctions} onFunctionCall={handleFunctionCall} />
+      case 'info':
+        return <ModuleInfo moduleInfo={moduleInfo} />
+      default:
+        return <LogContainer logs={logs} />
+    }
+  }
+
   return (
-    <ConsoleLayout title="Wasmrun">
-      <div class="px-8 py-4">
+    <ConsoleLayout 
+      title="Wasmrun" 
+      tabs={tabs} 
+      activeTab={activeTab} 
+      onTabChange={setActiveTab}
+    >
+      <div class="px-8 py-4 border-b border-dark-surface3">
         <h2 class="text-2xl font-medium text-dark-textMuted mb-4">Running: {FILENAME}</h2>
         <StatusBar status={status} />
       </div>
 
-      <div class="flex-1 px-8 pb-8">
-        <Tabs tabs={tabs} defaultTab="console" />
+      <div class="flex-1 p-8">
+        {renderActiveTabContent()}
       </div>
     </ConsoleLayout>
   )

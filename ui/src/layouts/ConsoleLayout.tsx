@@ -1,18 +1,44 @@
 import { ComponentChildren } from 'preact'
+import { TabItem } from '@/types'
+import clsx from 'clsx'
 
 interface ConsoleLayoutProps {
   title: string
   children: ComponentChildren
+  tabs?: TabItem[]
+  activeTab?: string
+  onTabChange?: (tabId: string) => void
 }
 
-export function ConsoleLayout({ title, children }: ConsoleLayoutProps) {
+export function ConsoleLayout({ title, children, tabs, activeTab, onTabChange }: ConsoleLayoutProps) {
   return (
     <div class="min-h-screen flex flex-col bg-dark-bg text-dark-text">
-      <header class="flex items-center px-8 py-4 bg-dark-surface shadow-lg">
-        <div class="flex items-center justify-center">
-          <img src="/assets/logo.png" alt="Wasmrun Logo" width="40" height="40" class="w-10 h-10" />
+      <header class="bg-dark-surface shadow-lg">
+        <div class="flex items-center px-8 py-4">
+          <div class="flex items-center justify-center">
+            <img src="/assets/logo.png" alt="Wasmrun Logo" width="40" height="40" class="w-10 h-10" />
+          </div>
+          <h1 class="ml-4 text-3xl font-semibold text-dark-text">{title}</h1>
         </div>
-        <h1 class="ml-4 text-3xl font-semibold text-dark-text">{title}</h1>
+        {tabs && tabs.length > 0 && (
+          <div class="flex bg-dark-surface2 border-t border-dark-surface3">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => !tab.disabled && onTabChange?.(tab.id)}
+                class={clsx('px-6 py-3 text-sm font-medium transition-colors duration-200', {
+                  'bg-dark-surface border-b-2 border-dark-accent text-dark-textMuted':
+                    activeTab === tab.id,
+                  'text-dark-textMuted hover:bg-dark-surface3': activeTab !== tab.id && !tab.disabled,
+                  'text-dark-textDim cursor-not-allowed opacity-50': tab.disabled,
+                })}
+                disabled={tab.disabled}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
       </header>
 
       <main class="flex-1 flex flex-col">{children}</main>
