@@ -144,8 +144,8 @@ export function Console() {
       activeTab={activeTab} 
       onTabChange={setActiveTab}
     >
-      <div class="px-8 py-4 border-b border-dark-surface3">
-        <h2 class="text-2xl font-medium text-dark-textMuted mb-4">Running: {FILENAME}</h2>
+      <div class="px-8 py-4 border-b border-light-surface3 dark:border-dark-surface3">
+        <h2 class="text-2xl font-medium text-light-textMuted dark:text-dark-textMuted mb-4">Running: {FILENAME}</h2>
         <StatusBar status={status} />
       </div>
 

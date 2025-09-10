@@ -1,5 +1,6 @@
 import { ComponentChildren } from 'preact'
 import { TabItem } from '@/types'
+import { ThemeToggle } from '@/components/ThemeToggle'
 import clsx from 'clsx'
 
 interface ConsoleLayoutProps {
@@ -12,25 +13,28 @@ interface ConsoleLayoutProps {
 
 export function ConsoleLayout({ title, children, tabs, activeTab, onTabChange }: ConsoleLayoutProps) {
   return (
-    <div class="min-h-screen flex flex-col bg-dark-bg text-dark-text">
-      <header class="bg-dark-surface shadow-lg">
-        <div class="flex items-center px-8 py-4">
-          <div class="flex items-center justify-center">
-            <img src="/assets/logo.png" alt="Wasmrun Logo" width="40" height="40" class="w-10 h-10" />
+    <div class="min-h-screen flex flex-col bg-light-bg dark:bg-dark-bg text-light-text dark:text-dark-text">
+      <header class="bg-light-surface dark:bg-dark-surface shadow-lg">
+        <div class="flex items-center justify-between px-8 py-4">
+          <div class="flex items-center">
+            <div class="flex items-center justify-center">
+              <img src="/assets/logo.png" alt="Wasmrun Logo" width="40" height="40" class="w-10 h-10" />
+            </div>
+            <h1 class="ml-4 text-3xl font-semibold text-light-text dark:text-dark-text">{title}</h1>
           </div>
-          <h1 class="ml-4 text-3xl font-semibold text-dark-text">{title}</h1>
+          <ThemeToggle />
         </div>
         {tabs && tabs.length > 0 && (
-          <div class="flex bg-dark-surface2 border-t border-dark-surface3">
+          <div class="flex bg-light-surface2 dark:bg-dark-surface2 border-t border-light-surface3 dark:border-dark-surface3">
             {tabs.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => !tab.disabled && onTabChange?.(tab.id)}
                 class={clsx('px-6 py-3 text-sm font-medium transition-colors duration-200', {
-                  'bg-dark-surface border-b-2 border-dark-accent text-dark-textMuted':
+                  'bg-light-surface dark:bg-dark-surface border-b-2 border-light-accent2 dark:border-dark-accent text-light-textMuted dark:text-dark-textMuted':
                     activeTab === tab.id,
-                  'text-dark-textMuted hover:bg-dark-surface3': activeTab !== tab.id && !tab.disabled,
-                  'text-dark-textDim cursor-not-allowed opacity-50': tab.disabled,
+                  'text-light-textMuted dark:text-dark-textMuted hover:bg-light-surface3 dark:hover:bg-dark-surface3': activeTab !== tab.id && !tab.disabled,
+                  'text-light-textDim dark:text-dark-textDim cursor-not-allowed opacity-50': tab.disabled,
                 })}
                 disabled={tab.disabled}
               >
@@ -43,7 +47,7 @@ export function ConsoleLayout({ title, children, tabs, activeTab, onTabChange }:
 
       <main class="flex-1 flex flex-col">{children}</main>
 
-      <footer class="bg-dark-surface py-8 mt-8">
+      <footer class="bg-light-surface dark:bg-dark-surface py-8 mt-8">
         <div class="max-w-4xl mx-auto px-8">
           <div class="flex flex-wrap justify-between items-center">
             <div class="flex items-center mb-4 lg:mb-0">
@@ -54,17 +58,17 @@ export function ConsoleLayout({ title, children, tabs, activeTab, onTabChange }:
                 height="32"
                 class="w-8 h-8 mr-2"
               />
-              <span class="text-lg font-semibold text-dark-textMuted">Wasmrun</span>
+              <span class="text-lg font-semibold text-light-textMuted dark:text-dark-textMuted">Wasmrun</span>
             </div>
 
-            <p class="text-sm text-dark-textDim mb-4 lg:mb-0">Powered by Wasmrun</p>
+            <p class="text-sm text-light-textDim dark:text-dark-textDim mb-4 lg:mb-0">Powered by Wasmrun</p>
 
             <div class="flex gap-4">
               <a
                 href="https://github.com/anistark/wasmrun"
                 target="_blank"
                 title="GitHub"
-                class="text-dark-textDim hover:text-purple-400 transition-colors"
+                class="text-light-textDim dark:text-dark-textDim hover:text-light-accent2 dark:hover:text-purple-400 transition-colors"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -84,7 +88,7 @@ export function ConsoleLayout({ title, children, tabs, activeTab, onTabChange }:
                 href="https://x.com/kranirudha"
                 target="_blank"
                 title="Twitter"
-                class="text-dark-textDim hover:text-purple-400 transition-colors"
+                class="text-light-textDim dark:text-dark-textDim hover:text-light-accent2 dark:hover:text-purple-400 transition-colors"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
