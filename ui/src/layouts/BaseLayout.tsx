@@ -1,5 +1,6 @@
 import { ComponentChildren } from 'preact'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { useVersion } from '@/hooks/useVersion'
 
 interface BaseLayoutProps {
   title: string
@@ -8,6 +9,8 @@ interface BaseLayoutProps {
 }
 
 export function BaseLayout({ title, children, showFooter = true }: BaseLayoutProps) {
+  const { version, loading } = useVersion()
+
   return (
     <div class="min-h-screen flex flex-col bg-light-bg dark:bg-dark-bg text-light-text dark:text-dark-text">
       <header class="flex items-center justify-between px-8 py-4 bg-light-surface dark:bg-dark-surface shadow-lg">
@@ -30,7 +33,7 @@ export function BaseLayout({ title, children, showFooter = true }: BaseLayoutPro
 
       {showFooter && (
         <footer class="bg-light-surface dark:bg-dark-surface py-4 text-center text-sm text-light-textMuted dark:text-dark-textMuted">
-          Powered by Wasmrun
+          Wasmrun{!loading && version && ` v${version}`}
         </footer>
       )}
     </div>

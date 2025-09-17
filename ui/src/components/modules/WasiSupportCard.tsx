@@ -61,11 +61,11 @@ const WASI_FEATURES: WasiFeature[] = [
 
 export function WasiSupportCard() {
   const [activeTab, setActiveTab] = useState<'supported' | 'partial' | 'unsupported' | 'all'>('all')
-  
+
   const supportedFeatures = WASI_FEATURES.filter(f => f.status === 'supported')
   const partialFeatures = WASI_FEATURES.filter(f => f.status === 'partial')
   const unsupportedFeatures = WASI_FEATURES.filter(f => f.status === 'unsupported')
-  
+
   const getFilteredFeatures = () => {
     switch (activeTab) {
       case 'supported':
@@ -94,12 +94,12 @@ export function WasiSupportCard() {
           WASI Support
         </h3>
       </div>
-      
+
       <div class="space-y-4">
         <p class="text-sm text-light-textDim dark:text-dark-textDim">
           Comprehensive WASI implementation for WebAssembly System Interface modules.
         </p>
-        
+
         {/* Tab Navigation */}
         <div class="flex flex-wrap gap-1 p-1 bg-light-surface3 dark:bg-dark-surface3 rounded-lg">
           {tabs.map(tab => (
@@ -125,7 +125,7 @@ export function WasiSupportCard() {
             </button>
           ))}
         </div>
-        
+
         {/* Features Grid */}
         <div class="max-h-56 overflow-y-auto">
           <div class="grid grid-cols-2 sm:grid-cols-6 gap-3">

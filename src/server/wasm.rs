@@ -11,7 +11,12 @@ pub fn serve_wasm_file(wasm_path: &str, port: u16, wasm_filename: &str) -> Resul
 }
 
 /// Simple server for non-watching mode with optional project path
-pub fn serve_wasm_file_with_project(wasm_path: &str, port: u16, wasm_filename: &str, project_path: Option<&str>) -> Result<(), String> {
+pub fn serve_wasm_file_with_project(
+    wasm_path: &str,
+    port: u16,
+    wasm_filename: &str,
+    project_path: Option<&str>,
+) -> Result<(), String> {
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {e}"))?;
 

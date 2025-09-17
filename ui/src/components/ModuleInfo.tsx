@@ -11,7 +11,6 @@ interface ModuleInfoProps {
   moduleInfo: WasmModuleInfo | null
 }
 
-
 export function ModuleInfo({ moduleInfo }: ModuleInfoProps) {
   return (
     <div class="p-6 space-y-6">

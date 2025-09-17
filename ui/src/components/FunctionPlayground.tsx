@@ -39,7 +39,10 @@ export function FunctionPlayground({ functions, onFunctionCall }: FunctionPlaygr
               return JSON.parse(value)
             } catch {
               // Fallback: split by comma and convert to numbers
-              return value.split(',').map(v => parseInt(v.trim())).filter(n => !isNaN(n))
+              return value
+                .split(',')
+                .map(v => parseInt(v.trim()))
+                .filter(n => !isNaN(n))
             }
           case 'string':
           default:
@@ -117,7 +120,13 @@ export function FunctionPlayground({ functions, onFunctionCall }: FunctionPlaygr
                   data-param={param.name}
                   defaultValue={param.value || ''}
                   class="w-full px-3 py-2 bg-light-bg dark:bg-dark-bg text-light-textMuted dark:text-dark-textMuted border border-light-surface3 dark:border-dark-surface3 rounded focus:outline-none focus:border-light-accent dark:focus:border-dark-accent font-mono text-sm"
-                  placeholder={param.type === 'array' ? 'e.g., [1, 2, 3]' : param.type === 'string' ? 'Enter text' : `Enter ${param.type} number`}
+                  placeholder={
+                    param.type === 'array'
+                      ? 'e.g., [1, 2, 3]'
+                      : param.type === 'string'
+                        ? 'Enter text'
+                        : `Enter ${param.type} number`
+                  }
                 />
               </div>
             ))}
