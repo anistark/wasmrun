@@ -56,7 +56,7 @@ export function ModuleDetailsCard({ moduleInfo }: ModuleDetailsCardProps) {
                   Binary Analysis
                 </h4>
               </div>
-              
+
               <div class="grid grid-cols-3 gap-3 mb-4 text-center">
                 <div class="p-2 bg-light-surface3 dark:bg-dark-surface3 rounded-lg">
                   <div class="text-sm font-bold text-light-textPrimary dark:text-dark-textPrimary">
@@ -106,7 +106,10 @@ export function ModuleDetailsCard({ moduleInfo }: ModuleDetailsCardProps) {
                   </h5>
                   <div class="max-h-24 overflow-y-auto space-y-1">
                     {inspection.sections.slice(0, 4).map((section, idx) => (
-                      <div key={idx} class="flex items-center justify-between text-xs p-2 bg-light-surface3 dark:bg-dark-surface3 rounded">
+                      <div
+                        key={idx}
+                        class="flex items-center justify-between text-xs p-2 bg-light-surface3 dark:bg-dark-surface3 rounded"
+                      >
                         <span class="font-medium text-light-textPrimary dark:text-dark-textPrimary">
                           {section.name}
                         </span>

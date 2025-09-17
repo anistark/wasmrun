@@ -162,7 +162,6 @@ impl ServerInfo {
             "\x1b[1;34m╰─────────────────────────────────────────────────────────────────╯\x1b[0m"
         );
     }
-
 }
 
 pub fn setup_project_compilation(
@@ -377,7 +376,13 @@ pub fn run_server(config: ServerConfig) -> Result<()> {
         .to_string_lossy()
         .to_string();
 
-    wasm::serve_wasm_file_with_project(&config.wasm_path, config.port, &wasm_filename, config.project_path.as_deref()).map_err(|e| {
+    wasm::serve_wasm_file_with_project(
+        &config.wasm_path,
+        config.port,
+        &wasm_filename,
+        config.project_path.as_deref(),
+    )
+    .map_err(|e| {
         WasmrunError::Server(ServerError::RequestHandlingFailed {
             reason: format!("Server startup failed: {e}"),
         })

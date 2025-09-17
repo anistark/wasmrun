@@ -122,18 +122,18 @@ export function analyzeWasmModule(module: WebAssembly.Module): Partial<WasmModul
 export async function fetchModuleInspection(): Promise<WasmInspectionInfo | null> {
   try {
     const response = await fetch('/api/module-info')
-    
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
-    
+
     const data = await response.json()
-    
+
     if (data.error) {
       console.error('Module inspection error:', data.error)
       return null
     }
-    
+
     return data as WasmInspectionInfo
   } catch (error) {
     console.error('Error fetching module inspection:', error)

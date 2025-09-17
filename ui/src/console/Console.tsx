@@ -31,7 +31,7 @@ export function Console() {
       // Instantiate the WASM module to create a runnable instance
       // For wasm-bindgen modules, we need to provide the proper imports
       let instance: WebAssembly.Instance
-      
+
       try {
         // Try to instantiate without imports first
         instance = new WebAssembly.Instance(module, {})
@@ -45,18 +45,18 @@ export function Console() {
             },
             __wbindgen_init_externref_table: () => {
               // Initialize external reference table
-            }
-          }
+            },
+          },
         }
         instance = new WebAssembly.Instance(module, imports)
       }
-      
+
       setWasmInstance(instance)
 
       // Fetch real inspection data from backend
       addLog('Analyzing WASM module structure...')
       const inspection = await fetchModuleInspection()
-      
+
       // Create module info with real inspection data
       const moduleInfo: WasmModuleInfo = {
         name: FILENAME,
@@ -68,9 +68,12 @@ export function Console() {
       }
 
       setModuleInfo(moduleInfo)
-      
+
       if (inspection) {
-        addLog(`Module analysis complete: ${inspection.section_count} sections, ${inspection.function_count} functions`, 'success')
+        addLog(
+          `Module analysis complete: ${inspection.section_count} sections, ${inspection.function_count} functions`,
+          'success'
+        )
       } else {
         addLog('Module analysis failed - using basic info only', 'warning')
       }
@@ -82,7 +85,7 @@ export function Console() {
           // Define parameters for known functions
           let parameters: any[] = []
           let signature = `${name}() -> unknown`
-          
+
           switch (name) {
             case 'greet':
               parameters = [{ name: 'name', type: 'string', value: 'World' }]
@@ -101,7 +104,7 @@ export function Console() {
               parameters = []
               break
           }
-          
+
           return {
             name,
             signature,

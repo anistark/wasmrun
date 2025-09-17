@@ -20,7 +20,7 @@ export function ImportsCard({ moduleInfo }: ImportsCardProps) {
           </span>
         )}
       </div>
-      
+
       <div class="overflow-y-auto">
         {moduleInfo?.imports && moduleInfo.imports.length > 0 ? (
           <div class="space-y-2">

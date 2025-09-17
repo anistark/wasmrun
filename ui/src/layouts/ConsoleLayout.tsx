@@ -1,6 +1,7 @@
 import { ComponentChildren } from 'preact'
 import { TabItem } from '@/types'
 import { ThemeToggle } from '@/components/ThemeToggle'
+import { useVersion } from '@/hooks/useVersion'
 import clsx from 'clsx'
 
 interface ConsoleLayoutProps {
@@ -18,6 +19,8 @@ export function ConsoleLayout({
   activeTab,
   onTabChange,
 }: ConsoleLayoutProps) {
+  const { version, loading } = useVersion()
+
   return (
     <div class="min-h-screen flex flex-col bg-light-bg dark:bg-dark-bg text-light-text dark:text-dark-text">
       <header class="bg-light-surface dark:bg-dark-surface shadow-lg">
@@ -37,9 +40,7 @@ export function ConsoleLayout({
             {filename && (
               <p class="text-sm text-light-textDim dark:text-dark-textDim mt-1">
                 Running:{' '}
-                <span class="font-mono text-green-500 dark:text-green-400">
-                  {filename}
-                </span>
+                <span class="font-mono text-green-500 dark:text-green-400">{filename}</span>
               </p>
             )}
           </div>
@@ -87,7 +88,7 @@ export function ConsoleLayout({
             </div>
 
             <p class="text-sm text-light-textDim dark:text-dark-textDim mb-4 lg:mb-0">
-              Powered by Wasmrun
+              Wasmrun{!loading && version && ` v${version}`}
             </p>
 
             <div class="flex gap-4">

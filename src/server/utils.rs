@@ -4,8 +4,8 @@ use crate::utils::CommandExecutor;
 use std::fs;
 use std::net::TcpListener;
 use std::path::Path;
-use std::time::{Duration, Instant};
 use std::thread;
+use std::time::{Duration, Instant};
 
 /// Generate a Content-Type header
 pub fn content_type_header(value: &str) -> tiny_http::Header {
@@ -50,40 +50,37 @@ pub fn is_port_available(port: u16) -> bool {
 /// Wait for server to be ready and then open browser
 pub fn open_browser_when_ready(port: u16) {
     let url = format!("http://localhost:{port}");
-    
+
     thread::spawn(move || {
         let start_time = Instant::now();
         let timeout = Duration::from_secs(30); // 30 second timeout
         let check_interval = Duration::from_millis(100);
-        
+
         println!("\n🌐 \x1b[1;36mWaiting for server to be ready...\x1b[0m");
-        
+
         loop {
             // Check if we can connect to the server
             if let Ok(stream) = std::net::TcpStream::connect(format!("localhost:{port}")) {
                 drop(stream);
-                
+
                 // Server is ready, open browser
                 println!("✅ \x1b[1;32mServer is ready! Opening browser...\x1b[0m");
-                
+
                 if let Err(e) = webbrowser::open(&url) {
                     println!("❗ \x1b[1;33mFailed to open browser automatically: {e}\x1b[0m");
-                    println!(
-                        "🔗 \x1b[1;34mManually open:\x1b[0m \x1b[4;36m{}\x1b[0m",
-                        url
-                    );
+                    println!("🔗 \x1b[1;34mManually open:\x1b[0m \x1b[4;36m{url}\x1b[0m");
                 } else {
                     println!("✅ \x1b[1;32mBrowser opened successfully!\x1b[0m");
                 }
                 break;
             }
-            
+
             // Check timeout
             if start_time.elapsed() > timeout {
-                println!("⏰ \x1b[1;33mTimeout waiting for server. Please open manually:\x1b[0m \x1b[4;36m{}\x1b[0m", url);
+                println!("⏰ \x1b[1;33mTimeout waiting for server. Please open manually:\x1b[0m \x1b[4;36m{url}\x1b[0m");
                 break;
             }
-            
+
             thread::sleep(check_interval);
         }
     });
