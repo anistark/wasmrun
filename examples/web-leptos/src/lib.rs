@@ -11,11 +11,15 @@ extern "C" {
 
 #[wasm_bindgen]
 pub fn greet(name: &str) {
+    console::log_1(&"[LEPTOS-WEB] greet() function called (running from web-leptos)".into());
+    console::log_1(&format!("[LEPTOS-WEB] greet() called with name: {}", name).into());
     alert(&format!("Hello, {}!", name));
+    console::log_1(&"[LEPTOS-WEB] greet() function completed".into());
 }
 
 #[component]
 pub fn App() -> impl IntoView {
+    console::log_1(&"[LEPTOS-WEB] App() component initializing (running from web-leptos)".into());
     provide_meta_context();
 
     view! {
@@ -36,6 +40,7 @@ pub fn App() -> impl IntoView {
 
 #[component]
 fn HomePage() -> impl IntoView {
+    console::log_1(&"[LEPTOS-WEB] HomePage() component initializing (running from web-leptos)".into());
     let (name, set_name) = create_signal(String::new());
 
     view! {
@@ -97,6 +102,7 @@ fn HomePage() -> impl IntoView {
 
 #[component]
 fn Counter() -> impl IntoView {
+    console::log_1(&"[LEPTOS-WEB] Counter() component initializing (running from web-leptos)".into());
     let (count, set_count) = create_signal(0);
     let (step, set_step) = create_signal(1);
 
@@ -166,13 +172,16 @@ struct TodoItem {
 
 #[component]
 fn TodoApp() -> impl IntoView {
+    console::log_1(&"[LEPTOS-WEB] TodoApp() component initializing (running from web-leptos)".into());
     let (todos, set_todos) = create_signal(Vec::<TodoItem>::new());
     let (new_todo, set_new_todo) = create_signal(String::new());
     let (next_id, set_next_id) = create_signal(1);
 
     let add_todo = move |_| {
+        console::log_1(&"[LEPTOS-WEB] add_todo() function called (running from web-leptos)".into());
         let text = new_todo.get().trim().to_string();
         if !text.is_empty() {
+            console::log_1(&format!("[LEPTOS-WEB] add_todo() adding todo: {}", text).into());
             let todo = TodoItem {
                 id: next_id.get(),
                 text,
@@ -181,19 +190,26 @@ fn TodoApp() -> impl IntoView {
             set_todos.update(|todos| todos.push(todo));
             set_next_id.update(|id| *id += 1);
             set_new_todo(String::new());
+            console::log_1(&"[LEPTOS-WEB] add_todo() todo added successfully".into());
+        } else {
+            console::log_1(&"[LEPTOS-WEB] add_todo() empty text, not adding".into());
         }
     };
 
     let toggle_todo = move |id: usize| {
+        console::log_1(&format!("[LEPTOS-WEB] toggle_todo() called for id: {} (running from web-leptos)", id).into());
         set_todos.update(|todos| {
             if let Some(todo) = todos.iter_mut().find(|t| t.id == id) {
                 todo.completed = !todo.completed;
+                console::log_1(&format!("[LEPTOS-WEB] toggle_todo() toggled todo {} to {}", id, todo.completed).into());
             }
         });
     };
 
     let delete_todo = move |id: usize| {
+        console::log_1(&format!("[LEPTOS-WEB] delete_todo() called for id: {} (running from web-leptos)", id).into());
         set_todos.update(|todos| todos.retain(|t| t.id != id));
+        console::log_1(&format!("[LEPTOS-WEB] delete_todo() deleted todo {}", id).into());
     };
 
     let completed_count = move || todos.with(|todos| todos.iter().filter(|t| t.completed).count());
@@ -281,22 +297,39 @@ fn NotFound() -> impl IntoView {
 }
 
 fn fibonacci_like(n: i32) -> i32 {
-    if n <= 0 { return 0; }
-    if n <= 2 { return 1; }
-    
+    console::log_1(&format!("[LEPTOS-WEB] fibonacci_like() called with n: {} (running from web-leptos)", n).into());
+    if n <= 0 {
+        console::log_1(&"[LEPTOS-WEB] fibonacci_like() n<=0, returning 0".into());
+        return 0;
+    }
+    if n <= 2 {
+        console::log_1(&"[LEPTOS-WEB] fibonacci_like() n<=2, returning 1".into());
+        return 1;
+    }
+
+    console::log_1(&format!("[LEPTOS-WEB] fibonacci_like() calculating for n={}", n).into());
     let mut a = 0;
     let mut b = 1;
-    for _ in 2..=n {
+    for i in 2..=n {
         let temp = a + b;
         a = b;
         b = temp;
+        if i <= 5 { // Only log first few iterations to avoid spam
+            console::log_1(&format!("[LEPTOS-WEB] fibonacci_like() iteration {}: result={}", i, b).into());
+        }
     }
+    console::log_1(&format!("[LEPTOS-WEB] fibonacci_like() final result: {}", b).into());
     b
 }
 
 #[wasm_bindgen(start)]
 pub fn main() {
     console_error_panic_hook::set_once();
+    console::log_1(&"[LEPTOS-WEB] ===== Leptos WebAssembly Example Starting =====".into());
+    console::log_1(&"[LEPTOS-WEB] Initializing Leptos-Web example module".into());
+    console::log_1(&"[LEPTOS-WEB] Module: Leptos-Web Example (web-leptos/src/lib.rs)".into());
     console::log_1(&"Leptos WebAssembly app starting...".into());
+    console::log_1(&"[LEPTOS-WEB] Mounting App component to body".into());
     leptos::mount_to_body(App);
+    console::log_1(&"[LEPTOS-WEB] ===== Leptos WebAssembly Example Ready =====".into());
 }
