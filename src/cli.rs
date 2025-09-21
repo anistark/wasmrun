@@ -229,7 +229,11 @@ pub enum Commands {
         positional_path: Option<String>,
 
         /// Clean everything (project artifacts and temp directories)
-        #[arg(short = 'a', long, help = "Clean both project artifacts and temp directories")]
+        #[arg(
+            short = 'a',
+            long,
+            help = "Clean both project artifacts and temp directories"
+        )]
         all: bool,
     },
 }

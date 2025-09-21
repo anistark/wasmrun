@@ -206,7 +206,10 @@ impl PathResolver {
             println!("🧹 Cleaning temporary directory: {}", temp_dir.display());
 
             let entries = fs::read_dir(&temp_dir).map_err(|e| {
-                WasmrunError::add_context(format!("Reading temporary directory {}", temp_dir.display()), e)
+                WasmrunError::add_context(
+                    format!("Reading temporary directory {}", temp_dir.display()),
+                    e,
+                )
             })?;
 
             let mut cleaned_files = 0;
@@ -214,7 +217,11 @@ impl PathResolver {
                 let entry_path = entry.path();
                 if entry_path.is_file() {
                     if let Err(e) = fs::remove_file(&entry_path) {
-                        println!("⚠️  Warning: Failed to remove {}: {}", entry_path.display(), e);
+                        println!(
+                            "⚠️  Warning: Failed to remove {}: {}",
+                            entry_path.display(),
+                            e
+                        );
                     } else {
                         cleaned_files += 1;
                     }
@@ -222,7 +229,7 @@ impl PathResolver {
             }
 
             if cleaned_files > 0 {
-                println!("✅ Cleaned {} stale files from temporary directory", cleaned_files);
+                println!("✅ Cleaned {cleaned_files} stale files from temporary directory");
             } else {
                 println!("✅ Temporary directory was already clean");
             }
@@ -250,9 +257,15 @@ impl PathResolver {
                         // Clean any directory that starts with wasmrun_
                         if dir_name_str.starts_with("wasmrun_") && dir_name_str != "wasmrun_temp" {
                             if let Err(e) = fs::remove_dir_all(&entry_path) {
-                                println!("⚠️  Warning: Failed to remove {}: {}", entry_path.display(), e);
+                                println!(
+                                    "⚠️  Warning: Failed to remove {}: {e}",
+                                    entry_path.display()
+                                );
                             } else {
-                                println!("🗑️  Removed old temp directory: {}", entry_path.display());
+                                println!(
+                                    "🗑️  Removed old temp directory: {}",
+                                    entry_path.display()
+                                );
                                 additional_cleaned += 1;
                             }
                         }
@@ -261,7 +274,7 @@ impl PathResolver {
             }
 
             if additional_cleaned > 0 {
-                println!("✅ Cleaned {} additional temporary directories", additional_cleaned);
+                println!("✅ Cleaned {additional_cleaned} additional temporary directories");
             }
         }
 
@@ -269,7 +282,7 @@ impl PathResolver {
         let pid_file = "/tmp/wasmrun_server.pid";
         if Path::new(pid_file).exists() {
             if let Err(e) = fs::remove_file(pid_file) {
-                println!("⚠️  Warning: Failed to remove PID file: {}", e);
+                println!("⚠️  Warning: Failed to remove PID file: {e}");
             } else {
                 println!("🗑️  Removed stale PID file");
             }

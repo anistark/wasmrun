@@ -7,7 +7,7 @@ use crate::utils::PathResolver;
 pub fn handle_clean_command(
     path: &Option<String>,
     positional_path: &Option<String>,
-    all: bool
+    all: bool,
 ) -> Result<()> {
     println!("🧹 Cleaning wasmrun temporary directories...");
     PathResolver::cleanup_all_temp_directories()?;

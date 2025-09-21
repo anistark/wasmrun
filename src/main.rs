@@ -128,9 +128,7 @@ fn main() {
             path,
             positional_path,
             all,
-        }) => {
-            commands::handle_clean_command(&path.clone(), &positional_path.clone(), *all)
-        }
+        }) => commands::handle_clean_command(&path.clone(), &positional_path.clone(), *all),
 
         None => {
             debug_println!("No subcommand provided, running default server mode");
