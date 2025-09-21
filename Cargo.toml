@@ -10,6 +10,7 @@ readme = "README.md"
 keywords = ["wasm", "webassembly", "browser", "runtime", "cli"]
 categories = ["command-line-utilities", "development-tools", "wasm"]
 include = ["src/**", "templates/**", "assets/**", "build.rs", "Cargo.toml", "README.md", "LICENSE"]
+exclude = ["ui", "target", "examples"]
 documentation = "https://docs.rs/wasmrun"
 rust-version = "1.70.0"
 
