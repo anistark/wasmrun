@@ -14,14 +14,18 @@ fn main() {
 
     let ui_dir = Path::new("ui");
     let templates_dir = Path::new("templates");
+    let ui_package_json = ui_dir.join("package.json");
 
     // Skip UI build if templates already exist and UI source is not available
-    if !ui_dir.exists() {
-        if templates_dir.exists() && templates_dir.join("app").exists() && templates_dir.join("console").exists() {
+    if !ui_package_json.exists() {
+        if templates_dir.exists()
+            && templates_dir.join("app").exists()
+            && templates_dir.join("console").exists()
+        {
             eprintln!("UI source not found but templates exist, skipping UI build");
             return;
         } else {
-            eprintln!("UI directory not found, skipping UI build");
+            eprintln!("UI source not found, skipping UI build");
             return;
         }
     }
