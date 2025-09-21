@@ -82,7 +82,7 @@ prepare-publish: format lint test build
 # Publish to crates.io (requires cargo login)
 publish-crates: prepare-publish
     @echo "Publishing version {{version}} to crates.io..."
-    cargo publish
+    cargo publish --allow-dirty
 
 # Generate an example WASM file using Emscripten
 example-wasm-emcc:
