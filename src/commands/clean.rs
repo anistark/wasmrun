@@ -4,24 +4,36 @@ use crate::ui::print_clean_info;
 use crate::utils::PathResolver;
 
 /// Handle clean command
-pub fn handle_clean_command(path: &Option<String>, positional_path: &Option<String>) -> Result<()> {
-    let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
-    PathResolver::validate_directory_exists(&project_path)?;
+pub fn handle_clean_command(
+    path: &Option<String>,
+    positional_path: &Option<String>,
+    all: bool
+) -> Result<()> {
+    println!("🧹 Cleaning wasmrun temporary directories...");
+    PathResolver::cleanup_all_temp_directories()?;
 
-    print_clean_info(&project_path);
+    // If all flag is set, also clean project artifacts
+    if all {
+        let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
+        PathResolver::validate_directory_exists(&project_path)?;
 
-    let language = compiler::detect_project_language(&project_path);
+        print_clean_info(&project_path);
 
-    match language {
-        // compiler::ProjectLanguage::Rust => clean_rust_project(&project_path),
-        // compiler::ProjectLanguage::Go => clean_go_project(&project_path),
-        compiler::ProjectLanguage::C => clean_c_project(&project_path),
-        compiler::ProjectLanguage::Asc => clean_asc_project(&project_path),
-        _ => {
-            println!("⚠️ Clean operation not specifically implemented for {language:?}");
-            println!("💡 You can manually delete build artifacts in your project directory.");
-            Ok(())
+        let language = compiler::detect_project_language(&project_path);
+
+        match language {
+            // compiler::ProjectLanguage::Rust => clean_rust_project(&project_path),
+            // compiler::ProjectLanguage::Go => clean_go_project(&project_path),
+            compiler::ProjectLanguage::C => clean_c_project(&project_path),
+            compiler::ProjectLanguage::Asc => clean_asc_project(&project_path),
+            _ => {
+                println!("⚠️ Clean operation not specifically implemented for {language:?}");
+                println!("💡 You can manually delete build artifacts in your project directory.");
+                Ok(())
+            }
         }
+    } else {
+        Ok(())
     }
 }
 

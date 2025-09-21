@@ -198,6 +198,87 @@ impl PathResolver {
         Ok(temp_dir.to_str().unwrap_or("/tmp").to_string())
     }
 
+    /// Clean up temporary directory used by wasmrun operations
+    pub fn cleanup_temp_directory(name: &str) -> Result<()> {
+        let temp_dir = std::env::temp_dir().join(name);
+
+        if temp_dir.exists() {
+            println!("🧹 Cleaning temporary directory: {}", temp_dir.display());
+
+            let entries = fs::read_dir(&temp_dir).map_err(|e| {
+                WasmrunError::add_context(format!("Reading temporary directory {}", temp_dir.display()), e)
+            })?;
+
+            let mut cleaned_files = 0;
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.is_file() {
+                    if let Err(e) = fs::remove_file(&entry_path) {
+                        println!("⚠️  Warning: Failed to remove {}: {}", entry_path.display(), e);
+                    } else {
+                        cleaned_files += 1;
+                    }
+                }
+            }
+
+            if cleaned_files > 0 {
+                println!("✅ Cleaned {} stale files from temporary directory", cleaned_files);
+            } else {
+                println!("✅ Temporary directory was already clean");
+            }
+        } else {
+            println!("ℹ️  Temporary directory does not exist, nothing to clean");
+        }
+
+        Ok(())
+    }
+
+    /// Clean all wasmrun temporary directories and files
+    pub fn cleanup_all_temp_directories() -> Result<()> {
+        println!("🧹 Starting cleanup of all wasmrun temporary directories...");
+
+        Self::cleanup_temp_directory("wasmrun_temp")?;
+        let temp_base = std::env::temp_dir();
+
+        if let Ok(entries) = fs::read_dir(&temp_base) {
+            let mut additional_cleaned = 0;
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.is_dir() {
+                    if let Some(dir_name) = entry_path.file_name() {
+                        let dir_name_str = dir_name.to_string_lossy();
+                        // Clean any directory that starts with wasmrun_
+                        if dir_name_str.starts_with("wasmrun_") && dir_name_str != "wasmrun_temp" {
+                            if let Err(e) = fs::remove_dir_all(&entry_path) {
+                                println!("⚠️  Warning: Failed to remove {}: {}", entry_path.display(), e);
+                            } else {
+                                println!("🗑️  Removed old temp directory: {}", entry_path.display());
+                                additional_cleaned += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if additional_cleaned > 0 {
+                println!("✅ Cleaned {} additional temporary directories", additional_cleaned);
+            }
+        }
+
+        // Clean the PID file if it exists
+        let pid_file = "/tmp/wasmrun_server.pid";
+        if Path::new(pid_file).exists() {
+            if let Err(e) = fs::remove_file(pid_file) {
+                println!("⚠️  Warning: Failed to remove PID file: {}", e);
+            } else {
+                println!("🗑️  Removed stale PID file");
+            }
+        }
+
+        println!("✅ Cleanup completed successfully!");
+        Ok(())
+    }
+
     /// Remove file
     pub fn remove_file(path: &str) -> Result<()> {
         fs::remove_file(path)

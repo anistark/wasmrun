@@ -192,6 +192,11 @@ pub fn setup_project_compilation(
 
                 use crate::utils::PathResolver;
 
+                // Clean up temp files from previous runs
+                if let Err(e) = PathResolver::cleanup_temp_directory("wasmrun_temp") {
+                    println!("⚠️  Warning: Failed to cleanup temporary directory: {e}");
+                }
+
                 let temp_output_dir = match PathResolver::create_temp_directory("wasmrun_temp") {
                     Ok(dir) => dir,
                     Err(e) => {
@@ -224,6 +229,11 @@ pub fn setup_project_compilation(
     };
 
     use crate::utils::PathResolver;
+
+    // Clean up any stale files from previous runs
+    if let Err(e) = PathResolver::cleanup_temp_directory("wasmrun_temp") {
+        println!("⚠️  Warning: Failed to cleanup temporary directory: {e}");
+    }
 
     let temp_output_dir = match PathResolver::create_temp_directory("wasmrun_temp") {
         Ok(dir) => dir,

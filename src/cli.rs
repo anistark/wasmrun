@@ -227,6 +227,10 @@ pub enum Commands {
         /// Project directory path (positional argument)
         #[arg(index = 1, value_hint = clap::ValueHint::DirPath)]
         positional_path: Option<String>,
+
+        /// Clean everything (project artifacts and temp directories)
+        #[arg(short = 'a', long, help = "Clean both project artifacts and temp directories")]
+        all: bool,
     },
 }
 

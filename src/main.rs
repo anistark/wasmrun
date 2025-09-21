@@ -127,9 +127,9 @@ fn main() {
         Some(Commands::Clean {
             path,
             positional_path,
+            all,
         }) => {
-            // let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
-            commands::handle_clean_command(&path.clone(), &positional_path.clone())
+            commands::handle_clean_command(&path.clone(), &positional_path.clone(), *all)
         }
 
         None => {
