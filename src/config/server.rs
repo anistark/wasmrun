@@ -19,6 +19,7 @@ pub struct ServerConfig {
     pub watch_mode: bool,
     pub project_path: Option<String>,
     pub output_dir: Option<String>,
+    pub serve: bool,
 }
 
 pub struct ServerInfo {
@@ -391,6 +392,7 @@ pub fn run_server(config: ServerConfig) -> Result<()> {
         config.port,
         &wasm_filename,
         config.project_path.as_deref(),
+        config.serve,
     )
     .map_err(|e| {
         WasmrunError::Server(ServerError::RequestHandlingFailed {
