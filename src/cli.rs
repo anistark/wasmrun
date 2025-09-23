@@ -53,6 +53,10 @@ pub struct Args {
     /// Enable debug output with detailed information
     #[arg(long, global = true, help = "Show detailed debug information")]
     pub debug: bool,
+
+    /// Serve the UI in browser (default: false)
+    #[arg(short = 's', long, help = "Open UI in browser when server starts")]
+    pub serve: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -304,6 +308,7 @@ pub struct ResolvedArgs {
     pub debug: bool,
     #[allow(dead_code)] // TODO: Used for command validation and processing
     pub command: Option<Commands>,
+    pub serve: bool,
 }
 
 impl ResolvedArgs {
@@ -318,6 +323,7 @@ impl ResolvedArgs {
             watch: args.watch,
             debug: args.debug,
             command: args.command,
+            serve: args.serve,
         })
     }
 

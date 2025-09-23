@@ -72,6 +72,7 @@ fn run_wasm_file(wasm_path: &str, port: Option<u16>, verbose: bool) -> Result<()
         watch_mode: false,
         project_path: None,
         output_dir: None,
+        serve: true,
     };
 
     crate::config::run_server(server_config)

@@ -6,8 +6,13 @@ use super::handler;
 use crate::template::{TemplateManager, TemplateType};
 
 /// Simple server for non-watching mode
-pub fn serve_wasm_file(wasm_path: &str, port: u16, wasm_filename: &str) -> Result<(), String> {
-    serve_wasm_file_with_project(wasm_path, port, wasm_filename, None)
+pub fn serve_wasm_file(
+    wasm_path: &str,
+    port: u16,
+    wasm_filename: &str,
+    serve: bool,
+) -> Result<(), String> {
+    serve_wasm_file_with_project(wasm_path, port, wasm_filename, None, serve)
 }
 
 /// Simple server for non-watching mode with optional project path
@@ -16,12 +21,15 @@ pub fn serve_wasm_file_with_project(
     port: u16,
     wasm_filename: &str,
     project_path: Option<&str>,
+    serve: bool,
 ) -> Result<(), String> {
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {e}"))?;
 
-    // Server is now ready, start browser opening in background
-    crate::server::utils::open_browser_when_ready(port);
+    // Server is now ready
+    if serve {
+        crate::server::utils::open_browser_when_ready(port);
+    }
 
     let template_manager = TemplateManager::default();
     let template_type = TemplateType::Console;
@@ -50,8 +58,9 @@ pub fn serve_wasm_bindgen_files(
     js_path: &str,
     port: u16,
     wasm_filename: &str,
+    serve: bool,
 ) -> Result<(), String> {
-    serve_wasm_bindgen_files_with_project(wasm_path, js_path, port, wasm_filename, None)
+    serve_wasm_bindgen_files_with_project(wasm_path, js_path, port, wasm_filename, None, serve)
 }
 
 /// Server for wasm-bindgen files with optional project path
@@ -61,12 +70,15 @@ pub fn serve_wasm_bindgen_files_with_project(
     port: u16,
     wasm_filename: &str,
     project_path: Option<&str>,
+    serve: bool,
 ) -> Result<(), String> {
     let server = Server::http(format!("0.0.0.0:{port}"))
         .map_err(|e| format!("Failed to start server: {e}"))?;
 
-    // Server is now ready, start browser opening in background
-    crate::server::utils::open_browser_when_ready(port);
+    // Server is now ready
+    if serve {
+        crate::server::utils::open_browser_when_ready(port);
+    }
 
     let js_path_obj = Path::new(js_path);
     let js_filename = js_path_obj
@@ -103,6 +115,7 @@ pub fn handle_wasm_bindgen_files(
     wasm_path: &str,
     port: u16,
     wasm_filename: &str,
+    serve: bool,
 ) -> Result<(), String> {
     println!("\n\x1b[1;34m╭\x1b[0m");
     println!("  ✅  \x1b[1;32mRunning wasm-bindgen project\x1b[0m");
@@ -111,7 +124,7 @@ pub fn handle_wasm_bindgen_files(
     println!("\x1b[1;34m╰\x1b[0m\n");
 
     // Run with wasm-bindgen support
-    serve_wasm_bindgen_files(wasm_path, js_path, port, wasm_filename)
+    serve_wasm_bindgen_files(wasm_path, js_path, port, wasm_filename, serve)
 }
 
 /// Inspect a WebAssembly file for wasm-bindgen patterns

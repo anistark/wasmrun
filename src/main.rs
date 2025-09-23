@@ -145,7 +145,7 @@ fn main() {
             };
             if resolved_args.wasm {
                 debug_println!("Running WASM file: {}", resolved_args.path);
-                server::run_wasm_file(&resolved_args.path, resolved_args.port)
+                server::run_wasm_file(&resolved_args.path, resolved_args.port, resolved_args.serve)
             } else {
                 debug_println!(
                     "Running project: {}, watch: {}",
@@ -157,6 +157,7 @@ fn main() {
                     resolved_args.port,
                     None,
                     resolved_args.watch,
+                    resolved_args.serve,
                 )
             }
         }

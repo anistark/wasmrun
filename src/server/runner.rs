@@ -8,7 +8,7 @@ use crate::{debug_enter, debug_exit, debug_println};
 use std::path::Path;
 
 /// Run a WASM file directly
-pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
+pub fn run_wasm_file(path: &str, port: u16, serve: bool) -> Result<()> {
     debug_enter!("run_wasm_file", "path={}, port={}", path, port);
 
     if cfg!(test) {
@@ -22,7 +22,7 @@ pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
     if !path_obj.extension().is_some_and(|ext| ext == "wasm") {
         if path_obj.extension().is_some_and(|ext| ext == "js") {
             debug_println!("Detected JS file, delegating to handle_js_file");
-            return handle_js_file(path, port);
+            return handle_js_file(path, port, serve);
         }
 
         debug_println!("File is not WASM or JS: {:?}", path_obj.extension());
@@ -36,7 +36,7 @@ pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
     debug_println!("Using port: {}", final_port);
 
     debug_println!("Checking for wasm-bindgen file");
-    if handle_wasm_bindgen_file(path_obj, path, final_port)? {
+    if handle_wasm_bindgen_file(path_obj, path, final_port, serve)? {
         debug_exit!("run_wasm_file", "handled as wasm-bindgen file");
         return Ok(());
     }
@@ -53,7 +53,7 @@ pub fn run_wasm_file(path: &str, port: u16) -> Result<()> {
     debug_println!("WASM filename: {}", wasm_filename);
 
     debug_println!("Starting WASM server");
-    let result = wasm::serve_wasm_file(path, final_port, &wasm_filename).map_err(|e| {
+    let result = wasm::serve_wasm_file(path, final_port, &wasm_filename, serve).map_err(|e| {
         debug_println!("WASM server failed: {:?}", e);
         WasmrunError::Server(ServerError::startup_failed(
             final_port,
@@ -71,6 +71,7 @@ pub fn run_project(
     port: u16,
     language_override: Option<String>,
     watch: bool,
+    serve: bool,
 ) -> Result<()> {
     debug_enter!(
         "run_project",
@@ -96,11 +97,11 @@ pub fn run_project(
         println!("  \x1b[0;37mRunning the WASM file directly...\x1b[0m");
         println!("\x1b[1;34m╰\x1b[0m\n");
 
-        return run_wasm_file(path, port);
+        return run_wasm_file(path, port, serve);
     }
 
     if path_obj.is_file() && path_obj.extension().is_some_and(|ext| ext == "js") {
-        return handle_js_file(path, port);
+        return handle_js_file(path, port, serve);
     }
 
     if !path_obj.is_dir() {
@@ -145,6 +146,7 @@ pub fn run_project(
         } else {
             None
         },
+        serve,
     };
 
     if is_wasm_bindgen {
@@ -162,7 +164,7 @@ pub fn run_project(
 }
 
 /// Handle JavaScript files (potentially wasm-bindgen generated)
-fn handle_js_file(path: &str, port: u16) -> Result<()> {
+fn handle_js_file(path: &str, port: u16, serve: bool) -> Result<()> {
     let path_obj = std::path::Path::new(path);
 
     let wasm_path = path_obj.with_extension("wasm");
@@ -196,6 +198,7 @@ fn handle_js_file(path: &str, port: u16) -> Result<()> {
                     wasm_path.to_str().unwrap(),
                     port,
                     &wasm_filename,
+                    serve,
                 )
                 .map_err(|e| {
                     WasmrunError::Server(ServerError::startup_failed(
@@ -206,7 +209,7 @@ fn handle_js_file(path: &str, port: u16) -> Result<()> {
             }
         }
 
-        return run_wasm_file(wasm_path.to_str().unwrap(), port);
+        return run_wasm_file(wasm_path.to_str().unwrap(), port, serve);
     }
 
     Err(WasmrunError::file_not_found(format!(
@@ -215,7 +218,12 @@ fn handle_js_file(path: &str, port: u16) -> Result<()> {
 }
 
 /// Handle wasm-bindgen files (files ending with _bg.wasm)
-fn handle_wasm_bindgen_file(path_obj: &std::path::Path, path: &str, port: u16) -> Result<bool> {
+fn handle_wasm_bindgen_file(
+    path_obj: &std::path::Path,
+    path: &str,
+    port: u16,
+    serve: bool,
+) -> Result<bool> {
     let file_name = path_obj
         .file_name()
         .ok_or_else(|| WasmrunError::path("Invalid file path"))?
@@ -249,6 +257,7 @@ fn handle_wasm_bindgen_file(path_obj: &std::path::Path, path: &str, port: u16) -
                 path,
                 port,
                 file_name.as_ref(),
+                serve,
             )
             .map_err(|e| {
                 WasmrunError::Server(ServerError::startup_failed(
@@ -259,7 +268,7 @@ fn handle_wasm_bindgen_file(path_obj: &std::path::Path, path: &str, port: u16) -
 
             return Ok(true);
         } else {
-            return search_for_js_files(path_obj, path, port, file_name.as_ref());
+            return search_for_js_files(path_obj, path, port, file_name.as_ref(), serve);
         }
     }
 
@@ -272,6 +281,7 @@ fn search_for_js_files(
     path: &str,
     port: u16,
     _wasm_filename: &str,
+    serve: bool,
 ) -> Result<bool> {
     println!("  ⚠️ \x1b[1;33mWarning: Could not find corresponding JS file\x1b[0m");
     println!("  \x1b[0;37mLooking for other JS files in the same directory...\x1b[0m");
@@ -299,6 +309,7 @@ fn search_for_js_files(
                                 watch_mode: false,
                                 project_path: None,
                                 output_dir: None,
+                                serve,
                             })
                             .map_err(|e| {
                                 WasmrunError::Server(ServerError::startup_failed(
@@ -357,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_run_wasm_file_invalid_path() {
-        let result = run_wasm_file("/nonexistent/file.wasm", 8080);
+        let result = run_wasm_file("/nonexistent/file.wasm", 8080, false);
         // In test mode, run_wasm_file returns Ok(()) early, so this succeeds
         assert!(result.is_ok());
     }
@@ -368,7 +379,7 @@ mod tests {
         let txt_file = temp_dir.path().join("test.txt");
         File::create(&txt_file).unwrap();
 
-        let result = run_wasm_file(txt_file.to_str().unwrap(), 8080);
+        let result = run_wasm_file(txt_file.to_str().unwrap(), 8080, false);
         // In test mode, run_wasm_file returns Ok(()) early, so this succeeds
         assert!(result.is_ok());
     }
@@ -380,13 +391,13 @@ mod tests {
             create_wasm_file_with_content(temp_dir.path(), "test.wasm", &VALID_WASM_BYTES);
 
         // In test mode, this should return Ok without actually starting server
-        let result = run_wasm_file(wasm_file.to_str().unwrap(), 8080);
+        let result = run_wasm_file(wasm_file.to_str().unwrap(), 8080, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_run_project_invalid_path() {
-        let result = run_project("/nonexistent/path", 8080, None, false);
+        let result = run_project("/nonexistent/path", 8080, None, false, false);
         // In test mode, run_project returns Ok(()) early, so this succeeds
         assert!(result.is_ok());
     }
@@ -398,7 +409,7 @@ mod tests {
             create_wasm_file_with_content(temp_dir.path(), "test.wasm", &VALID_WASM_BYTES);
 
         // Should delegate to run_wasm_file
-        let result = run_project(wasm_file.to_str().unwrap(), 8080, None, false);
+        let result = run_project(wasm_file.to_str().unwrap(), 8080, None, false, false);
         assert!(result.is_ok()); // In test mode
     }
 
@@ -410,7 +421,7 @@ mod tests {
         let js_file =
             create_js_file_with_content(temp_dir.path(), "test.js", "console.log('test');");
 
-        let result = run_project(js_file.to_str().unwrap(), 8080, None, false);
+        let result = run_project(js_file.to_str().unwrap(), 8080, None, false, false);
         assert!(result.is_ok()); // Should handle JS files
     }
 
@@ -419,7 +430,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
 
         // In test mode, run_project returns Ok(()) early, so this succeeds
-        let result = run_project(temp_dir.path().to_str().unwrap(), 8080, None, false);
+        let result = run_project(temp_dir.path().to_str().unwrap(), 8080, None, false, false);
         assert!(result.is_ok());
     }
 
@@ -431,7 +442,7 @@ mod tests {
         let js_file =
             create_js_file_with_content(temp_dir.path(), "test.js", "// wasm_bindgen generated");
 
-        let result = handle_js_file(js_file.to_str().unwrap(), 8080);
+        let result = handle_js_file(js_file.to_str().unwrap(), 8080, false);
         assert!(result.is_ok()); // In test mode
     }
 
@@ -441,7 +452,7 @@ mod tests {
         let js_file =
             create_js_file_with_content(temp_dir.path(), "test.js", "console.log('test');");
 
-        let result = handle_js_file(js_file.to_str().unwrap(), 8080);
+        let result = handle_js_file(js_file.to_str().unwrap(), 8080, false);
         assert!(result.is_err());
 
         if let Err(WasmrunError::FileNotFound { path: _ }) = result {
@@ -459,7 +470,8 @@ mod tests {
         let _js_file =
             create_js_file_with_content(temp_dir.path(), "test.js", "// wasm_bindgen generated");
 
-        let result = handle_wasm_bindgen_file(bg_wasm.as_path(), bg_wasm.to_str().unwrap(), 8080);
+        let result =
+            handle_wasm_bindgen_file(bg_wasm.as_path(), bg_wasm.to_str().unwrap(), 8080, false);
         assert!(result.is_ok());
         assert!(result.unwrap()); // Should detect as wasm-bindgen
     }
@@ -470,8 +482,12 @@ mod tests {
         let wasm_file =
             create_wasm_file_with_content(temp_dir.path(), "test.wasm", &VALID_WASM_BYTES);
 
-        let result =
-            handle_wasm_bindgen_file(wasm_file.as_path(), wasm_file.to_str().unwrap(), 8080);
+        let result = handle_wasm_bindgen_file(
+            wasm_file.as_path(),
+            wasm_file.to_str().unwrap(),
+            8080,
+            false,
+        );
         assert!(result.is_ok());
         assert!(!result.unwrap()); // Regular WASM file
     }
@@ -492,6 +508,7 @@ mod tests {
             wasm_file.to_str().unwrap(),
             8080,
             "test_bg.wasm",
+            false,
         );
         assert!(result.is_ok());
         assert!(result.unwrap()); // Should find JS file
@@ -510,6 +527,7 @@ mod tests {
             wasm_file.to_str().unwrap(),
             8080,
             "test_bg.wasm",
+            false,
         );
         assert!(result.is_err());
 
@@ -530,7 +548,7 @@ mod tests {
         let wasm_file =
             create_wasm_file_with_content(temp_dir.path(), "test.wasm", &VALID_WASM_BYTES);
 
-        let result = run_wasm_file(wasm_file.to_str().unwrap(), 8080);
+        let result = run_wasm_file(wasm_file.to_str().unwrap(), 8080, false);
         assert!(result.is_ok()); // Should succeed without starting server
     }
 
@@ -545,6 +563,7 @@ mod tests {
             temp_dir.path().to_str().unwrap(),
             8080,
             Some("rust".to_string()),
+            false,
             false,
         );
         // May succeed or fail depending on compilation, but shouldn't crash
@@ -562,6 +581,7 @@ mod tests {
             8080,
             None,
             true, // watch mode enabled
+            false,
         );
         // May succeed or fail depending on compilation, but shouldn't crash
         assert!(result.is_ok() || result.is_err());
