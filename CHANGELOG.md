@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Serve flag to make browser to wasmrun server optional (#27)
+- Version route to server modules
+- Memory allocation and cleaning info to console UI
+- More detailed plugin card information
+- Enhanced logging for examples with better debugging
+
+### Fixed
+- Templates for UI in packaging
+- Cached temp files cleanup
+- Browser hang time issues
+- External plugin fallback functionality
+- Plugin detection and API improvements
+- Go example file issues
+
 ### Changed
+- Refactored server modules with new version route
+- Cleaned up logs for better output
+- UI adjusted for larger screens
+- Improved plugin detection system
+- Allow dirty release in build process
+- Exclude cargo binary from packaging
 - Updated dependencies
 
 ## [0.11.3](https://github.com/anistark/wasmrun/releases/tag/v0.11.3) - 2025-09-03
