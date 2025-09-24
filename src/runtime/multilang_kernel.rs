@@ -1,0 +1,359 @@
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use crate::runtime::microkernel::{Pid, WasmInstance, WasmMicroKernel};
+use crate::runtime::registry::{DevServer, DevServerStatus, LanguageRuntimeRegistry};
+use crate::runtime::syscalls::{SyscallArgs, SyscallHandler, SyscallResult};
+
+/// Multi-language kernel that orchestrates different language runtimes
+pub struct MultiLanguageKernel {
+    base_kernel: WasmMicroKernel,
+    language_registry: LanguageRuntimeRegistry,
+    active_runtimes: Arc<Mutex<HashMap<String, WasmInstance>>>,
+    dev_servers: Arc<Mutex<HashMap<Pid, Box<dyn DevServer>>>>,
+    syscall_handler: Arc<Mutex<SyscallHandler>>,
+    process_languages: Arc<Mutex<HashMap<Pid, String>>>,
+}
+
+/// Configuration for running projects in OS mode
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OsRunConfig {
+    pub project_path: String,
+    pub language: Option<String>,
+    pub dev_mode: bool,
+    pub port: Option<u16>,
+    pub hot_reload: bool,
+    pub debugging: bool,
+}
+
+impl Default for MultiLanguageKernel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[allow(dead_code)]
+impl MultiLanguageKernel {
+    /// Create a new multi-language kernel
+    pub fn new() -> Self {
+        let base_kernel = WasmMicroKernel::new();
+        let syscall_handler = SyscallHandler::new(base_kernel.clone());
+
+        Self {
+            base_kernel: base_kernel.clone(),
+            language_registry: LanguageRuntimeRegistry::register_builtin_runtimes(),
+            active_runtimes: Arc::new(Mutex::new(HashMap::new())),
+            dev_servers: Arc::new(Mutex::new(HashMap::new())),
+            syscall_handler: Arc::new(Mutex::new(syscall_handler)),
+            process_languages: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Start the multi-language kernel
+    pub fn start(&self) -> Result<()> {
+        self.base_kernel.start_scheduler()?;
+        self.base_kernel.init_vfs()?;
+        Ok(())
+    }
+
+    /// Stop the multi-language kernel
+    pub fn stop(&self) -> Result<()> {
+        // Stop all dev servers
+        {
+            let mut dev_servers = self.dev_servers.lock().unwrap();
+            for (_, server) in dev_servers.drain() {
+                let _ = server.stop();
+            }
+        }
+
+        // Clean up active runtimes
+        {
+            let mut runtimes = self.active_runtimes.lock().unwrap();
+            runtimes.clear();
+        }
+
+        self.base_kernel.stop_scheduler()?;
+        Ok(())
+    }
+
+    /// Auto-detect language and run a project
+    pub fn auto_detect_and_run(&mut self, config: OsRunConfig) -> Result<Pid> {
+        let language = match config.language.clone() {
+            Some(lang) => lang,
+            None => {
+                match self
+                    .language_registry
+                    .detect_project_language(&config.project_path)
+                {
+                    Some(lang) => lang.to_string(),
+                    None => {
+                        return Err(anyhow::anyhow!(
+                        "Could not auto-detect language for project: {}. Please specify --language",
+                        config.project_path
+                    ))
+                    }
+                }
+            }
+        };
+
+        self.run_project_with_language(config, &language)
+    }
+
+    /// Run a project with a specific language runtime
+    pub fn run_project_with_language(
+        &mut self,
+        config: OsRunConfig,
+        language: &str,
+    ) -> Result<Pid> {
+        // 1. Ensure runtime is loaded
+        self.ensure_runtime_loaded(language)?;
+
+        // 2. Get the runtime
+        let runtime = self
+            .language_registry
+            .get_runtime(language)
+            .ok_or_else(|| anyhow::anyhow!("Runtime not found: {language}"))?;
+
+        // 3. Prepare project bundle
+        let bundle = runtime.prepare_project(&config.project_path)?;
+
+        // 4. Run the project
+        let pid = runtime.run_project(bundle, &mut self.base_kernel)?;
+
+        // 5. Track the process language
+        {
+            let mut process_languages = self.process_languages.lock().unwrap();
+            process_languages.insert(pid, language.to_string());
+        }
+
+        // 6. Set up development features if enabled
+        if config.dev_mode {
+            self.setup_dev_environment(pid, language, &config)?;
+        }
+
+        Ok(pid)
+    }
+
+    /// Ensure a language runtime is loaded and available
+    fn ensure_runtime_loaded(&mut self, runtime_name: &str) -> Result<()> {
+        {
+            let runtimes = self.active_runtimes.lock().unwrap();
+            if runtimes.contains_key(runtime_name) {
+                return Ok(()); // Already loaded
+            }
+        }
+
+        let runtime = self
+            .language_registry
+            .get_runtime(runtime_name)
+            .ok_or_else(|| anyhow::anyhow!("Runtime not found: {runtime_name}"))?;
+
+        // Load the runtime WASM binary
+        let wasm_binary = runtime.load_wasm_binary()?;
+
+        // Create WASM instance
+        let instance = WasmInstance {
+            binary: wasm_binary,
+            exports: HashMap::new(),
+            memory_regions: vec![],
+        };
+
+        // Store the instance
+        {
+            let mut runtimes = self.active_runtimes.lock().unwrap();
+            runtimes.insert(runtime_name.to_string(), instance);
+        }
+
+        Ok(())
+    }
+
+    /// Set up development environment for a process
+    fn setup_dev_environment(&self, pid: Pid, language: &str, config: &OsRunConfig) -> Result<()> {
+        let runtime = self
+            .language_registry
+            .get_runtime(language)
+            .ok_or_else(|| anyhow::anyhow!("Runtime not found: {language}"))?;
+
+        // Set up development server
+        if let Some(dev_server) = runtime.create_dev_server() {
+            let port = config.port.unwrap_or(8080);
+            dev_server.start(port)?;
+
+            let mut dev_servers = self.dev_servers.lock().unwrap();
+            dev_servers.insert(pid, dev_server);
+        }
+
+        // TODO: Set up hot reload if enabled
+        if config.hot_reload && runtime.supports_hot_reload() {
+            self.setup_hot_reload(pid, language)?;
+        }
+
+        // TODO: Set up debugging if enabled
+        if config.debugging && runtime.supports_debugging() {
+            self.setup_debugging(pid, language)?;
+        }
+
+        Ok(())
+    }
+
+    /// Set up hot reload for a process
+    fn setup_hot_reload(&self, _pid: Pid, _language: &str) -> Result<()> {
+        // TODO: Implement hot reload system
+        // This would involve:
+        // 1. Setting up file watchers for the project directory
+        // 2. Implementing reload mechanisms per language
+        // 3. Managing process restarts
+        Ok(())
+    }
+
+    /// Set up debugging for a process
+    fn setup_debugging(&self, _pid: Pid, _language: &str) -> Result<()> {
+        // TODO: Implement debugging support
+        // This would involve:
+        // 1. Setting up language-specific debug protocols
+        // 2. Implementing breakpoint management
+        // 3. Variable inspection interfaces
+        Ok(())
+    }
+
+    /// Handle a system call from a process
+    pub fn handle_syscall(
+        &mut self,
+        pid: Pid,
+        syscall_num: u32,
+        args: SyscallArgs,
+    ) -> SyscallResult {
+        // First try language-specific syscall handling
+        if let Some(language) = self.get_process_language(pid) {
+            if let Some(runtime) = self.language_registry.get_runtime(&language) {
+                match runtime.handle_syscall(pid, syscall_num, args.clone()) {
+                    SyscallResult::Success(result) => return SyscallResult::Success(result),
+                    SyscallResult::Error(_) => {
+                        // Fall through to generic syscall handling
+                    }
+                }
+            }
+        }
+
+        // Fall back to generic syscall handling
+        let mut handler = self.syscall_handler.lock().unwrap();
+        handler.handle_syscall(pid, syscall_num, args)
+    }
+
+    /// Get the language for a process
+    pub fn get_process_language(&self, pid: Pid) -> Option<String> {
+        let process_languages = self.process_languages.lock().unwrap();
+        process_languages.get(&pid).cloned()
+    }
+
+    /// List all active processes with their languages
+    pub fn list_processes_with_languages(&self) -> Vec<(Pid, String, String)> {
+        let processes = self.base_kernel.list_processes();
+        let process_languages = self.process_languages.lock().unwrap();
+
+        processes
+            .into_iter()
+            .map(|process| {
+                let language = process_languages
+                    .get(&process.pid)
+                    .cloned()
+                    .unwrap_or_else(|| "unknown".to_string());
+                (process.pid, process.name, language)
+            })
+            .collect()
+    }
+
+    /// Get development server status for a process
+    pub fn get_dev_server_status(&self, pid: Pid) -> Option<DevServerStatus> {
+        let dev_servers = self.dev_servers.lock().unwrap();
+        dev_servers.get(&pid).map(|server| server.get_status())
+    }
+
+    /// Stop a process and clean up associated resources
+    pub fn kill_process(&mut self, pid: Pid) -> Result<()> {
+        // Stop dev server if running
+        {
+            let mut dev_servers = self.dev_servers.lock().unwrap();
+            if let Some(server) = dev_servers.remove(&pid) {
+                let _ = server.stop();
+            }
+        }
+
+        // Remove language tracking
+        {
+            let mut process_languages = self.process_languages.lock().unwrap();
+            process_languages.remove(&pid);
+        }
+
+        // Kill the process in the base kernel
+        self.base_kernel.kill_process(pid)?;
+
+        Ok(())
+    }
+
+    /// Get kernel statistics
+    pub fn get_statistics(&self) -> KernelStatistics {
+        let memory_stats = self.base_kernel.get_memory_stats();
+        let active_runtimes = {
+            let runtimes = self.active_runtimes.lock().unwrap();
+            runtimes.keys().cloned().collect()
+        };
+        let active_dev_servers = {
+            let servers = self.dev_servers.lock().unwrap();
+            servers.len()
+        };
+
+        KernelStatistics {
+            total_memory_usage: memory_stats.get("total_memory").copied().unwrap_or(0),
+            active_processes: memory_stats.get("process_count").copied().unwrap_or(0),
+            active_runtimes,
+            active_dev_servers,
+        }
+    }
+
+    /// Get reference to the base kernel
+    pub fn base_kernel(&self) -> &WasmMicroKernel {
+        &self.base_kernel
+    }
+
+    /// Get reference to the language registry
+    pub fn registry(&self) -> &LanguageRuntimeRegistry {
+        &self.language_registry
+    }
+
+    /// Get mutable reference to the language registry
+    pub fn registry_mut(&mut self) -> &mut LanguageRuntimeRegistry {
+        &mut self.language_registry
+    }
+}
+
+/// Statistics about the multi-language kernel
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KernelStatistics {
+    pub total_memory_usage: usize,
+    pub active_processes: usize,
+    pub active_runtimes: Vec<String>,
+    pub active_dev_servers: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_kernel_creation() {
+        let kernel = MultiLanguageKernel::new();
+        let stats = kernel.get_statistics();
+        assert_eq!(stats.active_processes, 0);
+        assert_eq!(stats.active_runtimes.len(), 0);
+    }
+
+    #[test]
+    fn test_kernel_start_stop() {
+        let kernel = MultiLanguageKernel::new();
+        assert!(kernel.start().is_ok());
+        assert!(kernel.stop().is_ok());
+    }
+}

@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>wasmrun Express API Example</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .api-section {
+            margin: 30px 0;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .endpoint {
+            margin: 15px 0;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            border-left: 4px solid #00ff88;
+        }
+        .method {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-right: 10px;
+            min-width: 60px;
+            text-align: center;
+        }
+        .get { background: #28a745; }
+        .post { background: #007bff; }
+        .put { background: #ffc107; color: black; }
+        .delete { background: #dc3545; }
+        .url {
+            font-family: 'Courier New', monospace;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .description {
+            margin-top: 5px;
+            opacity: 0.9;
+            font-size: 0.9em;
+        }
+        .status {
+            text-align: center;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        .status.loading {
+            background: rgba(255, 193, 7, 0.2);
+            border: 1px solid #ffc107;
+        }
+        .status.success {
+            background: rgba(40, 167, 69, 0.2);
+            border: 1px solid #28a745;
+        }
+        .status.error {
+            background: rgba(220, 53, 69, 0.2);
+            border: 1px solid #dc3545;
+        }
+        button {
+            background: linear-gradient(45deg, #00ff88, #00d4ff);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 10px 5px;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 wasmrun Express API Example</h1>
+
+        <div id="status" class="status loading">
+            <strong>Connecting to API...</strong>
+        </div>
+
+        <div class="api-section">
+            <h2>🔍 Health & Info</h2>
+            <div class="endpoint">
+                <span class="method get">GET</span>
+                <span class="url">/</span>
+                <div class="description">Welcome message with API documentation</div>
+            </div>
+            <div class="endpoint">
+                <span class="method get">GET</span>
+                <span class="url">/health</span>
+                <div class="description">Server health check and status</div>
+            </div>
+            <button onclick="testEndpoint('/')">Test Welcome</button>
+            <button onclick="testEndpoint('/health')">Test Health</button>
+        </div>
+
+        <div class="api-section">
+            <h2>👥 Users API</h2>
+            <div class="endpoint">
+                <span class="method get">GET</span>
+                <span class="url">/api/users</span>
+                <div class="description">Get all users (supports ?role=admin|user filter)</div>
+            </div>
+            <div class="endpoint">
+                <span class="method get">GET</span>
+                <span class="url">/api/users/:id</span>
+                <div class="description">Get specific user by ID</div>
+            </div>
+            <div class="endpoint">
+                <span class="method post">POST</span>
+                <span class="url">/api/users</span>
+                <div class="description">Create new user (requires name, email)</div>
+            </div>
+            <button onclick="testEndpoint('/api/users')">Get All Users</button>
+            <button onclick="testEndpoint('/api/users?role=admin')">Get Admins</button>
+            <button onclick="testEndpoint('/api/users/1')">Get User 1</button>
+        </div>
+
+        <div class="api-section">
+            <h2>📝 Todos API</h2>
+            <div class="endpoint">
+                <span class="method get">GET</span>
+                <span class="url">/api/todos</span>
+                <div class="description">Get all todos (supports ?userId=1 and ?completed=true filters)</div>
+            </div>
+            <div class="endpoint">
+                <span class="method get">GET</span>
+                <span class="url">/api/todos/:id</span>
+                <div class="description">Get specific todo by ID</div>
+            </div>
+            <div class="endpoint">
+                <span class="method post">POST</span>
+                <span class="url">/api/todos</span>
+                <div class="description">Create new todo (requires title, userId)</div>
+            </div>
+            <div class="endpoint">
+                <span class="method put">PUT</span>
+                <span class="url">/api/todos/:id</span>
+                <div class="description">Update todo (optional title, completed)</div>
+            </div>
+            <div class="endpoint">
+                <span class="method delete">DELETE</span>
+                <span class="url">/api/todos/:id</span>
+                <div class="description">Delete todo by ID</div>
+            </div>
+            <button onclick="testEndpoint('/api/todos')">Get All Todos</button>
+            <button onclick="testEndpoint('/api/todos?completed=false')">Get Pending</button>
+            <button onclick="testEndpoint('/api/todos/1')">Get Todo 1</button>
+        </div>
+
+        <div class="api-section">
+            <h2>📊 Statistics</h2>
+            <div class="endpoint">
+                <span class="method get">GET</span>
+                <span class="url">/api/stats</span>
+                <div class="description">Get comprehensive server and data statistics</div>
+            </div>
+            <button onclick="testEndpoint('/api/stats')">Get Statistics</button>
+        </div>
+
+        <div class="api-section">
+            <h2>📋 API Response</h2>
+            <pre id="response" style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 8px; white-space: pre-wrap; max-height: 400px; overflow-y: auto;">
+API responses will appear here when you test endpoints...
+            </pre>
+        </div>
+
+        <div class="footer">
+            <p>🌟 Running in <strong>wasmrun OS mode</strong> - A browser-based WebAssembly execution environment</p>
+        </div>
+    </div>
+
+    <script>
+        // Check API status on page load
+        async function checkStatus() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                document.getElementById('status').className = 'status success';
+                document.getElementById('status').innerHTML = `
+                    <strong>✅ API Connected!</strong><br>
+                    Status: ${data.status} | Uptime: ${Math.floor(data.uptime)}s | Environment: ${data.environment}
+                `;
+            } catch (error) {
+                document.getElementById('status').className = 'status error';
+                document.getElementById('status').innerHTML = `
+                    <strong>❌ API Connection Failed</strong><br>
+                    ${error.message}
+                `;
+            }
+        }
+
+        // Test API endpoint
+        async function testEndpoint(endpoint) {
+            const responseEl = document.getElementById('response');
+            responseEl.textContent = `🔄 Testing ${endpoint}...`;
+
+            try {
+                const response = await fetch(endpoint);
+                const data = await response.json();
+
+                responseEl.textContent = `✅ ${response.status} ${response.statusText}\n\n` +
+                    JSON.stringify(data, null, 2);
+            } catch (error) {
+                responseEl.textContent = `❌ Error testing ${endpoint}:\n\n${error.message}`;
+            }
+        }
+
+        // Initialize
+        checkStatus();
+
+        // Refresh status every 30 seconds
+        setInterval(checkStatus, 30000);
+    </script>
+</body>
+</html>

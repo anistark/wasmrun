@@ -12,12 +12,17 @@ pub fn handle_run_command(
     positional_path: &Option<String>,
     port: u16,
     language: &Option<String>,
+    os: bool,
     watch: bool,
 ) -> Result<()> {
     let resolved_path =
         crate::utils::PathResolver::resolve_input_path(positional_path.clone(), path.clone());
 
-    run_project(resolved_path, Some(port), watch, language.clone(), false)
+    if os {
+        run_project_os_mode(resolved_path, port, language.clone(), watch)
+    } else {
+        run_project(resolved_path, Some(port), watch, language.clone(), false)
+    }
 }
 
 pub fn run_project(
@@ -370,4 +375,57 @@ fn run_with_watch_legacy(
             }
         }
     }
+}
+
+/// Run a project in OS mode using the multi-language kernel
+pub fn run_project_os_mode(
+    path: String,
+    port: u16,
+    language: Option<String>,
+    watch: bool,
+) -> Result<()> {
+    use crate::runtime::multilang_kernel::{MultiLanguageKernel, OsRunConfig};
+    use crate::runtime::os_server::OsServer;
+
+    println!("🚀 Starting wasmrun in OS mode...");
+    println!("📂 Project path: {path}");
+
+    if let Some(ref lang) = language {
+        println!("🏷️  Forced language: {lang}");
+    } else {
+        println!("🔍 Auto-detecting language...");
+    }
+
+    if watch {
+        println!("👀 Watch mode enabled (hot reload)");
+    }
+
+    // Initialize the multi-language kernel
+    let kernel = MultiLanguageKernel::new();
+
+    // Start the kernel
+    kernel
+        .start()
+        .map_err(|e| WasmrunError::from(format!("Failed to start OS kernel: {e}")))?;
+
+    println!("✅ Multi-language kernel started");
+
+    // Create OS run configuration
+    let config = OsRunConfig {
+        project_path: path.clone(),
+        language: language.clone(),
+        dev_mode: true,
+        port: Some(port),
+        hot_reload: watch,
+        debugging: false, // TODO: Add --debug flag support
+    };
+
+    // Start the OS server with kernel interface
+    let server = OsServer::new(kernel, config)?;
+
+    println!("🌐 OS Mode interface starting on http://localhost:{port}");
+    println!("📱 Open your browser to access the development environment");
+
+    // Start the server - this will block until Ctrl+C
+    server.start(port)
 }

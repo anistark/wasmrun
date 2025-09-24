@@ -5,6 +5,7 @@ mod config;
 mod debug;
 mod error;
 mod plugin;
+mod runtime;
 mod server;
 mod template;
 mod ui;
@@ -98,23 +99,24 @@ fn main() {
             positional_path,
             port,
             language,
+            os,
             watch,
             verbose: _verbose,
         }) => {
             debug_println!(
-                "Processing run command: port={}, language={:?}, watch={}",
+                "Processing run command: port={}, language={:?}, os={}, watch={}",
                 port,
                 language,
+                os,
                 watch
             );
-            commands::handle_run_command(path, positional_path, *port, language, *watch).map_err(
-                |e| match e {
+            commands::handle_run_command(path, positional_path, *port, language, *os, *watch)
+                .map_err(|e| match e {
                     WasmrunError::Command(_)
                     | WasmrunError::Server(_)
                     | WasmrunError::Path { .. } => e,
                     _ => e,
-                },
-            )
+                })
         }
 
         Some(Commands::Plugin(plugin_cmd)) => {

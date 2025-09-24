@@ -170,10 +170,14 @@ pub enum Commands {
         #[arg(
             short = 'l',
             long,
-            value_parser = ["rust", "go", "c", "asc", "python"],
+            value_parser = ["rust", "go", "c", "asc", "python", "nodejs"],
             help = "Force specific language for compilation"
         )]
         language: Option<String>,
+
+        /// Enable OS mode - run projects in browser-based multi-language kernel
+        #[arg(long, help = "Enable OS mode for multi-language execution in browser")]
+        os: bool,
 
         /// Enable watch mode for live-reloading on file changes
         #[arg(long, help = "Watch for changes and auto-reload")]
