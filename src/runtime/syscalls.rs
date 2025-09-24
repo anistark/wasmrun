@@ -312,7 +312,7 @@ impl SyscallHandler {
                 let result = data[start..end].to_vec();
                 SyscallResult::Success(SyscallReturn::Buffer(result))
             }
-            Err(e) => SyscallResult::Error(format!("read: {}", e)),
+            Err(e) => SyscallResult::Error(format!("read: {e}")),
         }
     }
 

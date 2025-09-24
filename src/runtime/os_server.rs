@@ -145,10 +145,10 @@ impl OsServer {
 
     /// Start the OS server
     pub fn start(mut self, port: u16) -> Result<()> {
-        let server = Server::http(format!("127.0.0.1:{}", port))
+        let server = Server::http(format!("127.0.0.1:{port}"))
             .map_err(|e| WasmrunError::from(format!("Failed to start HTTP server: {e}")))?;
 
-        println!("🌐 OS Mode server listening on http://127.0.0.1:{}", port);
+        println!("🌐 OS Mode server listening on http://127.0.0.1:{port}");
 
         // Start the project in the kernel
         self.start_project()?;
@@ -157,7 +157,7 @@ impl OsServer {
         for request in server.incoming_requests() {
             match self.handle_request(request) {
                 Ok(_) => {}
-                Err(e) => eprintln!("Request handling error: {}", e),
+                Err(e) => eprintln!("Request handling error: {e}"),
             }
         }
 
@@ -171,11 +171,11 @@ impl OsServer {
         match kernel.auto_detect_and_run(self.config.clone()) {
             Ok(pid) => {
                 self.project_pid = Some(pid);
-                println!("✅ Project started with PID: {}", pid);
+                println!("✅ Project started with PID: {pid}");
                 Ok(())
             }
             Err(e) => {
-                eprintln!("⚠️ Failed to start project in kernel: {}", e);
+                eprintln!("⚠️ Failed to start project in kernel: {e}");
                 // Continue serving the interface even if project fails
                 Ok(())
             }
