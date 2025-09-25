@@ -72,7 +72,7 @@ impl OsServer {
                 .map_err(|e| WasmrunError::from(format!("Failed to read CSS bundle: {e}")))?;
             index_content = index_content.replace(
                 "<!-- @style-placeholder -->",
-                &format!("<link rel=\"stylesheet\" href=\"/index.css\">"),
+                "<link rel=\"stylesheet\" href=\"/index.css\">",
             );
         }
 
@@ -80,7 +80,7 @@ impl OsServer {
         if js_path.exists() {
             index_content = index_content.replace(
                 "<!-- @script-placeholder -->",
-                &format!("<script src=\"/os.js\"></script>"),
+                "<script src=\"/os.js\"></script>",
             );
         }
 

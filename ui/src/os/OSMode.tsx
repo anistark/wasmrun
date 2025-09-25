@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'preact/hooks'
+import { useState, useEffect, useCallback } from 'preact/hooks'
 import { clsx } from 'clsx'
 
 interface KernelStats {
@@ -8,8 +8,6 @@ interface KernelStats {
   active_runtimes: string[]
   project_pid: number | null
 }
-
-interface OSModeProps {}
 
 interface PanelType {
   id: string
@@ -27,7 +25,7 @@ const panels: PanelType[] = [
   { id: 'logs', name: 'Logs', icon: '📋' },
 ]
 
-export default function OSMode({}: OSModeProps) {
+export default function OSMode() {
   const [activePanel, setActivePanel] = useState('project')
   const [kernelStats, setKernelStats] = useState<KernelStats | null>(null)
   const [kernelStatus, setKernelStatus] = useState<'loading' | 'running' | 'error'>('loading')
@@ -37,10 +35,10 @@ export default function OSMode({}: OSModeProps) {
 
   const projectName = (window as any).PROJECT_NAME || 'Unknown Project'
   const language = (window as any).LANGUAGE || 'unknown'
-  const projectPath = (window as any).PROJECT_PATH || ''
+  // const projectPath = (window as any).PROJECT_PATH || ''
   const port = (window as any).PORT || '8420'
 
-  const fetchKernelStats = async () => {
+  const fetchKernelStats = useCallback(async () => {
     try {
       const response = await fetch('/api/kernel/stats')
       const stats = await response.json()
@@ -53,12 +51,12 @@ export default function OSMode({}: OSModeProps) {
       console.error('Failed to fetch kernel stats:', error)
       setKernelStatus('error')
     }
-  }
+  }, [])
 
-  const updateUptime = () => {
+  const updateUptime = useCallback(() => {
     const seconds = Math.floor((Date.now() - startTime) / 1000)
     setUptime(seconds)
-  }
+  }, [startTime])
 
   useEffect(() => {
     fetchKernelStats()
@@ -71,7 +69,7 @@ export default function OSMode({}: OSModeProps) {
       clearInterval(statsInterval)
       clearInterval(uptimeInterval)
     }
-  }, [])
+  }, [fetchKernelStats, updateUptime])
 
   const formatUptime = (seconds: number) => {
     const hours = Math.floor(seconds / 3600)
@@ -90,11 +88,9 @@ export default function OSMode({}: OSModeProps) {
   const StatusIndicator = ({
     status,
     label,
-    id,
   }: {
     status: 'loading' | 'running' | 'error'
     label: string
-    id: string
   }) => (
     <div
       className={clsx('flex items-center gap-2 px-3 py-2 rounded-full text-sm font-medium border', {

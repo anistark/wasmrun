@@ -240,7 +240,7 @@ impl SyscallHandler {
             SyscallNumber::GetPid => self.handle_getpid(pid),
             SyscallNumber::Kill => self.handle_kill(pid, args),
             SyscallNumber::Print => self.handle_print(pid, args),
-            _ => SyscallResult::Error(format!("Unimplemented syscall: {:?}", syscall)),
+            _ => SyscallResult::Error(format!("Unimplemented syscall: {syscall:?}")),
         }
     }
 
