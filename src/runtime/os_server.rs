@@ -269,6 +269,11 @@ impl OsServer {
                     .map_err(|e| WasmrunError::from(e.to_string()))?;
             }
 
+            // Serve static assets
+            (Method::Get, path) if path.starts_with("/assets/") => {
+                self.serve_asset(request, &path[8..])?; // Remove "/assets/" prefix
+            }
+
             // Proxy requests to the user's project (running in kernel)
             (Method::Get, path) if path.starts_with("/project/") => {
                 // Strip /project/ prefix and proxy to the actual project
@@ -320,12 +325,12 @@ impl OsServer {
             "
             <html>
                 <head><title>Project Proxy</title></head>
-                <body>
-                    <h1>Project Running in Kernel</h1>
-                    <p>Path: {}</p>
-                    <p>PID: {:?}</p>
-                    <p>This would proxy to your project's HTTP server.</p>
-                    <p>Implementation in progress...</p>
+                <body style=\"background-color: #000; color: white; font-family: system-ui, -apple-system, sans-serif; padding: 2rem;\">
+                    <h1 style=\"color: #10b981;\">Project Running in Kernel</h1>
+                    <p style=\"color: white;\">Path: {}</p>
+                    <p style=\"color: white;\">PID: {:?}</p>
+                    <p style=\"color: white;\">This would proxy to your project's HTTP server.</p>
+                    <p style=\"color: #10b981;\">Implementation in progress...</p>
                 </body>
             </html>
         ",
@@ -334,6 +339,35 @@ impl OsServer {
 
         let response = Response::from_string(placeholder)
             .with_header(Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap());
+
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Serve static assets
+    fn serve_asset(&self, request: Request, asset_path: &str) -> Result<()> {
+        let full_path = Path::new("templates/assets").join(asset_path);
+
+        if !full_path.exists() {
+            return self.send_404(request);
+        }
+
+        let content = fs::read(&full_path)
+            .map_err(|e| WasmrunError::from(format!("Failed to read asset: {e}")))?;
+
+        let content_type = match full_path.extension().and_then(|ext| ext.to_str()) {
+            Some("png") => "image/png",
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("svg") => "image/svg+xml",
+            Some("css") => "text/css",
+            Some("js") => "application/javascript",
+            _ => "application/octet-stream",
+        };
+
+        let response = Response::from_data(content)
+            .with_header(Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap());
 
         request
             .respond(response)

@@ -246,7 +246,7 @@ export default function OSMode() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img
-              src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzAwRkY4OCIvPgo8cGF0aCBkPSJNOCA4SDI0VjI0SDhWOFoiIGZpbGw9IiMwMEZGODAiLz4KPHN2Zz4K"
+              src="/assets/logo-text.png"
               alt="wasmrun OS"
               className="h-8 object-contain"
             />
@@ -259,7 +259,6 @@ export default function OSMode() {
             <StatusIndicator
               status={kernelStatus}
               label={kernelStatus === 'running' ? 'Kernel Active' : 'Initializing Kernel...'}
-              id="kernel"
             />
             <StatusIndicator
               status={runtimeStatus}
@@ -268,7 +267,6 @@ export default function OSMode() {
                   ? `Runtime Active (PID: ${kernelStats?.project_pid || 'N/A'})`
                   : 'Loading Runtime...'
               }
-              id="runtime"
             />
           </div>
         </div>
