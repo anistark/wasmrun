@@ -1,2 +1,0 @@
-# Python WebAssembly Example Requirements
-# These packages are typically available in Pyodide environments

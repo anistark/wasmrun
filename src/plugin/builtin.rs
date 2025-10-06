@@ -2,9 +2,7 @@
 
 use crate::compiler::builder::WasmBuilder;
 use crate::error::Result;
-use crate::plugin::languages::{
-    asc_plugin::AscPlugin, c_plugin::CPlugin, python_plugin::PythonPlugin,
-};
+use crate::plugin::languages::{asc_plugin::AscPlugin, c_plugin::CPlugin};
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
 use std::sync::Arc;
 
@@ -167,10 +165,6 @@ pub fn load_all_builtin_plugins(plugins: &mut Vec<Box<dyn Plugin>>) -> Result<()
     let asc_plugin = Arc::new(AscPlugin::new());
     plugins.push(Box::new(BuiltinPlugin::new(asc_plugin)));
 
-    // Python plugin
-    let python_plugin = Arc::new(PythonPlugin::new());
-    plugins.push(Box::new(BuiltinPlugin::new(python_plugin)));
-
     Ok(())
 }
 
@@ -183,7 +177,7 @@ pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
 /// Check if a plugin name is a built-in plugin
 #[allow(dead_code)] // TODO: Future plugin validation
 pub fn is_builtin_plugin(name: &str) -> bool {
-    matches!(name, "c" | "asc" | "python")
+    matches!(name, "c" | "asc")
 }
 
 /// Get specific built-in plugin info by name
@@ -205,7 +199,7 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(!plugins.is_empty());
-        assert!(plugins.len() >= 3); // At least C, ASC, and Python plugins
+        assert!(plugins.len() >= 2); // At least C and ASC plugins
 
         // Verify all plugins are builtin type
         for plugin in &plugins {
@@ -224,7 +218,6 @@ mod tests {
         // Check that we have the expected builtin plugins
         assert!(plugin_names.contains(&"c"));
         assert!(plugin_names.contains(&"asc"));
-        assert!(plugin_names.contains(&"python"));
     }
 
     #[test]
@@ -251,9 +244,6 @@ mod tests {
                         info.extensions.contains(&"ts".to_string())
                             || info.extensions.contains(&"asc".to_string())
                     );
-                }
-                "python" => {
-                    assert!(info.extensions.contains(&"py".to_string()));
                 }
                 _ => {} // Other plugins are fine
             }
@@ -293,9 +283,9 @@ mod tests {
         let c_plugin = plugins.iter().find(|p| p.info().name == "c").unwrap();
         assert!(c_plugin.can_handle_project(temp_dir.path().to_str().unwrap()));
 
-        // Python plugin should not handle C project
-        let python_plugin = plugins.iter().find(|p| p.info().name == "python").unwrap();
-        assert!(!python_plugin.can_handle_project(temp_dir.path().to_str().unwrap()));
+        // ASC plugin should not handle C project
+        let asc_plugin = plugins.iter().find(|p| p.info().name == "asc").unwrap();
+        assert!(!asc_plugin.can_handle_project(temp_dir.path().to_str().unwrap()));
     }
 
     #[test]
@@ -331,7 +321,7 @@ mod tests {
             // Test that capabilities struct is properly initialized
             // (This ensures we don't get default/uninitialized values)
             match plugin.info().name.as_str() {
-                "c" | "asc" | "python" => {
+                "c" | "asc" => {
                     // These plugins should have reasonable capabilities
                     assert!(
                         !capabilities.custom_targets.is_empty()
@@ -347,10 +337,10 @@ mod tests {
     fn test_is_builtin_plugin() {
         assert!(is_builtin_plugin("c"));
         assert!(is_builtin_plugin("asc"));
-        assert!(is_builtin_plugin("python"));
 
         assert!(!is_builtin_plugin("rust"));
         assert!(!is_builtin_plugin("go"));
+        assert!(!is_builtin_plugin("python"));
         assert!(!is_builtin_plugin("nonexistent"));
         assert!(!is_builtin_plugin(""));
     }

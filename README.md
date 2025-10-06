@@ -10,7 +10,7 @@
 
 ## ✨ Features
 
-- 🚀 **Multi-Language Support** - Build WebAssembly from Rust, Go, C/C++, AssemblyScript, and Python
+- 🚀 **Multi-Language Support** - Build WebAssembly from Rust, Go, C/C++, and AssemblyScript
 - 🔌 **Plugin Architecture** - Extensible system with built-in and external plugins
 - 🔥 **Live Reload** - Instant development feedback with file watching
 - 🌐 **Zero-Config Web Server** - Built-in HTTP server with WASM and web app hosting
@@ -139,7 +139,6 @@ Built-in plugins are compiled directly into Wasmrun and provide core language su
 |--------|----------|----------|---------|--------------|
 | **C/C++** | C, C++ | Emscripten | ✅ Stable | Full WASM + Web Apps + Makefiles |
 | **AssemblyScript** | TypeScript-like | `asc` | ✅ Stable | WASM + Optimization + npm/yarn |
-| **Python** | Python | `py2wasm` | 🚧 Beta | Runtime Integration + Bundle creation |
 
 #### 2. **External Plugins** 📦
 External plugins are distributed via crates.io and installed dynamically to `~/.wasmrun/`:
@@ -232,24 +231,13 @@ wasmrun ./my-assemblyscript-project
 **Requirements:**
 - AssemblyScript compiler: `npm install -g assemblyscript`
 
-### Python (Built-in - Beta)
-
-```sh
-# Works out of the box
-wasmrun ./my-python-project
-```
-
-**Requirements:**
-- Python 3.11.0 (recommended to use [mise](https://mise.jdx.dev/))
-- py2wasm: `pip install py2wasm`
-
 ## 🔍 Project Detection
 
 Wasmrun automatically detects your project type based on:
 
-- **File extensions** (`.rs`, `.go`, `.c`, `.cpp`, `.py`, `.ts`)
+- **File extensions** (`.rs`, `.go`, `.c`, `.cpp`, `.ts`)
 - **Configuration files** (`Cargo.toml`, `go.mod`, `Makefile`, `package.json`)
-- **Entry point files** (`main.rs`, `main.go`, `main.c`, `main.py`, etc.)
+- **Entry point files** (`main.rs`, `main.go`, `main.c`, etc.)
 
 You can override detection with the `--language` flag:
 
@@ -267,7 +255,6 @@ wasmrun --language go ./my-project
 # For built-in language support:
 wasmrun --language c        # C/C++ (built-in)
 wasmrun --language asc      # AssemblyScript (built-in)
-wasmrun --language python   # Python (built-in)
 
 # For Rust projects, install the external plugin:
 wasmrun plugin install wasmrust
@@ -306,18 +293,6 @@ wasmrun plugin install wasmgo     # For Go support
 wasmrun plugin list --external
 ```
 
-### Configuring py2wasm
-
-- Make sure that you have python3.11.0 is installed and configured. We recommend
-  using [mise](https://mise.jdx.dev/getting-started.html).
-```sh
-mise use python@3.11.0
-```
-- Now install py2wasm, you can use a virtual environment or not.
-```sh
-pip install py2wasm
-```
-- Make sure that you have named the entry file as main.py or app.py.
 
 ### Common Issues
 

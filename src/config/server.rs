@@ -217,7 +217,6 @@ pub fn setup_project_compilation(
             "rust" | "rs" => crate::compiler::ProjectLanguage::Rust,
             "c" | "cpp" | "c++" => crate::compiler::ProjectLanguage::C,
             "asc" | "assemblyscript" => crate::compiler::ProjectLanguage::Asc,
-            "python" | "py" => crate::compiler::ProjectLanguage::Python,
             "go" => crate::compiler::ProjectLanguage::Go,
             _ => {
                 println!("⚠️  Unknown language override: {lang_override}");

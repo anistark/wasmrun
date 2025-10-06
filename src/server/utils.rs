@@ -156,8 +156,7 @@ impl ServerUtils {
                             return;
                         }
                         crate::compiler::ProjectLanguage::C
-                        | crate::compiler::ProjectLanguage::Asc
-                        | crate::compiler::ProjectLanguage::Python => {
+                        | crate::compiler::ProjectLanguage::Asc => {
                             println!("  🔧 \x1b[1;34mUsing built-in plugin\x1b[0m");
                         }
                         _ => {}
@@ -193,9 +192,7 @@ impl ServerUtils {
 
         if matches!(
             lang,
-            crate::compiler::ProjectLanguage::C
-                | crate::compiler::ProjectLanguage::Asc
-                | crate::compiler::ProjectLanguage::Python
+            crate::compiler::ProjectLanguage::C | crate::compiler::ProjectLanguage::Asc
         ) {
             crate::compiler::print_system_info();
             let os = crate::compiler::detect_operating_system();
