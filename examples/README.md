@@ -26,6 +26,11 @@ This directory contains example projects demonstrating how to create WebAssembly
 - **Functions**: `greet()`, `fibonacci()`, `isPrime()`, `reverseString()`, `power()`
 - **Build**: Uses AssemblyScript compiler
 
+### 🐍 Python (`python-hello/`)
+- **Features**: Python-to-WebAssembly compilation, type annotations, no runtime required
+- **Functions**: `greet()`, `add()`, `fibonacci()`, `factorial()`
+- **Build**: Uses waspy (Python to WASM compiler)
+
 ### 🌐 AssemblyScript Web App (`web-asc/`)
 - **Features**: Interactive web application, DOM manipulation, real-time calculations
 - **Functions**: `greet()`, `fibonacci()`, `isPrime()`, `reverseString()`, `power()`, `validateEmail()`, `calculateArea()`
@@ -44,6 +49,7 @@ Examples work with standard wasmrun commands:
 # Run any example (from wasmrun project root)
 wasmrun run examples/rust-hello
 wasmrun run examples/go-hello
+wasmrun run examples/python-hello
 wasmrun run examples/c-hello
 wasmrun run examples/asc-hello
 wasmrun run examples/web-asc
@@ -51,6 +57,7 @@ wasmrun run examples/web-leptos
 
 # Compile only
 wasmrun compile examples/rust-hello
+wasmrun compile examples/python-hello
 
 # Run with options
 wasmrun run examples/go-hello --port 3000 --watch
@@ -93,6 +100,13 @@ Each example contains:
 - Full-stack Rust development compiled to WebAssembly
 - `web-leptos` showcases modern web app architecture with Rust
 
+### Python
+- Requires `waspy` plugin: `wasmrun plugin install waspy`
+- Pure Rust-based compiler (no Python runtime needed)
+- Produces optimized `.wasm` files
+- Supports type annotations and basic Python syntax
+- Good for educational purposes and lightweight Python functions
+
 ## Contributing
 
 To add a new example:
@@ -109,6 +123,9 @@ All examples implement these common functions for consistency:
 
 - `greet(name)` - Basic greeting with the provided name
 - `fibonacci(n)` - Calculate the nth Fibonacci number
-- `sum_array(arr)` - Sum all elements in an array
+- `add(a, b)` / `sum_array(arr)` - Addition/sum operations
 
-Additional language-specific functions showcase unique capabilities of each platform.
+Additional language-specific functions showcase unique capabilities of each platform:
+- Python: `factorial()` for demonstrating recursion
+- C: `is_prime()`, `square_root()` for math operations
+- AssemblyScript: `reverseString()`, `power()` for string and numeric operations
