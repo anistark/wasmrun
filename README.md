@@ -10,7 +10,7 @@
 
 ## ✨ Features
 
-- 🚀 **Multi-Language Support** - Build WebAssembly from Rust, Go, C/C++, and AssemblyScript
+- 🚀 **Multi-Language Support** - Build WebAssembly from Rust, Go, Python, C/C++, and AssemblyScript
 - 🔌 **Plugin Architecture** - Extensible system with built-in and external plugins
 - 🔥 **Live Reload** - Instant development feedback with file watching
 - 🌐 **Zero-Config Web Server** - Built-in HTTP server with WASM and web app hosting
@@ -147,6 +147,7 @@ External plugins are distributed via crates.io and installed dynamically to `~/.
 |--------|----------|----------|-------------|--------------|
 | **wasmrust** | Rust | `rustc` + `wasm-pack` | `wasmrun plugin install wasmrust` | Full WASM + Web Apps + Optimization |
 | **wasmgo** | Go | TinyGo | `wasmrun plugin install wasmgo` | WASM + Optimization + Package Support |
+| **waspy** | Python | waspy | `wasmrun plugin install waspy` | WASM + Python-to-WASM Compilation |
 
 **How External Plugins Work:**
 - 📦 **Cargo-like Installation**: Similar to `cargo install`, plugins are downloaded and compiled to `~/.wasmrun/`
@@ -160,12 +161,14 @@ External plugins are distributed via crates.io and installed dynamically to `~/.
 # Install external plugins (similar to cargo install)
 wasmrun plugin install wasmrust  # Installs to ~/.wasmrun/
 wasmrun plugin install wasmgo
+wasmrun plugin install waspy
 
 # View all installed plugins
 wasmrun plugin list
 
 # Get detailed plugin information
 wasmrun plugin info wasmrust
+wasmrun plugin info waspy
 
 # Search for available plugins
 wasmrun plugin search rust
@@ -211,6 +214,25 @@ wasmrun ./my-go-wasm-project
 **Requirements:**
 - TinyGo compiler: [https://tinygo.org/](https://tinygo.org/)
 
+### Python (via External Plugin)
+
+```sh
+# Install the Python plugin
+wasmrun plugin install waspy
+
+# Run Python projects
+wasmrun ./my-python-wasm-project
+```
+
+**Requirements:**
+- None! waspy is a pure Rust compiler that compiles Python to WebAssembly
+
+**Features:**
+- ✅ Python to WebAssembly compilation
+- ✅ Support for functions, classes, and basic Python syntax
+- ✅ Type annotations support
+- ✅ No Python runtime required
+
 ### C/C++ (Built-in)
 
 ```sh
@@ -235,15 +257,16 @@ wasmrun ./my-assemblyscript-project
 
 Wasmrun automatically detects your project type based on:
 
-- **File extensions** (`.rs`, `.go`, `.c`, `.cpp`, `.ts`)
+- **File extensions** (`.rs`, `.go`, `.py`, `.c`, `.cpp`, `.ts`)
 - **Configuration files** (`Cargo.toml`, `go.mod`, `Makefile`, `package.json`)
-- **Entry point files** (`main.rs`, `main.go`, `main.c`, etc.)
+- **Entry point files** (`main.rs`, `main.go`, `main.py`, `main.c`, etc.)
 
 You can override detection with the `--language` flag:
 
 ```sh
 wasmrun --language rust ./my-project
 wasmrun --language go ./my-project
+wasmrun --language python ./my-project
 ```
 
 ## 🚨 Troubleshooting
@@ -271,6 +294,7 @@ go install tinygo.org/x/tinygo@latest     # For wasmgo plugin
 
 # Check plugin dependencies:
 wasmrun plugin info wasmrust  # Shows required dependencies
+wasmrun plugin info waspy     # Should show no dependencies
 ```
 
 **"Wrong plugin selected"**
@@ -278,6 +302,7 @@ wasmrun plugin info wasmrust  # Shows required dependencies
 # Force a specific plugin
 wasmrun --language rust
 wasmrun --language go
+wasmrun --language python
 ```
 
 ### External Plugin Installation
@@ -288,6 +313,7 @@ wasmrun --language go
 # Make sure you have the correct plugin name
 wasmrun plugin install wasmrust   # For Rust support
 wasmrun plugin install wasmgo     # For Go support
+wasmrun plugin install waspy      # For Python support
 
 # Check available external plugins
 wasmrun plugin list --external
