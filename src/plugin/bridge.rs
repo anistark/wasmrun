@@ -17,6 +17,31 @@ pub struct BuildResultC {
     pub error_message: *const c_char,
 }
 
+#[repr(C)]
+pub struct StringArrayC {
+    pub data: *const *const c_char,
+    pub len: usize,
+}
+
+#[repr(C)]
+#[allow(dead_code)]
+pub struct PluginInfoC {
+    pub name: *const c_char,
+    pub version: *const c_char,
+    pub description: *const c_char,
+    pub author: *const c_char,
+    pub extensions: StringArrayC,
+    pub entry_files: StringArrayC,
+}
+
+#[repr(C)]
+pub struct WaspyCompileResult {
+    pub success: bool,
+    pub wasm_data: *mut u8,
+    pub wasm_len: usize,
+    pub error_message: *mut c_char,
+}
+
 impl BuildConfig {
     #[allow(dead_code)]
     pub fn is_wasm_bindgen(&self) -> bool {
@@ -50,19 +75,52 @@ impl BuildResult {
 
 pub mod symbols {
     use std::ffi::c_void;
+    use std::os::raw::{c_char, c_int};
 
+    // Old API (deprecated)
     pub type CreateBuilderFn = unsafe extern "C" fn() -> *mut c_void;
-    pub type CanHandleProjectFn =
-        unsafe extern "C" fn(*const c_void, *const std::ffi::c_char) -> bool;
+    pub type CanHandleProjectFn = unsafe extern "C" fn(*const c_void, *const c_char) -> bool;
     pub type BuildFn =
         unsafe extern "C" fn(*const c_void, *const super::BuildConfigC) -> *mut super::BuildResultC;
-    pub type CleanFn = unsafe extern "C" fn(*const c_void, *const std::ffi::c_char) -> bool;
+    pub type CleanFn = unsafe extern "C" fn(*const c_void, *const c_char) -> bool;
     #[allow(dead_code)]
     pub type CloneBoxFn = unsafe extern "C" fn(*const c_void) -> *mut c_void;
     #[allow(dead_code)]
     pub type DropFn = unsafe extern "C" fn(*mut c_void);
     #[allow(dead_code)]
     pub type FreeBuildResultFn = unsafe extern "C" fn(*mut super::BuildResultC);
+
+    // New API - Plugin object methods
+    pub type PluginCreateFn = unsafe extern "C" fn() -> *mut c_void;
+    #[allow(dead_code)]
+    pub type PluginInfoFn = unsafe extern "C" fn(*const c_void) -> *const super::PluginInfoC;
+    #[allow(dead_code)]
+    pub type PluginCanHandleFn = unsafe extern "C" fn(*const c_void, *const c_char) -> bool;
+    #[allow(dead_code)]
+    pub type PluginGetBuilderFn = unsafe extern "C" fn(*const c_void) -> *mut c_void;
+    #[allow(dead_code)]
+    pub type PluginDropFn = unsafe extern "C" fn(*mut c_void);
+
+    // WasmBuilder methods (for new API)
+    #[allow(dead_code)]
+    pub type BuilderBuildFn =
+        unsafe extern "C" fn(*const c_void, *const super::BuildConfigC) -> *mut super::BuildResultC;
+    #[allow(dead_code)]
+    pub type BuilderCanHandleFn = unsafe extern "C" fn(*const c_void, *const c_char) -> bool;
+    #[allow(dead_code)]
+    pub type BuilderCheckDepsFn = unsafe extern "C" fn(*const c_void) -> *mut super::StringArrayC;
+    #[allow(dead_code)]
+    pub type BuilderCleanFn = unsafe extern "C" fn(*const c_void, *const c_char) -> bool;
+    #[allow(dead_code)]
+    pub type BuilderDropFn = unsafe extern "C" fn(*mut c_void);
+
+    // Waspy FFI - Direct compilation functions
+    pub type WaspyCompilePythonFn =
+        unsafe extern "C" fn(*const c_char, c_int) -> super::WaspyCompileResult;
+    pub type WaspyCompileProjectFn =
+        unsafe extern "C" fn(*const c_char, c_int) -> super::WaspyCompileResult;
+    pub type WaspyFreeWasmDataFn = unsafe extern "C" fn(*mut u8, usize);
+    pub type WaspyFreeErrorMessageFn = unsafe extern "C" fn(*mut c_char);
 }
 
 #[allow(dead_code)]
@@ -131,6 +189,52 @@ impl BuildConfigC {
             output_dir: output_dir.into_raw(),
             watch: config.watch,
         }
+    }
+}
+
+impl StringArrayC {
+    /// Convert from Rust Vec<String> to C array
+    /// Caller must free the returned pointers
+    #[allow(dead_code)]
+    pub fn from_vec(strings: &[String]) -> Self {
+        let c_strings: Vec<CString> = strings
+            .iter()
+            .map(|s| CString::new(s.as_str()).unwrap_or_default())
+            .collect();
+
+        let ptrs: Vec<*const c_char> = c_strings.iter().map(|s| s.as_ptr()).collect();
+
+        // Leak the strings so they remain valid
+        std::mem::forget(c_strings);
+
+        let data = ptrs.as_ptr();
+        let len = ptrs.len();
+        std::mem::forget(ptrs);
+
+        Self { data, len }
+    }
+
+    /// Convert from C array to Rust Vec<String>
+    #[allow(dead_code)]
+    pub unsafe fn to_vec(&self) -> Vec<String> {
+        if self.data.is_null() || self.len == 0 {
+            return vec![];
+        }
+
+        let slice = std::slice::from_raw_parts(self.data, self.len);
+        slice
+            .iter()
+            .filter_map(|&ptr| {
+                if ptr.is_null() {
+                    None
+                } else {
+                    std::ffi::CStr::from_ptr(ptr)
+                        .to_str()
+                        .ok()
+                        .map(String::from)
+                }
+            })
+            .collect()
     }
 }
 
