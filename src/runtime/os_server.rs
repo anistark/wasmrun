@@ -366,8 +366,9 @@ impl OsServer {
             _ => "application/octet-stream",
         };
 
-        let response = Response::from_data(content)
-            .with_header(Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap());
+        let response = Response::from_data(content).with_header(
+            Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap(),
+        );
 
         request
             .respond(response)

@@ -17,6 +17,7 @@ use std::process::Command;
 pub struct PluginStats {
     pub builtin_count: usize,
     pub external_count: usize,
+    #[allow(dead_code)] // TODO: Use for plugin statistics reporting
     pub enabled_count: usize,
     #[allow(dead_code)]
     pub available_count: usize,
@@ -644,6 +645,7 @@ impl PluginManager {
         Ok(())
     }
 
+    #[allow(dead_code)] // TODO: Use for plugin statistics display
     pub fn plugin_counts(&self) -> (usize, usize, usize) {
         (
             self.plugin_stats.builtin_count,

@@ -245,11 +245,7 @@ export default function OSMode() {
       <header className="bg-black/30 backdrop-blur-xl border-b border-green-500/20 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img
-              src="/assets/logo-text.png"
-              alt="wasmrun OS"
-              className="h-8 object-contain"
-            />
+            <img src="/assets/logo-text.png" alt="wasmrun OS" className="h-8 object-contain" />
             <div className="flex flex-col">
               <span className="text-white font-bold text-lg">wasmrun OS</span>
               <span className="text-green-400/80 text-xs">{projectName}</span>
