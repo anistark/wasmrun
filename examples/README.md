@@ -16,11 +16,6 @@ This directory contains example projects demonstrating how to create WebAssembly
 - **Functions**: `greet()`, `fibonacci()`, `sumArray()`, `getCurrentTime()`
 - **Build**: Uses Go with GOOS=js GOARCH=wasm
 
-### 🐍 Python (`python-hello/`)
-- **Features**: Pyodide runtime, math library, JSON processing
-- **Functions**: `greet()`, `fibonacci()`, `sum_array()`, `calculate_pi()`, `math_operations()`
-- **Build**: Uses Pyodide compilation
-
 ### 🔧 C (`c-hello/`)
 - **Features**: Emscripten integration, memory management, math library
 - **Functions**: `greet()`, `fibonacci()`, `factorial()`, `is_prime()`, `square_root()`
@@ -49,7 +44,6 @@ Examples work with standard wasmrun commands:
 # Run any example (from wasmrun project root)
 wasmrun run examples/rust-hello
 wasmrun run examples/go-hello
-wasmrun run examples/python-hello
 wasmrun run examples/c-hello
 wasmrun run examples/asc-hello
 wasmrun run examples/web-asc
@@ -81,11 +75,6 @@ Each example contains:
 - Requires Go 1.21+ with WebAssembly support
 - Produces single `.wasm` file with `wasm_exec.js`
 - Good for concurrent operations and system programming
-
-### Python
-- Uses Pyodide runtime for scientific computing
-- Access to numpy, pandas, and other Python packages
-- Best for data analysis and scientific applications
 
 ### C
 - Uses Emscripten for compilation

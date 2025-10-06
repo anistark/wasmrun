@@ -41,8 +41,7 @@ src/
 │   └── languages/            # Built-in language plugins
 │       ├── mod.rs            # Language plugin exports
 │       ├── asc_plugin.rs     # AssemblyScript plugin
-│       ├── c_plugin.rs       # C/C++ plugin with Emscripten
-│       └── python_plugin.rs  # Python plugin with py2wasm
+│       └── c_plugin.rs       # C/C++ plugin with Emscripten
 ├── server/                   # HTTP server and web interface
 │   ├── mod.rs                # Server module exports
 │   ├── config.rs             # Server configuration and setup
@@ -325,7 +324,6 @@ External plugins are **dynamically loaded libraries** that integrate with Wasmru
        vec![
            Box::new(CPlugin::new()),
            Box::new(AscPlugin::new()),
-           Box::new(PythonPlugin::new()),
            Box::new(MyLanguagePlugin::new()), // Add your plugin here
        ]
    }
@@ -929,7 +927,6 @@ The `examples/` directory contains sample WebAssembly projects for different pro
 | --- | --- | --- |
 | 🦀 **Rust** | `rust-hello/` | wasm-bindgen, browser APIs, memory management |
 | 🐹 **Go** | `go-hello/` | syscall/js, concurrency, time operations |
-| 🐍 **Python** | `python-hello/` | Pyodide runtime, scientific computing, JSON |
 | 🔧 **C** | `c-hello/` | Emscripten, math library, manual memory |
 | 🚀 **AssemblyScript** | `asc-hello/` | TypeScript syntax, performance optimization |
 
