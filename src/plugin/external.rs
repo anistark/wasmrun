@@ -67,10 +67,15 @@ impl ExternalPluginWrapper {
                     unsafe {
                         match Library::new(&path) {
                             Ok(library) => {
-                                if library
+                                // Try both old and new API symbols
+                                let has_old_api = library
                                     .get::<symbols::CreateBuilderFn>(b"create_wasm_builder")
-                                    .is_ok()
-                                {
+                                    .is_ok();
+                                let has_new_api = library
+                                    .get::<symbols::CreateBuilderFn>(b"wasmrun_plugin_create")
+                                    .is_ok();
+
+                                if has_old_api || has_new_api {
                                     return Ok(Some(Arc::new(library)));
                                 }
                             }
@@ -238,8 +243,27 @@ impl WasmBuilder for ExternalWasmBuilder {
         #[cfg(not(target_os = "windows"))]
         {
             if let Some(library) = &self.library {
-                if let Some(exports) = &self.metadata.exports {
-                    unsafe {
+                unsafe {
+                    // Try new API first (wasmrun_plugin_create)
+                    if let Ok(plugin_create) =
+                        library.get::<symbols::PluginCreateFn>(b"wasmrun_plugin_create")
+                    {
+                        let plugin_ptr = plugin_create();
+                        if !plugin_ptr.is_null() {
+                            // Create a builder using the new API
+                            // We'll use the library to call methods through a simpler adapter
+                            let builder = NewApiWasmBuilder::new(
+                                self.plugin_name.clone(),
+                                library.clone(),
+                                plugin_ptr,
+                            );
+
+                            return builder.build(config);
+                        }
+                    }
+
+                    // Try old API if exports are defined
+                    if let Some(exports) = &self.metadata.exports {
                         // Create a builder instance
                         if let Ok(create_builder) =
                             library.get::<symbols::CreateBuilderFn>(b"create_wasm_builder")
@@ -783,6 +807,348 @@ mod tests {
             // Build will fail (no plugin binary), but shouldn't crash
             let result = builder.build(config);
             assert!(result.is_err()); // Expected to fail
+        }
+    }
+}
+
+/// New API - WasmBuilder that directly interfaces with plugin library
+#[cfg(not(target_os = "windows"))]
+#[allow(clippy::items_after_test_module)]
+pub struct NewApiWasmBuilder {
+    plugin_name: String,
+    #[allow(dead_code)]
+    library: Arc<Library>,
+    plugin_ptr: *mut std::ffi::c_void,
+}
+
+#[cfg(not(target_os = "windows"))]
+unsafe impl Send for NewApiWasmBuilder {}
+#[cfg(not(target_os = "windows"))]
+unsafe impl Sync for NewApiWasmBuilder {}
+
+#[cfg(not(target_os = "windows"))]
+impl NewApiWasmBuilder {
+    pub fn new(
+        plugin_name: String,
+        library: Arc<Library>,
+        plugin_ptr: *mut std::ffi::c_void,
+    ) -> Self {
+        Self {
+            plugin_name,
+            library,
+            plugin_ptr,
+        }
+    }
+
+    /// Convert wasmrun BuildConfig to a format compatible with waspy
+    #[allow(dead_code)]
+    fn convert_config(&self, config: &BuildConfig) -> serde_json::Value {
+        serde_json::json!({
+            "input": config.project_path,
+            "output_dir": config.output_dir,
+            "optimization": match config.optimization_level {
+                crate::compiler::builder::OptimizationLevel::Debug => "Debug",
+                crate::compiler::builder::OptimizationLevel::Release => "Release",
+                crate::compiler::builder::OptimizationLevel::Size => "Size",
+            },
+            "target_type": match &config.target_type {
+                crate::compiler::builder::TargetType::Standard => "wasm",
+                crate::compiler::builder::TargetType::Web => "html",
+            },
+            "verbose": config.verbose,
+            "watch": config.watch,
+        })
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+impl WasmBuilder for NewApiWasmBuilder {
+    fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
+        use std::fs;
+        use std::path::Path;
+
+        let input_path = Path::new(&config.project_path);
+
+        unsafe {
+            // Try to use waspy's FFI compilation functions
+            if input_path.is_file() {
+                // Compile single Python file
+                if let Ok(compile_fn) = self
+                    .library
+                    .get::<symbols::WaspyCompilePythonFn>(b"waspy_compile_python")
+                {
+                    // Read the source
+                    let source = fs::read_to_string(&config.project_path).map_err(|e| {
+                        CompilationError::BuildFailed {
+                            language: "python".to_string(),
+                            reason: format!("Failed to read file: {e}"),
+                        }
+                    })?;
+
+                    let c_source = std::ffi::CString::new(source).map_err(|e| {
+                        CompilationError::BuildFailed {
+                            language: "python".to_string(),
+                            reason: format!("Invalid source string: {e}"),
+                        }
+                    })?;
+
+                    let optimize = match config.optimization_level {
+                        crate::compiler::builder::OptimizationLevel::Debug => 0,
+                        _ => 1,
+                    };
+
+                    let result = compile_fn(c_source.as_ptr(), optimize);
+
+                    if result.success {
+                        // Get the WASM bytes
+                        let wasm_bytes =
+                            std::slice::from_raw_parts(result.wasm_data, result.wasm_len).to_vec();
+
+                        // Free the data
+                        if let Ok(free_fn) = self
+                            .library
+                            .get::<symbols::WaspyFreeWasmDataFn>(b"waspy_free_wasm_data")
+                        {
+                            free_fn(result.wasm_data, result.wasm_len);
+                        }
+
+                        // Write output
+                        let output_name = input_path
+                            .file_stem()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string()
+                            + ".wasm";
+                        let output_path = Path::new(&config.output_dir).join(output_name);
+
+                        if let Some(parent) = output_path.parent() {
+                            fs::create_dir_all(parent).map_err(|e| {
+                                CompilationError::BuildFailed {
+                                    language: "python".to_string(),
+                                    reason: format!("Failed to create output directory: {e}"),
+                                }
+                            })?;
+                        }
+
+                        fs::write(&output_path, &wasm_bytes).map_err(|e| {
+                            CompilationError::BuildFailed {
+                                language: "python".to_string(),
+                                reason: format!("Failed to write output: {e}"),
+                            }
+                        })?;
+
+                        return Ok(BuildResult {
+                            wasm_path: output_path.to_string_lossy().to_string(),
+                            js_path: None,
+                            additional_files: vec![],
+                            is_wasm_bindgen: false,
+                        });
+                    } else {
+                        let error_msg = if !result.error_message.is_null() {
+                            let c_str = std::ffi::CStr::from_ptr(result.error_message);
+                            let msg = c_str.to_string_lossy().to_string();
+
+                            // Free the error message
+                            if let Ok(free_fn) =
+                                self.library.get::<symbols::WaspyFreeErrorMessageFn>(
+                                    b"waspy_free_error_message",
+                                )
+                            {
+                                free_fn(result.error_message);
+                            }
+
+                            msg
+                        } else {
+                            "Unknown compilation error".to_string()
+                        };
+
+                        return Err(CompilationError::BuildFailed {
+                            language: "python".to_string(),
+                            reason: error_msg,
+                        });
+                    }
+                }
+            } else if input_path.is_dir() {
+                // Compile Python project directory
+                if let Ok(compile_fn) = self
+                    .library
+                    .get::<symbols::WaspyCompileProjectFn>(b"waspy_compile_project")
+                {
+                    let c_path =
+                        std::ffi::CString::new(config.project_path.clone()).map_err(|e| {
+                            CompilationError::BuildFailed {
+                                language: "python".to_string(),
+                                reason: format!("Invalid path string: {e}"),
+                            }
+                        })?;
+
+                    let optimize = match config.optimization_level {
+                        crate::compiler::builder::OptimizationLevel::Debug => 0,
+                        _ => 1,
+                    };
+
+                    let result = compile_fn(c_path.as_ptr(), optimize);
+
+                    if result.success {
+                        // Get the WASM bytes
+                        let wasm_bytes =
+                            std::slice::from_raw_parts(result.wasm_data, result.wasm_len).to_vec();
+
+                        // Free the data
+                        if let Ok(free_fn) = self
+                            .library
+                            .get::<symbols::WaspyFreeWasmDataFn>(b"waspy_free_wasm_data")
+                        {
+                            free_fn(result.wasm_data, result.wasm_len);
+                        }
+
+                        // Write output
+                        let output_name = input_path
+                            .file_stem()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string()
+                            + ".wasm";
+                        let output_path = Path::new(&config.output_dir).join(output_name);
+
+                        if let Some(parent) = output_path.parent() {
+                            fs::create_dir_all(parent).map_err(|e| {
+                                CompilationError::BuildFailed {
+                                    language: "python".to_string(),
+                                    reason: format!("Failed to create output directory: {e}"),
+                                }
+                            })?;
+                        }
+
+                        fs::write(&output_path, &wasm_bytes).map_err(|e| {
+                            CompilationError::BuildFailed {
+                                language: "python".to_string(),
+                                reason: format!("Failed to write output: {e}"),
+                            }
+                        })?;
+
+                        return Ok(BuildResult {
+                            wasm_path: output_path.to_string_lossy().to_string(),
+                            js_path: None,
+                            additional_files: vec![],
+                            is_wasm_bindgen: false,
+                        });
+                    } else {
+                        let error_msg = if !result.error_message.is_null() {
+                            let c_str = std::ffi::CStr::from_ptr(result.error_message);
+                            let msg = c_str.to_string_lossy().to_string();
+
+                            // Free the error message
+                            if let Ok(free_fn) =
+                                self.library.get::<symbols::WaspyFreeErrorMessageFn>(
+                                    b"waspy_free_error_message",
+                                )
+                            {
+                                free_fn(result.error_message);
+                            }
+
+                            msg
+                        } else {
+                            "Unknown compilation error".to_string()
+                        };
+
+                        return Err(CompilationError::BuildFailed {
+                            language: "python".to_string(),
+                            reason: error_msg,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Fallback: FFI functions not available
+        Err(CompilationError::BuildFailed {
+            language: "python".to_string(),
+            reason: "Waspy FFI compilation functions not available".to_string(),
+        })
+    }
+
+    fn can_handle_project(&self, project_path: &str) -> bool {
+        let path = Path::new(project_path);
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("py") {
+            return true;
+        }
+        if path.is_dir() {
+            let entry_candidates = ["main.py", "__main__.py", "app.py", "src/main.py"];
+            for candidate in &entry_candidates {
+                if path.join(candidate).exists() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn check_dependencies(&self) -> Vec<String> {
+        vec![] // Waspy is self-contained
+    }
+
+    fn validate_project(&self, project_path: &str) -> CompilationResult<()> {
+        let path = Path::new(project_path);
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("py") {
+            return Ok(());
+        }
+        if path.is_dir() {
+            let entry_candidates = ["main.py", "__main__.py", "app.py", "src/main.py"];
+            for candidate in &entry_candidates {
+                if path.join(candidate).exists() {
+                    return Ok(());
+                }
+            }
+        }
+        Err(CompilationError::BuildFailed {
+            language: "python".to_string(),
+            reason: format!("No Python files found in '{project_path}'"),
+        })
+    }
+
+    fn clean(&self, project_path: &str) -> Result<()> {
+        let path = Path::new(project_path);
+        let dist_dir = path.join("dist");
+        if dist_dir.exists() {
+            std::fs::remove_dir_all(dist_dir)?;
+        }
+        Ok(())
+    }
+
+    fn clone_box(&self) -> Box<dyn WasmBuilder> {
+        Box::new(Self {
+            plugin_name: self.plugin_name.clone(),
+            library: self.library.clone(),
+            plugin_ptr: self.plugin_ptr,
+        })
+    }
+
+    fn language_name(&self) -> &str {
+        "python"
+    }
+
+    fn entry_file_candidates(&self) -> &[&str] {
+        &["main.py", "__main__.py", "app.py", "src/main.py"]
+    }
+
+    fn supported_extensions(&self) -> &[&str] {
+        &["py"]
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+impl Drop for NewApiWasmBuilder {
+    fn drop(&mut self) {
+        // Clean up the plugin pointer
+        unsafe {
+            if !self.plugin_ptr.is_null() {
+                // The plugin_ptr is a Box<WaspyPlugin>, we need to reconstruct and drop it
+                // We use c_void here as an opaque pointer type - the actual type is defined in waspy
+                #[allow(clippy::from_raw_with_void_ptr)]
+                let _plugin_box = Box::from_raw(self.plugin_ptr);
+                // Box will be dropped here
+            }
         }
     }
 }

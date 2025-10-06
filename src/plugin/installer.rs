@@ -242,6 +242,180 @@ impl PluginInstaller {
         false
     }
 
+    /// Install a library-only plugin by downloading and building the dynamic library
+    fn install_library_plugin(plugin_name: &str, plugin_dir: &Path) -> Result<InstallationResult> {
+        println!("📚 Installing library-only plugin: {plugin_name}");
+
+        let mut result = InstallationResult::new(plugin_name);
+
+        // Download the crate source
+        println!("📥 Downloading {plugin_name} from crates.io...");
+        let _output = std::process::Command::new("cargo")
+            .args([
+                "install",
+                plugin_name,
+                "--root",
+                &plugin_dir.to_string_lossy(),
+                "--no-track",
+            ])
+            .output();
+
+        // Even if cargo install fails for library, we can try building manually
+        let temp_download = std::env::temp_dir().join(format!("{plugin_name}_download"));
+
+        // Clean up if it exists from a previous run
+        if temp_download.exists() {
+            std::fs::remove_dir_all(&temp_download).ok();
+        }
+
+        std::fs::create_dir_all(&temp_download)
+            .map_err(|e| WasmrunError::from(format!("Failed to create temp directory: {e}")))?;
+
+        // Download crate metadata to get the latest version
+        let version = SystemUtils::get_latest_crates_version(plugin_name)
+            .unwrap_or_else(|| "latest".to_string());
+
+        println!("📦 Fetching {plugin_name} v{version} source...");
+
+        // Use cargo to download the source
+        let download_output = std::process::Command::new("cargo")
+            .current_dir(&temp_download)
+            .args(["init", "--lib", "--name", plugin_name])
+            .output()
+            .map_err(|e| WasmrunError::from(format!("Failed to init temp project: {e}")))?;
+
+        if !download_output.status.success() {
+            let stderr = String::from_utf8_lossy(&download_output.stderr);
+            return Err(WasmrunError::from(format!(
+                "Failed to initialize download directory: {stderr}"
+            )));
+        }
+
+        // Add the plugin as a dependency with all features
+        let cargo_toml_path = temp_download.join("Cargo.toml");
+        let mut cargo_toml_content = std::fs::read_to_string(&cargo_toml_path)
+            .map_err(|e| WasmrunError::from(format!("Failed to read Cargo.toml: {e}")))?;
+
+        // Check if [dependencies] section exists, if not add it
+        if cargo_toml_content.contains("[dependencies]") {
+            // Append to existing dependencies section
+            cargo_toml_content.push_str(&format!(
+                "{plugin_name} = {{ version = \"{version}\", features = [\"wasm-plugin\"] }}\n"
+            ));
+        } else {
+            cargo_toml_content.push_str(&format!(
+                "\n[dependencies]\n{plugin_name} = {{ version = \"{version}\", features = [\"wasm-plugin\"] }}\n"
+            ));
+        }
+
+        std::fs::write(&cargo_toml_path, cargo_toml_content)
+            .map_err(|e| WasmrunError::from(format!("Failed to write Cargo.toml: {e}")))?;
+
+        // Download dependencies
+        println!("⬇️  Downloading dependencies...");
+        let fetch_output = std::process::Command::new("cargo")
+            .current_dir(&temp_download)
+            .args(["fetch"])
+            .output()
+            .map_err(|e| WasmrunError::from(format!("Failed to fetch dependencies: {e}")))?;
+
+        if !fetch_output.status.success() {
+            let stderr = String::from_utf8_lossy(&fetch_output.stderr);
+            return Err(WasmrunError::from(format!("Failed to fetch: {stderr}")));
+        }
+
+        // Now copy the downloaded source to plugin directory
+        println!("🔨 Building {plugin_name} as dynamic library...");
+
+        // Build the plugin as a cdylib in the plugin directory
+        std::fs::create_dir_all(plugin_dir)
+            .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {e}")))?;
+
+        // Create a build project in the plugin directory
+        let build_manifest = format!(
+            r#"[package]
+name = "{plugin_name}"
+version = "{version}"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+{plugin_name} = {{ version = "{version}", features = ["wasm-plugin"] }}
+"#
+        );
+
+        let cargo_toml = plugin_dir.join("Cargo.toml");
+        std::fs::write(&cargo_toml, build_manifest)
+            .map_err(|e| WasmrunError::from(format!("Failed to write Cargo.toml: {e}")))?;
+
+        let src_dir = plugin_dir.join("src");
+        std::fs::create_dir_all(&src_dir)
+            .map_err(|e| WasmrunError::from(format!("Failed to create src directory: {e}")))?;
+
+        // Create a simple re-export lib.rs
+        let lib_rs = src_dir.join("lib.rs");
+        std::fs::write(&lib_rs, format!("pub use {plugin_name}::*;\n"))
+            .map_err(|e| WasmrunError::from(format!("Failed to write lib.rs: {e}")))?;
+
+        // Build the dynamic library
+        let build_output = std::process::Command::new("cargo")
+            .current_dir(plugin_dir)
+            .args(["build", "--release", "--lib"])
+            .output()
+            .map_err(|e| WasmrunError::from(format!("Failed to build plugin: {e}")))?;
+
+        if !build_output.status.success() {
+            let stderr = String::from_utf8_lossy(&build_output.stderr);
+            return Err(WasmrunError::from(format!("Build failed: {stderr}")));
+        }
+
+        // Check if the .dylib/.so file was created
+        let target_dir = plugin_dir.join("target").join("release");
+        let lib_extensions = if cfg!(target_os = "macos") {
+            vec!["dylib"]
+        } else if cfg!(target_os = "windows") {
+            vec!["dll"]
+        } else {
+            vec!["so"]
+        };
+
+        let mut lib_found = false;
+        for ext in &lib_extensions {
+            let lib_path = target_dir.join(format!("lib{plugin_name}.{ext}"));
+            if lib_path.exists() {
+                println!("✅ Dynamic library built: {}", lib_path.display());
+                lib_found = true;
+                break;
+            }
+        }
+
+        if !lib_found {
+            return Err(WasmrunError::from(format!(
+                "Dynamic library not found after build. Expected lib{}.{{dylib,so,dll}} in {}",
+                plugin_name,
+                target_dir.display()
+            )));
+        }
+
+        // Store metadata
+        Self::fetch_and_store_plugin_metadata(plugin_name, plugin_dir)?;
+
+        result.version = version;
+        result.binary_installed = false;
+
+        // Cleanup temp directory
+        let _ = std::fs::remove_dir_all(&temp_download);
+
+        println!(
+            "✅ Library plugin {plugin_name} v{} installed successfully",
+            result.version
+        );
+
+        Ok(result)
+    }
+
     fn install_generic_plugin(plugin_name: &str, plugin_dir: &Path) -> Result<InstallationResult> {
         println!("Installing {plugin_name} plugin via cargo...");
 
@@ -289,6 +463,14 @@ impl PluginInstaller {
             Self::fetch_and_store_plugin_metadata(plugin_name, plugin_dir)?;
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
+
+            // Check if the failure is because it's a library-only crate
+            if stderr.contains("has no binaries") || stderr.contains("only for installing programs")
+            {
+                println!("📚 Detected library-only plugin, switching to library installation...");
+                return Self::install_library_plugin(plugin_name, plugin_dir);
+            }
+
             println!("Direct cargo install failed: {stderr}");
             println!("Setting up as development plugin template...");
             Self::setup_plugin_from_source(plugin_name, plugin_dir)?;
