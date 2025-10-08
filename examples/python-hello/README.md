@@ -1,45 +1,32 @@
-# Python WebAssembly Example
+# Python Hello Example
 
-This example demonstrates how to create a WebAssembly module using Python with Pyodide.
+A simple Python WebAssembly example demonstrating basic functions.
 
 ## Features
 
-- String manipulation and greeting functions
-- Mathematical calculations (fibonacci, pi approximation)
-- Array processing
-- JSON parsing and manipulation
-- Advanced math operations using Python's math library
+This example includes:
+- String manipulation (`greet`)
+- Arithmetic operations (`add`)
+- Recursive functions (`fibonacci`, `factorial`)
+- Type annotations for all functions
 
-## Build and Run
+## Functions
 
-From the wasmrun project root:
+- `greet(name: str) -> str` - Returns a greeting message
+- `add(a: int, b: int) -> int` - Adds two numbers
+- `fibonacci(n: int) -> int` - Calculates the nth Fibonacci number
+- `factorial(n: int) -> int` - Calculates the factorial of n
 
-```sh
-# Run with wasmrun
+## Running
+
+```bash
 wasmrun run examples/python-hello
-
-# Or compile manually
-wasmrun compile examples/python-hello
 ```
 
-## Usage in JavaScript
+## Requirements
 
-Once loaded in the browser, you can call Python functions from JavaScript:
+This requires the `waspy` external plugin:
 
-```javascript
-// Access Python functions through pyodide
-await pyodide.loadPackage("numpy"); // if needed
-
-// Call Python functions
-pyodide.runPython(`
-    greet("World")
-    print(fibonacci(10))
-    print(sum_array([1, 2, 3, 4, 5]))
-    calculate_pi(1000)
-    math_operations(10, 3)
-`);
+```bash
+wasmrun plugin install waspy
 ```
-
-## Note
-
-Python WebAssembly requires Pyodide runtime. Wasmrun automatically handles the setup for you.

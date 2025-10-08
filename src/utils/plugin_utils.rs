@@ -279,7 +279,6 @@ impl PluginUtils {
             "rust" => ProjectLanguage::Rust,
             "go" => ProjectLanguage::Go,
             "c" | "cpp" | "c++" => ProjectLanguage::C,
-            "python" | "py" => ProjectLanguage::Python,
             "assemblyscript" | "asc" => ProjectLanguage::Asc,
             _ => {
                 // Unknown language, fallback to project detection

@@ -260,7 +260,6 @@ impl ProjectAnalysis {
             // crate::compiler::ProjectLanguage::Go => "🐹",
             crate::compiler::ProjectLanguage::C => "🔧",
             crate::compiler::ProjectLanguage::Asc => "📜",
-            crate::compiler::ProjectLanguage::Python => "🐍",
             _ => "❓",
         };
 
@@ -293,7 +292,6 @@ impl ProjectAnalysis {
             // crate::compiler::ProjectLanguage::Go => "🐹",
             crate::compiler::ProjectLanguage::C => "🔧",
             crate::compiler::ProjectLanguage::Asc => "📜",
-            crate::compiler::ProjectLanguage::Python => "🐍",
             _ => "❓",
         };
 

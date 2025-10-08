@@ -170,7 +170,6 @@ pub fn os_detect_project_language(project_path: &str) -> Result<String> {
         crate::compiler::ProjectLanguage::Go => Ok("go".to_string()),
         crate::compiler::ProjectLanguage::C => Ok("c".to_string()),
         crate::compiler::ProjectLanguage::Asc => Ok("asc".to_string()),
-        crate::compiler::ProjectLanguage::Python => Ok("python".to_string()),
         crate::compiler::ProjectLanguage::Unknown => Ok("unknown".to_string()),
     }
 }

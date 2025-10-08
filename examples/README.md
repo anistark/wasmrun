@@ -16,11 +16,6 @@ This directory contains example projects demonstrating how to create WebAssembly
 - **Functions**: `greet()`, `fibonacci()`, `sumArray()`, `getCurrentTime()`
 - **Build**: Uses Go with GOOS=js GOARCH=wasm
 
-### 🐍 Python (`python-hello/`)
-- **Features**: Pyodide runtime, math library, JSON processing
-- **Functions**: `greet()`, `fibonacci()`, `sum_array()`, `calculate_pi()`, `math_operations()`
-- **Build**: Uses Pyodide compilation
-
 ### 🔧 C (`c-hello/`)
 - **Features**: Emscripten integration, memory management, math library
 - **Functions**: `greet()`, `fibonacci()`, `factorial()`, `is_prime()`, `square_root()`
@@ -30,6 +25,11 @@ This directory contains example projects demonstrating how to create WebAssembly
 - **Features**: TypeScript-like syntax, typed arrays, performance optimization
 - **Functions**: `greet()`, `fibonacci()`, `isPrime()`, `reverseString()`, `power()`
 - **Build**: Uses AssemblyScript compiler
+
+### 🐍 Python (`python-hello/`)
+- **Features**: Python-to-WebAssembly compilation, type annotations, no runtime required
+- **Functions**: `greet()`, `add()`, `fibonacci()`, `factorial()`
+- **Build**: Uses waspy (Python to WASM compiler)
 
 ### 🌐 AssemblyScript Web App (`web-asc/`)
 - **Features**: Interactive web application, DOM manipulation, real-time calculations
@@ -57,6 +57,7 @@ wasmrun run examples/web-leptos
 
 # Compile only
 wasmrun compile examples/rust-hello
+wasmrun compile examples/python-hello
 
 # Run with options
 wasmrun run examples/go-hello --port 3000 --watch
@@ -82,11 +83,6 @@ Each example contains:
 - Produces single `.wasm` file with `wasm_exec.js`
 - Good for concurrent operations and system programming
 
-### Python
-- Uses Pyodide runtime for scientific computing
-- Access to numpy, pandas, and other Python packages
-- Best for data analysis and scientific applications
-
 ### C
 - Uses Emscripten for compilation
 - Full control over memory management
@@ -104,6 +100,13 @@ Each example contains:
 - Full-stack Rust development compiled to WebAssembly
 - `web-leptos` showcases modern web app architecture with Rust
 
+### Python
+- Requires `waspy` plugin: `wasmrun plugin install waspy`
+- Pure Rust-based compiler (no Python runtime needed)
+- Produces optimized `.wasm` files
+- Supports type annotations and basic Python syntax
+- Good for educational purposes and lightweight Python functions
+
 ## Contributing
 
 To add a new example:
@@ -120,6 +123,9 @@ All examples implement these common functions for consistency:
 
 - `greet(name)` - Basic greeting with the provided name
 - `fibonacci(n)` - Calculate the nth Fibonacci number
-- `sum_array(arr)` - Sum all elements in an array
+- `add(a, b)` / `sum_array(arr)` - Addition/sum operations
 
-Additional language-specific functions showcase unique capabilities of each platform.
+Additional language-specific functions showcase unique capabilities of each platform:
+- Python: `factorial()` for demonstrating recursion
+- C: `is_prime()`, `square_root()` for math operations
+- AssemblyScript: `reverseString()`, `power()` for string and numeric operations

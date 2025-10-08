@@ -10,7 +10,6 @@ pub enum ProjectLanguage {
     Go,
     C,
     Asc,
-    Python,
     Unknown,
 }
 
@@ -60,19 +59,6 @@ pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
                     debug_println!("Found .go file - detected Go project");
                     debug_exit!("detect_project_language", ProjectLanguage::Go);
                     return ProjectLanguage::Go;
-                }
-            }
-        }
-    }
-
-    if path.join("pyproject.toml").exists() || path.join("setup.py").exists() {
-        return ProjectLanguage::Python;
-    } else if let Ok(entries) = fs::read_dir(path) {
-        for entry in entries.flatten() {
-            if let Some(extension) = entry.path().extension() {
-                let ext = extension.to_string_lossy().to_lowercase();
-                if ext == "py" {
-                    return ProjectLanguage::Python;
                 }
             }
         }
@@ -164,7 +150,6 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
         (ProjectLanguage::Asc, _) => {
             vec!["node.js".to_string(), "npm".to_string(), "asc".to_string()]
         }
-        (ProjectLanguage::Python, _) => Vec::new(),
         (ProjectLanguage::Unknown, _) => Vec::new(),
     };
 
@@ -207,7 +192,6 @@ impl fmt::Display for ProjectLanguage {
             ProjectLanguage::Go => "Go",
             ProjectLanguage::C => "C",
             ProjectLanguage::Asc => "Asc",
-            ProjectLanguage::Python => "Python",
             ProjectLanguage::Unknown => "Unknown",
         };
         write!(f, "{lang_str}")
@@ -252,33 +236,6 @@ mod tests {
 
         let result = detect_project_language(temp_dir.path().to_str().unwrap());
         assert_eq!(result, ProjectLanguage::Go);
-    }
-
-    #[test]
-    fn test_detect_python_project_with_pyproject_toml() {
-        let temp_dir = tempdir().unwrap();
-        create_test_file(temp_dir.path(), "pyproject.toml", "[build-system]");
-
-        let result = detect_project_language(temp_dir.path().to_str().unwrap());
-        assert_eq!(result, ProjectLanguage::Python);
-    }
-
-    #[test]
-    fn test_detect_python_project_with_setup_py() {
-        let temp_dir = tempdir().unwrap();
-        create_test_file(temp_dir.path(), "setup.py", "from setuptools import setup");
-
-        let result = detect_project_language(temp_dir.path().to_str().unwrap());
-        assert_eq!(result, ProjectLanguage::Python);
-    }
-
-    #[test]
-    fn test_detect_python_project_with_py_files() {
-        let temp_dir = tempdir().unwrap();
-        create_test_file(temp_dir.path(), "main.py", "print('hello')");
-
-        let result = detect_project_language(temp_dir.path().to_str().unwrap());
-        assert_eq!(result, ProjectLanguage::Python);
     }
 
     #[test]
@@ -405,7 +362,6 @@ mod tests {
         assert_eq!(format!("{}", ProjectLanguage::Go), "Go");
         assert_eq!(format!("{}", ProjectLanguage::C), "C");
         assert_eq!(format!("{}", ProjectLanguage::Asc), "Asc");
-        assert_eq!(format!("{}", ProjectLanguage::Python), "Python");
         assert_eq!(format!("{}", ProjectLanguage::Unknown), "Unknown");
     }
 

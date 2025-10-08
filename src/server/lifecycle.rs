@@ -87,10 +87,10 @@ mod tests {
 
     #[test]
     fn test_is_server_running_no_pid_file() {
-        // This test ensures is_server_running returns false when there's no PID file
-        let result = is_server_running();
+        // This test ensures is_server_running doesn't crash when there's no PID file
+        let _result = is_server_running();
         // Result depends on whether server is actually running, but shouldn't crash
-        assert!(result || !result);
+        // Just verify the function returns without panicking
     }
 
     #[test]

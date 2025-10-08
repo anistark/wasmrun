@@ -182,9 +182,6 @@ impl BuilderFactory {
             ProjectLanguage::Asc => {
                 Box::new(crate::plugin::languages::asc_plugin::AscPlugin::new())
             }
-            ProjectLanguage::Python => {
-                Box::new(crate::plugin::languages::python_plugin::PythonPlugin::new())
-            }
             ProjectLanguage::Go => Box::new(UnknownBuilder),
             ProjectLanguage::Unknown => Box::new(UnknownBuilder),
         }
@@ -197,7 +194,6 @@ impl BuilderFactory {
             "Go".to_string(),
             "C".to_string(),
             "Asc".to_string(),
-            "Python".to_string(),
         ]
     }
 }
