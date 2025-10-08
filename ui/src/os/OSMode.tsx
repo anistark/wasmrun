@@ -9,6 +9,24 @@ interface KernelStats {
   project_pid: number | null
 }
 
+interface FilesystemStats {
+  total_mounts: number
+  total_size: number
+  open_fds: number
+  mounts: Array<{
+    guest_path: string
+    host_path: string
+    size: number
+  }>
+}
+
+interface DirEntry {
+  name: string
+  is_dir: boolean
+  is_file: boolean
+  size: number
+}
+
 interface PanelType {
   id: string
   name: string
@@ -32,6 +50,14 @@ export default function OSMode() {
   const [runtimeStatus, setRuntimeStatus] = useState<'loading' | 'running' | 'error'>('loading')
   const [startTime] = useState(Date.now())
   const [uptime, setUptime] = useState(0)
+
+  // Filesystem state
+  const [fsStats, setFsStats] = useState<FilesystemStats | null>(null)
+  const [currentPath, setCurrentPath] = useState('/project')
+  const [dirEntries, setDirEntries] = useState<DirEntry[]>([])
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [fileContent, setFileContent] = useState<string>('')
+  const [isEditing, setIsEditing] = useState(false)
 
   const projectName = (window as any).PROJECT_NAME || 'Unknown Project'
   const language = (window as any).LANGUAGE || 'unknown'
@@ -58,6 +84,61 @@ export default function OSMode() {
     setUptime(seconds)
   }, [startTime])
 
+  // Filesystem functions
+  const fetchFsStats = useCallback(async () => {
+    try {
+      const response = await fetch('/api/fs/stats')
+      const stats = await response.json()
+      setFsStats(stats)
+    } catch (error) {
+      console.error('Failed to fetch filesystem stats:', error)
+    }
+  }, [])
+
+  const fetchDirectory = useCallback(async (path: string) => {
+    try {
+      const response = await fetch(`/api/fs/list${path}`)
+      const data = await response.json()
+      if (data.success) {
+        setDirEntries(data.entries)
+      }
+    } catch (error) {
+      console.error('Failed to list directory:', error)
+    }
+  }, [])
+
+  const readFile = useCallback(async (path: string) => {
+    try {
+      const response = await fetch(`/api/fs/read${path}`)
+      const data = await response.json()
+      if (data.success && data.type === 'text') {
+        setFileContent(data.content)
+        setSelectedFile(path)
+      } else {
+        setFileContent('Binary file - cannot display')
+      }
+    } catch (error) {
+      console.error('Failed to read file:', error)
+      setFileContent('Error reading file')
+    }
+  }, [])
+
+  const saveFile = useCallback(async (path: string, content: string) => {
+    try {
+      const response = await fetch(`/api/fs/write${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: content,
+      })
+      const data = await response.json()
+      if (data.success) {
+        setIsEditing(false)
+      }
+    } catch (error) {
+      console.error('Failed to save file:', error)
+    }
+  }, [])
+
   useEffect(() => {
     fetchKernelStats()
     setRuntimeStatus('running')
@@ -71,6 +152,14 @@ export default function OSMode() {
     }
   }, [fetchKernelStats, updateUptime])
 
+  // Fetch filesystem data when filesystem panel is active
+  useEffect(() => {
+    if (activePanel === 'filesystem') {
+      fetchFsStats()
+      fetchDirectory(currentPath)
+    }
+  }, [activePanel, currentPath, fetchFsStats, fetchDirectory])
+
   const formatUptime = (seconds: number) => {
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
@@ -83,6 +172,14 @@ export default function OSMode() {
     } else {
       return `${secs}s`
     }
+  }
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
   }
 
   const StatusIndicator = ({
@@ -225,6 +322,163 @@ export default function OSMode() {
           </div>
         )
 
+      case 'filesystem':
+        return (
+          <div className="h-full flex flex-col">
+            <div className="border-b border-green-500/20 bg-black/20 backdrop-blur-lg p-6">
+              <h2 className="text-2xl font-bold mb-2 text-green-400">WASI File System</h2>
+              <p className="text-white/80">Mounted directories and file operations</p>
+            </div>
+            <div className="flex-1 flex">
+              {/* Left sidebar - file browser */}
+              <div className="w-1/3 border-r border-green-500/20 bg-black/10 p-4 overflow-y-auto">
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <button
+                      onClick={() => {
+                        const newPath = currentPath.split('/').slice(0, -1).join('/') || '/project'
+                        setCurrentPath(newPath)
+                        fetchDirectory(newPath)
+                      }}
+                      disabled={currentPath === '/project'}
+                      className="px-3 py-1 bg-green-600/30 hover:bg-green-600/50 disabled:opacity-30 disabled:cursor-not-allowed border border-green-500/30 rounded text-sm"
+                    >
+                      ⬆️ Up
+                    </button>
+                    <button
+                      onClick={() => fetchDirectory(currentPath)}
+                      className="px-3 py-1 bg-green-600/30 hover:bg-green-600/50 border border-green-500/30 rounded text-sm"
+                    >
+                      🔄 Refresh
+                    </button>
+                  </div>
+                  <div className="text-sm text-green-400 font-mono mb-2">📂 {currentPath}</div>
+                </div>
+
+                <div className="space-y-1">
+                  {dirEntries.map(entry => (
+                    <button
+                      key={entry.name}
+                      onClick={() => {
+                        const fullPath = `${currentPath}/${entry.name}`
+                        if (entry.is_dir) {
+                          setCurrentPath(fullPath)
+                          fetchDirectory(fullPath)
+                        } else {
+                          readFile(fullPath)
+                        }
+                      }}
+                      className={clsx(
+                        'w-full flex items-center justify-between px-3 py-2 rounded hover:bg-green-500/20 transition-colors text-left',
+                        {
+                          'bg-green-500/30': selectedFile === `${currentPath}/${entry.name}`,
+                        }
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span>{entry.is_dir ? '📁' : '📄'}</span>
+                        <span className="text-sm font-mono">{entry.name}</span>
+                      </div>
+                      {entry.is_file && (
+                        <span className="text-xs text-white/50">{formatBytes(entry.size)}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {dirEntries.length === 0 && (
+                  <div className="text-center text-white/50 py-8">
+                    <div className="text-4xl mb-2">📂</div>
+                    <div>Empty directory</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right panel - file viewer/editor and stats */}
+              <div className="flex-1 flex flex-col">
+                {/* Filesystem stats */}
+                <div className="border-b border-green-500/20 bg-black/10 p-4">
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="bg-black/30 border border-green-500/30 rounded-lg p-3">
+                      <div className="text-xs text-green-400/80 mb-1">Mounted</div>
+                      <div className="text-xl font-bold">{fsStats?.total_mounts || 0}</div>
+                    </div>
+                    <div className="bg-black/30 border border-green-500/30 rounded-lg p-3">
+                      <div className="text-xs text-green-400/80 mb-1">Total Size</div>
+                      <div className="text-xl font-bold">
+                        {formatBytes(fsStats?.total_size || 0)}
+                      </div>
+                    </div>
+                    <div className="bg-black/30 border border-green-500/30 rounded-lg p-3">
+                      <div className="text-xs text-green-400/80 mb-1">Open FDs</div>
+                      <div className="text-xl font-bold">{fsStats?.open_fds || 0}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* File content viewer/editor */}
+                <div className="flex-1 p-4 overflow-hidden">
+                  {selectedFile ? (
+                    <div className="h-full flex flex-col">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-sm text-green-400 font-mono">{selectedFile}</div>
+                        <div className="flex gap-2">
+                          {isEditing ? (
+                            <>
+                              <button
+                                onClick={() => saveFile(selectedFile, fileContent)}
+                                className="px-3 py-1 bg-green-600 hover:bg-green-700 border border-green-400/50 rounded text-sm"
+                              >
+                                💾 Save
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setIsEditing(false)
+                                  readFile(selectedFile)
+                                }}
+                                className="px-3 py-1 bg-gray-600 hover:bg-gray-700 border border-gray-400/50 rounded text-sm"
+                              >
+                                ❌ Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => setIsEditing(true)}
+                              className="px-3 py-1 bg-blue-600/80 hover:bg-blue-600 border border-blue-400/50 rounded text-sm"
+                            >
+                              ✏️ Edit
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex-1 bg-black/50 border border-green-500/30 rounded-lg overflow-hidden">
+                        {isEditing ? (
+                          <textarea
+                            value={fileContent}
+                            onChange={e => setFileContent(e.currentTarget.value)}
+                            className="w-full h-full bg-transparent text-white font-mono text-sm p-4 resize-none focus:outline-none"
+                          />
+                        ) : (
+                          <pre className="w-full h-full text-white font-mono text-sm p-4 overflow-auto">
+                            {fileContent}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-white/50">
+                      <div className="text-center">
+                        <div className="text-6xl mb-4">📄</div>
+                        <div>Select a file to view or edit</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+
       default:
         return (
           <div className="h-full flex items-center justify-center">
@@ -247,7 +501,7 @@ export default function OSMode() {
           <div className="flex items-center gap-3">
             <img src="/assets/logo-text.png" alt="wasmrun OS" className="h-8 object-contain" />
             <div className="flex flex-col">
-              <span className="text-white font-bold text-lg">wasmrun OS</span>
+              <span className="text-white font-bold text-lg">OS</span>
               <span className="text-green-400/80 text-xs">{projectName}</span>
             </div>
           </div>

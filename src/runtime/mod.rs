@@ -4,3 +4,4 @@ pub mod multilang_kernel;
 pub mod os_server;
 pub mod registry;
 pub mod syscalls;
+pub mod wasi_fs;

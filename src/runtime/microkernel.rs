@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
+use crate::runtime::wasi_fs::WasiFilesystem;
+
 /// Process ID type for OS mode
 pub type Pid = u32;
 
@@ -79,6 +81,7 @@ pub struct WasmMicroKernel {
     processes: Arc<RwLock<HashMap<Pid, Process>>>,
     wasm_instances: Arc<RwLock<HashMap<Pid, WasmInstance>>>,
     filesystem: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    wasi_fs: Arc<WasiFilesystem>,
     next_pid: Arc<Mutex<Pid>>,
     scheduler_running: Arc<Mutex<bool>>,
 }
@@ -96,9 +99,15 @@ impl WasmMicroKernel {
             processes: Arc::new(RwLock::new(HashMap::new())),
             wasm_instances: Arc::new(RwLock::new(HashMap::new())),
             filesystem: Arc::new(Mutex::new(HashMap::new())),
+            wasi_fs: Arc::new(WasiFilesystem::new()),
             next_pid: Arc::new(Mutex::new(1)),
             scheduler_running: Arc::new(Mutex::new(false)),
         }
+    }
+
+    /// Get reference to the WASI filesystem
+    pub fn wasi_filesystem(&self) -> &WasiFilesystem {
+        &self.wasi_fs
     }
 
     /// Start the kernel scheduler

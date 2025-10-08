@@ -55,7 +55,21 @@ impl MultiLanguageKernel {
     pub fn start(&self) -> Result<()> {
         self.base_kernel.start_scheduler()?;
         self.base_kernel.init_vfs()?;
+        println!("✅ WASI filesystem initialized");
         Ok(())
+    }
+
+    /// Mount a project directory into the WASI filesystem
+    pub fn mount_project(&self, project_path: &str) -> Result<()> {
+        let wasi_fs = self.base_kernel.wasi_filesystem();
+        wasi_fs.mount("/project", project_path)?;
+        println!("✅ Project mounted at /project -> {}", project_path);
+        Ok(())
+    }
+
+    /// Get reference to the WASI filesystem
+    pub fn wasi_filesystem(&self) -> &crate::runtime::wasi_fs::WasiFilesystem {
+        self.base_kernel.wasi_filesystem()
     }
 
     /// Stop the multi-language kernel

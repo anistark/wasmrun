@@ -168,6 +168,11 @@ impl OsServer {
     fn start_project(&mut self) -> Result<()> {
         let mut kernel = self.kernel.write().unwrap();
 
+        // Mount the project directory into WASI filesystem
+        if let Err(e) = kernel.mount_project(&self.config.project_path) {
+            eprintln!("⚠️ Failed to mount project directory: {e}");
+        }
+
         match kernel.auto_detect_and_run(self.config.clone()) {
             Ok(pid) => {
                 self.project_pid = Some(pid);
@@ -249,6 +254,41 @@ impl OsServer {
             // API endpoint for kernel statistics
             (Method::Get, "/api/kernel/stats") => {
                 self.handle_kernel_stats_request(request)?;
+            }
+
+            // API endpoint for filesystem statistics
+            (Method::Get, "/api/fs/stats") => {
+                self.handle_fs_stats_request(request)?;
+            }
+
+            // API endpoint for reading files
+            (Method::Get, path) if path.starts_with("/api/fs/read/") => {
+                let file_path = &path[13..]; // Remove "/api/fs/read/"
+                self.handle_fs_read_request(request, file_path)?;
+            }
+
+            // API endpoint for listing directory
+            (Method::Get, path) if path.starts_with("/api/fs/list/") => {
+                let dir_path = &path[13..]; // Remove "/api/fs/list/"
+                self.handle_fs_list_request(request, dir_path)?;
+            }
+
+            // API endpoint for writing files
+            (Method::Post, path) if path.starts_with("/api/fs/write/") => {
+                let file_path = &path[14..]; // Remove "/api/fs/write/"
+                self.handle_fs_write_request(request, file_path)?;
+            }
+
+            // API endpoint for creating directories
+            (Method::Post, path) if path.starts_with("/api/fs/mkdir/") => {
+                let dir_path = &path[14..]; // Remove "/api/fs/mkdir/"
+                self.handle_fs_mkdir_request(request, dir_path)?;
+            }
+
+            // API endpoint for deleting files
+            (Method::Post, path) if path.starts_with("/api/fs/delete/") => {
+                let file_path = &path[15..]; // Remove "/api/fs/delete/"
+                self.handle_fs_delete_request(request, file_path)?;
             }
 
             // API endpoint for process management
@@ -395,6 +435,332 @@ impl OsServer {
         request
             .respond(response)
             .map_err(|e| WasmrunError::from(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Handle filesystem statistics request
+    fn handle_fs_stats_request(&self, request: Request) -> Result<()> {
+        let kernel = self.kernel.read().unwrap();
+        let wasi_fs = kernel.wasi_filesystem();
+        let stats = wasi_fs.get_stats();
+
+        let stats_json = serde_json::to_string(&stats)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
+
+        let response = Response::from_string(stats_json)
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+            );
+
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Handle file read request
+    fn handle_fs_read_request(&self, request: Request, file_path: &str) -> Result<()> {
+        let kernel = self.kernel.read().unwrap();
+        let wasi_fs = kernel.wasi_filesystem();
+
+        // Ensure path has leading slash
+        let normalized_path = if file_path.starts_with('/') {
+            file_path.to_string()
+        } else {
+            format!("/{}", file_path)
+        };
+
+        match wasi_fs.read_file(&normalized_path) {
+            Ok(content) => {
+                // Try to detect if it's text or binary
+                let is_text = content.iter().all(|&b| b.is_ascii() || b == b'\n' || b == b'\r' || b == b'\t');
+
+                let response_json = if is_text {
+                    serde_json::json!({
+                        "success": true,
+                        "path": file_path,
+                        "content": String::from_utf8_lossy(&content),
+                        "size": content.len(),
+                        "type": "text"
+                    })
+                } else {
+                    // For binary files, return hex representation
+                    let hex_content: String = content.iter()
+                        .map(|b| format!("{:02x}", b))
+                        .collect();
+                    serde_json::json!({
+                        "success": true,
+                        "path": file_path,
+                        "content": hex_content,
+                        "size": content.len(),
+                        "type": "binary"
+                    })
+                };
+
+                let response = Response::from_string(response_json.to_string())
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+            Err(e) => {
+                let error_json = serde_json::json!({
+                    "success": false,
+                    "error": e.to_string()
+                });
+
+                let response = Response::from_string(error_json.to_string())
+                    .with_status_code(tiny_http::StatusCode(404))
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle directory listing request
+    fn handle_fs_list_request(&self, request: Request, dir_path: &str) -> Result<()> {
+        let kernel = self.kernel.read().unwrap();
+        let wasi_fs = kernel.wasi_filesystem();
+
+        // Ensure path has leading slash
+        let normalized_path = if dir_path.starts_with('/') {
+            dir_path.to_string()
+        } else {
+            format!("/{}", dir_path)
+        };
+
+        match wasi_fs.path_readdir(&normalized_path) {
+            Ok(entries) => {
+                let response_json = serde_json::json!({
+                    "success": true,
+                    "path": dir_path,
+                    "entries": entries
+                });
+
+                let response = Response::from_string(response_json.to_string())
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+            Err(e) => {
+                let error_json = serde_json::json!({
+                    "success": false,
+                    "error": e.to_string()
+                });
+
+                let response = Response::from_string(error_json.to_string())
+                    .with_status_code(tiny_http::StatusCode(404))
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle file write request
+    fn handle_fs_write_request(&self, mut request: Request, file_path: &str) -> Result<()> {
+        // Read the request body
+        let mut body = Vec::new();
+        let mut reader = request.as_reader();
+        std::io::Read::read_to_end(&mut reader, &mut body)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
+
+        let kernel = self.kernel.read().unwrap();
+        let wasi_fs = kernel.wasi_filesystem();
+
+        // Ensure path has leading slash
+        let normalized_path = if file_path.starts_with('/') {
+            file_path.to_string()
+        } else {
+            format!("/{}", file_path)
+        };
+
+        match wasi_fs.write_file(&normalized_path, &body) {
+            Ok(_) => {
+                let response_json = serde_json::json!({
+                    "success": true,
+                    "path": file_path,
+                    "size": body.len()
+                });
+
+                let response = Response::from_string(response_json.to_string())
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+            Err(e) => {
+                let error_json = serde_json::json!({
+                    "success": false,
+                    "error": e.to_string()
+                });
+
+                let response = Response::from_string(error_json.to_string())
+                    .with_status_code(tiny_http::StatusCode(500))
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle directory creation request
+    fn handle_fs_mkdir_request(&self, request: Request, dir_path: &str) -> Result<()> {
+        let kernel = self.kernel.read().unwrap();
+        let wasi_fs = kernel.wasi_filesystem();
+
+        // Ensure path has leading slash
+        let normalized_path = if dir_path.starts_with('/') {
+            dir_path.to_string()
+        } else {
+            format!("/{}", dir_path)
+        };
+
+        match wasi_fs.path_create_directory(&normalized_path) {
+            Ok(_) => {
+                let response_json = serde_json::json!({
+                    "success": true,
+                    "path": dir_path
+                });
+
+                let response = Response::from_string(response_json.to_string())
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+            Err(e) => {
+                let error_json = serde_json::json!({
+                    "success": false,
+                    "error": e.to_string()
+                });
+
+                let response = Response::from_string(error_json.to_string())
+                    .with_status_code(tiny_http::StatusCode(500))
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle file deletion request
+    fn handle_fs_delete_request(&self, request: Request, file_path: &str) -> Result<()> {
+        let kernel = self.kernel.read().unwrap();
+        let wasi_fs = kernel.wasi_filesystem();
+
+        // Ensure path has leading slash
+        let normalized_path = if file_path.starts_with('/') {
+            file_path.to_string()
+        } else {
+            format!("/{}", file_path)
+        };
+
+        match wasi_fs.path_unlink_file(&normalized_path) {
+            Ok(_) => {
+                let response_json = serde_json::json!({
+                    "success": true,
+                    "path": file_path
+                });
+
+                let response = Response::from_string(response_json.to_string())
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+            Err(e) => {
+                let error_json = serde_json::json!({
+                    "success": false,
+                    "error": e.to_string()
+                });
+
+                let response = Response::from_string(error_json.to_string())
+                    .with_status_code(tiny_http::StatusCode(500))
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+        }
+
         Ok(())
     }
 }
