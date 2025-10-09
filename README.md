@@ -25,6 +25,29 @@
 cargo install wasmrun
 ```
 
+### From Prebuilt Packages
+
+<details>
+<summary>DEB Package (Debian/Ubuntu/Pop! OS)</summary>
+
+![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=for-the-badge&logo=ubuntu&logoColor=white) ![Debian](https://img.shields.io/badge/Debian-D70A53?style=for-the-badge&logo=debian&logoColor=white) ![Pop!\_OS](https://img.shields.io/badge/Pop!_OS-48B9C7?style=for-the-badge&logo=Pop!_OS&logoColor=white) ![Linux Mint](https://img.shields.io/badge/Linux%20Mint-87CF3E?style=for-the-badge&logo=Linux%20Mint&logoColor=white)
+
+Wasmrun is available as a DEB package for Debian-based systems.
+
+1. Download the latest `.deb` file from [GitHub Releases](https://github.com/anistark/wasmrun/releases)
+2. Install the package:
+
+```bash
+# Install the downloaded DEB package
+sudo apt install wasmrun_*.deb
+
+# If there are dependency issues, fix them
+sudo apt install -f
+```
+</details>
+
+Track releases on [github releases](https://github.com/anistark/wasmrun/releases) or [via release feed](https://github.com/anistark/wasmrun/releases.atom).
+
 ### From Source
 
 ```sh
