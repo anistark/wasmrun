@@ -130,7 +130,7 @@ gh-release:
 
     # Create a tag if it doesn't exist
     if ! git rev-parse "v{{version}}" >/dev/null 2>&1; then
-        git tag -a "v{{version}}"
+        git tag -a "v{{version}}" -m "Release v{{version}}"
         echo "✓ Created tag v{{version}}"
     else
         echo "✓ Tag v{{version}} already exists"
