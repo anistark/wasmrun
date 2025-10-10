@@ -62,8 +62,16 @@ impl MultiLanguageKernel {
     /// Mount a project directory into the WASI filesystem
     pub fn mount_project(&self, project_path: &str) -> Result<()> {
         let wasi_fs = self.base_kernel.wasi_filesystem();
-        wasi_fs.mount("/project", project_path)?;
-        println!("✅ Project mounted at /project -> {}", project_path);
+
+        // Extract project name from path
+        let project_name = std::path::Path::new(project_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("project");
+
+        let mount_path = format!("/{}", project_name);
+        wasi_fs.mount(&mount_path, project_path)?;
+        println!("✅ Project mounted at {} -> {}", mount_path, project_path);
         Ok(())
     }
 
@@ -319,11 +327,38 @@ impl MultiLanguageKernel {
             servers.len()
         };
 
+        // Get system information
+        let os = std::env::consts::OS.to_string();
+        let arch = std::env::consts::ARCH.to_string();
+        let kernel_version = env!("CARGO_PKG_VERSION").to_string();
+
+        // Get WASI capabilities
+        let wasi_capabilities = vec![
+            "wasi_snapshot_preview1".to_string(),
+            "filesystem".to_string(),
+            "networking".to_string(),
+            "process".to_string(),
+        ];
+
+        // Get filesystem mount count
+        let wasi_fs = self.base_kernel.wasi_filesystem();
+        let fs_stats = wasi_fs.get_stats();
+        let filesystem_mounts = fs_stats.total_mounts;
+
+        // Get supported languages from registry
+        let supported_languages = self.language_registry.list_runtimes();
+
         KernelStatistics {
             total_memory_usage: memory_stats.get("total_memory").copied().unwrap_or(0),
             active_processes: memory_stats.get("process_count").copied().unwrap_or(0),
             active_runtimes,
             active_dev_servers,
+            os,
+            arch,
+            kernel_version,
+            wasi_capabilities,
+            filesystem_mounts,
+            supported_languages,
         }
     }
 
@@ -350,6 +385,14 @@ pub struct KernelStatistics {
     pub active_processes: usize,
     pub active_runtimes: Vec<String>,
     pub active_dev_servers: usize,
+    // System information
+    pub os: String,
+    pub arch: String,
+    pub kernel_version: String,
+    // WASI capabilities
+    pub wasi_capabilities: Vec<String>,
+    pub filesystem_mounts: usize,
+    pub supported_languages: Vec<String>,
 }
 
 #[cfg(test)]

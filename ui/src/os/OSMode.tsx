@@ -6,7 +6,16 @@ interface KernelStats {
   active_processes: number
   total_memory_usage: number
   active_runtimes: string[]
+  active_dev_servers: number
   project_pid: number | null
+  // System information
+  os: string
+  arch: string
+  kernel_version: string
+  // WASI capabilities
+  wasi_capabilities: string[]
+  filesystem_mounts: number
+  supported_languages: string[]
 }
 
 interface FilesystemStats {
@@ -53,13 +62,13 @@ export default function OSMode() {
 
   // Filesystem state
   const [fsStats, setFsStats] = useState<FilesystemStats | null>(null)
-  const [currentPath, setCurrentPath] = useState('/project')
   const [dirEntries, setDirEntries] = useState<DirEntry[]>([])
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string>('')
   const [isEditing, setIsEditing] = useState(false)
 
   const projectName = (window as any).PROJECT_NAME || 'Unknown Project'
+  const [currentPath, setCurrentPath] = useState(`/${projectName}`)
   const language = (window as any).LANGUAGE || 'unknown'
   // const projectPath = (window as any).PROJECT_PATH || ''
   const port = (window as any).PORT || '8420'
@@ -241,7 +250,7 @@ export default function OSMode() {
 
               <div className="bg-white/5 backdrop-blur-lg border border-green-500/30 rounded-xl h-96 overflow-hidden">
                 <iframe
-                  src={`http://localhost:${port}/project/`}
+                  src={`http://localhost:${port}/${projectName}/`}
                   className="w-full h-full rounded-xl"
                   title="Project Application"
                 />
@@ -257,7 +266,8 @@ export default function OSMode() {
               <h2 className="text-2xl font-bold mb-2 text-green-400">Kernel Status</h2>
               <p className="text-white/80">WebAssembly Micro-Kernel Information</p>
             </div>
-            <div className="flex-1 p-6">
+            <div className="flex-1 p-6 overflow-y-auto">
+              {/* Primary Stats Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <div className="bg-black/20 backdrop-blur-lg border border-green-500/30 rounded-xl p-4 hover:scale-105 transition-transform">
                   <div className="text-sm font-medium text-green-400/90 mb-2">Kernel Status</div>
@@ -279,8 +289,61 @@ export default function OSMode() {
                 </div>
               </div>
 
-              {kernelStats?.active_runtimes && (
+              {/* System Information */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                 <div className="bg-black/20 backdrop-blur-lg border border-green-500/30 rounded-xl p-6">
+                  <h3 className="text-lg font-semibold mb-4 text-green-400">System Information</h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-white/70">Operating System</span>
+                      <span className="font-mono text-green-300">{kernelStats?.os || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-white/70">Architecture</span>
+                      <span className="font-mono text-green-300">{kernelStats?.arch || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-white/70">Kernel Version</span>
+                      <span className="font-mono text-green-300">
+                        v{kernelStats?.kernel_version || '0.0.0'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-white/70">Filesystem Mounts</span>
+                      <span className="font-mono text-green-300">
+                        {kernelStats?.filesystem_mounts || 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-white/70">Dev Servers</span>
+                      <span className="font-mono text-green-300">
+                        {kernelStats?.active_dev_servers || 0}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* WASI Capabilities */}
+                <div className="bg-black/20 backdrop-blur-lg border border-green-500/30 rounded-xl p-6">
+                  <h3 className="text-lg font-semibold mb-4 text-green-400">WASI Capabilities</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {kernelStats?.wasi_capabilities?.map(capability => (
+                      <span
+                        key={capability}
+                        className="px-3 py-1 bg-blue-500/30 border border-blue-400/50 rounded-full text-sm"
+                      >
+                        {capability}
+                      </span>
+                    )) || (
+                      <span className="text-white/50 text-sm">No capabilities loaded</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Runtimes */}
+              {kernelStats?.active_runtimes && kernelStats.active_runtimes.length > 0 && (
+                <div className="bg-black/20 backdrop-blur-lg border border-green-500/30 rounded-xl p-6 mb-8">
                   <h3 className="text-lg font-semibold mb-4 text-green-400">Active Runtimes</h3>
                   <div className="flex flex-wrap gap-2">
                     {kernelStats.active_runtimes.map(runtime => (
@@ -289,6 +352,25 @@ export default function OSMode() {
                         className="px-3 py-1 bg-green-500/30 border border-green-400/50 rounded-full text-sm"
                       >
                         {runtime}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Supported Languages */}
+              {kernelStats?.supported_languages && kernelStats.supported_languages.length > 0 && (
+                <div className="bg-black/20 backdrop-blur-lg border border-green-500/30 rounded-xl p-6">
+                  <h3 className="text-lg font-semibold mb-4 text-green-400">
+                    Supported Languages
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {kernelStats.supported_languages.map(lang => (
+                      <span
+                        key={lang}
+                        className="px-3 py-1 bg-purple-500/30 border border-purple-400/50 rounded-full text-sm"
+                      >
+                        {lang}
                       </span>
                     ))}
                   </div>
@@ -336,11 +418,11 @@ export default function OSMode() {
                   <div className="flex items-center gap-2 mb-2">
                     <button
                       onClick={() => {
-                        const newPath = currentPath.split('/').slice(0, -1).join('/') || '/project'
+                        const newPath = currentPath.split('/').slice(0, -1).join('/') || `/${projectName}`
                         setCurrentPath(newPath)
                         fetchDirectory(newPath)
                       }}
-                      disabled={currentPath === '/project'}
+                      disabled={currentPath === `/${projectName}`}
                       className="px-3 py-1 bg-green-600/30 hover:bg-green-600/50 disabled:opacity-30 disabled:cursor-not-allowed border border-green-500/30 rounded text-sm"
                     >
                       ⬆️ Up

@@ -314,13 +314,6 @@ impl OsServer {
                 self.serve_asset(request, &path[8..])?; // Remove "/assets/" prefix
             }
 
-            // Proxy requests to the user's project (running in kernel)
-            (Method::Get, path) if path.starts_with("/project/") => {
-                // Strip /project/ prefix and proxy to the actual project
-                let project_path = &path[9..]; // Remove "/project/"
-                self.proxy_to_project(request, project_path)?;
-            }
-
             // Default: serve 404
             _ => {
                 self.send_404(request)?;
@@ -340,7 +333,16 @@ impl OsServer {
             "active_processes": stats.active_processes,
             "total_memory_usage": stats.total_memory_usage,
             "active_runtimes": stats.active_runtimes,
-            "project_pid": self.project_pid
+            "active_dev_servers": stats.active_dev_servers,
+            "project_pid": self.project_pid,
+            // System information
+            "os": stats.os,
+            "arch": stats.arch,
+            "kernel_version": stats.kernel_version,
+            // WASI capabilities
+            "wasi_capabilities": stats.wasi_capabilities,
+            "filesystem_mounts": stats.filesystem_mounts,
+            "supported_languages": stats.supported_languages,
         });
 
         let response = Response::from_string(stats_json.to_string())
