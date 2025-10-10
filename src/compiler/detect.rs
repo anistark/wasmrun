@@ -179,6 +179,7 @@ pub fn get_missing_tools(language: &ProjectLanguage, os: &OperatingSystem) -> Ve
 }
 
 /// Print system information
+#[allow(dead_code)] // TODO: Use for debugging/verbose output
 pub fn print_system_info() {
     let os = detect_operating_system();
     println!("💻 System: {os:?}");

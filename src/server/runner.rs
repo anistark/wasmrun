@@ -66,6 +66,7 @@ pub fn run_wasm_file(path: &str, port: u16, serve: bool) -> Result<()> {
 }
 
 /// Run a project (directory) or file
+#[allow(dead_code)] // TODO: Use for direct project execution API
 pub fn run_project(
     path: &str,
     port: u16,

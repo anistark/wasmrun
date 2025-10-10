@@ -45,6 +45,7 @@ pub enum WasmrunError {
 
     /// Language detection errors
     #[error("Language detection failed: {message}")]
+    #[allow(dead_code)] // TODO: Use for advanced language detection
     LanguageDetection { message: String },
 
     /// Multiple tools missing
@@ -200,6 +201,7 @@ impl WasmrunError {
     }
 
     /// language detection error
+    #[allow(dead_code)] // TODO: Use for advanced language detection
     pub fn language_detection(message: impl Into<String>) -> Self {
         Self::LanguageDetection {
             message: message.into(),
@@ -289,6 +291,7 @@ impl WasmError {
 
 impl CompilationError {
     /// new build failed error
+    #[allow(dead_code)] // TODO: Use for compilation error handling
     pub fn build_failed(language: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::BuildFailed {
             language: language.into(),

@@ -5,6 +5,7 @@ mod config;
 mod debug;
 mod error;
 mod plugin;
+mod runtime;
 mod server;
 mod template;
 mod ui;
@@ -100,21 +101,52 @@ fn main() {
             language,
             watch,
             verbose: _verbose,
+            serve,
         }) => {
             debug_println!(
-                "Processing run command: port={}, language={:?}, watch={}",
+                "Processing run command: port={}, language={:?}, watch={}, serve={}",
                 port,
                 language,
-                watch
+                watch,
+                serve
             );
-            commands::handle_run_command(path, positional_path, *port, language, *watch).map_err(
-                |e| match e {
+            commands::handle_run_command(
+                path,
+                positional_path,
+                *port,
+                language,
+                *watch,
+                false,
+                *serve,
+            )
+            .map_err(|e| match e {
+                WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,
+                _ => e,
+            })
+        }
+
+        Some(Commands::Os {
+            path,
+            positional_path,
+            port,
+            language,
+            watch,
+            verbose,
+        }) => {
+            debug_println!(
+                "Processing os command: port={}, language={:?}, watch={}, verbose={}",
+                port,
+                language,
+                watch,
+                verbose
+            );
+            commands::handle_os_command(path, positional_path, *port, language, *watch, *verbose)
+                .map_err(|e| match e {
                     WasmrunError::Command(_)
                     | WasmrunError::Server(_)
                     | WasmrunError::Path { .. } => e,
                     _ => e,
-                },
-            )
+                })
         }
 
         Some(Commands::Plugin(plugin_cmd)) => {
@@ -131,7 +163,9 @@ fn main() {
         }) => commands::handle_clean_command(&path.clone(), &positional_path.clone(), *all),
 
         None => {
-            debug_println!("No subcommand provided, running default server mode");
+            debug_println!(
+                "No subcommand provided, running default mode (equivalent to 'run' command)"
+            );
             let resolved_args = match ResolvedArgs::from_args(args) {
                 Ok(args) => {
                     debug_println!("Resolved args: {:?}", args);
@@ -148,17 +182,27 @@ fn main() {
                 server::run_wasm_file(&resolved_args.path, resolved_args.port, resolved_args.serve)
             } else {
                 debug_println!(
-                    "Running project: {}, watch: {}",
+                    "Running project: {}, language: {:?}, watch: {}",
                     resolved_args.path,
+                    resolved_args.language,
                     resolved_args.watch
                 );
-                server::run_project(
-                    &resolved_args.path,
+                // Use the same logic as the run command (not OS mode)
+                commands::handle_run_command(
+                    &None,
+                    &Some(resolved_args.path),
                     resolved_args.port,
-                    None,
+                    &resolved_args.language,
                     resolved_args.watch,
+                    false, // verbose mode for default command
                     resolved_args.serve,
                 )
+                .map_err(|e| match e {
+                    WasmrunError::Command(_)
+                    | WasmrunError::Server(_)
+                    | WasmrunError::Path { .. } => e,
+                    _ => e,
+                })
             }
         }
     };
