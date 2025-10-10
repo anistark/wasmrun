@@ -57,8 +57,7 @@ function PanelSection({ title, panels, activePanel, onPanelChange }: PanelSectio
             className={clsx(
               'w-full flex items-center gap-3 px-4 py-3 rounded-lg backdrop-blur-sm transition-all duration-200',
               {
-                'bg-green-600/30 border border-green-400/50 text-white':
-                  activePanel === panel.id,
+                'bg-green-600/30 border border-green-400/50 text-white': activePanel === panel.id,
                 'bg-white/5 border border-green-500/20 text-white/80 hover:bg-green-500/20 hover:text-white hover:translate-x-1':
                   activePanel !== panel.id,
               }

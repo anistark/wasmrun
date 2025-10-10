@@ -53,8 +53,7 @@ pub trait ProjectBundler {
 
         if !path.exists() {
             return Err(anyhow::anyhow!(
-                "Project path does not exist: {}",
-                project_path
+                "Project path does not exist: {project_path}"
             ));
         }
 

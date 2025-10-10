@@ -32,7 +32,7 @@ impl NodeJSRuntime {
 
         let content = std::fs::read_to_string(&package_json_path)?;
         let package_json: PackageJson = serde_json::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse package.json: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to parse package.json: {e}"))?;
 
         Ok(package_json)
     }

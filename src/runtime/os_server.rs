@@ -144,7 +144,7 @@ impl OsServer {
     }
 
     /// Start the OS server
-    pub fn start(mut self, port: u16) -> Result<()> {
+    pub fn start(self, port: u16) -> Result<()> {
         let server = Server::http(format!("127.0.0.1:{port}"))
             .map_err(|e| WasmrunError::from(format!("Failed to start HTTP server: {e}")))?;
 
@@ -240,10 +240,9 @@ impl OsServer {
 
             (Method::Get, "/ws") => {
                 // TODO: WebSocket upgrade for real-time communication
-                let response = Response::from_string("WebSocket not implemented yet")
-                    .with_header(
-                        Header::from_bytes(&b"Content-Type"[..], &b"text/plain"[..]).unwrap(),
-                    );
+                let response = Response::from_string("WebSocket not implemented yet").with_header(
+                    Header::from_bytes(&b"Content-Type"[..], &b"text/plain"[..]).unwrap(),
+                );
                 request
                     .respond(response)
                     .map_err(|e| WasmrunError::from(e.to_string()))?;
@@ -349,10 +348,12 @@ impl OsServer {
 
                     let response = Response::from_string(response_json.to_string())
                         .with_header(
-                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                                .unwrap(),
                         )
                         .with_header(
-                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
+                                .unwrap(),
                         );
 
                     request
@@ -368,10 +369,12 @@ impl OsServer {
                     let response = Response::from_string(response_json.to_string())
                         .with_status_code(tiny_http::StatusCode(500))
                         .with_header(
-                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                                .unwrap(),
                         )
                         .with_header(
-                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
+                                .unwrap(),
                         );
 
                     request
@@ -493,12 +496,17 @@ impl OsServer {
 
             if let Some(port) = dev_server_port {
                 // Forward the request to the dev server
-                let target_url = format!("http://127.0.0.1:{}{}", port, if path.is_empty() { "/" } else { path });
+                let target_url = format!(
+                    "http://127.0.0.1:{}{}",
+                    port,
+                    if path.is_empty() { "/" } else { path }
+                );
 
                 match self.fetch_from_dev_server(&target_url) {
                     Ok((content, content_type)) => {
                         let response = Response::from_string(content).with_header(
-                            Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap(),
+                            Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes())
+                                .unwrap(),
                         );
                         request
                             .respond(response)
@@ -506,8 +514,7 @@ impl OsServer {
                     }
                     Err(e) => {
                         let error_html = format!(
-                            "<html><body><h1>Dev Server Error</h1><p>{}</p></body></html>",
-                            e
+                            "<html><body><h1>Dev Server Error</h1><p>{e}</p></body></html>"
                         );
                         let response = Response::from_string(error_html).with_header(
                             Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
@@ -519,8 +526,7 @@ impl OsServer {
                 }
             } else {
                 let error_html = format!(
-                    "<html><body><h1>No Dev Server</h1><p>No dev server running for PID {}</p></body></html>",
-                    pid
+                    "<html><body><h1>No Dev Server</h1><p>No dev server running for PID {pid}</p></body></html>"
                 );
                 let response = Response::from_string(error_html).with_header(
                     Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
@@ -531,9 +537,8 @@ impl OsServer {
             }
         } else {
             let error_html = "<html><body><h1>No Project Running</h1><p>No project is currently running</p></body></html>";
-            let response = Response::from_string(error_html).with_header(
-                Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
-            );
+            let response = Response::from_string(error_html)
+                .with_header(Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap());
             request
                 .respond(response)
                 .map_err(|e| WasmrunError::from(e.to_string()))?;
@@ -558,21 +563,18 @@ impl OsServer {
 
         // Connect to the dev server
         let mut stream = TcpStream::connect(host)
-            .map_err(|e| WasmrunError::from(format!("Failed to connect to dev server: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to connect to dev server: {e}")))?;
 
         // Send HTTP request
-        let request = format!(
-            "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-            path, host
-        );
+        let request = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
         std::io::Write::write_all(&mut stream, request.as_bytes())
-            .map_err(|e| WasmrunError::from(format!("Failed to send request: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to send request: {e}")))?;
 
         // Read response
         let mut response = String::new();
         stream
             .read_to_string(&mut response)
-            .map_err(|e| WasmrunError::from(format!("Failed to read response: {}", e)))?;
+            .map_err(|e| WasmrunError::from(format!("Failed to read response: {e}")))?;
 
         // Parse HTTP response
         if let Some(header_end) = response.find("\r\n\r\n") {
@@ -651,8 +653,8 @@ impl OsServer {
         let wasi_fs = kernel.wasi_filesystem();
         let stats = wasi_fs.get_stats();
 
-        let stats_json = serde_json::to_string(&stats)
-            .map_err(|e| WasmrunError::from(e.to_string()))?;
+        let stats_json =
+            serde_json::to_string(&stats).map_err(|e| WasmrunError::from(e.to_string()))?;
 
         let response = Response::from_string(stats_json)
             .with_header(
@@ -677,13 +679,15 @@ impl OsServer {
         let normalized_path = if file_path.starts_with('/') {
             file_path.to_string()
         } else {
-            format!("/{}", file_path)
+            format!("/{file_path}")
         };
 
         match wasi_fs.read_file(&normalized_path) {
             Ok(content) => {
                 // Try to detect if it's text or binary
-                let is_text = content.iter().all(|&b| b.is_ascii() || b == b'\n' || b == b'\r' || b == b'\t');
+                let is_text = content
+                    .iter()
+                    .all(|&b| b.is_ascii() || b == b'\n' || b == b'\r' || b == b'\t');
 
                 let response_json = if is_text {
                     serde_json::json!({
@@ -695,9 +699,7 @@ impl OsServer {
                     })
                 } else {
                     // For binary files, return hex representation
-                    let hex_content: String = content.iter()
-                        .map(|b| format!("{:02x}", b))
-                        .collect();
+                    let hex_content: String = content.iter().map(|b| format!("{b:02x}")).collect();
                     serde_json::json!({
                         "success": true,
                         "path": file_path,
@@ -752,7 +754,7 @@ impl OsServer {
         let normalized_path = if dir_path.starts_with('/') {
             dir_path.to_string()
         } else {
-            format!("/{}", dir_path)
+            format!("/{dir_path}")
         };
 
         match wasi_fs.path_readdir(&normalized_path) {
@@ -814,7 +816,7 @@ impl OsServer {
         let normalized_path = if file_path.starts_with('/') {
             file_path.to_string()
         } else {
-            format!("/{}", file_path)
+            format!("/{file_path}")
         };
 
         match wasi_fs.write_file(&normalized_path, &body) {
@@ -870,7 +872,7 @@ impl OsServer {
         let normalized_path = if dir_path.starts_with('/') {
             dir_path.to_string()
         } else {
-            format!("/{}", dir_path)
+            format!("/{dir_path}")
         };
 
         match wasi_fs.path_create_directory(&normalized_path) {
@@ -925,7 +927,7 @@ impl OsServer {
         let normalized_path = if file_path.starts_with('/') {
             file_path.to_string()
         } else {
-            format!("/{}", file_path)
+            format!("/{file_path}")
         };
 
         match wasi_fs.path_unlink_file(&normalized_path) {

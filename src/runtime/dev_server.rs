@@ -47,7 +47,7 @@ impl DevServerManager {
 
         thread::spawn(move || {
             if let Err(e) = run_dev_server(port, project_root, stop_signal_clone) {
-                eprintln!("Dev server error for PID {}: {}", pid, e);
+                eprintln!("Dev server error for PID {pid}: {e}");
             }
         });
 
@@ -68,6 +68,7 @@ impl DevServerManager {
         servers.get(&pid).map(|s| DevServerStatus::Running(s.port))
     }
 
+    #[allow(dead_code)]
     pub fn get_port(&self, pid: Pid) -> Option<u16> {
         let servers = self.servers.lock().unwrap();
         servers.get(&pid).map(|s| s.port)
@@ -81,29 +82,30 @@ impl DevServerManager {
             .collect()
     }
 
+    #[allow(dead_code)]
     pub fn reload_server(&self, pid: Pid) -> Result<()> {
         let servers = self.servers.lock().unwrap();
         if let Some(_server) = servers.get(&pid) {
-            println!("🔄 Reloading dev server for PID {}", pid);
+            println!("🔄 Reloading dev server for PID {pid}");
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Server not found for PID {}", pid))
+            Err(anyhow::anyhow!("Server not found for PID {pid}"))
         }
     }
 }
 
 fn run_dev_server(port: u16, _project_root: String, stop_signal: Arc<Mutex<bool>>) -> Result<()> {
-    let addr = format!("127.0.0.1:{}", port);
-    let server = Server::http(&addr)
-        .map_err(|e| anyhow::anyhow!("Failed to start dev server: {}", e))?;
+    let addr = format!("127.0.0.1:{port}");
+    let server =
+        Server::http(&addr).map_err(|e| anyhow::anyhow!("Failed to start dev server: {e}"))?;
 
-    println!("✅ Dev server started on http://{}", addr);
+    println!("✅ Dev server started on http://{addr}");
 
     for request in server.incoming_requests() {
         {
             let should_stop = *stop_signal.lock().unwrap();
             if should_stop {
-                println!("🛑 Stopping dev server on port {}", port);
+                println!("🛑 Stopping dev server on port {port}");
                 break;
             }
         }
@@ -112,7 +114,7 @@ fn run_dev_server(port: u16, _project_root: String, stop_signal: Arc<Mutex<bool>
             r#"<!DOCTYPE html>
 <html>
 <head>
-    <title>Dev Server - Port {}</title>
+    <title>Dev Server - Port {port}</title>
     <style>
         body {{
             font-family: system-ui, -apple-system, sans-serif;
@@ -148,15 +150,14 @@ fn run_dev_server(port: u16, _project_root: String, stop_signal: Arc<Mutex<bool>
 <body>
     <div class="container">
         <h1>🚀 wasmrun Dev Server</h1>
-        <p>Port: {}</p>
+        <p>Port: {port}</p>
         <p>Status: <span class="status">RUNNING</span></p>
         <p style="margin-top: 2rem; color: #666;">
             This is a development server managed by wasmrun OS mode
         </p>
     </div>
 </body>
-</html>"#,
-            port, port
+</html>"#
         ))
         .with_header(
             tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
@@ -164,7 +165,7 @@ fn run_dev_server(port: u16, _project_root: String, stop_signal: Arc<Mutex<bool>
         );
 
         if let Err(e) = request.respond(response) {
-            eprintln!("Failed to send response: {}", e);
+            eprintln!("Failed to send response: {e}");
         }
     }
 

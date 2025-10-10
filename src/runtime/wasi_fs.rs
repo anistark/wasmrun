@@ -128,10 +128,7 @@ impl WasiFilesystem {
         }
 
         if !host_path.is_dir() {
-            anyhow::bail!(
-                "Cannot mount non-directory path: {}",
-                host_path.display()
-            );
+            anyhow::bail!("Cannot mount non-directory path: {}", host_path.display());
         }
 
         let canonical = host_path.canonicalize()?;
@@ -152,19 +149,12 @@ impl WasiFilesystem {
     #[allow(dead_code)]
     pub fn list_mounts(&self) -> Vec<(String, PathBuf)> {
         let mounts = self.mounts.read().unwrap();
-        mounts
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
+        mounts.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
 
     /// WASI path_open - Open or create a file
     #[allow(dead_code)]
-    pub fn path_open(
-        &self,
-        virtual_path: &str,
-        flags: OpenFlags,
-    ) -> Result<WasiFd> {
+    pub fn path_open(&self, virtual_path: &str, flags: OpenFlags) -> Result<WasiFd> {
         if self.config.read_only && (flags.write || flags.create) {
             anyhow::bail!("Filesystem is in read-only mode");
         }
@@ -181,7 +171,7 @@ impl WasiFilesystem {
 
         // Verify the file exists
         if !host_path.exists() {
-            anyhow::bail!("File not found: {}", virtual_path);
+            anyhow::bail!("File not found: {virtual_path}");
         }
 
         // Truncate if requested
@@ -204,7 +194,7 @@ impl WasiFilesystem {
             OpenFile {
                 path: host_path,
                 flags,
-                offset: if flags.append { 0 } else { 0 }, // Will be set to end in first write
+                offset: 0, // Will be set to end in first write for append mode
                 virtual_path: virtual_path.to_string(),
             },
         );
@@ -218,7 +208,7 @@ impl WasiFilesystem {
         let mut fd_table = self.fd_table.write().unwrap();
         let open_file = fd_table
             .get_mut(&fd)
-            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {}", fd))?;
+            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {fd}"))?;
 
         if !open_file.flags.read {
             anyhow::bail!("File not open for reading");
@@ -247,7 +237,7 @@ impl WasiFilesystem {
         let mut fd_table = self.fd_table.write().unwrap();
         let open_file = fd_table
             .get_mut(&fd)
-            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {}", fd))?;
+            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {fd}"))?;
 
         if !open_file.flags.write {
             anyhow::bail!("File not open for writing");
@@ -255,9 +245,7 @@ impl WasiFilesystem {
 
         if open_file.flags.append {
             // Append mode: write to end of file
-            let mut file = fs::OpenOptions::new()
-                .append(true)
-                .open(&open_file.path)?;
+            let mut file = fs::OpenOptions::new().append(true).open(&open_file.path)?;
             std::io::Write::write_all(&mut file, data)?;
             open_file.offset += data.len();
         } else {
@@ -288,7 +276,7 @@ impl WasiFilesystem {
         let mut fd_table = self.fd_table.write().unwrap();
         fd_table
             .remove(&fd)
-            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {}", fd))?;
+            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {fd}"))?;
         Ok(())
     }
 
@@ -298,7 +286,7 @@ impl WasiFilesystem {
         let mut fd_table = self.fd_table.write().unwrap();
         let open_file = fd_table
             .get_mut(&fd)
-            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {}", fd))?;
+            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {fd}"))?;
 
         let file_size = fs::metadata(&open_file.path)?.len() as usize;
 
@@ -326,7 +314,7 @@ impl WasiFilesystem {
 
         let host_path = self.resolve_path(virtual_path)?;
         fs::create_dir_all(&host_path)
-            .with_context(|| format!("Failed to create directory: {}", virtual_path))?;
+            .with_context(|| format!("Failed to create directory: {virtual_path}"))?;
         Ok(())
     }
 
@@ -339,7 +327,7 @@ impl WasiFilesystem {
 
         let host_path = self.resolve_path(virtual_path)?;
         fs::remove_dir(&host_path)
-            .with_context(|| format!("Failed to remove directory: {}", virtual_path))?;
+            .with_context(|| format!("Failed to remove directory: {virtual_path}"))?;
         Ok(())
     }
 
@@ -351,7 +339,7 @@ impl WasiFilesystem {
 
         let host_path = self.resolve_path(virtual_path)?;
         fs::remove_file(&host_path)
-            .with_context(|| format!("Failed to unlink file: {}", virtual_path))?;
+            .with_context(|| format!("Failed to unlink file: {virtual_path}"))?;
         Ok(())
     }
 
@@ -481,18 +469,18 @@ impl WasiFilesystem {
                     // If file doesn't exist yet, check parent
                     parent.canonicalize()?
                 } else {
-                    anyhow::bail!("Invalid path: {}", virtual_path);
+                    anyhow::bail!("Invalid path: {virtual_path}");
                 };
 
                 if !canonical_resolved.starts_with(&canonical_mount) {
-                    anyhow::bail!("Path escapes mount point: {}", virtual_path);
+                    anyhow::bail!("Path escapes mount point: {virtual_path}");
                 }
 
                 return Ok(resolved);
             }
         }
 
-        anyhow::bail!("Path not mounted: {}", virtual_path)
+        anyhow::bail!("Path not mounted: {virtual_path}")
     }
 
     /// Calculate the size of a directory recursively
@@ -635,8 +623,7 @@ mod tests {
         assert!(fs.path_exists("/test/subdir"));
 
         // Write file in subdirectory
-        fs.write_file("/test/subdir/file.txt", b"content")
-            .unwrap();
+        fs.write_file("/test/subdir/file.txt", b"content").unwrap();
 
         // Check file stats
         let stats = fs.path_filestat_get("/test/subdir/file.txt").unwrap();
@@ -661,7 +648,13 @@ mod tests {
 
         // Open for reading
         let fd = fs
-            .path_open("/test/test.txt", OpenFlags { read: true, ..Default::default() })
+            .path_open(
+                "/test/test.txt",
+                OpenFlags {
+                    read: true,
+                    ..Default::default()
+                },
+            )
             .unwrap();
 
         // Read data

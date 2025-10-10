@@ -22,10 +22,7 @@ export default function KernelStatusPanel({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatCard title="Kernel Status" value={kernelStats?.status || 'Loading...'} />
           <StatCard title="Active Processes" value={kernelStats?.active_processes || 0} />
-          <StatCard
-            title="Memory Usage"
-            value={`${kernelStats?.total_memory_usage || 0} MB`}
-          />
+          <StatCard title="Memory Usage" value={`${kernelStats?.total_memory_usage || 0} MB`} />
           <StatCard title="Uptime" value={formatUptime(uptime)} />
         </div>
 

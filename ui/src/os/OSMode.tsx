@@ -6,12 +6,7 @@ import KernelStatusPanel from '../components/os/KernelStatusPanel'
 import FilesystemPanel from '../components/os/FilesystemPanel'
 import { panels } from '../components/os/panels'
 import { formatUptime, formatBytes } from '../utils/osUtils'
-import type {
-  KernelStats,
-  FilesystemStats,
-  DirEntry,
-  StatusType,
-} from '../types/osTypes'
+import type { KernelStats, FilesystemStats, DirEntry, StatusType } from '../types/osTypes'
 
 export default function OSMode() {
   const [activePanel, setActivePanel] = useState('project')
@@ -92,24 +87,21 @@ export default function OSMode() {
     }
   }, [])
 
-  const saveFile = useCallback(
-    async (path: string, content: string) => {
-      try {
-        const response = await fetch(`/api/fs/write${path}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body: content,
-        })
-        const data = await response.json()
-        if (data.success) {
-          setIsEditing(false)
-        }
-      } catch (error) {
-        console.error('Failed to save file:', error)
+  const saveFile = useCallback(async (path: string, content: string) => {
+    try {
+      const response = await fetch(`/api/fs/write${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: content,
+      })
+      const data = await response.json()
+      if (data.success) {
+        setIsEditing(false)
       }
-    },
-    []
-  )
+    } catch (error) {
+      console.error('Failed to save file:', error)
+    }
+  }, [])
 
   useEffect(() => {
     fetchKernelStats()
@@ -257,9 +249,7 @@ export default function OSMode() {
 
       <div className="flex h-[calc(100vh-80px)]">
         <Sidebar panels={panels} activePanel={activePanel} onPanelChange={setActivePanel} />
-        <main className="flex-1 overflow-hidden bg-black/10 backdrop-blur-sm">
-          {renderPanel()}
-        </main>
+        <main className="flex-1 overflow-hidden bg-black/10 backdrop-blur-sm">{renderPanel()}</main>
       </div>
 
       <div className="fixed bottom-4 right-4 text-xs text-white/50">

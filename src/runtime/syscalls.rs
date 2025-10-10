@@ -56,7 +56,7 @@ impl TryFrom<u32> for SyscallNumber {
             16 => Ok(SyscallNumber::Munmap),
             17 => Ok(SyscallNumber::Print),
             18 => Ok(SyscallNumber::Input),
-            _ => Err(anyhow::anyhow!("Unknown syscall number: {}", value)),
+            _ => Err(anyhow::anyhow!("Unknown syscall number: {value}")),
         }
     }
 }

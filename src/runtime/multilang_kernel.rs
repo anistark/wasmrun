@@ -70,9 +70,9 @@ impl MultiLanguageKernel {
             .and_then(|n| n.to_str())
             .unwrap_or("project");
 
-        let mount_path = format!("/{}", project_name);
+        let mount_path = format!("/{project_name}");
         wasi_fs.mount(&mount_path, project_path)?;
-        println!("✅ Project mounted at {} -> {}", mount_path, project_path);
+        println!("✅ Project mounted at {mount_path} -> {project_path}");
         Ok(())
     }
 
@@ -199,10 +199,10 @@ impl MultiLanguageKernel {
         // Set up development server
         if runtime.create_dev_server().is_some() {
             let port = config.port.unwrap_or_else(|| 8000 + (pid as u16));
-            let project_root = format!("/projects/{}", pid);
+            let project_root = format!("/projects/{pid}");
             self.dev_server_manager
                 .start_server(pid, port, project_root)?;
-            println!("✅ Dev server started for PID {} on port {}", pid, port);
+            println!("✅ Dev server started for PID {pid} on port {port}");
         }
 
         // TODO: Set up hot reload if enabled

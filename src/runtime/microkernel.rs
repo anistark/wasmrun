@@ -259,7 +259,7 @@ impl SyscallInterface for WasmMicroKernel {
         let fs = self.filesystem.lock().unwrap();
         fs.get(path)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("File not found: {}", path))
+            .ok_or_else(|| anyhow::anyhow!("File not found: {path}"))
     }
 
     fn write_file(&self, path: &str, data: &[u8]) -> Result<()> {
