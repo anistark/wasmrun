@@ -141,8 +141,7 @@ impl LanguageRuntime for NodeJSRuntime {
     }
 
     fn load_wasm_binary(&self) -> Result<Vec<u8>> {
-        // TODO: In a real implementation, this would load a Node.js + V8 WASM binary
-        // For now, return a placeholder WASM module
+        // TODO: Load actual Node.js + V8 WASM binary
         Ok(create_placeholder_nodejs_wasm())
     }
 
@@ -229,15 +228,12 @@ impl LanguageRuntime for NodeJSRuntime {
     }
 
     fn handle_syscall(&self, _pid: Pid, _syscall_num: u32, _args: SyscallArgs) -> SyscallResult {
-        // TODO: Implement Node.js-specific syscalls (e.g., require, setTimeout, process.env)
+        // TODO: Implement Node.js syscalls (require, setTimeout, process.env, etc.)
         SyscallResult::Error("Node.js-specific syscalls not yet implemented".to_string())
     }
 }
 
-/// Node.js-specific syscall interface
-struct NodeJSSyscallInterface {
-    // TODO: Add Node.js-specific syscall implementations
-}
+struct NodeJSSyscallInterface {}
 
 impl NodeJSSyscallInterface {
     fn new() -> Self {
@@ -247,30 +243,24 @@ impl NodeJSSyscallInterface {
 
 impl SyscallInterface for NodeJSSyscallInterface {
     fn read_file(&self, _path: &str) -> Result<Vec<u8>> {
-        // TODO: Implement Node.js-specific file reading with require() support
-        Err(anyhow::anyhow!("Node.js file reading not implemented"))
+        // TODO: Add require() module resolution support
+        Err(anyhow::anyhow!("Not implemented"))
     }
 
     fn write_file(&self, _path: &str, _data: &[u8]) -> Result<()> {
-        // TODO: Implement Node.js-specific file writing
-        Err(anyhow::anyhow!("Node.js file writing not implemented"))
+        Err(anyhow::anyhow!("Not implemented"))
     }
 
     fn list_directory(&self, _path: &str) -> Result<Vec<crate::runtime::microkernel::VfsEntry>> {
-        // TODO: Implement Node.js-specific directory listing
-        Err(anyhow::anyhow!("Node.js directory listing not implemented"))
+        Err(anyhow::anyhow!("Not implemented"))
     }
 
     fn create_directory(&self, _path: &str) -> Result<()> {
-        // TODO: Implement Node.js-specific directory creation
-        Err(anyhow::anyhow!(
-            "Node.js directory creation not implemented"
-        ))
+        Err(anyhow::anyhow!("Not implemented"))
     }
 
     fn delete_file(&self, _path: &str) -> Result<()> {
-        // TODO: Implement Node.js-specific file deletion
-        Err(anyhow::anyhow!("Node.js file deletion not implemented"))
+        Err(anyhow::anyhow!("Not implemented"))
     }
 }
 
@@ -288,22 +278,18 @@ impl NodeJSDevServer {
 }
 
 impl DevServer for NodeJSDevServer {
-    fn start(&self, port: u16) -> Result<()> {
-        // TODO: Implement Node.js development server startup
-        // This would involve setting up hot reload, watch mode, etc.
-        println!("Starting Node.js dev server on port {port}");
+    fn start(&self, _port: u16) -> Result<()> {
+        // TODO: Start actual dev server with hot reload
         Ok(())
     }
 
     fn stop(&self) -> Result<()> {
-        // TODO: Implement Node.js development server shutdown
-        println!("Stopping Node.js dev server");
+        // TODO: Stop dev server
         Ok(())
     }
 
     fn reload(&self) -> Result<()> {
-        // TODO: Implement hot reload functionality
-        println!("Reloading Node.js project");
+        // TODO: Hot reload implementation
         Ok(())
     }
 
@@ -312,8 +298,7 @@ impl DevServer for NodeJSDevServer {
     }
 }
 
-/// Create a placeholder WASM binary for Node.js runtime
-/// In a real implementation, this would be a pre-compiled Node.js + V8 WASM binary
+// TODO: Replace with actual Node.js + V8 WASM binary
 fn create_placeholder_nodejs_wasm() -> Vec<u8> {
     // WASM magic number + version
     let mut wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];

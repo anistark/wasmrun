@@ -1,4 +1,3 @@
-// Go runtime implementation
 // TODO: Implement Go runtime with TinyGo WASM
 
 pub struct GoRuntime;

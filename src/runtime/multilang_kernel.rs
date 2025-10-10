@@ -220,23 +220,13 @@ impl MultiLanguageKernel {
         Ok(())
     }
 
-    /// Set up hot reload for a process
     fn setup_hot_reload(&self, _pid: Pid, _language: &str) -> Result<()> {
-        // TODO: Implement hot reload system
-        // This would involve:
-        // 1. Setting up file watchers for the project directory
-        // 2. Implementing reload mechanisms per language
-        // 3. Managing process restarts
+        // TODO: File watchers, reload mechanisms, process restarts
         Ok(())
     }
 
-    /// Set up debugging for a process
     fn setup_debugging(&self, _pid: Pid, _language: &str) -> Result<()> {
-        // TODO: Implement debugging support
-        // This would involve:
-        // 1. Setting up language-specific debug protocols
-        // 2. Implementing breakpoint management
-        // 3. Variable inspection interfaces
+        // TODO: Debug protocols, breakpoint management, variable inspection
         Ok(())
     }
 

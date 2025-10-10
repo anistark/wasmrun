@@ -237,15 +237,12 @@ impl OsServer {
                 }
             }
 
-            // WebSocket endpoint (simplified HTTP upgrade simulation)
             (Method::Get, "/ws") => {
-                // For now, return a simple response
-                // TODO: Implement proper WebSocket upgrade
-                let response =
-                    Response::from_string("WebSocket endpoint - upgrade not implemented yet")
-                        .with_header(
-                            Header::from_bytes(&b"Content-Type"[..], &b"text/plain"[..]).unwrap(),
-                        );
+                // TODO: WebSocket upgrade for real-time communication
+                let response = Response::from_string("WebSocket not implemented yet")
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"text/plain"[..]).unwrap(),
+                    );
                 request
                     .respond(response)
                     .map_err(|e| WasmrunError::from(e.to_string()))?;
@@ -291,12 +288,10 @@ impl OsServer {
                 self.handle_fs_delete_request(request, file_path)?;
             }
 
-            // API endpoint for process management
             (Method::Post, "/api/kernel/restart") => {
-                // Note: This requires mutable access but we can't get it in this context
-                // For now, return a placeholder response
+                // TODO: Process restart functionality
                 let response = Response::from_string(
-                    r#"{"error": "Restart functionality not yet implemented"}"#,
+                    r#"{"error": "Not implemented"}"#,
                 )
                 .with_header(
                     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
@@ -359,24 +354,11 @@ impl OsServer {
         Ok(())
     }
 
-    /// Proxy request to the user's project running in the kernel
     #[allow(dead_code)]
     fn proxy_to_project(&self, request: Request, path: &str) -> Result<()> {
-        // For now, return a placeholder response
-        // TODO: Implement actual proxying to the project's HTTP server
+        // TODO: Proxy to project's HTTP server
         let placeholder = format!(
-            "
-            <html>
-                <head><title>Project Proxy</title></head>
-                <body style=\"background-color: #000; color: white; font-family: system-ui, -apple-system, sans-serif; padding: 2rem;\">
-                    <h1 style=\"color: #10b981;\">Project Running in Kernel</h1>
-                    <p style=\"color: white;\">Path: {}</p>
-                    <p style=\"color: white;\">PID: {:?}</p>
-                    <p style=\"color: white;\">This would proxy to your project's HTTP server.</p>
-                    <p style=\"color: #10b981;\">Implementation in progress...</p>
-                </body>
-            </html>
-        ",
+            "<html><body><h1>Project Proxy</h1><p>Path: {}</p><p>PID: {:?}</p></body></html>",
             path, self.project_pid
         );
 

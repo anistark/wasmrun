@@ -110,14 +110,13 @@ impl WasmMicroKernel {
         &self.wasi_fs
     }
 
-    /// Start the kernel scheduler
     pub fn start_scheduler(&self) -> Result<()> {
         let mut running = self.scheduler_running.lock().unwrap();
         if *running {
             return Ok(());
         }
         *running = true;
-        // TODO: Implement actual scheduler logic
+        // TODO: Process scheduling algorithm
         Ok(())
     }
 

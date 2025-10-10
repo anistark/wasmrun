@@ -133,14 +133,13 @@ fn os_create_config(
         dev_mode: true,
         port: None,
         hot_reload: watch,
-        debugging: false, // TODO: Add debug support
+        debugging: false, // TODO: Add --debug flag
     })
 }
 
-/// Initialize the multi-language kernel for OS mode
 fn os_initialize_kernel(_config: OsRunConfig) -> Result<MultiLanguageKernel> {
     let kernel = MultiLanguageKernel::new();
-    // TODO: Use config to configure kernel
+    // TODO: Apply config to kernel
     println!("✅ Multi-language kernel started");
     Ok(kernel)
 }
@@ -159,11 +158,9 @@ fn os_start_server(server: OsServer, port: u16) -> Result<()> {
     server.start(port)
 }
 
-/// Detect project language for OS mode (with OS-specific logic)
-#[allow(dead_code)] // TODO: Future OS-specific language detection
+// TODO: OS-specific language detection
+#[allow(dead_code)]
 pub fn os_detect_project_language(project_path: &str) -> Result<String> {
-    // TODO: Implement OS mode language detection logic
-    // For now, using regular detection and convert to String
     let language = crate::compiler::detect_project_language(project_path);
     match language {
         crate::compiler::ProjectLanguage::Rust => Ok("rust".to_string()),
@@ -174,14 +171,9 @@ pub fn os_detect_project_language(project_path: &str) -> Result<String> {
     }
 }
 
-/// Validate OS mode project structure
-#[allow(dead_code)] // TODO: Future OS mode project validation
+// TODO: OS mode project validation
+#[allow(dead_code)]
 pub fn os_validate_project(project_path: &str) -> Result<()> {
-    // OS mode specific validations
-    // - Check for supported project types
-    // - Validate kernel compatibility
-    // - Check for required dependencies
-
     if !Path::new(project_path).exists() {
         return Err(WasmrunError::from(format!(
             "Project path does not exist: {project_path}"
@@ -194,7 +186,6 @@ pub fn os_validate_project(project_path: &str) -> Result<()> {
         )));
     }
 
-    // TODO: Add more OS-specific validations
     Ok(())
 }
 
