@@ -360,6 +360,7 @@ impl OsServer {
     }
 
     /// Proxy request to the user's project running in the kernel
+    #[allow(dead_code)]
     fn proxy_to_project(&self, request: Request, path: &str) -> Result<()> {
         // For now, return a placeholder response
         // TODO: Implement actual proxying to the project's HTTP server
