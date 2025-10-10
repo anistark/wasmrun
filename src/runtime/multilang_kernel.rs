@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::runtime::dev_server::DevServerManager;
 use crate::runtime::microkernel::{Pid, WasmInstance, WasmMicroKernel};
-use crate::runtime::registry::{DevServer, DevServerStatus, LanguageRuntimeRegistry};
+use crate::runtime::registry::{DevServerStatus, LanguageRuntimeRegistry};
 use crate::runtime::syscalls::{SyscallArgs, SyscallHandler, SyscallResult};
 
 /// Multi-language kernel that orchestrates different language runtimes
@@ -12,7 +13,7 @@ pub struct MultiLanguageKernel {
     base_kernel: WasmMicroKernel,
     language_registry: LanguageRuntimeRegistry,
     active_runtimes: Arc<Mutex<HashMap<String, WasmInstance>>>,
-    dev_servers: Arc<Mutex<HashMap<Pid, Box<dyn DevServer>>>>,
+    dev_server_manager: Arc<DevServerManager>,
     syscall_handler: Arc<Mutex<SyscallHandler>>,
     process_languages: Arc<Mutex<HashMap<Pid, String>>>,
 }
@@ -45,7 +46,7 @@ impl MultiLanguageKernel {
             base_kernel: base_kernel.clone(),
             language_registry: LanguageRuntimeRegistry::register_builtin_runtimes(),
             active_runtimes: Arc::new(Mutex::new(HashMap::new())),
-            dev_servers: Arc::new(Mutex::new(HashMap::new())),
+            dev_server_manager: Arc::new(DevServerManager::new()),
             syscall_handler: Arc::new(Mutex::new(syscall_handler)),
             process_languages: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -83,11 +84,8 @@ impl MultiLanguageKernel {
     /// Stop the multi-language kernel
     pub fn stop(&self) -> Result<()> {
         // Stop all dev servers
-        {
-            let mut dev_servers = self.dev_servers.lock().unwrap();
-            for (_, server) in dev_servers.drain() {
-                let _ = server.stop();
-            }
+        for (pid, _, _) in self.dev_server_manager.list_servers() {
+            let _ = self.dev_server_manager.stop_server(pid);
         }
 
         // Clean up active runtimes
@@ -199,12 +197,12 @@ impl MultiLanguageKernel {
             .ok_or_else(|| anyhow::anyhow!("Runtime not found: {language}"))?;
 
         // Set up development server
-        if let Some(dev_server) = runtime.create_dev_server() {
-            let port = config.port.unwrap_or(8080);
-            dev_server.start(port)?;
-
-            let mut dev_servers = self.dev_servers.lock().unwrap();
-            dev_servers.insert(pid, dev_server);
+        if runtime.create_dev_server().is_some() {
+            let port = config.port.unwrap_or_else(|| 8000 + (pid as u16));
+            let project_root = format!("/projects/{}", pid);
+            self.dev_server_manager
+                .start_server(pid, port, project_root)?;
+            println!("✅ Dev server started for PID {} on port {}", pid, port);
         }
 
         // TODO: Set up hot reload if enabled
@@ -279,19 +277,13 @@ impl MultiLanguageKernel {
 
     /// Get development server status for a process
     pub fn get_dev_server_status(&self, pid: Pid) -> Option<DevServerStatus> {
-        let dev_servers = self.dev_servers.lock().unwrap();
-        dev_servers.get(&pid).map(|server| server.get_status())
+        self.dev_server_manager.get_status(pid)
     }
 
     /// Stop a process and clean up associated resources
     pub fn kill_process(&mut self, pid: Pid) -> Result<()> {
         // Stop dev server if running
-        {
-            let mut dev_servers = self.dev_servers.lock().unwrap();
-            if let Some(server) = dev_servers.remove(&pid) {
-                let _ = server.stop();
-            }
-        }
+        let _ = self.dev_server_manager.stop_server(pid);
 
         // Remove language tracking
         {
@@ -312,10 +304,7 @@ impl MultiLanguageKernel {
             let runtimes = self.active_runtimes.lock().unwrap();
             runtimes.keys().cloned().collect()
         };
-        let active_dev_servers = {
-            let servers = self.dev_servers.lock().unwrap();
-            servers.len()
-        };
+        let active_dev_servers = self.dev_server_manager.list_servers().len();
 
         // Get system information
         let os = std::env::consts::OS.to_string();

@@ -10,7 +10,7 @@ use tiny_http::{Header, Method, Request, Response, Server};
 pub struct OsServer {
     kernel: Arc<RwLock<MultiLanguageKernel>>,
     config: OsRunConfig,
-    project_pid: Option<u32>,
+    project_pid: Arc<RwLock<Option<u32>>>,
     template_cache: HashMap<String, String>,
 }
 
@@ -19,7 +19,7 @@ impl OsServer {
         let mut server = Self {
             kernel: Arc::new(RwLock::new(kernel)),
             config,
-            project_pid: None,
+            project_pid: Arc::new(RwLock::new(None)),
             template_cache: HashMap::new(),
         };
 
@@ -165,7 +165,7 @@ impl OsServer {
     }
 
     /// Start the project in the kernel
-    fn start_project(&mut self) -> Result<()> {
+    fn start_project(&self) -> Result<()> {
         let mut kernel = self.kernel.write().unwrap();
 
         // Mount the project directory into WASI filesystem
@@ -175,7 +175,8 @@ impl OsServer {
 
         match kernel.auto_detect_and_run(self.config.clone()) {
             Ok(pid) => {
-                self.project_pid = Some(pid);
+                let mut project_pid = self.project_pid.write().unwrap();
+                *project_pid = Some(pid);
                 println!("✅ Project started with PID: {pid}");
                 Ok(())
             }
@@ -288,25 +289,23 @@ impl OsServer {
                 self.handle_fs_delete_request(request, file_path)?;
             }
 
+            (Method::Post, "/api/kernel/start") => {
+                self.handle_start_project(request)?;
+            }
+
             (Method::Post, "/api/kernel/restart") => {
-                // TODO: Process restart functionality
-                let response = Response::from_string(
-                    r#"{"error": "Not implemented"}"#,
-                )
-                .with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                )
-                .with_header(
-                    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                );
-                request
-                    .respond(response)
-                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+                self.handle_restart_project(request)?;
             }
 
             // Serve static assets
             (Method::Get, path) if path.starts_with("/assets/") => {
                 self.serve_asset(request, &path[8..])?; // Remove "/assets/" prefix
+            }
+
+            // Proxy requests to project dev server
+            (Method::Get, path) if path.starts_with("/app/") => {
+                let project_path = &path[5..]; // Remove "/app/" prefix
+                self.proxy_to_dev_server(request, project_path)?;
             }
 
             // Default: serve 404
@@ -318,18 +317,142 @@ impl OsServer {
         Ok(())
     }
 
+    /// Handle start project request
+    fn handle_start_project(&self, request: Request) -> Result<()> {
+        let project_pid = self.project_pid.read().unwrap();
+        if project_pid.is_some() {
+            let response_json = serde_json::json!({
+                "success": false,
+                "error": "Project is already running"
+            });
+
+            let response = Response::from_string(response_json.to_string())
+                .with_header(
+                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                )
+                .with_header(
+                    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                );
+
+            request
+                .respond(response)
+                .map_err(|e| WasmrunError::from(e.to_string()))?;
+        } else {
+            drop(project_pid); // Release read lock
+            match self.start_project() {
+                Ok(_) => {
+                    let pid = *self.project_pid.read().unwrap();
+                    let response_json = serde_json::json!({
+                        "success": true,
+                        "pid": pid
+                    });
+
+                    let response = Response::from_string(response_json.to_string())
+                        .with_header(
+                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                        )
+                        .with_header(
+                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                        );
+
+                    request
+                        .respond(response)
+                        .map_err(|e| WasmrunError::from(e.to_string()))?;
+                }
+                Err(e) => {
+                    let response_json = serde_json::json!({
+                        "success": false,
+                        "error": e.to_string()
+                    });
+
+                    let response = Response::from_string(response_json.to_string())
+                        .with_status_code(tiny_http::StatusCode(500))
+                        .with_header(
+                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                        )
+                        .with_header(
+                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                        );
+
+                    request
+                        .respond(response)
+                        .map_err(|e| WasmrunError::from(e.to_string()))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle restart project request
+    fn handle_restart_project(&self, request: Request) -> Result<()> {
+        // Stop the current project if running
+        {
+            let pid_opt = *self.project_pid.read().unwrap();
+            if let Some(pid) = pid_opt {
+                let mut kernel = self.kernel.write().unwrap();
+                let _ = kernel.kill_process(pid);
+                let mut project_pid = self.project_pid.write().unwrap();
+                *project_pid = None;
+            }
+        }
+
+        // Start the project again
+        match self.start_project() {
+            Ok(_) => {
+                let pid = *self.project_pid.read().unwrap();
+                let response_json = serde_json::json!({
+                    "success": true,
+                    "pid": pid
+                });
+
+                let response = Response::from_string(response_json.to_string())
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+            Err(e) => {
+                let response_json = serde_json::json!({
+                    "success": false,
+                    "error": e.to_string()
+                });
+
+                let response = Response::from_string(response_json.to_string())
+                    .with_status_code(tiny_http::StatusCode(500))
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Handle kernel statistics API request
     fn handle_kernel_stats_request(&self, request: Request) -> Result<()> {
         let kernel = self.kernel.read().unwrap();
         let stats = kernel.get_statistics();
 
+        let project_pid = *self.project_pid.read().unwrap();
         let stats_json = serde_json::json!({
             "status": "running",
             "active_processes": stats.active_processes,
             "total_memory_usage": stats.total_memory_usage,
             "active_runtimes": stats.active_runtimes,
             "active_dev_servers": stats.active_dev_servers,
-            "project_pid": self.project_pid,
+            "project_pid": project_pid,
             // System information
             "os": stats.os,
             "arch": stats.arch,
@@ -354,21 +477,120 @@ impl OsServer {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    fn proxy_to_project(&self, request: Request, path: &str) -> Result<()> {
-        // TODO: Proxy to project's HTTP server
-        let placeholder = format!(
-            "<html><body><h1>Project Proxy</h1><p>Path: {}</p><p>PID: {:?}</p></body></html>",
-            path, self.project_pid
-        );
+    /// Proxy requests to the project's dev server
+    fn proxy_to_dev_server(&self, request: Request, path: &str) -> Result<()> {
+        // Get the dev server port for the project
+        let project_pid = *self.project_pid.read().unwrap();
+        if let Some(pid) = project_pid {
+            let kernel = self.kernel.read().unwrap();
+            let dev_server_port = kernel.get_dev_server_status(pid).and_then(|status| {
+                if let crate::runtime::registry::DevServerStatus::Running(port) = status {
+                    Some(port)
+                } else {
+                    None
+                }
+            });
 
-        let response = Response::from_string(placeholder)
-            .with_header(Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap());
+            if let Some(port) = dev_server_port {
+                // Forward the request to the dev server
+                let target_url = format!("http://127.0.0.1:{}{}", port, if path.is_empty() { "/" } else { path });
 
-        request
-            .respond(response)
-            .map_err(|e| WasmrunError::from(e.to_string()))?;
+                match self.fetch_from_dev_server(&target_url) {
+                    Ok((content, content_type)) => {
+                        let response = Response::from_string(content).with_header(
+                            Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap(),
+                        );
+                        request
+                            .respond(response)
+                            .map_err(|e| WasmrunError::from(e.to_string()))?;
+                    }
+                    Err(e) => {
+                        let error_html = format!(
+                            "<html><body><h1>Dev Server Error</h1><p>{}</p></body></html>",
+                            e
+                        );
+                        let response = Response::from_string(error_html).with_header(
+                            Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
+                        );
+                        request
+                            .respond(response)
+                            .map_err(|e| WasmrunError::from(e.to_string()))?;
+                    }
+                }
+            } else {
+                let error_html = format!(
+                    "<html><body><h1>No Dev Server</h1><p>No dev server running for PID {}</p></body></html>",
+                    pid
+                );
+                let response = Response::from_string(error_html).with_header(
+                    Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
+                );
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+        } else {
+            let error_html = "<html><body><h1>No Project Running</h1><p>No project is currently running</p></body></html>";
+            let response = Response::from_string(error_html).with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
+            );
+            request
+                .respond(response)
+                .map_err(|e| WasmrunError::from(e.to_string()))?;
+        }
         Ok(())
+    }
+
+    /// Fetch content from the dev server
+    fn fetch_from_dev_server(&self, url: &str) -> Result<(String, String)> {
+        use std::io::Read;
+        use std::net::TcpStream;
+
+        // Parse the URL to get host and path
+        let url_without_scheme = url.strip_prefix("http://").unwrap_or(url);
+        let parts: Vec<&str> = url_without_scheme.splitn(2, '/').collect();
+        let host = parts[0];
+        let path = if parts.len() > 1 {
+            format!("/{}", parts[1])
+        } else {
+            "/".to_string()
+        };
+
+        // Connect to the dev server
+        let mut stream = TcpStream::connect(host)
+            .map_err(|e| WasmrunError::from(format!("Failed to connect to dev server: {}", e)))?;
+
+        // Send HTTP request
+        let request = format!(
+            "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            path, host
+        );
+        std::io::Write::write_all(&mut stream, request.as_bytes())
+            .map_err(|e| WasmrunError::from(format!("Failed to send request: {}", e)))?;
+
+        // Read response
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .map_err(|e| WasmrunError::from(format!("Failed to read response: {}", e)))?;
+
+        // Parse HTTP response
+        if let Some(header_end) = response.find("\r\n\r\n") {
+            let headers = &response[..header_end];
+            let body = &response[header_end + 4..];
+
+            // Extract content type from headers
+            let content_type = headers
+                .lines()
+                .find(|line| line.to_lowercase().starts_with("content-type:"))
+                .and_then(|line| line.split(':').nth(1))
+                .map(|ct| ct.trim().to_string())
+                .unwrap_or_else(|| "text/html".to_string());
+
+            Ok((body.to_string(), content_type))
+        } else {
+            Err(WasmrunError::from("Invalid HTTP response"))
+        }
     }
 
     /// Serve static assets

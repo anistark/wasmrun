@@ -3,13 +3,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
+use crate::runtime::scheduler::ProcessScheduler;
 use crate::runtime::wasi_fs::WasiFilesystem;
 
 /// Process ID type for OS mode
 pub type Pid = u32;
 
 /// Process state in the micro-kernel
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ProcessState {
     Ready,
     Running,
@@ -83,6 +84,7 @@ pub struct WasmMicroKernel {
     filesystem: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     wasi_fs: Arc<WasiFilesystem>,
     next_pid: Arc<Mutex<Pid>>,
+    scheduler: Arc<ProcessScheduler>,
     scheduler_running: Arc<Mutex<bool>>,
 }
 
@@ -93,7 +95,6 @@ impl Default for WasmMicroKernel {
 }
 
 impl WasmMicroKernel {
-    /// Create a new micro-kernel instance
     pub fn new() -> Self {
         Self {
             processes: Arc::new(RwLock::new(HashMap::new())),
@@ -101,6 +102,7 @@ impl WasmMicroKernel {
             filesystem: Arc::new(Mutex::new(HashMap::new())),
             wasi_fs: Arc::new(WasiFilesystem::new()),
             next_pid: Arc::new(Mutex::new(1)),
+            scheduler: Arc::new(ProcessScheduler::new()),
             scheduler_running: Arc::new(Mutex::new(false)),
         }
     }
@@ -116,7 +118,14 @@ impl WasmMicroKernel {
             return Ok(());
         }
         *running = true;
-        // TODO: Process scheduling algorithm
+
+        let processes = self.processes.read().unwrap();
+        for (pid, process) in processes.iter() {
+            if process.state == ProcessState::Ready {
+                self.scheduler.add_process(*pid);
+            }
+        }
+
         Ok(())
     }
 
@@ -128,7 +137,6 @@ impl WasmMicroKernel {
         Ok(())
     }
 
-    /// Create a new process
     pub fn create_process(
         &self,
         name: String,
@@ -155,6 +163,11 @@ impl WasmMicroKernel {
         let mut processes = self.processes.write().unwrap();
         processes.insert(pid, process);
 
+        let scheduler_running = *self.scheduler_running.lock().unwrap();
+        if scheduler_running {
+            self.scheduler.add_process(pid);
+        }
+
         Ok(pid)
     }
 
@@ -172,7 +185,6 @@ impl WasmMicroKernel {
         processes.values().cloned().collect()
     }
 
-    /// Kill a process
     #[allow(dead_code)]
     pub fn kill_process(&self, pid: Pid) -> Result<()> {
         {
@@ -182,7 +194,8 @@ impl WasmMicroKernel {
             }
         }
 
-        // Clean up WASM instance
+        self.scheduler.remove_process(pid);
+
         let mut instances = self.wasm_instances.write().unwrap();
         instances.remove(&pid);
 
