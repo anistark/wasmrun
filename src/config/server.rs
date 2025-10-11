@@ -165,6 +165,7 @@ impl ServerInfo {
     }
 }
 
+#[allow(dead_code)] // TODO: Use for advanced compilation setup
 pub fn setup_project_compilation(
     project_path: &str,
     language_override: Option<String>,
@@ -246,6 +247,7 @@ pub fn setup_project_compilation(
     Some((lang, temp_output_dir))
 }
 
+#[allow(dead_code)] // TODO: Use for standalone compilation API
 pub fn compile_project(
     project_path: &str,
     output_dir: &str,

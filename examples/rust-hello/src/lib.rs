@@ -16,7 +16,7 @@ macro_rules! console_log {
 #[wasm_bindgen]
 pub fn greet(name: &str) -> String {
     console_log!("[RUST-HELLO] greet() function called with name: {} (running from rust-hello)", name);
-    let greeting = format!("Hello, {}! 👋 This message is from Rust and WebAssembly.", name);
+    let greeting = format!("Hello, {name}! 👋 This message is from Rust and WebAssembly.");
     console_log!("[RUST-HELLO] greet() generated greeting: {} (running from rust-hello)", greeting);
     console_log!("Rust says: {} (running from rust-hello)", greeting);
     console_log!("[RUST-HELLO] greet() function completed");

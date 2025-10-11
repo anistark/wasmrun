@@ -57,6 +57,15 @@ pub struct Args {
     /// Serve the UI in browser (default: false)
     #[arg(short = 's', long, help = "Open UI in browser when server starts")]
     pub serve: bool,
+
+    /// Language to use for compilation (auto-detect if not specified)
+    #[arg(
+        short = 'l',
+        long,
+        value_parser = ["rust", "go", "c", "asc", "python"],
+        help = "Force specific language for compilation"
+    )]
+    pub language: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -172,6 +181,53 @@ pub enum Commands {
             long,
             value_parser = ["rust", "go", "c", "asc", "python"],
             help = "Force specific language for compilation"
+        )]
+        language: Option<String>,
+
+        /// Enable watch mode for live-reloading on file changes
+        #[arg(long, help = "Watch for changes and auto-reload")]
+        watch: bool,
+
+        /// Enable verbose output
+        #[arg(short = 'v', long, help = "Show detailed build output")]
+        verbose: bool,
+
+        /// Serve the UI in browser (default: false)
+        #[arg(short = 's', long, help = "Open UI in browser when server starts")]
+        serve: bool,
+    },
+
+    /// Run projects in browser-based multi-language OS mode
+    Os {
+        /// Path to the project
+        #[arg(
+            short = 'p',
+            long,
+            value_hint = clap::ValueHint::DirPath,
+            help = "Project directory to run in OS mode"
+        )]
+        path: Option<String>,
+
+        /// Project path (positional argument)
+        #[arg(index = 1, value_hint = clap::ValueHint::DirPath)]
+        positional_path: Option<String>,
+
+        /// Port to serve (default: 8420)
+        #[arg(
+            short = 'P',
+            long,
+            default_value_t = 8420,
+            value_parser = clap::value_parser!(u16).range(1..=65535),
+            help = "OS mode server port"
+        )]
+        port: u16,
+
+        /// Language to use for OS mode execution (auto-detect if not specified)
+        #[arg(
+            short = 'l',
+            long,
+            value_parser = ["nodejs", "python"],
+            help = "Force specific language for OS mode execution"
         )]
         language: Option<String>,
 
@@ -309,6 +365,7 @@ pub struct ResolvedArgs {
     #[allow(dead_code)] // TODO: Used for command validation and processing
     pub command: Option<Commands>,
     pub serve: bool,
+    pub language: Option<String>,
 }
 
 impl ResolvedArgs {
@@ -324,6 +381,7 @@ impl ResolvedArgs {
             debug: args.debug,
             command: args.command,
             serve: args.serve,
+            language: args.language,
         })
     }
 
@@ -346,6 +404,7 @@ impl ResolvedArgs {
             }
             Some(Commands::Compile { .. })
             | Some(Commands::Run { .. })
+            | Some(Commands::Os { .. })
             | Some(Commands::Clean { .. }) => {
                 // These commands expect project directories
                 PathResolver::validate_directory_exists(&self.path)?;
@@ -392,6 +451,11 @@ impl CommandArgs for Commands {
                 ..
             } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
             Commands::Run {
+                path,
+                positional_path,
+                ..
+            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Os {
                 path,
                 positional_path,
                 ..

@@ -21,6 +21,7 @@ fn main() {
         if templates_dir.exists()
             && templates_dir.join("app").exists()
             && templates_dir.join("console").exists()
+            && templates_dir.join("os").exists()
         {
             eprintln!("UI source not found but templates exist, skipping UI build");
             return;
@@ -79,6 +80,22 @@ fn main() {
         );
     }
 
+    eprintln!("Building OS mode UI...");
+    let os_output = Command::new("pnpm")
+        .args(["vite", "build"])
+        .env("VITE_TEMPLATE", "os")
+        .current_dir(ui_dir)
+        .output()
+        .expect("Failed to build OS mode UI. Make sure pnpm is installed.");
+
+    if !os_output.status.success() {
+        panic!(
+            "OS mode UI build failed: {}\nStdout: {}",
+            String::from_utf8_lossy(&os_output.stderr),
+            String::from_utf8_lossy(&os_output.stdout)
+        );
+    }
+
     reorganize_build_output();
     eprintln!("UI build completed successfully!");
 }
@@ -101,6 +118,7 @@ fn reorganize_build_output() {
 
     process_template_v2(&temp_dir.join("app"), target_dir, "app");
     process_template_v2(&temp_dir.join("console"), target_dir, "console");
+    process_template_v2(&temp_dir.join("os"), target_dir, "os");
 
     let assets_source = Path::new("assets");
     let assets_dest = target_dir.join("assets");
@@ -130,7 +148,11 @@ fn process_template_v2(template_build_dir: &Path, target_dir: &Path, template_na
 
     let js_src = template_build_dir.join(format!("{template_name}.js"));
     if js_src.exists() {
-        let js_dest = target_template_dir.join("scripts.js");
+        let js_dest = if template_name == "os" {
+            target_template_dir.join("os.js")
+        } else {
+            target_template_dir.join("scripts.js")
+        };
         let _ = fs::copy(&js_src, &js_dest);
     }
 
@@ -145,7 +167,11 @@ fn process_template_v2(template_build_dir: &Path, target_dir: &Path, template_na
 
     let css_src = template_build_dir.join("index.css");
     if css_src.exists() {
-        let css_dest = target_template_dir.join("style.css");
+        let css_dest = if template_name == "os" {
+            target_template_dir.join("index.css")
+        } else {
+            target_template_dir.join("style.css")
+        };
         let _ = fs::copy(&css_src, &css_dest);
     }
 }
