@@ -8,11 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Fixed
+
+### Changed
+
+## [0.13.0](https://github.com/anistark/wasmrun/releases/tag/v0.13.0) - 2025-10-12
+
+### Added
+- **NEW FEATURE**: OS Mode for system-level interactions (#34)
 - Serve flag to make browser to wasmrun server optional (#27)
-- Version route to server modules
+- Version route to server modules and version display on UI
 - Memory allocation and cleaning info to console UI
-- More detailed plugin card information
-- Enhanced logging for examples with better debugging
+- Module inspection tab with detailed WASI module information
+- Plugin information in module info UI
+- Light theme support for UI
+- Icons in assets for better visual experience
+- Full-width layout for UI
+- Examples with Python support via waspy
 
 ### Fixed
 - Templates for UI in packaging
@@ -20,16 +33,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Browser hang time issues
 - External plugin fallback functionality
 - Plugin detection and API improvements
+- Module initialization on playground
+- Wasmrun server WASM loading
+- Waspy integration with dynamic loading FFI
 - Go example file issues
+- Typing issues across the codebase
 
 ### Changed
+- **BREAKING**: Removed py2wasm built-in plugin (use waspy instead)
+- Refactored UI from templates to separate ui/ directory using Preact
+- Refactor wasmrun server UI/UX
 - Refactored server modules with new version route
 - Cleaned up logs for better output
-- UI adjusted for larger screens
+- UI adjusted for larger screens with responsiveness improvements
 - Improved plugin detection system
 - Allow dirty release in build process
 - Exclude cargo binary from packaging
-- Updated dependencies
+- Enhanced module inspection functionality
 
 ## [0.11.3](https://github.com/anistark/wasmrun/releases/tag/v0.11.3) - 2025-09-03
 
@@ -212,7 +232,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Key Milestones
 - **v0.1.x**: Initial release and CI/CD setup
-- **v0.2.x**: Added compilation capabilities  
+- **v0.2.x**: Added compilation capabilities
 - **v0.3.x**: Introduced WASI support and verification
 - **v0.4.x**: Major AOT compilation features
 - **v0.6.x**: Multi-language support (AssemblyScript, Go, C)
@@ -221,5 +241,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **v0.9.x**: Python language support via py2wasm
 - **v0.10.x**: Project rename and external plugin system
 - **v0.11.x**: Configuration refactoring and examples
+- **v0.13.x**: OS Mode, UI refactor with Preact, and waspy integration
 
 Checkout all [releases](https://github.com/anistark/wasmrun/releases) and [tags](https://github.com/anistark/wasmrun/tags).
