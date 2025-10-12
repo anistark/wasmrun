@@ -48,3 +48,5 @@ jobs:
 
     - name: Run clippy
       run: cargo clippy --all-targets --all-features -- -D warnings
+      env:
+        SKIP_UI_BUILD: 1

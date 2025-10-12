@@ -113,6 +113,8 @@ jobs:
     # Build wasmrun
     - name: Build wasmrun
       run: cargo build --release
+      env:
+        SKIP_UI_BUILD: 1
 
     # Install waspy plugin for Python examples
     - name: Install waspy plugin

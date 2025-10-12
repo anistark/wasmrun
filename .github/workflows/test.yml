@@ -45,3 +45,5 @@ jobs:
 
     - name: Run tests
       run: cargo test --all-features --verbose
+      env:
+        SKIP_UI_BUILD: 1
