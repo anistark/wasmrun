@@ -1,0 +1,180 @@
+name: Examples
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  examples:
+    name: Test Examples
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        example:
+          - name: rust-hello
+            lang: rust
+          - name: go-hello
+            lang: go
+          - name: c-hello
+            lang: c
+          - name: asc-hello
+            lang: asc
+          - name: python-hello
+            lang: python
+          - name: web-asc
+            lang: asc
+          - name: web-leptos
+            lang: rust
+          - name: nodejs-express-api
+            lang: nodejs
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-index-
+
+    - name: Cache target directory
+      uses: actions/cache@v4
+      with:
+        path: target
+        key: ${{ runner.os }}-target-examples-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-target-examples-
+
+    # Install language-specific dependencies
+    - name: Install Go
+      if: matrix.example.lang == 'go'
+      uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+
+    - name: Install Node.js
+      if: matrix.example.lang == 'asc' || matrix.example.lang == 'nodejs'
+      uses: actions/setup-node@v4
+      with:
+        node-version: 'lts/*'
+
+    - name: Install AssemblyScript
+      if: matrix.example.lang == 'asc'
+      run: npm install -g assemblyscript
+
+    - name: Install Emscripten
+      if: matrix.example.lang == 'c' && runner.os == 'Linux'
+      run: |
+        git clone https://github.com/emscripten-core/emsdk.git
+        cd emsdk
+        ./emsdk install latest
+        ./emsdk activate latest
+
+    - name: Install Emscripten (Windows)
+      if: matrix.example.lang == 'c' && runner.os == 'Windows'
+      run: |
+        git clone https://github.com/emscripten-core/emsdk.git
+        cd emsdk
+        .\emsdk install latest
+        .\emsdk activate latest
+
+    - name: Install wasm-bindgen-cli
+      if: matrix.example.lang == 'rust'
+      run: cargo install wasm-bindgen-cli
+
+    - name: Install Python
+      if: matrix.example.lang == 'python'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    # Build wasmrun
+    - name: Build wasmrun
+      run: cargo build --release
+
+    # Install waspy plugin for Python examples
+    - name: Install waspy plugin
+      if: matrix.example.lang == 'python'
+      run: ./target/release/wasmrun plugin install waspy
+      shell: bash
+
+    # Test example compilation
+    - name: Test ${{ matrix.example.name }} (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        if [ "${{ matrix.example.lang }}" = "c" ]; then
+          source ./emsdk/emsdk_env.sh
+        fi
+        timeout 60 ./target/release/wasmrun compile examples/${{ matrix.example.name }} -o /tmp/wasmrun_test_${{ matrix.example.name }} -v || exit 1
+      shell: bash
+
+    - name: Test ${{ matrix.example.name }} (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        if ("${{ matrix.example.lang }}" -eq "c") {
+          & .\emsdk\emsdk_env.ps1
+        }
+        & .\target\release\wasmrun.exe compile examples\${{ matrix.example.name }} -o $env:TEMP\wasmrun_test_${{ matrix.example.name }} -v
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+      shell: powershell
+      timeout-minutes: 2
+
+    - name: Verify output files exist (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        if [ ! -f /tmp/wasmrun_test_${{ matrix.example.name }}/*.wasm ]; then
+          echo "Error: WASM file not found"
+          ls -la /tmp/wasmrun_test_${{ matrix.example.name }}/
+          exit 1
+        fi
+        echo "✓ Example ${{ matrix.example.name }} compiled successfully"
+      shell: bash
+
+    - name: Verify output files exist (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        $wasmFiles = Get-ChildItem -Path "$env:TEMP\wasmrun_test_${{ matrix.example.name }}" -Filter "*.wasm"
+        if ($wasmFiles.Count -eq 0) {
+          Write-Host "Error: WASM file not found"
+          Get-ChildItem -Path "$env:TEMP\wasmrun_test_${{ matrix.example.name }}"
+          exit 1
+        }
+        Write-Host "✓ Example ${{ matrix.example.name }} compiled successfully"
+      shell: powershell
+
+  summary:
+    name: Examples Summary
+    needs: examples
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+    - name: Check results
+      run: |
+        if [ "${{ needs.examples.result }}" = "success" ]; then
+          echo "✓ All examples passed"
+          exit 0
+        else
+          echo "✗ Some examples failed"
+          exit 1
+        fi
