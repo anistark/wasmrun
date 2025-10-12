@@ -233,6 +233,7 @@ impl LanguageRuntime for NodeJSRuntime {
     }
 }
 
+#[allow(dead_code)] // Used via create_syscall_interface() in NodeJSRuntime
 struct NodeJSSyscallInterface {}
 
 impl NodeJSSyscallInterface {
