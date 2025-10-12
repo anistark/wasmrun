@@ -815,6 +815,7 @@ mod tests {
 #[cfg(not(target_os = "windows"))]
 #[allow(clippy::items_after_test_module)]
 pub struct NewApiWasmBuilder {
+    #[allow(dead_code)] // Used in clone_box() method
     plugin_name: String,
     #[allow(dead_code)]
     library: Arc<Library>,

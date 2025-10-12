@@ -47,6 +47,7 @@ pub struct BuildResult {
 }
 
 pub trait WasmBuilder: Send + Sync {
+    #[allow(dead_code)] // Used by plugin system for project detection
     fn can_handle_project(&self, project_path: &str) -> bool;
     fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult>;
     #[allow(dead_code)] // TODO: Future cleanup functionality
@@ -54,7 +55,9 @@ pub trait WasmBuilder: Send + Sync {
     #[allow(dead_code)] // TODO: For plugin cloning functionality
     fn clone_box(&self) -> Box<dyn WasmBuilder>;
     fn language_name(&self) -> &str;
+    #[allow(dead_code)] // Used by language detection system
     fn entry_file_candidates(&self) -> &[&str];
+    #[allow(dead_code)] // Used by language detection system
     fn supported_extensions(&self) -> &[&str];
     fn check_dependencies(&self) -> Vec<String>;
     fn validate_project(&self, project_path: &str) -> CompilationResult<()>;
