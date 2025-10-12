@@ -1,14 +1,16 @@
 name: Examples
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
+  workflow_run:
+    workflows: ["Tests"]
+    types:
+      - completed
     branches: [ main ]
 
 jobs:
   examples:
     name: Test Examples
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     strategy:
       fail-fast: false
       matrix:
