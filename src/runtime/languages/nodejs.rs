@@ -233,8 +233,10 @@ impl LanguageRuntime for NodeJSRuntime {
     }
 }
 
+#[allow(dead_code)] // Used via create_syscall_interface() in NodeJSRuntime
 struct NodeJSSyscallInterface {}
 
+#[allow(dead_code)]
 impl NodeJSSyscallInterface {
     fn new() -> Self {
         Self {}
@@ -266,6 +268,7 @@ impl SyscallInterface for NodeJSSyscallInterface {
 
 /// Node.js development server
 struct NodeJSDevServer {
+    #[allow(dead_code)] // Used in get_status() method
     status: DevServerStatus,
 }
 
