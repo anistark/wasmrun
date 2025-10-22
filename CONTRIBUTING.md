@@ -528,6 +528,37 @@ just prepare-publish # Prepare for publishing
 just publish         # Publish to crates.io and GitHub
 ```
 
+### Pre-Commit Checklist
+
+**Before pushing your changes, ensure:**
+
+```sh
+# 1. Format code
+just format
+# or
+cargo fmt --all
+
+# 2. Run lints (must pass with no warnings)
+just lint
+# or
+cargo clippy --all-targets --all-features -- -D warnings
+
+# 3. Run tests locally
+just test
+# or
+cargo test --all-features
+
+# 4. Type check TypeScript (if UI changes)
+just type-check
+```
+
+### Github Workflows
+
+All CI workflows are in `.github/workflows/`:
+- `ci.yml` - Format and lint checks
+- `test.yml` - Test execution
+- `examples.yml` - Example projects compilation
+
 ### UI Development Workflow
 
 The `wasmrun-ui` is built with [Preact](https://preactjs.com/), [TypeScript](https://www.typescriptlang.org/), and [Tailwind CSS](https://tailwindcss.com/):
@@ -620,15 +651,37 @@ just test             # Run tests
 
 ### PR Review Checklist
 
+#### Code Quality
 - [ ] Code follows style guidelines (`just format` && `just lint`)
 - [ ] TypeScript code passes type checking (`just type-check`)
-- [ ] All tests pass (`just test`)
+- [ ] All tests pass locally (`just test`)
+- [ ] No clippy warnings (`cargo clippy --all-targets --all-features -- -D warnings`)
+- [ ] Code is formatted (`cargo fmt --all -- --check`)
+
+#### Testing
 - [ ] New functionality includes tests
+- [ ] Tests don't hang (use `cfg!(test)` guards for server tests)
+- [ ] Tests are cross-platform compatible
+- [ ] Integration tests use appropriate timeouts
+
+#### Documentation
 - [ ] Documentation is updated if needed
-- [ ] No hanging server tests (cfg!(test) guards added)
+- [ ] Doc comments added for public APIs
+- [ ] Examples updated if APIs changed
+- [ ] CHANGELOG.md updated for notable changes
+
+#### CI/CD
+- [ ] All CI workflows pass (format, lint, tests, examples)
+- [ ] Examples compile on both Ubuntu and Windows
+- [ ] No new dependency conflicts
+- [ ] Breaking changes are clearly marked
+
+#### Performance & Compatibility
 - [ ] Error messages are user-friendly
 - [ ] Performance impact is considered
+- [ ] Cross-platform compatibility verified
 - [ ] UI changes work in all supported modes (console, app)
+- [ ] Binary size increase is reasonable
 
 ## 🐛 Bug Reports
 

@@ -82,6 +82,7 @@ pub mod symbols {
     pub type CanHandleProjectFn = unsafe extern "C" fn(*const c_void, *const c_char) -> bool;
     pub type BuildFn =
         unsafe extern "C" fn(*const c_void, *const super::BuildConfigC) -> *mut super::BuildResultC;
+    #[allow(dead_code)] // Part of deprecated plugin API
     pub type CleanFn = unsafe extern "C" fn(*const c_void, *const c_char) -> bool;
     #[allow(dead_code)]
     pub type CloneBoxFn = unsafe extern "C" fn(*const c_void) -> *mut c_void;
