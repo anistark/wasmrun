@@ -53,7 +53,7 @@ impl TemplateManager {
         // 1. Check relative to current directory first (for development/cargo run scenarios)
         let cwd_templates = PathBuf::from("templates");
         if cwd_templates.exists() && Self::is_valid_templates_dir(&cwd_templates) {
-            return Some(cwd_templates.canonicalize().ok()?);
+            return cwd_templates.canonicalize().ok();
         }
 
         // 2. Check relative to executable (for installed versions)
