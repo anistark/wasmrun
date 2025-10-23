@@ -46,6 +46,25 @@ sudo apt install -f
 ```
 </details>
 
+<details>
+<summary>RPM Package (Fedora/RHEL/CentOS)</summary>
+
+![Fedora](https://img.shields.io/badge/Fedora-294172?style=for-the-badge&logo=fedora&logoColor=white) ![Red Hat](https://img.shields.io/badge/Red%20Hat-EE0000?style=for-the-badge&logo=redhat&logoColor=white) ![CentOS](https://img.shields.io/badge/CentOS-262577?style=for-the-badge&logo=centos&logoColor=white)
+
+Wasmrun is available as an RPM package for Red Hat-based systems.
+
+1. Download the latest `.rpm` file from [GitHub Releases](https://github.com/anistark/wasmrun/releases)
+2. Install the package:
+
+```bash
+# Install the downloaded RPM package
+sudo rpm -i wasmrun-*.rpm
+
+# Or using dnf (Fedora/RHEL 8+)
+sudo dnf install wasmrun-*.rpm
+```
+</details>
+
 Track releases on [github releases](https://github.com/anistark/wasmrun/releases) or [via release feed](https://github.com/anistark/wasmrun/releases.atom).
 
 ### From Source
