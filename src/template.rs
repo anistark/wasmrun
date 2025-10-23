@@ -33,13 +33,65 @@ pub struct TemplateManager {
 
 impl TemplateManager {
     pub fn new() -> Result<Self> {
-        let template_dir = PathBuf::from("templates");
+        // First, try to find templates relative to the current executable
+        // This works for: cargo run (debug), cargo install, and system installations
+        let template_dir = match Self::find_templates_dir() {
+            Some(dir) => dir,
+            None => PathBuf::from("templates"), // Fallback for development scenarios
+        };
+
         let mut manager = Self {
             templates: HashMap::new(),
             template_dir,
         };
         manager.load_templates()?;
         Ok(manager)
+    }
+
+    // Find templates directory by checking multiple locations
+    fn find_templates_dir() -> Option<PathBuf> {
+        // 1. Check relative to current directory first (for development/cargo run scenarios)
+        let cwd_templates = PathBuf::from("templates");
+        if cwd_templates.exists() && Self::is_valid_templates_dir(&cwd_templates) {
+            return cwd_templates.canonicalize().ok();
+        }
+
+        // 2. Check relative to executable (for installed versions)
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                // Check both alongside executable and in parent directories
+                let mut check_path = exe_dir.to_path_buf();
+                for _ in 0..3 {
+                    let templates_path = check_path.join("templates");
+                    if templates_path.exists() && Self::is_valid_templates_dir(&templates_path) {
+                        return Some(templates_path);
+                    }
+                    if !check_path.pop() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 3. Search up from current directory (fallback for nested execution)
+        if let Ok(mut current) = std::env::current_dir() {
+            for _ in 0..10 {
+                let templates_path = current.join("templates");
+                if templates_path.exists() && Self::is_valid_templates_dir(&templates_path) {
+                    return Some(templates_path);
+                }
+                if !current.pop() {
+                    break;
+                }
+            }
+        }
+
+        None
+    }
+
+    // Validate that a directory contains the required template subdirectories
+    fn is_valid_templates_dir(path: &Path) -> bool {
+        path.join("console").exists() && path.join("app").exists()
     }
 
     #[allow(dead_code)]
