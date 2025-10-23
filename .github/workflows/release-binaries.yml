@@ -56,3 +56,53 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-rpm:
+    name: Build .rpm package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: x86_64
+          - target: aarch64-unknown-linux-gnu
+            arch: aarch64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 'latest'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-rpm
+        run: cargo install cargo-rpm
+
+      - uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build .rpm package
+        run: |
+          # Initialize RPM configuration if .rpm directory doesn't exist
+          if [ ! -d ".rpm" ]; then
+            echo "Initializing RPM configuration..."
+            cargo rpm init
+          fi
+          cargo rpm build --target ${{ matrix.target }}
+          RPM_FILE=$(find target/${{ matrix.target }}/release/rpmbuild/RPMS -name "*.rpm")
+          VERSION=${GITHUB_REF#refs/tags/}
+          cp "$RPM_FILE" "wasmrun-${VERSION}-${{ matrix.arch }}.rpm"
+
+      - name: Upload .rpm artifacts
+        uses: softprops/action-gh-release@v1
+        with:
+          files: "wasmrun-*.rpm"
+          draft: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
