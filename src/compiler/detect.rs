@@ -10,6 +10,7 @@ pub enum ProjectLanguage {
     Go,
     C,
     Asc,
+    Python,
     Unknown,
 }
 
@@ -88,6 +89,32 @@ pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
         return ProjectLanguage::C;
     }
 
+    if path.join("requirements.txt").exists() {
+        debug_println!("Found requirements.txt - detected Python project");
+        debug_exit!("detect_project_language", ProjectLanguage::Python);
+        return ProjectLanguage::Python;
+    }
+
+    if path.join("pyproject.toml").exists() {
+        debug_println!("Found pyproject.toml - detected Python project");
+        debug_exit!("detect_project_language", ProjectLanguage::Python);
+        return ProjectLanguage::Python;
+    }
+
+    if let Ok(entries) = fs::read_dir(path) {
+        debug_println!("Scanning directory for Python source files");
+        for entry in entries.flatten() {
+            if let Some(extension) = entry.path().extension() {
+                let ext = extension.to_string_lossy().to_lowercase();
+                if ext == "py" {
+                    debug_println!("Found .py file - detected Python project");
+                    debug_exit!("detect_project_language", ProjectLanguage::Python);
+                    return ProjectLanguage::Python;
+                }
+            }
+        }
+    }
+
     ProjectLanguage::Unknown
 }
 
@@ -150,6 +177,12 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
         (ProjectLanguage::Asc, _) => {
             vec!["node.js".to_string(), "npm".to_string(), "asc".to_string()]
         }
+        (ProjectLanguage::Python, _) => {
+            vec![
+                "External Python plugin (install with: wasmrun plugin install waspy)".to_string(),
+                "python3".to_string(),
+            ]
+        }
         (ProjectLanguage::Unknown, _) => Vec::new(),
     };
 
@@ -192,6 +225,7 @@ impl fmt::Display for ProjectLanguage {
             ProjectLanguage::Go => "Go",
             ProjectLanguage::C => "C",
             ProjectLanguage::Asc => "Asc",
+            ProjectLanguage::Python => "Python",
             ProjectLanguage::Unknown => "Unknown",
         };
         write!(f, "{lang_str}")
@@ -362,6 +396,7 @@ mod tests {
         assert_eq!(format!("{}", ProjectLanguage::Go), "Go");
         assert_eq!(format!("{}", ProjectLanguage::C), "C");
         assert_eq!(format!("{}", ProjectLanguage::Asc), "Asc");
+        assert_eq!(format!("{}", ProjectLanguage::Python), "Python");
         assert_eq!(format!("{}", ProjectLanguage::Unknown), "Unknown");
     }
 

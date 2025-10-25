@@ -159,6 +159,14 @@ impl ServerUtils {
                         | crate::compiler::ProjectLanguage::Asc => {
                             println!("  🔧 \x1b[1;34mUsing built-in plugin\x1b[0m");
                         }
+                        crate::compiler::ProjectLanguage::Python => {
+                            println!("\n  ⚠️  \x1b[1;33mPython plugin not found\x1b[0m");
+                            println!("  💡 \x1b[1;33mInstall the waspy plugin:\x1b[0m");
+                            println!("     \x1b[1;37mwasmrun plugin install waspy\x1b[0m");
+                            println!("\n  ℹ️  \x1b[1;34mAfter installation, waspy will be auto-detected\x1b[0m");
+                            println!("\x1b[1;34m╰\x1b[0m\n");
+                            return;
+                        }
                         _ => {}
                     }
                 }
@@ -192,7 +200,9 @@ impl ServerUtils {
 
         if matches!(
             lang,
-            crate::compiler::ProjectLanguage::C | crate::compiler::ProjectLanguage::Asc
+            crate::compiler::ProjectLanguage::C
+                | crate::compiler::ProjectLanguage::Asc
+                | crate::compiler::ProjectLanguage::Python
         ) {
             crate::compiler::print_system_info();
             let os = crate::compiler::detect_operating_system();

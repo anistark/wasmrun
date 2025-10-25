@@ -180,13 +180,13 @@ Built-in plugins are compiled directly into Wasmrun and provide core language su
 | Plugin | Language | Compiler | Status | Capabilities |
 |--------|----------|----------|---------|--------------|
 | **C/C++** | C, C++ | Emscripten | ✅ Stable | Full WASM + Web Apps + Makefiles |
-| **AssemblyScript** | TypeScript-like | `asc` | ✅ Stable | WASM + Optimization + npm/yarn |
 
 #### 2. **External Plugins** 📦
 External plugins are distributed via crates.io and installed dynamically to `~/.wasmrun/`:
 
 | Plugin | Language | Compiler | Installation | Capabilities |
 |--------|----------|----------|-------------|--------------|
+| **wasmasc** | AssemblyScript | `asc` | `wasmrun plugin install wasmasc` | WASM + Optimization + npm/yarn/pnpm/bun |
 | **wasmrust** | Rust | `rustc` + `wasm-pack` | `wasmrun plugin install wasmrust` | Full WASM + Web Apps + Optimization |
 | **wasmgo** | Go | TinyGo | `wasmrun plugin install wasmgo` | WASM + Optimization + Package Support |
 | **waspy** | Python | waspy | `wasmrun plugin install waspy` | WASM + Python-to-WASM Compilation |
@@ -200,23 +200,20 @@ External plugins are distributed via crates.io and installed dynamically to `~/.
 ### Plugin Management
 
 ```sh
-# Install external plugins (similar to cargo install)
-wasmrun plugin install wasmrust  # Installs to ~/.wasmrun/
-wasmrun plugin install wasmgo
-wasmrun plugin install waspy
+# Install external plugins
+wasmrun plugin install wasmrust # Rust plugin
+wasmrun plugin install wasmgo   # Go plugin
+wasmrun plugin install waspy    # Python plugin
+wasmrun plugin install wasmasc  # AssemblyScript plugin
 
 # View all installed plugins
 wasmrun plugin list
 
 # Get detailed plugin information
-wasmrun plugin info wasmrust
-wasmrun plugin info waspy
-
-# Search for available plugins
-wasmrun plugin search rust
+wasmrun plugin info <plugin-name>
 
 # Uninstall plugins
-wasmrun plugin uninstall wasmgo
+wasmrun plugin uninstall <plugin-name>
 ```
 
 **Plugin Installation Process:**
@@ -275,6 +272,27 @@ wasmrun ./my-python-wasm-project
 - ✅ Type annotations support
 - ✅ No Python runtime required
 
+### AssemblyScript (via External Plugin)
+
+```sh
+# Install the AssemblyScript plugin
+wasmrun plugin install wasmasc
+
+# Run AssemblyScript projects
+wasmrun ./my-assemblyscript-project
+```
+
+**Requirements:**
+- AssemblyScript compiler: `npm install -g asc`
+- Node.js runtime
+
+**Package Manager Support:**
+The plugin automatically detects and uses your preferred package manager:
+- `npm` (default)
+- `yarn` (via `yarn.lock`)
+- `pnpm` (via `pnpm-lock.yaml`)
+- `bun` (via `bun.lockb`)
+
 ### C/C++ (Built-in)
 
 ```sh
@@ -284,16 +302,6 @@ wasmrun ./my-c-project
 
 **Requirements:**
 - Emscripten SDK: [https://emscripten.org/](https://emscripten.org/)
-
-### AssemblyScript (Built-in)
-
-```sh
-# Works out of the box
-wasmrun ./my-assemblyscript-project
-```
-
-**Requirements:**
-- AssemblyScript compiler: `npm install -g assemblyscript`
 
 ## 🔍 Project Detection
 
@@ -309,6 +317,7 @@ You can override detection with the `--language` flag:
 wasmrun --language rust ./my-project
 wasmrun --language go ./my-project
 wasmrun --language python ./my-project
+wasmrun --language asc ./my-project
 ```
 
 ## 🚨 Troubleshooting
@@ -319,11 +328,15 @@ wasmrun --language python ./my-project
 ```sh
 # For built-in language support:
 wasmrun --language c        # C/C++ (built-in)
-wasmrun --language asc      # AssemblyScript (built-in)
 
-# For Rust projects, install the external plugin:
-wasmrun plugin install wasmrust
-# Use wasmrun plugin list to see available plugins
+# For external plugins, install them first:
+wasmrun plugin install wasmrust   # Rust plugin
+wasmrun plugin install wasmgo     # Go plugin
+wasmrun plugin install waspy      # Python plugin
+wasmrun plugin install wasmasc    # AssemblyScript plugin
+
+# View all available plugins:
+wasmrun plugin list
 ```
 
 🚨 Open an [issue](https://github.com/anistark/wasmrun/issues) and let us know about it.
