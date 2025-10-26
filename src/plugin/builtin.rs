@@ -2,7 +2,7 @@
 
 use crate::compiler::builder::WasmBuilder;
 use crate::error::Result;
-use crate::plugin::languages::{asc_plugin::AscPlugin, c_plugin::CPlugin};
+use crate::plugin::languages::c_plugin::CPlugin;
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
 use std::sync::Arc;
 
@@ -161,10 +161,6 @@ pub fn load_all_builtin_plugins(plugins: &mut Vec<Box<dyn Plugin>>) -> Result<()
     let c_plugin = Arc::new(CPlugin::new());
     plugins.push(Box::new(BuiltinPlugin::new(c_plugin)));
 
-    // AssemblyScript plugin
-    let asc_plugin = Arc::new(AscPlugin::new());
-    plugins.push(Box::new(BuiltinPlugin::new(asc_plugin)));
-
     Ok(())
 }
 
@@ -177,7 +173,7 @@ pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
 /// Check if a plugin name is a built-in plugin
 #[allow(dead_code)] // TODO: Future plugin validation
 pub fn is_builtin_plugin(name: &str) -> bool {
-    matches!(name, "c" | "asc")
+    matches!(name, "c")
 }
 
 /// Get specific built-in plugin info by name
@@ -198,8 +194,7 @@ mod tests {
         let result = load_all_builtin_plugins(&mut plugins);
 
         assert!(result.is_ok());
-        assert!(!plugins.is_empty());
-        assert!(plugins.len() >= 2); // At least C and ASC plugins
+        assert!(!plugins.is_empty()); // At least C plugin
 
         // Verify all plugins are builtin type
         for plugin in &plugins {
@@ -217,7 +212,6 @@ mod tests {
 
         // Check that we have the expected builtin plugins
         assert!(plugin_names.contains(&"c"));
-        assert!(plugin_names.contains(&"asc"));
     }
 
     #[test]
@@ -232,21 +226,12 @@ mod tests {
             assert!(!info.extensions.is_empty());
 
             // Check specific plugin extensions
-            match info.name.as_str() {
-                "c" => {
-                    assert!(
-                        info.extensions.contains(&"c".to_string())
-                            || info.extensions.contains(&"cpp".to_string())
-                    );
-                }
-                "asc" => {
-                    assert!(
-                        info.extensions.contains(&"ts".to_string())
-                            || info.extensions.contains(&"asc".to_string())
-                    );
-                }
-                _ => {} // Other plugins are fine
-            }
+            if info.name.as_str() == "c" {
+                assert!(
+                    info.extensions.contains(&"c".to_string())
+                        || info.extensions.contains(&"cpp".to_string())
+                );
+            } // Other plugins are fine
         }
     }
 
@@ -282,10 +267,6 @@ mod tests {
 
         let c_plugin = plugins.iter().find(|p| p.info().name == "c").unwrap();
         assert!(c_plugin.can_handle_project(temp_dir.path().to_str().unwrap()));
-
-        // ASC plugin should not handle C project
-        let asc_plugin = plugins.iter().find(|p| p.info().name == "asc").unwrap();
-        assert!(!asc_plugin.can_handle_project(temp_dir.path().to_str().unwrap()));
     }
 
     #[test]
@@ -336,8 +317,8 @@ mod tests {
     #[test]
     fn test_is_builtin_plugin() {
         assert!(is_builtin_plugin("c"));
-        assert!(is_builtin_plugin("asc"));
 
+        assert!(!is_builtin_plugin("asc"));
         assert!(!is_builtin_plugin("rust"));
         assert!(!is_builtin_plugin("go"));
         assert!(!is_builtin_plugin("python"));

@@ -40,7 +40,6 @@ src/
 │   ├── registry.rs           # Plugin registry and discovery
 │   └── languages/            # Built-in language plugins
 │       ├── mod.rs            # Language plugin exports
-│       ├── asc_plugin.rs     # AssemblyScript plugin
 │       └── c_plugin.rs       # C/C++ plugin with Emscripten
 ├── server/                   # HTTP server and web interface
 │   ├── mod.rs                # Server module exports
@@ -323,7 +322,6 @@ External plugins are **dynamically loaded libraries** that integrate with Wasmru
    pub fn get_builtin_plugins() -> Vec<Box<dyn Plugin>> {
        vec![
            Box::new(CPlugin::new()),
-           Box::new(AscPlugin::new()),
            Box::new(MyLanguagePlugin::new()), // Add your plugin here
        ]
    }

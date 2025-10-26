@@ -219,6 +219,7 @@ pub fn setup_project_compilation(
             "c" | "cpp" | "c++" => crate::compiler::ProjectLanguage::C,
             "asc" | "assemblyscript" => crate::compiler::ProjectLanguage::Asc,
             "go" => crate::compiler::ProjectLanguage::Go,
+            "python" | "py" => crate::compiler::ProjectLanguage::Python,
             _ => {
                 println!("⚠️  Unknown language override: {lang_override}");
                 crate::compiler::detect_project_language(project_path)
