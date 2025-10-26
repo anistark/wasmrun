@@ -194,8 +194,7 @@ mod tests {
         let result = load_all_builtin_plugins(&mut plugins);
 
         assert!(result.is_ok());
-        assert!(!plugins.is_empty());
-        assert!(plugins.len() >= 1); // At least C plugin
+        assert!(!plugins.is_empty()); // At least C plugin
 
         // Verify all plugins are builtin type
         for plugin in &plugins {
@@ -227,15 +226,12 @@ mod tests {
             assert!(!info.extensions.is_empty());
 
             // Check specific plugin extensions
-            match info.name.as_str() {
-                "c" => {
-                    assert!(
-                        info.extensions.contains(&"c".to_string())
-                            || info.extensions.contains(&"cpp".to_string())
-                    );
-                }
-                _ => {} // Other plugins are fine
-            }
+            if info.name.as_str() == "c" {
+                assert!(
+                    info.extensions.contains(&"c".to_string())
+                        || info.extensions.contains(&"cpp".to_string())
+                );
+            } // Other plugins are fine
         }
     }
 
