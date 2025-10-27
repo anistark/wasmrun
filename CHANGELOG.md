@@ -8,10 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- RPM distribution support (#38)
+- GitHub Actions CI/CD workflow (#36)
+- APT installation support for wasmrun (#30)
 
 ### Fixed
+- Templates for UI in installed or global versions (#37)
 
 ### Changed
+- **BREAKING**: AssemblyScript (asc) moved from built-in to external plugin as wasmasc (#39)
 
 ## [0.13.0](https://github.com/anistark/wasmrun/releases/tag/v0.13.0) - 2025-10-12
 
