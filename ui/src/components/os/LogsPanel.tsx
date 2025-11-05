@@ -5,7 +5,7 @@ interface LogsPanelProps {
   port: string
 }
 
-export default function LogsPanel({ port }: LogsPanelProps) {
+export default function LogsPanel({ _port }: LogsPanelProps) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([])
   const [levelFilter, setLevelFilter] = useState<string>('all')
@@ -211,7 +211,8 @@ export default function LogsPanel({ port }: LogsPanelProps) {
           Filtered: <span className="text-green-400 font-bold">{filteredLogs.length}</span>
         </div>
         <div className="text-white/70 ml-auto">
-          Last updated: <span className="text-green-400 font-mono text-xs">{lastUpdateTime || '-'}</span>
+          Last updated:{' '}
+          <span className="text-green-400 font-mono text-xs">{lastUpdateTime || '-'}</span>
         </div>
       </div>
 
@@ -233,14 +234,22 @@ export default function LogsPanel({ port }: LogsPanelProps) {
               <div className="text-gray-500 font-mono text-xs min-w-fit flex-shrink-0">
                 {formatTimestamp(log.timestamp)}
               </div>
-              <div className={`font-bold text-xs min-w-fit flex-shrink-0 ${getLevelColor(log.level)}`}>
+              <div
+                className={`font-bold text-xs min-w-fit flex-shrink-0 ${getLevelColor(log.level)}`}
+              >
                 [{log.level}]
               </div>
-              <div className={`font-bold text-xs min-w-fit flex-shrink-0 ${getSourceColor(log.source)}`}>
+              <div
+                className={`font-bold text-xs min-w-fit flex-shrink-0 ${getSourceColor(log.source)}`}
+              >
                 [{log.source}]
               </div>
-              {log.pid && <div className="text-gray-500 text-xs min-w-fit flex-shrink-0">PID:{log.pid}</div>}
-              <div className="text-white/90 font-mono text-xs break-words flex-1">{log.message}</div>
+              {log.pid && (
+                <div className="text-gray-500 text-xs min-w-fit flex-shrink-0">PID:{log.pid}</div>
+              )}
+              <div className="text-white/90 font-mono text-xs break-words flex-1">
+                {log.message}
+              </div>
             </div>
           ))
         )}

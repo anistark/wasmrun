@@ -113,7 +113,8 @@ impl OsServer {
         if logging_js_path.exists() {
             let logging_js_content = fs::read_to_string(&logging_js_path)
                 .map_err(|e| WasmrunError::from(format!("Failed to read logging.js: {e}")))?;
-            self.template_cache.insert("logging.js".to_string(), logging_js_content);
+            self.template_cache
+                .insert("logging.js".to_string(), logging_js_content);
         }
 
         // Load logs panel HTML
@@ -121,9 +122,10 @@ impl OsServer {
         if logs_path.exists() {
             let logs_content = fs::read_to_string(&logs_path)
                 .map_err(|e| WasmrunError::from(format!("Failed to read logs.html: {e}")))?;
-            let logs_content = logs_content
-                .replace("$PORT$", &self.config.port.unwrap_or(8420).to_string());
-            self.template_cache.insert("logs.html".to_string(), logs_content);
+            let logs_content =
+                logs_content.replace("$PORT$", &self.config.port.unwrap_or(8420).to_string());
+            self.template_cache
+                .insert("logs.html".to_string(), logs_content);
         }
 
         self.log_system.log(LogEntry::info(
@@ -208,8 +210,11 @@ impl OsServer {
                 let mut project_pid = self.project_pid.write().unwrap();
                 *project_pid = Some(pid);
                 self.log_system.log(
-                    LogEntry::info(LogSource::Kernel, format!("Project started with PID: {pid}"))
-                        .with_pid(pid),
+                    LogEntry::info(
+                        LogSource::Kernel,
+                        format!("Project started with PID: {pid}"),
+                    )
+                    .with_pid(pid),
                 );
                 println!("✅ Project started with PID: {pid}");
                 Ok(())
