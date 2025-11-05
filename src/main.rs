@@ -4,6 +4,7 @@ mod compiler;
 mod config;
 mod debug;
 mod error;
+mod logging;
 mod plugin;
 mod runtime;
 mod server;

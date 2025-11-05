@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **NEW FEATURE**: Real-time logs panel in OS mode with filtering and export
 - RPM distribution support (#38)
 - GitHub Actions CI/CD workflow (#36)
 - APT installation support for wasmrun (#30)
