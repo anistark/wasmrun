@@ -40,3 +40,11 @@ export interface PanelType {
 }
 
 export type StatusType = 'loading' | 'running' | 'error'
+
+export interface LogEntry {
+  timestamp: string
+  level: string
+  source: string
+  message: string
+  pid?: number
+}

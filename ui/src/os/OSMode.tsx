@@ -4,6 +4,7 @@ import Sidebar from '../components/os/Sidebar'
 import ApplicationPanel from '../components/os/ApplicationPanel'
 import KernelStatusPanel from '../components/os/KernelStatusPanel'
 import FilesystemPanel from '../components/os/FilesystemPanel'
+import LogsPanel from '../components/os/LogsPanel'
 import { panels } from '../components/os/panels'
 import { formatUptime, formatBytes } from '../utils/osUtils'
 import type { KernelStats, FilesystemStats, DirEntry, StatusType } from '../types/osTypes'
@@ -222,6 +223,9 @@ export default function OSMode() {
             formatBytes={formatBytes}
           />
         )
+
+      case 'logs':
+        return <LogsPanel port={port} />
 
       default:
         return (

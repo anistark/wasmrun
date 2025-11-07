@@ -165,6 +165,21 @@ fn process_template_v2(template_build_dir: &Path, target_dir: &Path, template_na
         let _ = fs::copy(wasi_src, &wasi_dest);
     }
 
+    // Copy logging module for OS mode
+    if template_name == "os" {
+        let logging_src = Path::new("ui/src/wasi/logging.js");
+        let logging_dest = target_template_dir.join("logging.js");
+        if logging_src.exists() {
+            let _ = fs::copy(logging_src, &logging_dest);
+        }
+
+        let logs_html_src = Path::new("ui/src/wasi/logs.html");
+        let logs_html_dest = target_template_dir.join("logs.html");
+        if logs_html_src.exists() {
+            let _ = fs::copy(logs_html_src, &logs_html_dest);
+        }
+    }
+
     let css_src = template_build_dir.join("index.css");
     if css_src.exists() {
         let css_dest = if template_name == "os" {

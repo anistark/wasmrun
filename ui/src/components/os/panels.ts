@@ -7,5 +7,5 @@ export const panels: PanelType[] = [
   { id: 'filesystem', name: 'File System', icon: '📁' },
   { id: 'processes', name: 'Processes (Coming Soon)', icon: '🔄' },
   { id: 'metrics', name: 'Metrics (Coming Soon)', icon: '📈' },
-  { id: 'logs', name: 'Logs (Coming Soon)', icon: '📋' },
+  { id: 'logs', name: 'Logs', icon: '📋' },
 ]

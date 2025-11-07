@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::logging::LogTrailSystem;
 use crate::runtime::dev_server::DevServerManager;
 use crate::runtime::microkernel::{Pid, WasmInstance, WasmMicroKernel};
 use crate::runtime::registry::{DevServerStatus, LanguageRuntimeRegistry};
@@ -16,6 +17,7 @@ pub struct MultiLanguageKernel {
     dev_server_manager: Arc<DevServerManager>,
     syscall_handler: Arc<Mutex<SyscallHandler>>,
     process_languages: Arc<Mutex<HashMap<Pid, String>>>,
+    log_system: Arc<LogTrailSystem>,
 }
 
 /// Configuration for running projects in OS mode
@@ -49,6 +51,7 @@ impl MultiLanguageKernel {
             dev_server_manager: Arc::new(DevServerManager::new()),
             syscall_handler: Arc::new(Mutex::new(syscall_handler)),
             process_languages: Arc::new(Mutex::new(HashMap::new())),
+            log_system: Arc::new(LogTrailSystem::new()),
         }
     }
 
@@ -354,6 +357,11 @@ impl MultiLanguageKernel {
     /// Get mutable reference to the language registry
     pub fn registry_mut(&mut self) -> &mut LanguageRuntimeRegistry {
         &mut self.language_registry
+    }
+
+    /// Get reference to the log system
+    pub fn log_system(&self) -> Arc<LogTrailSystem> {
+        Arc::clone(&self.log_system)
     }
 }
 

@@ -1,4 +1,5 @@
 use crate::error::{Result, WasmrunError};
+use crate::logging::{LogEntry, LogSource, LogTrailSystem};
 use crate::runtime::multilang_kernel::{MultiLanguageKernel, OsRunConfig};
 use std::collections::HashMap;
 use std::fs;
@@ -12,15 +13,18 @@ pub struct OsServer {
     config: OsRunConfig,
     project_pid: Arc<RwLock<Option<u32>>>,
     template_cache: HashMap<String, String>,
+    log_system: Arc<LogTrailSystem>,
 }
 
 impl OsServer {
     pub fn new(kernel: MultiLanguageKernel, config: OsRunConfig) -> Result<Self> {
+        let log_system = kernel.log_system();
         let mut server = Self {
             kernel: Arc::new(RwLock::new(kernel)),
             config,
             project_pid: Arc::new(RwLock::new(None)),
             template_cache: HashMap::new(),
+            log_system,
         };
 
         // Load and process templates
@@ -104,6 +108,30 @@ impl OsServer {
                 .insert("index.css".to_string(), css_content);
         }
 
+        // Load logging module
+        let logging_js_path = templates_dir.join("logging.js");
+        if logging_js_path.exists() {
+            let logging_js_content = fs::read_to_string(&logging_js_path)
+                .map_err(|e| WasmrunError::from(format!("Failed to read logging.js: {e}")))?;
+            self.template_cache
+                .insert("logging.js".to_string(), logging_js_content);
+        }
+
+        // Load logs panel HTML
+        let logs_path = templates_dir.join("logs.html");
+        if logs_path.exists() {
+            let logs_content = fs::read_to_string(&logs_path)
+                .map_err(|e| WasmrunError::from(format!("Failed to read logs.html: {e}")))?;
+            let logs_content =
+                logs_content.replace("$PORT$", &self.config.port.unwrap_or(8420).to_string());
+            self.template_cache
+                .insert("logs.html".to_string(), logs_content);
+        }
+
+        self.log_system.log(LogEntry::info(
+            LogSource::Kernel,
+            "OS mode templates loaded",
+        ));
         println!("✅ OS mode templates loaded");
         Ok(())
     }
@@ -148,6 +176,10 @@ impl OsServer {
         let server = Server::http(format!("127.0.0.1:{port}"))
             .map_err(|e| WasmrunError::from(format!("Failed to start HTTP server: {e}")))?;
 
+        self.log_system.log(LogEntry::info(
+            LogSource::Kernel,
+            format!("OS Mode server listening on http://127.0.0.1:{port}"),
+        ));
         println!("🌐 OS Mode server listening on http://127.0.0.1:{port}");
 
         // Start the project in the kernel
@@ -177,10 +209,21 @@ impl OsServer {
             Ok(pid) => {
                 let mut project_pid = self.project_pid.write().unwrap();
                 *project_pid = Some(pid);
+                self.log_system.log(
+                    LogEntry::info(
+                        LogSource::Kernel,
+                        format!("Project started with PID: {pid}"),
+                    )
+                    .with_pid(pid),
+                );
                 println!("✅ Project started with PID: {pid}");
                 Ok(())
             }
             Err(e) => {
+                self.log_system.log(LogEntry::error(
+                    LogSource::Kernel,
+                    format!("Failed to start project in kernel: {e}"),
+                ));
                 eprintln!("⚠️ Failed to start project in kernel: {e}");
                 // Continue serving the interface even if project fails
                 Ok(())
@@ -229,6 +272,36 @@ impl OsServer {
                 if let Some(content) = self.template_cache.get("index.css") {
                     let response = Response::from_string(content).with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"text/css"[..]).unwrap(),
+                    );
+                    request
+                        .respond(response)
+                        .map_err(|e| WasmrunError::from(e.to_string()))?;
+                } else {
+                    self.send_404(request)?;
+                }
+            }
+
+            // Serve logging module
+            (Method::Get, "/logging.js") => {
+                if let Some(content) = self.template_cache.get("logging.js") {
+                    let response = Response::from_string(content).with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/javascript"[..])
+                            .unwrap(),
+                    );
+                    request
+                        .respond(response)
+                        .map_err(|e| WasmrunError::from(e.to_string()))?;
+                } else {
+                    self.send_404(request)?;
+                }
+            }
+
+            // Serve logs panel
+            (Method::Get, "/logs") => {
+                if let Some(content) = self.template_cache.get("logs.html") {
+                    let response = Response::from_string(content).with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
+                            .unwrap(),
                     );
                     request
                         .respond(response)
@@ -294,6 +367,15 @@ impl OsServer {
 
             (Method::Post, "/api/kernel/restart") => {
                 self.handle_restart_project(request)?;
+            }
+
+            // API endpoint for logs
+            (Method::Get, "/api/logs") => {
+                self.handle_logs_request(request)?;
+            }
+
+            (Method::Get, "/api/logs/recent") => {
+                self.handle_recent_logs_request(request)?;
             }
 
             // Serve static assets
@@ -969,6 +1051,53 @@ impl OsServer {
                     .map_err(|e| WasmrunError::from(e.to_string()))?;
             }
         }
+
+        Ok(())
+    }
+
+    fn handle_logs_request(&self, request: Request) -> Result<()> {
+        let logs = self.log_system.get_all();
+        let response_json = serde_json::json!({
+            "success": true,
+            "count": logs.len(),
+            "logs": logs
+        });
+
+        let response = Response::from_string(response_json.to_string())
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+            );
+
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
+
+        Ok(())
+    }
+
+    fn handle_recent_logs_request(&self, request: Request) -> Result<()> {
+        let count = 100;
+        let logs = self.log_system.get_recent(count);
+        let response_json = serde_json::json!({
+            "success": true,
+            "count": logs.len(),
+            "logs": logs
+        });
+
+        let response = Response::from_string(response_json.to_string())
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+            );
+
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
 
         Ok(())
     }

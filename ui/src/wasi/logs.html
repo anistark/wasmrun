@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logs - wasmrun OS</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #000000 0%, #1a1a2e 50%, #16213e 100%);
+            color: #ffffff;
+            font-family: 'Monaco', 'Menlo', monospace;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .logs-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .logs-header {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(34, 197, 94, 0.2);
+            padding: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .logs-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4ade80;
+        }
+
+        .logs-controls {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        select, button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #ffffff;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+
+        select:hover, button:hover {
+            background: rgba(34, 197, 94, 0.2);
+            border-color: rgba(34, 197, 94, 0.5);
+        }
+
+        select:focus {
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3);
+        }
+
+        .logs-stats {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.875rem;
+        }
+
+        .stat {
+            display: flex;
+            gap: 0.25rem;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .stat-value {
+            color: #4ade80;
+            font-weight: bold;
+        }
+
+        .logs-view {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            scroll-behavior: smooth;
+        }
+
+        .log-entry {
+            display: flex;
+            gap: 1rem;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            background: rgba(255, 255, 255, 0.02);
+            border-left: 3px solid;
+            border-radius: 0.25rem;
+            transition: background 0.2s;
+            line-height: 1.4;
+        }
+
+        .log-entry:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .log-timestamp {
+            color: rgba(255, 255, 255, 0.5);
+            font-weight: 600;
+            min-width: fit-content;
+            font-size: 0.8rem;
+        }
+
+        .log-level {
+            min-width: 50px;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+        }
+
+        .log-source {
+            min-width: 90px;
+            font-weight: bold;
+            font-size: 0.8rem;
+        }
+
+        .log-pid {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.8rem;
+        }
+
+        .log-message {
+            flex: 1;
+            word-break: break-word;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .logs-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: rgba(255, 255, 255, 0.5);
+            text-align: center;
+        }
+
+        .logs-empty-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        .logs-footer {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid rgba(34, 197, 94, 0.2);
+            padding: 0.75rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.875rem;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .log-level-DEBUG { color: #888888; }
+        .log-level-INFO { color: #4ade80; }
+        .log-level-WARN { color: #facc15; }
+        .log-level-ERROR { color: #f87171; }
+
+        .log-source-KERNEL { color: #60a5fa; }
+        .log-source-WASM { color: #8b5cf6; }
+        .log-source-DEV_SERVER { color: #ec4899; }
+        .log-source-FS { color: #f97316; }
+        .log-source-SYSCALL { color: #06b6d4; }
+
+        .spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid rgba(74, 222, 128, 0.3);
+            border-top: 2px solid #4ade80;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(74, 222, 128, 0.3);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(74, 222, 128, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="logs-container">
+        <div class="logs-header">
+            <div class="logs-title">📋 Application Logs</div>
+            <div class="logs-controls">
+                <div class="filter-group">
+                    <label for="level-filter" style="font-size: 0.875rem;">Level:</label>
+                    <select id="level-filter">
+                        <option value="all">All</option>
+                        <option value="DEBUG">Debug</option>
+                        <option value="INFO">Info</option>
+                        <option value="WARN">Warn</option>
+                        <option value="ERROR">Error</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="source-filter" style="font-size: 0.875rem;">Source:</label>
+                    <select id="source-filter">
+                        <option value="all">All</option>
+                        <option value="KERNEL">Kernel</option>
+                        <option value="WASM">WASM</option>
+                        <option value="DEV_SERVER">Dev Server</option>
+                        <option value="FS">Filesystem</option>
+                        <option value="SYSCALL">Syscall</option>
+                    </select>
+                </div>
+                <button id="refresh-btn">🔄 Refresh</button>
+                <button id="clear-btn">🗑️ Clear</button>
+                <button id="export-json-btn">💾 JSON</button>
+                <button id="export-csv-btn">📊 CSV</button>
+            </div>
+            <div class="logs-stats">
+                <div class="stat">Total: <span class="stat-value" id="total-count">0</span></div>
+                <div class="stat">Filtered: <span class="stat-value" id="filtered-count">0</span></div>
+                <div class="stat" id="auto-refresh-status">Auto-refresh: <span class="stat-value">✓</span></div>
+            </div>
+        </div>
+
+        <div class="logs-view" id="logs-view">
+            <div class="logs-empty">
+                <div class="logs-empty-icon">⏳</div>
+                <div>Fetching logs...</div>
+            </div>
+        </div>
+
+        <div class="logs-footer">
+            <div>Wasmrun OS Mode - Live Application Logs</div>
+            <div id="status">Ready</div>
+        </div>
+    </div>
+
+    <script src="/logging.js"></script>
+    <script>
+        const logsPanel = new window.LogsPanel(window.PORT || 8420);
+        const logsView = document.getElementById('logs-view');
+        const levelFilter = document.getElementById('level-filter');
+        const sourceFilter = document.getElementById('source-filter');
+        const totalCount = document.getElementById('total-count');
+        const filteredCount = document.getElementById('filtered-count');
+        const statusDiv = document.getElementById('status');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const exportJsonBtn = document.getElementById('export-json-btn');
+        const exportCsvBtn = document.getElementById('export-csv-btn');
+
+        async function updateLogs() {
+            try {
+                statusDiv.innerHTML = `<span class="spinner"></span>`;
+                const logs = await logsPanel.fetchLogs(true);
+                totalCount.textContent = logs.length;
+
+                const filtered = logsPanel.filterLogs();
+                filteredCount.textContent = filtered.length;
+
+                if (filtered.length === 0) {
+                    logsView.innerHTML = `
+                        <div class="logs-empty">
+                            <div class="logs-empty-icon">🤐</div>
+                            <div>No logs match the current filters</div>
+                        </div>
+                    `;
+                } else {
+                    logsView.innerHTML = filtered.map(log => {
+                        const formatted = logsPanel.formatLogEntry(log);
+                        const pidStr = formatted.pid ? ` <span class="log-pid">PID:${formatted.pid}</span>` : '';
+                        return `
+                            <div class="log-entry" style="border-left-color: ${formatted.sourceColor}">
+                                <div class="log-timestamp">${formatted.timestamp}</div>
+                                <div class="log-level log-level-${formatted.level}" style="color: ${formatted.levelColor}">${formatted.level}</div>
+                                <div class="log-source" style="color: ${formatted.sourceColor}">${formatted.source}</div>
+                                ${pidStr}
+                                <div class="log-message">${formatted.message}</div>
+                            </div>
+                        `;
+                    }).join('');
+                    logsView.scrollTop = logsView.scrollHeight;
+                }
+
+                statusDiv.innerHTML = `Last updated: ${new Date().toLocaleTimeString()}`;
+            } catch (error) {
+                console.error('Error updating logs:', error);
+                statusDiv.innerHTML = 'Error fetching logs';
+            }
+        }
+
+        levelFilter.addEventListener('change', (e) => {
+            logsPanel.filterLevel = e.target.value;
+            updateLogs();
+        });
+
+        sourceFilter.addEventListener('change', (e) => {
+            logsPanel.filterSource = e.target.value;
+            updateLogs();
+        });
+
+        refreshBtn.addEventListener('click', updateLogs);
+        clearBtn.addEventListener('click', async () => {
+            if (confirm('Are you sure you want to clear all logs?')) {
+                await logsPanel.clear();
+                updateLogs();
+            }
+        });
+
+        exportJsonBtn.addEventListener('click', () => logsPanel.exportLogs('json'));
+        exportCsvBtn.addEventListener('click', () => logsPanel.exportLogs('csv'));
+
+        // Initial load
+        updateLogs();
+
+        // Auto-refresh every 2 seconds
+        setInterval(updateLogs, 2000);
+    </script>
+</body>
+</html>
