@@ -1,7 +1,9 @@
 use anyhow::Result;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 use tiny_http::{Response, Server};
 
 use super::microkernel::Pid;
@@ -46,7 +48,7 @@ impl DevServerManager {
         }
 
         thread::spawn(move || {
-            if let Err(e) = run_dev_server(port, project_root, stop_signal_clone) {
+            if let Err(e) = serve_wasi_files(port, &project_root, stop_signal_clone) {
                 eprintln!("Dev server error for PID {pid}: {e}");
             }
         });
@@ -86,7 +88,7 @@ impl DevServerManager {
     pub fn reload_server(&self, pid: Pid) -> Result<()> {
         let servers = self.servers.lock().unwrap();
         if let Some(_server) = servers.get(&pid) {
-            println!("🔄 Reloading dev server for PID {pid}");
+            println!("Reloading dev server for PID {pid}");
             Ok(())
         } else {
             Err(anyhow::anyhow!("Server not found for PID {pid}"))
@@ -94,82 +96,72 @@ impl DevServerManager {
     }
 }
 
-fn run_dev_server(port: u16, _project_root: String, stop_signal: Arc<Mutex<bool>>) -> Result<()> {
+fn serve_wasi_files(
+    port: u16,
+    project_root: &str,
+    stop_signal: Arc<Mutex<bool>>,
+) -> Result<()> {
     let addr = format!("127.0.0.1:{port}");
-    let server =
-        Server::http(&addr).map_err(|e| anyhow::anyhow!("Failed to start dev server: {e}"))?;
+    let server = Server::http(&addr)
+        .map_err(|e| anyhow::anyhow!("Failed to start dev server: {e}"))?;
 
-    println!("✅ Dev server started on http://{addr}");
+    println!("Dev server (WASI files) started on http://{addr}");
 
     for request in server.incoming_requests() {
         {
             let should_stop = *stop_signal.lock().unwrap();
             if should_stop {
-                println!("🛑 Stopping dev server on port {port}");
                 break;
             }
         }
 
-        let response = Response::from_string(format!(
-            r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>Dev Server - Port {port}</title>
-    <style>
-        body {{
-            font-family: system-ui, -apple-system, sans-serif;
-            background: #0a0a0a;
-            color: #10b981;
-            padding: 2rem;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-        }}
-        .container {{
-            text-align: center;
-            border: 2px solid #10b981;
-            padding: 3rem;
-            border-radius: 1rem;
-            background: rgba(16, 185, 129, 0.1);
-        }}
-        h1 {{ color: #10b981; margin-bottom: 1rem; }}
-        p {{ color: #a0a0a0; margin: 0.5rem 0; }}
-        .status {{
-            display: inline-block;
-            padding: 0.5rem 1rem;
-            background: #10b981;
-            color: #000;
-            border-radius: 0.5rem;
-            font-weight: bold;
-            margin-top: 1rem;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🚀 wasmrun Dev Server</h1>
-        <p>Port: {port}</p>
-        <p>Status: <span class="status">RUNNING</span></p>
-        <p style="margin-top: 2rem; color: #666;">
-            This is a development server managed by wasmrun OS mode
-        </p>
-    </div>
-</body>
-</html>"#
-        ))
-        .with_header(
-            tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
-                .unwrap(),
-        );
-
-        if let Err(e) = request.respond(response) {
-            eprintln!("Failed to send response: {e}");
+        let mut path = request.url().to_string();
+        if path == "/" {
+            path = "/index.html".to_string();
         }
+
+        let file_path = Path::new(project_root).join(path.trim_start_matches('/'));
+
+        let response = if file_path.exists() && file_path.is_file() {
+            match std::fs::read(&file_path) {
+                Ok(content) => {
+                    let content_type = get_content_type(&file_path);
+                    Response::from_data(content)
+                        .with_header(
+                            tiny_http::Header::from_bytes(
+                                &b"Content-Type"[..],
+                                content_type.as_bytes(),
+                            )
+                            .unwrap(),
+                        )
+                }
+                Err(_) => Response::from_string("404 Not Found")
+                    .with_status_code(tiny_http::StatusCode(404)),
+            }
+        } else {
+            Response::from_string("404 Not Found").with_status_code(tiny_http::StatusCode(404))
+        };
+
+        let _ = request.respond(response);
     }
 
     Ok(())
+}
+
+fn get_content_type(path: &Path) -> String {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("css") => "text/css",
+        Some("js") => "application/javascript",
+        Some("json") => "application/json",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("svg") => "image/svg+xml",
+        Some("wasm") => "application/wasm",
+        _ => "text/plain",
+    }
+    .to_string()
 }
 
 #[cfg(test)]
@@ -222,5 +214,22 @@ mod tests {
 
         manager.stop_server(3).unwrap();
         manager.stop_server(4).unwrap();
+    }
+
+    #[test]
+    fn test_content_type_detection() {
+        assert_eq!(
+            get_content_type(Path::new("file.html")),
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            get_content_type(Path::new("file.js")),
+            "application/javascript"
+        );
+        assert_eq!(
+            get_content_type(Path::new("file.css")),
+            "text/css"
+        );
+        assert_eq!(get_content_type(Path::new("file.json")), "application/json");
     }
 }
