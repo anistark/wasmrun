@@ -95,14 +95,10 @@ impl DevServerManager {
     }
 }
 
-fn serve_wasi_files(
-    port: u16,
-    project_root: &str,
-    stop_signal: Arc<Mutex<bool>>,
-) -> Result<()> {
+fn serve_wasi_files(port: u16, project_root: &str, stop_signal: Arc<Mutex<bool>>) -> Result<()> {
     let addr = format!("127.0.0.1:{port}");
-    let server = Server::http(&addr)
-        .map_err(|e| anyhow::anyhow!("Failed to start dev server: {e}"))?;
+    let server =
+        Server::http(&addr).map_err(|e| anyhow::anyhow!("Failed to start dev server: {e}"))?;
 
     println!("Dev server (WASI files) started on http://{addr}");
 
@@ -125,14 +121,13 @@ fn serve_wasi_files(
             match std::fs::read(&file_path) {
                 Ok(content) => {
                     let content_type = get_content_type(&file_path);
-                    Response::from_data(content)
-                        .with_header(
-                            tiny_http::Header::from_bytes(
-                                &b"Content-Type"[..],
-                                content_type.as_bytes(),
-                            )
-                            .unwrap(),
+                    Response::from_data(content).with_header(
+                        tiny_http::Header::from_bytes(
+                            &b"Content-Type"[..],
+                            content_type.as_bytes(),
                         )
+                        .unwrap(),
+                    )
                 }
                 Err(_) => Response::from_string("404 Not Found")
                     .with_status_code(tiny_http::StatusCode(404)),
@@ -226,10 +221,7 @@ mod tests {
             get_content_type(Path::new("file.js")),
             "application/javascript"
         );
-        assert_eq!(
-            get_content_type(Path::new("file.css")),
-            "text/css"
-        );
+        assert_eq!(get_content_type(Path::new("file.css")), "text/css");
         assert_eq!(get_content_type(Path::new("file.json")), "application/json");
     }
 }
