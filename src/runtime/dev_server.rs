@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 use tiny_http::{Response, Server};
 
 use super::microkernel::Pid;
@@ -167,6 +166,7 @@ fn get_content_type(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn test_dev_server_manager_creation() {
@@ -180,7 +180,7 @@ mod tests {
         let result = manager.start_server(1, 9999, "/tmp".to_string());
         assert!(result.is_ok());
 
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(100));
 
         assert_eq!(manager.get_port(1), Some(9999));
         let status = manager.get_status(1);
@@ -194,7 +194,7 @@ mod tests {
         let manager = DevServerManager::new();
         manager.start_server(2, 9998, "/tmp".to_string()).unwrap();
 
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(100));
 
         let result = manager.stop_server(2);
         assert!(result.is_ok());
@@ -207,7 +207,7 @@ mod tests {
         manager.start_server(3, 9997, "/tmp".to_string()).unwrap();
         manager.start_server(4, 9996, "/tmp".to_string()).unwrap();
 
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(100));
 
         let servers = manager.list_servers();
         assert_eq!(servers.len(), 2);

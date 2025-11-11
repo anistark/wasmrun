@@ -392,6 +392,20 @@ wasmrun --port 3001  # Use different port
 - Use the `.js` file instead of the `.wasm` file directly (wasmrust plugin)
 - Run `wasmrun project-dir` instead of individual files
 
+## 📼 Talks/Demos
+
+A list of wasmrun related talks (latest first): ✨
+
+| When | What | Where | Who |
+| --- | --- | --- | --- |
+| Oct 18, 2025 | Bringing Python to WebAssembly | PyCon Thailand 2025, Bangkok | [Farhaan](https://github.com/farhaanbukhsh), [Ani](https://github.com/anistark) |
+| Sept 20, 2025 | [Your Next Server Might Be a Browser](https://www.youtube.com/watch?v=NXGxSM9Mqes) | IndiaFOSS 2025, Bengaluru | [Ani](https://github.com/anistark) |
+| Sept 13, 2025 | Compiling Python to WASM | PyCon India 2025, Bengaluru | [Farhaan](https://github.com/farhaanbukhsh), [Ani](https://github.com/anistark) |
+| July 16, 2025 | [WASM and Python: The Future of Serverless Computing](https://www.youtube.com/watch?v=qes-hzyVIGU) | EuroPython 2025, Prague, Czech | [Farhaan](https://github.com/farhaanbukhsh), [Ani](https://github.com/anistark) |
+| May 24, 2025 | [WASM and Python](https://x.com/__bangpypers__/status/1926174903264252149) | BangPypers Meetup | [Farhaan](https://github.com/farhaanbukhsh), [Ani](https://github.com/anistark) |
+
+_If you've talked about wasmrun at a conference, podcast, virtual or local meetup, feel free to add to this list_ 🙌 
+
 ## 🤝 Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines, including how to create and maintain plugins.
