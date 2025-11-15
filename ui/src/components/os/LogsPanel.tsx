@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback } from 'preact/hooks'
 import type { LogEntry } from '../../types/osTypes'
 
-interface LogsPanelProps {
-  port: string
-}
+interface LogsPanelProps {}
 
-export default function LogsPanel({ _port }: LogsPanelProps) {
+export default function LogsPanel(_props: LogsPanelProps) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([])
   const [levelFilter, setLevelFilter] = useState<string>('all')
@@ -48,12 +46,13 @@ export default function LogsPanel({ _port }: LogsPanelProps) {
   const formatTimestamp = (timestamp: string) => {
     try {
       const date = new Date(timestamp)
-      return date.toLocaleTimeString('en-US', {
+      const time = date.toLocaleTimeString('en-US', {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
-        fractionalSecondDigits: 3,
       })
+      const ms = date.getMilliseconds().toString().padStart(3, '0')
+      return `${time}.${ms}`
     } catch {
       return timestamp
     }

@@ -225,7 +225,7 @@ export default function OSMode() {
         )
 
       case 'logs':
-        return <LogsPanel port={port} />
+        return <LogsPanel />
 
       default:
         return (
