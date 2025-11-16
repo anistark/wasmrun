@@ -9,7 +9,7 @@ mod integration_tests {
         let wasm_path = "examples/rust-hello/target/wasm32-unknown-unknown/release/rust_hello.wasm";
 
         if !std::path::Path::new(wasm_path).exists() {
-            println!("⚠️  {} not found, skipping test", wasm_path);
+            println!("⚠️  {wasm_path} not found, skipping test");
             return;
         }
 
@@ -27,19 +27,19 @@ mod integration_tests {
 
                 // Check for entry point
                 if let Some(entry) = module.find_entry_point() {
-                    println!("  - Entry point: function {}", entry);
+                    println!("  - Entry point: function {entry}");
                 }
 
                 // Print exports
-                for (name, _export) in &module.exports {
-                    println!("  - Export: {}", name);
+                for name in module.exports.keys() {
+                    println!("  - Export: {name}");
                 }
             }
             Err(e) => {
                 println!(
                     "⚠️  Could not fully parse Rust hello WASM (expected for newer WASM features)"
                 );
-                println!("   Error: {}", e);
+                println!("   Error: {e}");
                 // Don't fail test - this WASM may use newer features we don't support yet
             }
         }
@@ -51,7 +51,7 @@ mod integration_tests {
         let wasm_path = "examples/go-hello/main.wasm";
 
         if !std::path::Path::new(wasm_path).exists() {
-            println!("⚠️  {} not found, skipping test", wasm_path);
+            println!("⚠️  {wasm_path} not found, skipping test");
             return;
         }
 
@@ -67,11 +67,11 @@ mod integration_tests {
                 println!("  - Imports: {}", module.imports.len());
 
                 if let Some(entry) = module.find_entry_point() {
-                    println!("  - Entry point: function {}", entry);
+                    println!("  - Entry point: function {entry}");
                 }
             }
             Err(e) => {
-                println!("⚠️  Could not parse Go hello WASM: {}", e);
+                println!("⚠️  Could not parse Go hello WASM: {e}");
             }
         }
     }
@@ -82,7 +82,7 @@ mod integration_tests {
         let wasm_path = "examples/rust-hello/target/wasm32-unknown-unknown/release/rust_hello.wasm";
 
         if !std::path::Path::new(wasm_path).exists() {
-            println!("⚠️  {} not found, skipping test", wasm_path);
+            println!("⚠️  {wasm_path} not found, skipping test");
             return;
         }
 
@@ -102,12 +102,12 @@ mod integration_tests {
 
             for (i, func) in module.functions.iter().enumerate() {
                 if !func.code.is_empty() {
-                    println!("✓ Function {} has code", i);
+                    println!("✓ Function {i} has code");
                 }
             }
 
             println!("✓ Functions analyzed");
-            println!("  - Import functions: {}", import_func_count);
+            println!("  - Import functions: {import_func_count}");
             println!("  - Local functions: {}", module.functions.len());
         }
     }
@@ -118,7 +118,7 @@ mod integration_tests {
         let wasm_path = "examples/rust-hello/target/wasm32-unknown-unknown/release/rust_hello.wasm";
 
         if !std::path::Path::new(wasm_path).exists() {
-            println!("⚠️  {} not found, skipping test", wasm_path);
+            println!("⚠️  {wasm_path} not found, skipping test");
             return;
         }
 
@@ -128,7 +128,7 @@ mod integration_tests {
                 println!("✓ Memory section found");
                 println!("  - Initial pages: {}", memory.initial);
                 if let Some(max) = memory.max {
-                    println!("  - Max pages: {}", max);
+                    println!("  - Max pages: {max}");
                 } else {
                     println!("  - Max pages: unlimited");
                 }
@@ -142,7 +142,7 @@ mod integration_tests {
         let wasm_path = "examples/rust-hello/target/wasm32-unknown-unknown/release/rust_hello.wasm";
 
         if !std::path::Path::new(wasm_path).exists() {
-            println!("⚠️  {} not found, skipping test", wasm_path);
+            println!("⚠️  {wasm_path} not found, skipping test");
             return;
         }
 
@@ -151,7 +151,7 @@ mod integration_tests {
             for (name, export) in &module.exports {
                 assert!(!name.is_empty(), "Export name should not be empty");
                 assert!(name.is_ascii(), "Export name should be ASCII");
-                println!("✓ Export: {} (type: {:?})", name, export.kind);
+                println!("✓ Export: {name} (type: {:?})", export.kind);
             }
         }
     }
