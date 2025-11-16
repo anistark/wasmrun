@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Comprehensive WASM binary parser supporting all standard sections
   - Module structure with full metadata extraction (types, imports, functions, exports, memory, globals, etc.)
   - Support for modern WASM features (reference types, vector types)
+  - Linear memory management with 64KB pages and bounds checking
+  - Execution context with operand stack, call stack, and frame management
+  - Full-featured value types (i32, i64, f32, f64) with type-safe operations
 
 
 ## [0.14.0](https://github.com/anistark/wasmrun/releases/tag/v0.14.0) - 2025-11-15

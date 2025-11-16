@@ -255,6 +255,23 @@ impl Module {
         Ok(module)
     }
 
+    /// Create an empty module (useful for testing)
+    pub fn new() -> Self {
+        Module {
+            version: 1,
+            types: Vec::new(),
+            imports: Vec::new(),
+            functions: Vec::new(),
+            tables: Vec::new(),
+            memory: None,
+            globals: Vec::new(),
+            exports: HashMap::new(),
+            start: None,
+            elements: Vec::new(),
+            data: Vec::new(),
+        }
+    }
+
     /// Get function by index, accounting for imported functions
     pub fn get_function(&self, idx: u32) -> Option<&Function> {
         let import_count = self
