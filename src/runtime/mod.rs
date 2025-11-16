@@ -1,3 +1,4 @@
+pub mod core;
 pub mod dev_server;
 pub mod languages;
 pub mod microkernel;

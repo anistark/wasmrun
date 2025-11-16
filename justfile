@@ -55,7 +55,7 @@ format:
 
 # Run clippy lints
 lint:
-    cargo clippy -- -D warnings
+    cargo clippy --all-targets --all-features -- -D warnings
     cd ui && pnpm lint
 
 # Run clippy lints
