@@ -195,6 +195,13 @@ pub enum Commands {
         /// Serve the UI in browser (default: false)
         #[arg(short = 's', long, help = "Open UI in browser when server starts")]
         serve: bool,
+
+        /// Execute WASM file natively (without dev server)
+        #[arg(
+            long,
+            help = "Run WASM file natively with interpreter (bypasses dev server)"
+        )]
+        native: bool,
     },
 
     /// Run projects in browser-based multi-language OS mode

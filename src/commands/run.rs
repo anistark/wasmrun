@@ -8,6 +8,7 @@ use crate::runtime::core::native_executor;
 use crate::utils::PathResolver;
 use std::path::Path;
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_run_command(
     path: &Option<String>,
     positional_path: &Option<String>,
@@ -16,6 +17,7 @@ pub fn handle_run_command(
     watch: bool,
     verbose: bool,
     serve: bool,
+    native: bool,
 ) -> Result<()> {
     let resolved_path =
         crate::utils::PathResolver::resolve_input_path(positional_path.clone(), path.clone());
@@ -27,6 +29,7 @@ pub fn handle_run_command(
         language.clone(),
         verbose,
         serve,
+        native,
     )
 }
 
@@ -37,6 +40,7 @@ pub fn run_project(
     language: Option<String>,
     verbose: bool,
     serve: bool,
+    native: bool,
 ) -> Result<()> {
     let resolved_path = PathResolver::resolve_input_path(Some(path.clone()), None);
 
@@ -45,7 +49,7 @@ pub fn run_project(
     }
 
     if is_wasm_file(&resolved_path) {
-        return run_wasm_file(&resolved_path, port, serve);
+        return run_wasm_file(&resolved_path, port, serve, native);
     }
 
     if Path::new(&resolved_path).is_dir() {
@@ -64,32 +68,30 @@ fn is_wasm_file(path: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn run_wasm_file(wasm_path: &str, port: Option<u16>, serve: bool) -> Result<()> {
+fn run_wasm_file(wasm_path: &str, port: Option<u16>, serve: bool, native: bool) -> Result<()> {
     println!("🎯 Running WASM file: {wasm_path}");
 
-    // If serve flag is set or port is needed, use dev server
-    // Otherwise, execute natively by default
-    if serve || port.is_some() {
-        let server_port = port.unwrap_or(8420);
-        println!("🚀 Starting server on port {server_port}");
-
-        let server_config = crate::config::ServerConfig {
-            wasm_path: wasm_path.to_string(),
-            js_path: None,
-            port: server_port,
-            watch_mode: false,
-            project_path: None,
-            output_dir: None,
-            serve,
-        };
-
-        crate::config::run_server(server_config)
-    } else {
+    if native {
         println!("🏃 Executing natively (interpreter mode)");
         native_executor::execute_wasm_file(wasm_path)?;
         println!("✅ Execution completed");
-        Ok(())
+        return Ok(());
     }
+
+    let server_port = port.unwrap_or(8420);
+    println!("🚀 Starting server on port {server_port}");
+
+    let server_config = crate::config::ServerConfig {
+        wasm_path: wasm_path.to_string(),
+        js_path: None,
+        port: server_port,
+        watch_mode: false,
+        project_path: None,
+        output_dir: None,
+        serve,
+    };
+
+    crate::config::run_server(server_config)
 }
 
 fn run_project_directory(
