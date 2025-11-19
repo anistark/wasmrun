@@ -38,10 +38,10 @@ impl PluginInstaller {
     pub fn install_external_plugin(plugin_name: &str) -> Result<InstallationResult> {
         let mut result = InstallationResult::new(plugin_name);
 
-        if !Self::is_supported_plugin(plugin_name) {
-            return Err(WasmrunError::from(format!(
-                "Plugin '{plugin_name}' not found or not a valid WebAssembly plugin"
-            )));
+        // Check if supported, but don't fail - allow fallback to template creation
+        let is_supported = Self::is_supported_plugin(plugin_name);
+        if !is_supported {
+            println!("⚠️  Plugin '{plugin_name}' not found on crates.io - will create template");
         }
 
         if !SystemUtils::is_tool_available("cargo") {

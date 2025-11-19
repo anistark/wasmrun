@@ -2170,6 +2170,11 @@ impl Executor {
     pub fn module(&self) -> &Module {
         &self.module
     }
+
+    /// Get mutable reference to module
+    pub fn module_mut(&mut self) -> &mut Module {
+        &mut self.module
+    }
 }
 
 #[cfg(test)]

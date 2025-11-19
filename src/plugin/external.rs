@@ -430,21 +430,36 @@ impl ExternalPluginLoader {
     }
 
     pub fn create_generic_entry(plugin_name: &str) -> Result<ExternalPluginEntry> {
-        let metadata = PluginMetadata::from_crates_io(plugin_name)?;
+        if plugin_name.is_empty() {
+            return Err(crate::error::WasmrunError::from(
+                "Plugin name cannot be empty",
+            ));
+        }
+
+        let metadata = PluginMetadata::from_crates_io(plugin_name).ok();
 
         let info = PluginInfo {
             name: plugin_name.to_string(),
             version: "0.1.0".to_string(),
             description: format!("{plugin_name} WebAssembly plugin"),
             author: "Community".to_string(),
-            extensions: metadata.extensions.clone(),
-            entry_files: metadata.entry_files.clone(),
+            extensions: metadata
+                .as_ref()
+                .map(|m| m.extensions.clone())
+                .unwrap_or_default(),
+            entry_files: metadata
+                .as_ref()
+                .map(|m| m.entry_files.clone())
+                .unwrap_or_default(),
             plugin_type: crate::plugin::PluginType::External,
             source: Some(crate::plugin::PluginSource::CratesIo {
                 name: plugin_name.to_string(),
                 version: "latest".to_string(),
             }),
-            dependencies: metadata.dependencies.tools.clone(),
+            dependencies: metadata
+                .as_ref()
+                .map(|m| m.dependencies.tools.clone())
+                .unwrap_or_default(),
             capabilities: Default::default(),
         };
 
