@@ -66,11 +66,11 @@ impl Default for WasiEnv {
 pub fn create_wasi_linker(_env: Arc<Mutex<WasiEnv>>) -> Linker {
     let mut linker = Linker::new();
 
-    // Register proc_exit syscall
+    // Register proc_exit syscall (1 arg: exit code, 0 returns)
     linker.register(
         "proc_exit".to_string(),
         Box::new(ClosureHostFunction::new(
-            move |args| {
+            |args| {
                 if args.is_empty() {
                     return Ok(vec![]);
                 }
@@ -88,15 +88,135 @@ pub fn create_wasi_linker(_env: Arc<Mutex<WasiEnv>>) -> Linker {
         )),
     );
 
-    // Register fd_write syscall (simplified: writes to stdout)
+    // Register fd_write syscall (4 args: fd, iov_ptr, iov_count, nwritten_ptr; 1 return: errno)
     linker.register(
         "fd_write".to_string(),
         Box::new(ClosureHostFunction::new(
-            |_args| {
-                // Simplified: just return success
-                Ok(vec![Value::I32(0)])
+            |args| {
+                if args.len() < 4 {
+                    return Ok(vec![Value::I32(syscalls::WASI_EINVAL)]);
+                }
+                let fd = match &args[0] {
+                    Value::I32(v) => *v as u32,
+                    _ => return Ok(vec![Value::I32(syscalls::WASI_EBADF)]),
+                };
+                Ok(vec![Value::I32(
+                    syscalls::fd_write(fd, 0, 0, 0).unwrap_or(syscalls::WASI_EIO),
+                )])
             },
             4,
+            1,
+        )),
+    );
+
+    // Register fd_read syscall (4 args: fd, iov_ptr, iov_count, nread_ptr; 1 return: errno)
+    linker.register(
+        "fd_read".to_string(),
+        Box::new(ClosureHostFunction::new(
+            |args| {
+                if args.len() < 4 {
+                    return Ok(vec![Value::I32(syscalls::WASI_EINVAL)]);
+                }
+                let fd = match &args[0] {
+                    Value::I32(v) => *v as u32,
+                    _ => return Ok(vec![Value::I32(syscalls::WASI_EBADF)]),
+                };
+                Ok(vec![Value::I32(
+                    syscalls::fd_read(fd, 0, 0, 0).unwrap_or(syscalls::WASI_EIO),
+                )])
+            },
+            4,
+            1,
+        )),
+    );
+
+    // Register environ_sizes_get syscall (2 args: count_ptr, buf_size_ptr; 1 return: errno)
+    linker.register(
+        "environ_sizes_get".to_string(),
+        Box::new(ClosureHostFunction::new(
+            |_args| {
+                Ok(vec![Value::I32(
+                    syscalls::environ_sizes_get(0, 0).unwrap_or(syscalls::WASI_EIO),
+                )])
+            },
+            2,
+            1,
+        )),
+    );
+
+    // Register environ_get syscall (2 args: environ_ptr, buf_size; 1 return: errno)
+    linker.register(
+        "environ_get".to_string(),
+        Box::new(ClosureHostFunction::new(
+            |_args| {
+                Ok(vec![Value::I32(
+                    syscalls::environ_get(0, 0).unwrap_or(syscalls::WASI_EIO),
+                )])
+            },
+            2,
+            1,
+        )),
+    );
+
+    // Register args_sizes_get syscall (2 args: count_ptr, buf_size_ptr; 1 return: errno)
+    linker.register(
+        "args_sizes_get".to_string(),
+        Box::new(ClosureHostFunction::new(
+            |_args| {
+                Ok(vec![Value::I32(
+                    syscalls::args_sizes_get(0, 0).unwrap_or(syscalls::WASI_EIO),
+                )])
+            },
+            2,
+            1,
+        )),
+    );
+
+    // Register args_get syscall (2 args: argv_ptr, buf_size; 1 return: errno)
+    linker.register(
+        "args_get".to_string(),
+        Box::new(ClosureHostFunction::new(
+            |_args| {
+                Ok(vec![Value::I32(
+                    syscalls::args_get(0, 0).unwrap_or(syscalls::WASI_EIO),
+                )])
+            },
+            2,
+            1,
+        )),
+    );
+
+    // Register clock_time_get syscall (3 args: clock_id, precision, time_ptr; 1 return: errno)
+    linker.register(
+        "clock_time_get".to_string(),
+        Box::new(ClosureHostFunction::new(
+            |args| {
+                if args.len() < 3 {
+                    return Ok(vec![Value::I32(syscalls::WASI_EINVAL)]);
+                }
+                let clock_id = match &args[0] {
+                    Value::I32(v) => *v as u32,
+                    _ => return Ok(vec![Value::I32(syscalls::WASI_EINVAL)]),
+                };
+                Ok(vec![Value::I32(
+                    syscalls::clock_time_get(clock_id, 0, 0).unwrap_or(syscalls::WASI_EIO),
+                )])
+            },
+            3,
+            1,
+        )),
+    );
+
+    // Register random_get syscall (2 args: buf_ptr, buf_len; 1 return: errno)
+    linker.register(
+        "random_get".to_string(),
+        Box::new(ClosureHostFunction::new(
+            |_args| {
+                Ok(vec![Value::I32(
+                    syscalls::random_get(0, 0).unwrap_or(syscalls::WASI_EIO),
+                )])
+            },
+            2,
             1,
         )),
     );
@@ -132,5 +252,36 @@ mod tests {
 
         assert!(linker.has("proc_exit"));
         assert!(linker.has("fd_write"));
+        assert!(linker.has("fd_read"));
+        assert!(linker.has("environ_get"));
+        assert!(linker.has("environ_sizes_get"));
+        assert!(linker.has("args_get"));
+        assert!(linker.has("args_sizes_get"));
+        assert!(linker.has("clock_time_get"));
+        assert!(linker.has("random_get"));
+    }
+
+    #[test]
+    fn test_wasi_env_get_stdout() {
+        let env = WasiEnv::new();
+        let stdout = env.get_stdout();
+        assert!(stdout.is_empty());
+    }
+
+    #[test]
+    fn test_wasi_env_get_stderr() {
+        let env = WasiEnv::new();
+        let stderr = env.get_stderr();
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn test_wasi_env_with_multiple_env_vars() {
+        let env = WasiEnv::new()
+            .with_env("VAR1".to_string(), "value1".to_string())
+            .with_env("VAR2".to_string(), "value2".to_string())
+            .with_env("VAR3".to_string(), "value3".to_string());
+
+        assert_eq!(env.env_vars.len(), 3);
     }
 }
