@@ -8,13 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Native WASM runtime with modular architecture
+- **Native WASM Execution**: Direct interpreter execution of compiled WASM files with `--native` flag
+  - Automatic entry point detection (_start, main, start functions)
+  - Full WASI syscall support for file I/O, environment, arguments, and time
+  - Direct stdout/stderr output to terminal for CLI tools
+- Complete WASM runtime implementation
   - Comprehensive WASM binary parser supporting all standard sections
-  - Module structure with full metadata extraction (types, imports, functions, exports, memory, globals, etc.)
-  - Support for modern WASM features (reference types, vector types)
-  - Linear memory management with 64KB pages and bounds checking
-  - Execution context with operand stack, call stack, and frame management
-  - Full-featured value types (i32, i64, f32, f64) with type-safe operations
+  - All numeric operations (i32, i64, f32, f64) with proper type handling
+  - Memory operations with bounds checking and sign extension
+  - Control flow instructions (blocks, loops, branching) with proper stack management
+  - Function calls and indirect calls via tables
+  - Global variable support
+  - WASI syscall implementations (fd_read/write, environ, args, clock, random, proc_exit)
+
+### Improved
+- Plugin system now gracefully handles invalid/non-existent plugins by creating templates
+- Better error messages for WASM execution failures
+- Proper metadata handling for plugins without crates.io entries
 
 
 ## [0.14.0](https://github.com/anistark/wasmrun/releases/tag/v0.14.0) - 2025-11-15
