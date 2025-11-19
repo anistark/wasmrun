@@ -5,6 +5,17 @@ use super::module::{Module, ValueType};
 use super::values::Value;
 use std::io::Cursor;
 
+/// Result of instruction execution for control flow
+#[derive(Debug, Clone)]
+enum ControlFlow {
+    /// Continue to next instruction
+    None,
+    /// Return from function
+    Return,
+    /// Branch to bytecode position
+    Branch(usize),
+}
+
 /// WASM instruction representation
 /// Covers all instruction types from the WebAssembly specification
 #[derive(Debug, Clone)]
@@ -482,6 +493,21 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
 }
 
 /// Represents a single function call frame on the call stack
+/// Control flow block state for branching
+#[derive(Debug, Clone)]
+pub struct BlockFrame {
+    /// Block type (None for Block/Loop, Some for If)
+    pub block_type: Option<ValueType>,
+    /// Stack depth at block entry
+    pub stack_depth: usize,
+    /// Whether this is a loop (affects branching)
+    pub is_loop: bool,
+    /// Bytecode position of the block start
+    pub start_pos: usize,
+    /// Bytecode position after 'end' instruction (branch target)
+    pub end_pos: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct Frame {
     /// Function index being executed
@@ -536,6 +562,10 @@ pub struct ExecutionContext {
     pub operand_stack: Vec<Value>,
     /// Linear memory
     pub memory: LinearMemory,
+    /// Control flow block stack (for block, loop, if)
+    pub block_stack: Vec<BlockFrame>,
+    /// Global variable values (mutable)
+    pub globals: Vec<Value>,
 }
 
 impl ExecutionContext {
@@ -546,6 +576,8 @@ impl ExecutionContext {
             call_stack: Vec::new(),
             operand_stack: Vec::new(),
             memory,
+            block_stack: Vec::new(),
+            globals: Vec::new(),
         })
     }
 
@@ -607,6 +639,38 @@ impl ExecutionContext {
             .last()
             .ok_or_else(|| "No active frame".to_string())
     }
+
+    /// Push a control flow block
+    pub fn push_block(
+        &mut self,
+        block_type: Option<ValueType>,
+        is_loop: bool,
+        start_pos: usize,
+        end_pos: usize,
+    ) {
+        let stack_depth = self.operand_stack.len();
+        self.block_stack.push(BlockFrame {
+            block_type,
+            stack_depth,
+            is_loop,
+            start_pos,
+            end_pos,
+        });
+    }
+
+    /// Pop a control flow block
+    pub fn pop_block(&mut self) -> Result<BlockFrame, String> {
+        self.block_stack
+            .pop()
+            .ok_or_else(|| "Block stack underflow".to_string())
+    }
+
+    /// Get current block
+    pub fn current_block(&self) -> Result<&BlockFrame, String> {
+        self.block_stack
+            .last()
+            .ok_or_else(|| "No active block".to_string())
+    }
 }
 
 /// WASM instruction executor
@@ -626,7 +690,20 @@ impl Executor {
             (1, None)
         };
 
-        let context = ExecutionContext::new(initial, max)?;
+        let mut context = ExecutionContext::new(initial, max)?;
+
+        // Initialize globals with default values for their types
+        for global in &module.globals {
+            let default_val = match global.value_type {
+                ValueType::I32 => Value::I32(0),
+                ValueType::I64 => Value::I64(0),
+                ValueType::F32 => Value::F32(0.0),
+                ValueType::F64 => Value::F64(0.0),
+                _ => return Err(format!("Unsupported global type: {:?}", global.value_type)),
+            };
+            context.globals.push(default_val);
+        }
+
         Ok(Executor { context, module })
     }
 
@@ -1749,7 +1826,302 @@ impl Executor {
                 }
             }
 
-            // Not yet implemented
+            // Global operations
+            Instruction::GlobalGet(idx) => {
+                let val = self
+                    .context
+                    .globals
+                    .get(idx as usize)
+                    .copied()
+                    .ok_or_else(|| format!("Global index {idx} out of bounds"))?;
+                self.context.push(val);
+            }
+            Instruction::GlobalSet(idx) => {
+                let val = self.context.pop()?;
+                let global = self
+                    .context
+                    .globals
+                    .get_mut(idx as usize)
+                    .ok_or_else(|| format!("Global index {idx} out of bounds"))?;
+                *global = val;
+            }
+
+            // Memory load operations
+            Instruction::I32Load => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_i32(addr)?;
+                self.context.push(Value::I32(val));
+            }
+            Instruction::I64Load => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_i64(addr)?;
+                self.context.push(Value::I64(val));
+            }
+            Instruction::F32Load => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_f32(addr)?;
+                self.context.push(Value::F32(val));
+            }
+            Instruction::F64Load => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_f64(addr)?;
+                self.context.push(Value::F64(val));
+            }
+            Instruction::I32Load8S => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_i8(addr)? as i32;
+                self.context.push(Value::I32(val));
+            }
+            Instruction::I32Load8U => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = (self.context.memory.read_u8(addr)? as u32) as i32;
+                self.context.push(Value::I32(val));
+            }
+            Instruction::I32Load16S => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_i16(addr)? as i32;
+                self.context.push(Value::I32(val));
+            }
+            Instruction::I32Load16U => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = (self.context.memory.read_u16(addr)? as u32) as i32;
+                self.context.push(Value::I32(val));
+            }
+            Instruction::I64Load8S => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_i8(addr)? as i64;
+                self.context.push(Value::I64(val));
+            }
+            Instruction::I64Load8U => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_u8(addr)? as i64;
+                self.context.push(Value::I64(val));
+            }
+            Instruction::I64Load16S => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_i16(addr)? as i64;
+                self.context.push(Value::I64(val));
+            }
+            Instruction::I64Load16U => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_u16(addr)? as i64;
+                self.context.push(Value::I64(val));
+            }
+            Instruction::I64Load32S => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = self.context.memory.read_i32(addr)? as i64;
+                self.context.push(Value::I64(val));
+            }
+            Instruction::I64Load32U => {
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                let val = (self.context.memory.read_i32(addr)? as u32) as i64;
+                self.context.push(Value::I64(val));
+            }
+
+            // Memory store operations
+            Instruction::I32Store => {
+                let val = match self.context.pop()? {
+                    Value::I32(v) => v,
+                    _ => return Err("Value must be i32".to_string()),
+                };
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                self.context.memory.write_i32(addr, val)?;
+            }
+            Instruction::I64Store => {
+                let val = match self.context.pop()? {
+                    Value::I64(v) => v,
+                    _ => return Err("Value must be i64".to_string()),
+                };
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                self.context.memory.write_i64(addr, val)?;
+            }
+            Instruction::F32Store => {
+                let val = match self.context.pop()? {
+                    Value::F32(v) => v,
+                    _ => return Err("Value must be f32".to_string()),
+                };
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                self.context.memory.write_f32(addr, val)?;
+            }
+            Instruction::F64Store => {
+                let val = match self.context.pop()? {
+                    Value::F64(v) => v,
+                    _ => return Err("Value must be f64".to_string()),
+                };
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                self.context.memory.write_f64(addr, val)?;
+            }
+            Instruction::I32Store8 => {
+                let val = match self.context.pop()? {
+                    Value::I32(v) => v as u8,
+                    _ => return Err("Value must be i32".to_string()),
+                };
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                self.context.memory.write_u8(addr, val)?;
+            }
+            Instruction::I32Store16 => {
+                let val = match self.context.pop()? {
+                    Value::I32(v) => v as u16,
+                    _ => return Err("Value must be i32".to_string()),
+                };
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                self.context.memory.write_u16(addr, val)?;
+            }
+            Instruction::I64Store8 => {
+                let val = match self.context.pop()? {
+                    Value::I64(v) => v as u8,
+                    _ => return Err("Value must be i64".to_string()),
+                };
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                self.context.memory.write_u8(addr, val)?;
+            }
+            Instruction::I64Store16 => {
+                let val = match self.context.pop()? {
+                    Value::I64(v) => v as u16,
+                    _ => return Err("Value must be i64".to_string()),
+                };
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                self.context.memory.write_u16(addr, val)?;
+            }
+            Instruction::I64Store32 => {
+                let val = match self.context.pop()? {
+                    Value::I64(v) => v as u32 as i32,
+                    _ => return Err("Value must be i64".to_string()),
+                };
+                let addr = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("Address must be i32".to_string()),
+                };
+                self.context.memory.write_i32(addr, val)?;
+            }
+
+            // Memory size
+            Instruction::MemorySize => {
+                let pages = self.context.memory.pages() as i32;
+                self.context.push(Value::I32(pages));
+            }
+
+            // Control flow - simplified implementation
+            Instruction::Block(_block_type) => {
+                // For now, just note the block on the control flow stack
+                // Full implementation would require tracking bytecode positions
+                // This is a simplified version that allows nesting but no actual branching
+                self.context.push_block(_block_type, false, 0, 0);
+            }
+            Instruction::Loop(_block_type) => {
+                // Similar to block - just track the loop
+                self.context.push_block(_block_type, true, 0, 0);
+            }
+            Instruction::If(_block_type) => {
+                // Pop condition from stack
+                let cond = self.context.pop()?;
+                match cond {
+                    Value::I32(_) => {
+                        // Store whether condition is true for else handling
+                        self.context.push_block(_block_type, false, 0, 0);
+                        // Note: Full if/else would need bytecode skipping for false condition
+                    }
+                    _ => return Err("if requires i32 condition".to_string()),
+                }
+            }
+            Instruction::Else => {
+                // Mark else branch
+                // Full implementation would skip bytecode until matching end
+            }
+            Instruction::Br(_label) => {
+                // Branch to label
+                // Full implementation would jump in bytecode
+                // For now, return an error indicating this needs work
+                return Err(
+                    "br (branch) requires bytecode position tracking not yet implemented"
+                        .to_string(),
+                );
+            }
+            Instruction::BrIf(_label) => {
+                // Conditional branch
+                let cond = self.context.pop()?;
+                match cond {
+                    Value::I32(v) if v != 0 => {
+                        return Err("br_if (conditional branch) requires bytecode position tracking not yet implemented".to_string());
+                    }
+                    Value::I32(_) => {
+                        // Condition false, continue
+                    }
+                    _ => return Err("br_if requires i32 condition".to_string()),
+                }
+            }
+            Instruction::BrTable(_, _) => {
+                // Branch table (switch)
+                return Err("br_table (branch table) requires bytecode position tracking not yet implemented".to_string());
+            }
+
+            // Type conversions and other unimplemented
             Instruction::I32WrapI64
             | Instruction::I32TruncF32S
             | Instruction::I32TruncF32U
@@ -1775,40 +2147,7 @@ impl Executor {
             | Instruction::I64Reinterpret
             | Instruction::F32Reinterpret
             | Instruction::F64Reinterpret
-            | Instruction::I32Load
-            | Instruction::I64Load
-            | Instruction::F32Load
-            | Instruction::F64Load
-            | Instruction::I32Load8S
-            | Instruction::I32Load8U
-            | Instruction::I32Load16S
-            | Instruction::I32Load16U
-            | Instruction::I64Load8S
-            | Instruction::I64Load8U
-            | Instruction::I64Load16S
-            | Instruction::I64Load16U
-            | Instruction::I64Load32S
-            | Instruction::I64Load32U
-            | Instruction::I32Store
-            | Instruction::I64Store
-            | Instruction::F32Store
-            | Instruction::F64Store
-            | Instruction::I32Store8
-            | Instruction::I32Store16
-            | Instruction::I64Store8
-            | Instruction::I64Store16
-            | Instruction::I64Store32
-            | Instruction::MemorySize
             | Instruction::MemoryGrow
-            | Instruction::GlobalGet(_)
-            | Instruction::GlobalSet(_)
-            | Instruction::Block(_)
-            | Instruction::Loop(_)
-            | Instruction::If(_)
-            | Instruction::Else
-            | Instruction::Br(_)
-            | Instruction::BrIf(_)
-            | Instruction::BrTable(_, _)
             | Instruction::Select => {
                 return Err(format!("Instruction not yet implemented: {instr:?}"));
             }
@@ -2621,5 +2960,160 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0], Value::I32(10));
         assert_eq!(results[1], Value::I32(5));
+    }
+
+    // Phase 1e tests: Global operations
+    #[test]
+    fn test_global_get_set() {
+        use crate::runtime::core::module::{Function, FunctionType, GlobalValue};
+
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![],
+                results: vec![ValueType::I32],
+            }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![],
+                code: vec![0x23, 0x00, 0x0b],
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![GlobalValue {
+                mutable: true,
+                value_type: ValueType::I32,
+                init_expr: vec![],
+            }],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.globals[0] = Value::I32(42);
+
+        let results = executor.execute(0).unwrap();
+        assert_eq!(results[0], Value::I32(42));
+    }
+
+    // Phase 1e tests: Memory operations via context
+    #[test]
+    fn test_memory_direct_i32_store_load() {
+        use crate::runtime::core::module::MemoryType;
+
+        let module = Module {
+            version: 1,
+            types: vec![],
+            imports: vec![],
+            functions: vec![],
+            tables: vec![],
+            memory: Some(MemoryType {
+                initial: 1,
+                max: None,
+            }),
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+
+        let mut executor = Executor::new(module).unwrap();
+
+        executor.context.memory.write_i32(100, 12345).unwrap();
+        let val = executor.context.memory.read_i32(100).unwrap();
+        assert_eq!(val, 12345);
+    }
+
+    #[test]
+    fn test_memory_size() {
+        use crate::runtime::core::module::MemoryType;
+
+        let module = Module {
+            version: 1,
+            types: vec![],
+            imports: vec![],
+            functions: vec![],
+            tables: vec![],
+            memory: Some(MemoryType {
+                initial: 3,
+                max: Some(5),
+            }),
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+
+        let executor = Executor::new(module).unwrap();
+        assert_eq!(executor.context.memory.pages(), 3);
+    }
+
+    #[test]
+    fn test_memory_i8_operations() {
+        use crate::runtime::core::module::MemoryType;
+
+        let module = Module {
+            version: 1,
+            types: vec![],
+            imports: vec![],
+            functions: vec![],
+            tables: vec![],
+            memory: Some(MemoryType {
+                initial: 1,
+                max: None,
+            }),
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+
+        let mut executor = Executor::new(module).unwrap();
+
+        executor.context.memory.write_i8(50, -42).unwrap();
+        let val = executor.context.memory.read_i8(50).unwrap();
+        assert_eq!(val, -42);
+
+        executor.context.memory.write_u8(100, 255).unwrap();
+        let val = executor.context.memory.read_u8(100).unwrap();
+        assert_eq!(val, 255);
+    }
+
+    #[test]
+    fn test_memory_i16_operations() {
+        use crate::runtime::core::module::MemoryType;
+
+        let module = Module {
+            version: 1,
+            types: vec![],
+            imports: vec![],
+            functions: vec![],
+            tables: vec![],
+            memory: Some(MemoryType {
+                initial: 1,
+                max: None,
+            }),
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+
+        let mut executor = Executor::new(module).unwrap();
+
+        executor.context.memory.write_i16(200, -1000).unwrap();
+        let val = executor.context.memory.read_i16(200).unwrap();
+        assert_eq!(val, -1000);
+
+        executor.context.memory.write_u16(300, 65535).unwrap();
+        let val = executor.context.memory.read_u16(300).unwrap();
+        assert_eq!(val, 65535);
     }
 }

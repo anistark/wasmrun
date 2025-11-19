@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod control_flow;
 pub mod executor;
 pub mod linker;
 pub mod memory;
