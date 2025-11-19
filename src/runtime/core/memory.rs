@@ -245,6 +245,84 @@ impl LinearMemory {
         Ok(())
     }
 
+    /// Read i8 (signed byte)
+    pub fn read_i8(&self, addr: usize) -> Result<i8, String> {
+        let val = self.read_u8(addr)?;
+        Ok(val as i8)
+    }
+
+    /// Write i8 (signed byte)
+    pub fn write_i8(&mut self, addr: usize, value: i8) -> Result<(), String> {
+        self.write_u8(addr, value as u8)
+    }
+
+    /// Read i16 (2 bytes, little-endian)
+    pub fn read_i16(&self, addr: usize) -> Result<i16, String> {
+        if addr + 2 > self.size_bytes() {
+            return Err(format!(
+                "Memory access out of bounds: read i16 at {} (size: {} bytes)",
+                addr,
+                self.size_bytes()
+            ));
+        }
+
+        let bytes = [self.read_u8(addr)?, self.read_u8(addr + 1)?];
+        Ok(i16::from_le_bytes(bytes))
+    }
+
+    /// Write i16 (2 bytes, little-endian)
+    pub fn write_i16(&mut self, addr: usize, value: i16) -> Result<(), String> {
+        if addr + 2 > self.size_bytes() {
+            return Err(format!(
+                "Memory access out of bounds: write i16 at {} (size: {} bytes)",
+                addr,
+                self.size_bytes()
+            ));
+        }
+
+        let bytes = value.to_le_bytes();
+        for (i, &b) in bytes.iter().enumerate() {
+            self.write_u8(addr + i, b)?;
+        }
+        Ok(())
+    }
+
+    /// Read u16 (2 bytes, little-endian)
+    pub fn read_u16(&self, addr: usize) -> Result<u16, String> {
+        if addr + 2 > self.size_bytes() {
+            return Err(format!(
+                "Memory access out of bounds: read u16 at {} (size: {} bytes)",
+                addr,
+                self.size_bytes()
+            ));
+        }
+
+        let bytes = [self.read_u8(addr)?, self.read_u8(addr + 1)?];
+        Ok(u16::from_le_bytes(bytes))
+    }
+
+    /// Write u16 (2 bytes, little-endian)
+    pub fn write_u16(&mut self, addr: usize, value: u16) -> Result<(), String> {
+        if addr + 2 > self.size_bytes() {
+            return Err(format!(
+                "Memory access out of bounds: write u16 at {} (size: {} bytes)",
+                addr,
+                self.size_bytes()
+            ));
+        }
+
+        let bytes = value.to_le_bytes();
+        for (i, &b) in bytes.iter().enumerate() {
+            self.write_u8(addr + i, b)?;
+        }
+        Ok(())
+    }
+
+    /// Get number of pages
+    pub fn pages(&self) -> u32 {
+        self.pages.len() as u32
+    }
+
     /// Read a slice of bytes
     pub fn read_bytes(&self, addr: usize, len: usize) -> Result<Vec<u8>, String> {
         if addr + len > self.size_bytes() {
