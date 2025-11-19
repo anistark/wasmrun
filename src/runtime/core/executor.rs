@@ -711,6 +711,108 @@ impl Executor {
         Ok(())
     }
 
+    /// Call a function with arguments already on stack
+    fn call_function(&mut self, func_idx: u32) -> Result<(), String> {
+        let (arg_count, num_results, code, local_types) = {
+            let func = self
+                .module
+                .functions
+                .get(func_idx as usize)
+                .ok_or_else(|| format!("Function index {func_idx} out of bounds"))?;
+
+            let func_type = self
+                .module
+                .types
+                .get(func.type_index as usize)
+                .ok_or_else(|| format!("Function type index {} out of bounds", func.type_index))?;
+
+            (
+                func_type.params.len(),
+                func_type.results.len(),
+                func.code.clone(),
+                func.locals.clone(),
+            )
+        };
+
+        // Pop arguments from operand stack
+        let args = self.context.pop_n(arg_count)?;
+
+        // Initialize locals: parameters + local variables
+        let mut locals = args;
+
+        // Add local variable slots
+        for (count, value_type) in local_types {
+            for _ in 0..count {
+                let default_value = match value_type {
+                    ValueType::I32 => Value::I32(0),
+                    ValueType::I64 => Value::I64(0),
+                    ValueType::F32 => Value::F32(0.0),
+                    ValueType::F64 => Value::F64(0.0),
+                    _ => return Err(format!("Unsupported value type in locals: {value_type:?}")),
+                };
+                locals.push(default_value);
+            }
+        }
+
+        // Create call frame and push it
+        let frame = Frame::new(func_idx, locals, num_results);
+        self.context.push_frame(frame);
+
+        // Execute function bytecode
+        let mut cursor = Cursor::new(code.as_slice());
+        self.execute_bytecode(&mut cursor)?;
+
+        // Pop frame
+        self.context.pop_frame()?;
+
+        Ok(())
+    }
+
+    /// Call a function indirectly via table lookup
+    fn call_function_indirect(&mut self, table_idx: u32, type_idx: u32) -> Result<(), String> {
+        if self.module.tables.is_empty() {
+            return Err("No tables defined in module".to_string());
+        }
+
+        if self.module.elements.is_empty() {
+            return Err("No element segments in module".to_string());
+        }
+
+        let element_segment = &self.module.elements[0];
+        let func_idx = element_segment
+            .function_indices
+            .get(table_idx as usize)
+            .ok_or_else(|| format!("Table index {table_idx} out of bounds"))?;
+
+        let func = self
+            .module
+            .functions
+            .get(*func_idx as usize)
+            .ok_or_else(|| format!("Function index {func_idx} out of bounds"))?;
+
+        let func_type = self
+            .module
+            .types
+            .get(func.type_index as usize)
+            .ok_or_else(|| format!("Function type index {} out of bounds", func.type_index))?;
+
+        let expected_type = self
+            .module
+            .types
+            .get(type_idx as usize)
+            .ok_or_else(|| format!("Expected type index {type_idx} out of bounds"))?;
+
+        if func_type.params != expected_type.params || func_type.results != expected_type.results {
+            return Err(format!(
+                "Function signature mismatch: expected {:?}->{:?}, got {:?}->{:?}",
+                expected_type.params, expected_type.results, func_type.params, func_type.results
+            ));
+        }
+
+        self.call_function(*func_idx)?;
+        Ok(())
+    }
+
     /// Dispatch instruction to handler
     fn dispatch_instruction(&mut self, instr: Instruction) -> Result<(), String> {
         match instr {
@@ -1011,81 +1113,644 @@ impl Executor {
                 frame.set_local(idx as usize, value)?;
             }
 
+            // i64 arithmetic
+            Instruction::I64Add => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I64(x.wrapping_add(y)))
+                    }
+                    _ => return Err("Type mismatch for i64.add".to_string()),
+                }
+            }
+            Instruction::I64Sub => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I64(x.wrapping_sub(y)))
+                    }
+                    _ => return Err("Type mismatch for i64.sub".to_string()),
+                }
+            }
+            Instruction::I64Mul => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I64(x.wrapping_mul(y)))
+                    }
+                    _ => return Err("Type mismatch for i64.mul".to_string()),
+                }
+            }
+            Instruction::I64DivS => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        if y == 0 {
+                            return Err("Integer division by zero".to_string());
+                        }
+                        if x == i64::MIN && y == -1 {
+                            return Err("Integer overflow in division".to_string());
+                        }
+                        self.context.push(Value::I64(x / y));
+                    }
+                    _ => return Err("Type mismatch for i64.div_s".to_string()),
+                }
+            }
+            Instruction::I64DivU => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        if y == 0 {
+                            return Err("Integer division by zero".to_string());
+                        }
+                        self.context
+                            .push(Value::I64(((x as u64) / (y as u64)) as i64));
+                    }
+                    _ => return Err("Type mismatch for i64.div_u".to_string()),
+                }
+            }
+            Instruction::I64RemS => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        if y == 0 {
+                            return Err("Integer division by zero".to_string());
+                        }
+                        self.context.push(Value::I64(x % y));
+                    }
+                    _ => return Err("Type mismatch for i64.rem_s".to_string()),
+                }
+            }
+            Instruction::I64RemU => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        if y == 0 {
+                            return Err("Integer division by zero".to_string());
+                        }
+                        self.context
+                            .push(Value::I64(((x as u64) % (y as u64)) as i64));
+                    }
+                    _ => return Err("Type mismatch for i64.rem_u".to_string()),
+                }
+            }
+
+            // i64 bitwise
+            Instruction::I64And => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => self.context.push(Value::I64(x & y)),
+                    _ => return Err("Type mismatch for i64.and".to_string()),
+                }
+            }
+            Instruction::I64Or => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => self.context.push(Value::I64(x | y)),
+                    _ => return Err("Type mismatch for i64.or".to_string()),
+                }
+            }
+            Instruction::I64Xor => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => self.context.push(Value::I64(x ^ y)),
+                    _ => return Err("Type mismatch for i64.xor".to_string()),
+                }
+            }
+            Instruction::I64Shl => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I64(x.wrapping_shl(y as u32 & 63)));
+                    }
+                    _ => return Err("Type mismatch for i64.shl".to_string()),
+                }
+            }
+            Instruction::I64ShrS => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I64(x >> (y as u32 & 63)));
+                    }
+                    _ => return Err("Type mismatch for i64.shr_s".to_string()),
+                }
+            }
+            Instruction::I64ShrU => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context
+                            .push(Value::I64(((x as u64) >> (y as u32 & 63)) as i64));
+                    }
+                    _ => return Err("Type mismatch for i64.shr_u".to_string()),
+                }
+            }
+            Instruction::I64Rotl => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        let shift = (y as u32) & 63;
+                        self.context.push(Value::I64(x.rotate_left(shift)));
+                    }
+                    _ => return Err("Type mismatch for i64.rotl".to_string()),
+                }
+            }
+            Instruction::I64Rotr => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        let shift = (y as u32) & 63;
+                        self.context.push(Value::I64(x.rotate_right(shift)));
+                    }
+                    _ => return Err("Type mismatch for i64.rotr".to_string()),
+                }
+            }
+
+            // i64 comparison
+            Instruction::I64Eq => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I32(if x == y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for i64.eq".to_string()),
+                }
+            }
+            Instruction::I64Ne => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I32(if x != y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for i64.ne".to_string()),
+                }
+            }
+            Instruction::I64LtS => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I32(if x < y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for i64.lt_s".to_string()),
+                }
+            }
+            Instruction::I64LtU => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context
+                            .push(Value::I32(if (x as u64) < (y as u64) { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for i64.lt_u".to_string()),
+                }
+            }
+            Instruction::I64GtS => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I32(if x > y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for i64.gt_s".to_string()),
+                }
+            }
+            Instruction::I64GtU => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context
+                            .push(Value::I32(if (x as u64) > (y as u64) { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for i64.gt_u".to_string()),
+                }
+            }
+            Instruction::I64LeS => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I32(if x <= y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for i64.le_s".to_string()),
+                }
+            }
+            Instruction::I64LeU => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context
+                            .push(Value::I32(if (x as u64) <= (y as u64) { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for i64.le_u".to_string()),
+                }
+            }
+            Instruction::I64GeS => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context.push(Value::I32(if x >= y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for i64.ge_s".to_string()),
+                }
+            }
+            Instruction::I64GeU => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::I64(x), Value::I64(y)) => {
+                        self.context
+                            .push(Value::I32(if (x as u64) >= (y as u64) { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for i64.ge_u".to_string()),
+                }
+            }
+
+            // f32 arithmetic
+            Instruction::F32Add => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => self.context.push(Value::F32(x + y)),
+                    _ => return Err("Type mismatch for f32.add".to_string()),
+                }
+            }
+            Instruction::F32Sub => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => self.context.push(Value::F32(x - y)),
+                    _ => return Err("Type mismatch for f32.sub".to_string()),
+                }
+            }
+            Instruction::F32Mul => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => self.context.push(Value::F32(x * y)),
+                    _ => return Err("Type mismatch for f32.mul".to_string()),
+                }
+            }
+            Instruction::F32Div => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => self.context.push(Value::F32(x / y)),
+                    _ => return Err("Type mismatch for f32.div".to_string()),
+                }
+            }
+            Instruction::F32Sqrt => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => self.context.push(Value::F32(x.sqrt())),
+                    _ => return Err("Type mismatch for f32.sqrt".to_string()),
+                }
+            }
+            Instruction::F32Min => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => self.context.push(Value::F32(x.min(y))),
+                    _ => return Err("Type mismatch for f32.min".to_string()),
+                }
+            }
+            Instruction::F32Max => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => self.context.push(Value::F32(x.max(y))),
+                    _ => return Err("Type mismatch for f32.max".to_string()),
+                }
+            }
+            Instruction::F32Ceil => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => self.context.push(Value::F32(x.ceil())),
+                    _ => return Err("Type mismatch for f32.ceil".to_string()),
+                }
+            }
+            Instruction::F32Floor => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => self.context.push(Value::F32(x.floor())),
+                    _ => return Err("Type mismatch for f32.floor".to_string()),
+                }
+            }
+            Instruction::F32Trunc => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => self.context.push(Value::F32(x.trunc())),
+                    _ => return Err("Type mismatch for f32.trunc".to_string()),
+                }
+            }
+            Instruction::F32Nearest => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => self.context.push(Value::F32(x.round())),
+                    _ => return Err("Type mismatch for f32.nearest".to_string()),
+                }
+            }
+            Instruction::F32Abs => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => self.context.push(Value::F32(x.abs())),
+                    _ => return Err("Type mismatch for f32.abs".to_string()),
+                }
+            }
+            Instruction::F32Neg => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => self.context.push(Value::F32(-x)),
+                    _ => return Err("Type mismatch for f32.neg".to_string()),
+                }
+            }
+            Instruction::F32Copysign => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => self.context.push(Value::F32(x.copysign(y))),
+                    _ => return Err("Type mismatch for f32.copysign".to_string()),
+                }
+            }
+
+            // f32 comparison
+            Instruction::F32Eq => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => {
+                        self.context.push(Value::I32(if x == y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f32.eq".to_string()),
+                }
+            }
+            Instruction::F32Ne => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => {
+                        self.context.push(Value::I32(if x != y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f32.ne".to_string()),
+                }
+            }
+            Instruction::F32Lt => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => {
+                        self.context.push(Value::I32(if x < y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f32.lt".to_string()),
+                }
+            }
+            Instruction::F32Gt => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => {
+                        self.context.push(Value::I32(if x > y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f32.gt".to_string()),
+                }
+            }
+            Instruction::F32Le => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => {
+                        self.context.push(Value::I32(if x <= y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f32.le".to_string()),
+                }
+            }
+            Instruction::F32Ge => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F32(x), Value::F32(y)) => {
+                        self.context.push(Value::I32(if x >= y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f32.ge".to_string()),
+                }
+            }
+
+            // f64 arithmetic
+            Instruction::F64Add => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => self.context.push(Value::F64(x + y)),
+                    _ => return Err("Type mismatch for f64.add".to_string()),
+                }
+            }
+            Instruction::F64Sub => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => self.context.push(Value::F64(x - y)),
+                    _ => return Err("Type mismatch for f64.sub".to_string()),
+                }
+            }
+            Instruction::F64Mul => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => self.context.push(Value::F64(x * y)),
+                    _ => return Err("Type mismatch for f64.mul".to_string()),
+                }
+            }
+            Instruction::F64Div => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => self.context.push(Value::F64(x / y)),
+                    _ => return Err("Type mismatch for f64.div".to_string()),
+                }
+            }
+            Instruction::F64Sqrt => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => self.context.push(Value::F64(x.sqrt())),
+                    _ => return Err("Type mismatch for f64.sqrt".to_string()),
+                }
+            }
+            Instruction::F64Min => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => self.context.push(Value::F64(x.min(y))),
+                    _ => return Err("Type mismatch for f64.min".to_string()),
+                }
+            }
+            Instruction::F64Max => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => self.context.push(Value::F64(x.max(y))),
+                    _ => return Err("Type mismatch for f64.max".to_string()),
+                }
+            }
+            Instruction::F64Ceil => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => self.context.push(Value::F64(x.ceil())),
+                    _ => return Err("Type mismatch for f64.ceil".to_string()),
+                }
+            }
+            Instruction::F64Floor => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => self.context.push(Value::F64(x.floor())),
+                    _ => return Err("Type mismatch for f64.floor".to_string()),
+                }
+            }
+            Instruction::F64Trunc => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => self.context.push(Value::F64(x.trunc())),
+                    _ => return Err("Type mismatch for f64.trunc".to_string()),
+                }
+            }
+            Instruction::F64Nearest => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => self.context.push(Value::F64(x.round())),
+                    _ => return Err("Type mismatch for f64.nearest".to_string()),
+                }
+            }
+            Instruction::F64Abs => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => self.context.push(Value::F64(x.abs())),
+                    _ => return Err("Type mismatch for f64.abs".to_string()),
+                }
+            }
+            Instruction::F64Neg => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => self.context.push(Value::F64(-x)),
+                    _ => return Err("Type mismatch for f64.neg".to_string()),
+                }
+            }
+            Instruction::F64Copysign => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => self.context.push(Value::F64(x.copysign(y))),
+                    _ => return Err("Type mismatch for f64.copysign".to_string()),
+                }
+            }
+
+            // f64 comparison
+            Instruction::F64Eq => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => {
+                        self.context.push(Value::I32(if x == y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f64.eq".to_string()),
+                }
+            }
+            Instruction::F64Ne => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => {
+                        self.context.push(Value::I32(if x != y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f64.ne".to_string()),
+                }
+            }
+            Instruction::F64Lt => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => {
+                        self.context.push(Value::I32(if x < y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f64.lt".to_string()),
+                }
+            }
+            Instruction::F64Gt => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => {
+                        self.context.push(Value::I32(if x > y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f64.gt".to_string()),
+                }
+            }
+            Instruction::F64Le => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => {
+                        self.context.push(Value::I32(if x <= y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f64.le".to_string()),
+                }
+            }
+            Instruction::F64Ge => {
+                let b = self.context.pop()?;
+                let a = self.context.pop()?;
+                match (a, b) {
+                    (Value::F64(x), Value::F64(y)) => {
+                        self.context.push(Value::I32(if x >= y { 1 } else { 0 }));
+                    }
+                    _ => return Err("Type mismatch for f64.ge".to_string()),
+                }
+            }
+
             // Control flow - basic ones first
             Instruction::Nop => {}
             Instruction::Unreachable => return Err("Unreachable instruction executed".to_string()),
             Instruction::Return => return Ok(()),
+            Instruction::End => {}
             Instruction::Drop => {
                 self.context.pop()?;
             }
 
+            // Call instruction - implement function invocation
+            Instruction::Call(func_idx) => {
+                self.call_function(func_idx)?;
+            }
+
+            // CallIndirect - call function through table
+            Instruction::CallIndirect(type_idx) => {
+                let func_idx = self.context.pop()?;
+                if let Value::I32(idx) = func_idx {
+                    self.call_function_indirect(idx as u32, type_idx)?;
+                } else {
+                    return Err("CallIndirect requires i32 function index on stack".to_string());
+                }
+            }
+
             // Not yet implemented
-            Instruction::I64Add
-            | Instruction::I64Sub
-            | Instruction::I64Mul
-            | Instruction::I64DivS
-            | Instruction::I64DivU
-            | Instruction::I64RemS
-            | Instruction::I64RemU
-            | Instruction::I64And
-            | Instruction::I64Or
-            | Instruction::I64Xor
-            | Instruction::I64Shl
-            | Instruction::I64ShrS
-            | Instruction::I64ShrU
-            | Instruction::I64Rotl
-            | Instruction::I64Rotr
-            | Instruction::I64Eq
-            | Instruction::I64Ne
-            | Instruction::I64LtS
-            | Instruction::I64LtU
-            | Instruction::I64GtS
-            | Instruction::I64GtU
-            | Instruction::I64LeS
-            | Instruction::I64LeU
-            | Instruction::I64GeS
-            | Instruction::I64GeU
-            | Instruction::F32Add
-            | Instruction::F32Sub
-            | Instruction::F32Mul
-            | Instruction::F32Div
-            | Instruction::F32Sqrt
-            | Instruction::F32Min
-            | Instruction::F32Max
-            | Instruction::F32Ceil
-            | Instruction::F32Floor
-            | Instruction::F32Trunc
-            | Instruction::F32Nearest
-            | Instruction::F32Abs
-            | Instruction::F32Neg
-            | Instruction::F32Copysign
-            | Instruction::F64Add
-            | Instruction::F64Sub
-            | Instruction::F64Mul
-            | Instruction::F64Div
-            | Instruction::F64Sqrt
-            | Instruction::F64Min
-            | Instruction::F64Max
-            | Instruction::F64Ceil
-            | Instruction::F64Floor
-            | Instruction::F64Trunc
-            | Instruction::F64Nearest
-            | Instruction::F64Abs
-            | Instruction::F64Neg
-            | Instruction::F64Copysign
-            | Instruction::F32Eq
-            | Instruction::F32Ne
-            | Instruction::F32Lt
-            | Instruction::F32Gt
-            | Instruction::F32Le
-            | Instruction::F32Ge
-            | Instruction::F64Eq
-            | Instruction::F64Ne
-            | Instruction::F64Lt
-            | Instruction::F64Gt
-            | Instruction::F64Le
-            | Instruction::F64Ge
-            | Instruction::I32WrapI64
+            Instruction::I32WrapI64
             | Instruction::I32TruncF32S
             | Instruction::I32TruncF32U
             | Instruction::I32TruncF64S
@@ -1141,12 +1806,9 @@ impl Executor {
             | Instruction::Loop(_)
             | Instruction::If(_)
             | Instruction::Else
-            | Instruction::End
             | Instruction::Br(_)
             | Instruction::BrIf(_)
             | Instruction::BrTable(_, _)
-            | Instruction::Call(_)
-            | Instruction::CallIndirect(_)
             | Instruction::Select => {
                 return Err(format!("Instruction not yet implemented: {instr:?}"));
             }
@@ -1641,5 +2303,323 @@ mod tests {
         }
 
         assert_eq!(ctx.pop().unwrap(), Value::I32(0x40000000u32 as i32));
+    }
+
+    #[test]
+    fn test_i64_add() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::I64(100));
+        ctx.push(Value::I64(42));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::I64(x), Value::I64(y)) => ctx.push(Value::I64(x.wrapping_add(y))),
+            _ => panic!("Type mismatch"),
+        }
+
+        assert_eq!(ctx.pop().unwrap(), Value::I64(142));
+    }
+
+    #[test]
+    fn test_i64_sub() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::I64(100));
+        ctx.push(Value::I64(42));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::I64(x), Value::I64(y)) => ctx.push(Value::I64(x.wrapping_sub(y))),
+            _ => panic!("Type mismatch"),
+        }
+
+        assert_eq!(ctx.pop().unwrap(), Value::I64(58));
+    }
+
+    #[test]
+    fn test_i64_mul() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::I64(6));
+        ctx.push(Value::I64(7));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::I64(x), Value::I64(y)) => ctx.push(Value::I64(x.wrapping_mul(y))),
+            _ => panic!("Type mismatch"),
+        }
+
+        assert_eq!(ctx.pop().unwrap(), Value::I64(42));
+    }
+
+    #[test]
+    fn test_i64_div_s() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::I64(84));
+        ctx.push(Value::I64(2));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::I64(x), Value::I64(y)) => {
+                if y != 0 {
+                    ctx.push(Value::I64(x / y));
+                }
+            }
+            _ => panic!("Type mismatch"),
+        }
+
+        assert_eq!(ctx.pop().unwrap(), Value::I64(42));
+    }
+
+    #[test]
+    fn test_i64_eq() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::I64(42));
+        ctx.push(Value::I64(42));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::I64(x), Value::I64(y)) => {
+                ctx.push(Value::I32(if x == y { 1 } else { 0 }));
+            }
+            _ => panic!("Type mismatch"),
+        }
+
+        assert_eq!(ctx.pop().unwrap(), Value::I32(1));
+    }
+
+    #[test]
+    fn test_i64_lt_s() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::I64(10));
+        ctx.push(Value::I64(42));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::I64(x), Value::I64(y)) => {
+                ctx.push(Value::I32(if x < y { 1 } else { 0 }));
+            }
+            _ => panic!("Type mismatch"),
+        }
+
+        assert_eq!(ctx.pop().unwrap(), Value::I32(1));
+    }
+
+    #[test]
+    fn test_f32_add() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::F32(1.5));
+        ctx.push(Value::F32(2.5));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::F32(x), Value::F32(y)) => ctx.push(Value::F32(x + y)),
+            _ => panic!("Type mismatch"),
+        }
+
+        match ctx.pop().unwrap() {
+            Value::F32(x) => assert!((x - 4.0).abs() < 0.001),
+            _ => panic!("Expected f32"),
+        }
+    }
+
+    #[test]
+    fn test_f32_mul() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::F32(2.0));
+        ctx.push(Value::F32(3.0));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::F32(x), Value::F32(y)) => ctx.push(Value::F32(x * y)),
+            _ => panic!("Type mismatch"),
+        }
+
+        match ctx.pop().unwrap() {
+            Value::F32(x) => assert!((x - 6.0).abs() < 0.001),
+            _ => panic!("Expected f32"),
+        }
+    }
+
+    #[test]
+    fn test_f32_eq() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::F32(std::f32::consts::PI));
+        ctx.push(Value::F32(std::f32::consts::PI));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::F32(x), Value::F32(y)) => {
+                ctx.push(Value::I32(if x == y { 1 } else { 0 }));
+            }
+            _ => panic!("Type mismatch"),
+        }
+
+        assert_eq!(ctx.pop().unwrap(), Value::I32(1));
+    }
+
+    #[test]
+    fn test_f64_add() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::F64(1.5));
+        ctx.push(Value::F64(2.5));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::F64(x), Value::F64(y)) => ctx.push(Value::F64(x + y)),
+            _ => panic!("Type mismatch"),
+        }
+
+        match ctx.pop().unwrap() {
+            Value::F64(x) => assert!((x - 4.0).abs() < 0.001),
+            _ => panic!("Expected f64"),
+        }
+    }
+
+    #[test]
+    fn test_f64_div() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::F64(10.0));
+        ctx.push(Value::F64(2.0));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::F64(x), Value::F64(y)) => ctx.push(Value::F64(x / y)),
+            _ => panic!("Type mismatch"),
+        }
+
+        match ctx.pop().unwrap() {
+            Value::F64(x) => assert!((x - 5.0).abs() < 0.001),
+            _ => panic!("Expected f64"),
+        }
+    }
+
+    #[test]
+    fn test_f64_lt() {
+        let mut ctx = ExecutionContext::new(1, None).unwrap();
+        ctx.push(Value::F64(1.5));
+        ctx.push(Value::F64(2.5));
+
+        let b = ctx.pop().unwrap();
+        let a = ctx.pop().unwrap();
+        match (a, b) {
+            (Value::F64(x), Value::F64(y)) => {
+                ctx.push(Value::I32(if x < y { 1 } else { 0 }));
+            }
+            _ => panic!("Type mismatch"),
+        }
+
+        assert_eq!(ctx.pop().unwrap(), Value::I32(1));
+    }
+
+    #[test]
+    fn test_function_call_simple() {
+        use crate::runtime::core::module::{Function, FunctionType};
+
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![ValueType::I32, ValueType::I32],
+                results: vec![ValueType::I32],
+            }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![],
+                code: vec![0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b],
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::I32(10));
+        executor.context.push(Value::I32(5));
+
+        executor.call_function(0).unwrap();
+
+        let result = executor.context.pop().unwrap();
+        assert_eq!(result, Value::I32(15));
+    }
+
+    #[test]
+    fn test_function_call_with_locals() {
+        use crate::runtime::core::module::{Function, FunctionType};
+
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![ValueType::I32],
+                results: vec![ValueType::I32],
+            }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![(1, ValueType::I32)],
+                code: vec![0x41, 0x05, 0x21, 0x01, 0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b],
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::I32(10));
+
+        executor.call_function(0).unwrap();
+
+        let result = executor.context.pop().unwrap();
+        assert_eq!(result, Value::I32(15));
+    }
+
+    #[test]
+    fn test_multiple_return_values() {
+        use crate::runtime::core::module::{Function, FunctionType};
+
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![],
+                results: vec![ValueType::I32, ValueType::I32],
+            }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![],
+                code: vec![0x41, 0x0a, 0x41, 0x05, 0x0b],
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+
+        let mut executor = Executor::new(module).unwrap();
+        let results = executor.execute(0).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0], Value::I32(10));
+        assert_eq!(results[1], Value::I32(5));
     }
 }
