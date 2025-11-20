@@ -16,6 +16,7 @@
 - 🌐 **Zero-Config Web Server** - Built-in HTTP server with WASM and web app hosting
 - 📦 **Smart Project Detection** - Automatically detects and configures project types
 - ⚡ **Zero Configuration** - Works out of the box with sensible defaults and automatic project detection
+- 🏃 **Native WASM Execution** - Run compiled WASM files directly with the native interpreter (with `--native` flag)
 
 ## 🚀 Installation
 
@@ -85,8 +86,11 @@ Wasmrun supports both flag-based arguments using `--path` and direct positional 
 # Run on current directory
 wasmrun
 
-# Run a WebAssembly file directly  
+# Run a WebAssembly file with dev server (default)
 wasmrun myfile.wasm
+
+# Run a WASM file natively with interpreter
+wasmrun myfile.wasm --native
 
 # Run a project directory
 wasmrun ./my-wasm-project
@@ -97,6 +101,20 @@ wasmrun --path ./my-wasm-project
 ```
 
 ### 🔧 Commands
+
+#### Native WASM Execution
+
+Run compiled WASM files directly using the native interpreter (useful for CLI tools, test binaries, etc):
+
+```sh
+# Execute WASM file natively
+wasmrun myapp.wasm --native
+
+# Stdout goes directly to terminal
+wasmrun cli-tool.wasm --native
+```
+
+**Default Behavior:** Running WASM files starts the dev server on port 8420. Use `--native` to bypass the server and execute the WASM module directly.
 
 #### Development Server
 

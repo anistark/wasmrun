@@ -274,7 +274,13 @@ mod tests {
 
     #[test]
     fn test_run_plugin_install_invalid() {
-        let result = run_plugin_install("invalid_plugin_name_12345");
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let plugin_name = format!("invalid_plugin_name_{timestamp}");
+        let result = run_plugin_install(&plugin_name);
         // Plugin installer creates a template even for non-existent plugins, so this succeeds
         assert!(result.is_ok());
     }

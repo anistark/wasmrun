@@ -103,13 +103,15 @@ fn main() {
             watch,
             verbose: _verbose,
             serve,
+            native,
         }) => {
             debug_println!(
-                "Processing run command: port={}, language={:?}, watch={}, serve={}",
+                "Processing run command: port={}, language={:?}, watch={}, serve={}, native={}",
                 port,
                 language,
                 watch,
-                serve
+                serve,
+                native
             );
             commands::handle_run_command(
                 path,
@@ -119,6 +121,7 @@ fn main() {
                 *watch,
                 false,
                 *serve,
+                *native,
             )
             .map_err(|e| match e {
                 WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,
@@ -188,7 +191,6 @@ fn main() {
                     resolved_args.language,
                     resolved_args.watch
                 );
-                // Use the same logic as the run command (not OS mode)
                 commands::handle_run_command(
                     &None,
                     &Some(resolved_args.path),
@@ -197,6 +199,7 @@ fn main() {
                     resolved_args.watch,
                     false, // verbose mode for default command
                     resolved_args.serve,
+                    false, // native flag
                 )
                 .map_err(|e| match e {
                     WasmrunError::Command(_)
