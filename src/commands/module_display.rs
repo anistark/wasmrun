@@ -37,7 +37,7 @@ pub fn format_function_signature(params: &[ValueType], results: &[ValueType]) ->
             .join(", ")
     };
 
-    format!("({}) -> {}", param_str, result_str)
+    format!("({param_str}) -> {result_str}")
 }
 
 /// Display module types with signatures
@@ -50,7 +50,7 @@ pub fn display_types(module: &Module) {
     println!("  📋 Function Types: {}", module.types.len());
     for (idx, func_type) in module.types.iter().enumerate() {
         let sig = format_function_signature(&func_type.params, &func_type.results);
-        println!("     type[{}] {}", idx, sig);
+        println!("     type[{idx}] {sig}");
     }
 }
 
@@ -79,16 +79,16 @@ pub fn display_imports(module: &Module) {
     }
 
     if functions > 0 {
-        println!("     ├─ Functions: {}", functions);
+        println!("     ├─ Functions: {functions}");
     }
     if tables > 0 {
-        println!("     ├─ Tables: {}", tables);
+        println!("     ├─ Tables: {tables}");
     }
     if memory > 0 {
-        println!("     ├─ Memory: {}", memory);
+        println!("     ├─ Memory: {memory}");
     }
     if globals > 0 {
-        println!("     └─ Globals: {}", globals);
+        println!("     └─ Globals: {globals}");
     }
 
     // Show first few imports
@@ -118,7 +118,7 @@ pub fn display_functions(module: &Module) {
         return;
     }
 
-    println!("  🔧 Functions: {}", function_count);
+    println!("  🔧 Functions: {function_count}");
 
     // Calculate code statistics
     let total_code_size: usize = module.functions.iter().map(|f| f.code.len()).sum();
@@ -141,10 +141,10 @@ pub fn display_functions(module: &Module) {
         .min()
         .unwrap_or(0);
 
-    println!("     ├─ Code size: {} bytes", total_code_size);
-    println!("     ├─ Average function size: {} bytes", avg_size);
-    println!("     ├─ Largest function: {} bytes", max_size);
-    println!("     └─ Smallest function: {} bytes", min_size);
+    println!("     ├─ Code size: {total_code_size} bytes");
+    println!("     ├─ Average function size: {avg_size} bytes");
+    println!("     ├─ Largest function: {max_size} bytes");
+    println!("     └─ Smallest function: {min_size} bytes");
 }
 
 /// Display module exports
@@ -216,7 +216,7 @@ pub fn display_globals(module: &Module) {
             "immutable"
         };
         let type_str = format_value_type(global.value_type);
-        println!("     [{idx}] {} ({})", type_str, mutability);
+        println!("     [{idx}] {type_str} ({mutability})");
     }
 
     if module.globals.len() > 5 {
@@ -236,7 +236,7 @@ pub fn display_memory(module: &Module) {
             );
             if let Some(max) = mem.max {
                 let max_bytes = max * 65536;
-                println!("     └─ Maximum: {} page(s) ({} bytes)", max, max_bytes);
+                println!("     └─ Maximum: {max} page(s) ({max_bytes} bytes)");
             } else {
                 println!("     └─ Maximum: unbounded");
             }
@@ -256,7 +256,7 @@ pub fn display_data_segments(module: &Module) {
 
     println!("  📦 Data Segments: {}", module.data.len());
     let total_data: usize = module.data.iter().map(|d| d.data.len()).sum();
-    println!("     Total data: {} bytes", total_data);
+    println!("     Total data: {total_data} bytes");
 
     for (idx, segment) in module.data.iter().enumerate().take(3) {
         println!("     [{idx}] {} bytes", segment.data.len());
@@ -280,7 +280,7 @@ pub fn display_element_segments(module: &Module) {
         .iter()
         .map(|e| e.function_indices.len())
         .sum();
-    println!("     Total function references: {}", total_funcs);
+    println!("     Total function references: {total_funcs}");
 }
 
 /// Display complete module summary

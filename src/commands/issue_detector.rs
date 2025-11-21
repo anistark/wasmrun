@@ -85,8 +85,7 @@ fn check_section_completeness(module: &Module, issues: &mut Vec<WasmIssue>) {
             severity: IssueSeverity::Error,
             title: "Functions without code".to_string(),
             description: format!(
-                "Found {} function declarations but no code implementations. Module is likely invalid.",
-                function_count
+                "Found {function_count} function declarations but no code implementations. Module is likely invalid."
             ),
         });
     }
@@ -95,7 +94,7 @@ fn check_section_completeness(module: &Module, issues: &mut Vec<WasmIssue>) {
     let tiny_functions = module
         .functions
         .iter()
-        .filter(|f| f.code.len() > 0 && f.code.len() < 3)
+        .filter(|f| !f.code.is_empty() && f.code.len() < 3)
         .count();
 
     if tiny_functions as f64 / code_count as f64 > 0.5 && code_count > 10 {
@@ -103,8 +102,7 @@ fn check_section_completeness(module: &Module, issues: &mut Vec<WasmIssue>) {
             severity: IssueSeverity::Info,
             title: "Many minimal functions".to_string(),
             description: format!(
-                "{} out of {} functions are very small (< 3 bytes). May indicate stub functions.",
-                tiny_functions, code_count
+                "{tiny_functions} out of {code_count} functions are very small (< 3 bytes). May indicate stub functions."
             ),
         });
     }
@@ -146,8 +144,7 @@ fn check_memory_configuration(module: &Module, issues: &mut Vec<WasmIssue>) {
                         severity: IssueSeverity::Warning,
                         title: "Restrictive memory limit".to_string(),
                         description: format!(
-                            "Maximum memory is limited to {} pages. Runtime may fail if memory is exhausted.",
-                            max
+                            "Maximum memory is limited to {max} pages. Runtime may fail if memory is exhausted."
                         ),
                     });
                 }
@@ -233,8 +230,7 @@ fn check_code_characteristics(module: &Module, issues: &mut Vec<WasmIssue>) {
                 severity: IssueSeverity::Warning,
                 title: "Very large average function size".to_string(),
                 description: format!(
-                    "Average function size is {} bytes. Functions may not be optimized.",
-                    avg_size
+                    "Average function size is {avg_size} bytes. Functions may not be optimized."
                 ),
             });
         }
@@ -246,8 +242,7 @@ fn check_code_characteristics(module: &Module, issues: &mut Vec<WasmIssue>) {
                     severity: IssueSeverity::Warning,
                     title: "Extremely large function detected".to_string(),
                     description: format!(
-                        "One function is {} bytes. This may indicate a problem with compilation or inlining.",
-                        max_size
+                        "One function is {max_size} bytes. This may indicate a problem with compilation or inlining."
                     ),
                 });
             }

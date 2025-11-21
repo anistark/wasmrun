@@ -188,8 +188,7 @@ impl Module {
             let section_end = pos + section_size;
             if section_end > total_len {
                 return Err(format!(
-                    "Section {} extends beyond end of module (pos={}, size={}, total={})",
-                    section_id, pos, section_size, total_len
+                    "Section {section_id} extends beyond end of module (pos={pos}, size={section_size}, total={total_len})"
                 ));
             }
 
@@ -732,7 +731,8 @@ mod tests {
     fn test_parse_minimal_wasm() {
         // Minimal valid WASM: just magic bytes and version with no sections
         let mut bytes = vec![0x00, 0x61, 0x73, 0x6d]; // magic: \0asm
-        bytes.push(0x01); // version 1 (LEB128 encoded single byte)
+        // Version is 4 fixed bytes in little-endian format (0x00, 0x01, 0x00, 0x00 = version 1)
+        bytes.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]);
 
         let module = Module::parse(&bytes).expect("Should parse minimal WASM");
         assert_eq!(module.version, 1);
