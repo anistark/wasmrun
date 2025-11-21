@@ -181,33 +181,27 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            if resolved_args.wasm {
-                debug_println!("Running WASM file: {}", resolved_args.path);
-                server::run_wasm_file(&resolved_args.path, resolved_args.port, resolved_args.serve)
-            } else {
-                debug_println!(
-                    "Running project: {}, language: {:?}, watch: {}",
-                    resolved_args.path,
-                    resolved_args.language,
-                    resolved_args.watch
-                );
-                commands::handle_run_command(
-                    &None,
-                    &Some(resolved_args.path),
-                    resolved_args.port,
-                    &resolved_args.language,
-                    resolved_args.watch,
-                    false, // verbose mode for default command
-                    resolved_args.serve,
-                    false, // native flag
-                )
-                .map_err(|e| match e {
-                    WasmrunError::Command(_)
-                    | WasmrunError::Server(_)
-                    | WasmrunError::Path { .. } => e,
-                    _ => e,
-                })
-            }
+            debug_println!(
+                "Running project/WASM: {}, language: {:?}, watch: {}, native: {}",
+                resolved_args.path,
+                resolved_args.language,
+                resolved_args.watch,
+                resolved_args.native
+            );
+            commands::handle_run_command(
+                &None,
+                &Some(resolved_args.path),
+                resolved_args.port,
+                &resolved_args.language,
+                resolved_args.watch,
+                false, // verbose mode for default command
+                resolved_args.serve,
+                resolved_args.native,
+            )
+            .map_err(|e| match e {
+                WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,
+                _ => e,
+            })
         }
     };
 

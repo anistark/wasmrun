@@ -1,6 +1,8 @@
 use crate::cli::CommandValidator;
+use crate::commands::{issue_detector, module_display};
 use crate::config::WASM_MAGIC_BYTES;
 use crate::error::{Result, WasmError, WasmrunError};
+use crate::runtime::core::module::Module;
 use crate::utils::PathResolver;
 use std::fs;
 use std::io::{Cursor, Read};
@@ -58,6 +60,15 @@ pub fn handle_verify_command(
         )));
     }
 
+    // Show detailed module analysis if requested
+    if detailed {
+        if let Ok(wasm_bytes) = fs::read(&wasm_path) {
+            if let Ok(module) = Module::parse(&wasm_bytes) {
+                module_display::display_module_summary(&module);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -66,19 +77,24 @@ pub fn handle_inspect_command(
     path: &Option<String>,
     positional_path: &Option<String>,
 ) -> Result<()> {
-    let resolved_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
-    println!("Resolved path: {resolved_path:?}");
-
     let wasm_path = CommandValidator::validate_verify_args(path, positional_path)?;
 
     PathResolver::validate_wasm_file(&wasm_path)?;
 
-    println!("🔍 Inspecting WebAssembly file: {wasm_path}");
+    println!("🔍 Inspecting WebAssembly file: {wasm_path}\n");
 
+    // Show binary information
     print_detailed_binary_info(&wasm_path)
         .map_err(|e| WasmrunError::Wasm(WasmError::validation_failed(e)))?;
 
-    println!("Inspection completed successfully.");
+    // Also show parsed module analysis
+    if let Ok(wasm_bytes) = fs::read(&wasm_path) {
+        if let Ok(module) = Module::parse(&wasm_bytes) {
+            println!("\n📊 Parsed Module Analysis:");
+            module_display::display_module_summary(&module);
+        }
+    }
+
     Ok(())
 }
 
@@ -588,12 +604,15 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
         println!("  ❌ \x1b[1;31mNo sections found in WASM file\x1b[0m");
     }
 
-    // Diagnostic advice.
-    println!("\n  🔍 \x1b[1;34mPossible Issues:\x1b[0m");
-    println!("     \x1b[0;37m• Sections in incorrect order (browsers require specific section ordering)\x1b[0m");
-    println!("     \x1b[0;37m• Memory section with invalid configuration\x1b[0m");
-    println!("     \x1b[0;37m• Binary compiled with incompatible flags or WASM features\x1b[0m");
-    println!("     \x1b[0;37m• File corruption\x1b[0m");
+    // Analyze the module for issues
+    println!();
+    if let Ok(wasm_bytes) = fs::read(path) {
+        if let Ok(module) = Module::parse(&wasm_bytes) {
+            let issues = issue_detector::detect_issues(&module);
+            issue_detector::display_issues(&issues);
+        }
+    }
+
     println!("\x1b[1;34m╰\x1b[0m");
 
     Ok(())

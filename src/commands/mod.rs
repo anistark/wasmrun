@@ -1,6 +1,8 @@
 mod clean;
 mod compile;
 mod init;
+mod issue_detector;
+mod module_display;
 mod os;
 mod plugin;
 mod run;
