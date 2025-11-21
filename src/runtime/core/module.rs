@@ -731,7 +731,7 @@ mod tests {
     fn test_parse_minimal_wasm() {
         // Minimal valid WASM: just magic bytes and version with no sections
         let mut bytes = vec![0x00, 0x61, 0x73, 0x6d]; // magic: \0asm
-        // Version is 4 fixed bytes in little-endian format (0x00, 0x01, 0x00, 0x00 = version 1)
+                                                      // Version is 4 fixed bytes in little-endian format (0x00, 0x01, 0x00, 0x00 = version 1)
         bytes.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]);
 
         let module = Module::parse(&bytes).expect("Should parse minimal WASM");
