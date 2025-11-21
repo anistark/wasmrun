@@ -1,9 +1,9 @@
 use crate::cli::CommandValidator;
+use crate::commands::{issue_detector, module_display};
 use crate::config::WASM_MAGIC_BYTES;
 use crate::error::{Result, WasmError, WasmrunError};
 use crate::runtime::core::module::Module;
 use crate::utils::PathResolver;
-use crate::commands::{module_display, issue_detector};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;

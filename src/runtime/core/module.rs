@@ -187,8 +187,10 @@ impl Module {
 
             let section_end = pos + section_size;
             if section_end > total_len {
-                return Err(format!("Section {} extends beyond end of module (pos={}, size={}, total={})",
-                    section_id, pos, section_size, total_len));
+                return Err(format!(
+                    "Section {} extends beyond end of module (pos={}, size={}, total={})",
+                    section_id, pos, section_size, total_len
+                ));
             }
 
             let section_data = &bytes[pos..section_end];
@@ -696,7 +698,10 @@ fn parse_expression(cursor: &mut Cursor<Vec<u8>>, section_end: usize) -> Result<
 
         // Check if we've hit the section boundary
         if current_pos >= section_end {
-            return Err("Expression parsing exceeded section boundary - missing END marker (0x0b)".to_string());
+            return Err(
+                "Expression parsing exceeded section boundary - missing END marker (0x0b)"
+                    .to_string(),
+            );
         }
 
         // Check if expression is getting too large (likely infinite loop)

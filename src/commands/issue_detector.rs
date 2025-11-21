@@ -30,8 +30,8 @@ impl IssueSeverity {
     pub fn color_code(&self) -> &'static str {
         match self {
             IssueSeverity::Info => "\x1b[0;36m",    // Cyan
-            IssueSeverity::Warning => "\x1b[0;33m",  // Yellow
-            IssueSeverity::Error => "\x1b[0;31m",    // Red
+            IssueSeverity::Warning => "\x1b[0;33m", // Yellow
+            IssueSeverity::Error => "\x1b[0;31m",   // Red
         }
     }
 }
@@ -74,7 +74,11 @@ fn check_section_completeness(module: &Module, issues: &mut Vec<WasmIssue>) {
 
     // If there are functions, there should be code
     let function_count = module.functions.len();
-    let code_count = module.functions.iter().filter(|f| !f.code.is_empty()).count();
+    let code_count = module
+        .functions
+        .iter()
+        .filter(|f| !f.code.is_empty())
+        .count();
 
     if function_count > 0 && code_count == 0 {
         issues.push(WasmIssue {
@@ -198,9 +202,10 @@ fn check_export_patterns(module: &Module, issues: &mut Vec<WasmIssue>) {
         issues.push(WasmIssue {
             severity: IssueSeverity::Info,
             title: "Only describe exports".to_string(),
-            description: "All exports are wasm-bindgen describe functions. This module appears to be a \
+            description:
+                "All exports are wasm-bindgen describe functions. This module appears to be a \
                            wasm-bindgen artifact or build intermediate."
-                .to_string(),
+                    .to_string(),
         });
     }
 }
@@ -213,8 +218,9 @@ fn check_code_characteristics(module: &Module, issues: &mut Vec<WasmIssue>) {
         issues.push(WasmIssue {
             severity: IssueSeverity::Error,
             title: "No function code".to_string(),
-            description: "Module declares functions but has no code section. Module is likely corrupt."
-                .to_string(),
+            description:
+                "Module declares functions but has no code section. Module is likely corrupt."
+                    .to_string(),
         });
     }
 
@@ -324,7 +330,8 @@ pub fn display_issues(issues: &[WasmIssue]) {
     for issue in sorted_issues {
         let color = issue.severity.color_code();
         let reset = "\x1b[0m";
-        println!("     {} {}{}{}:",
+        println!(
+            "     {} {}{}{}:",
             issue.severity.emoji(),
             color,
             issue.title,

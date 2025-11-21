@@ -1,6 +1,6 @@
 //! Display helpers for formatting WASM module information
 
-use crate::runtime::core::module::{Module, ValueType, ExportKind, ImportKind};
+use crate::runtime::core::module::{ExportKind, ImportKind, Module, ValueType};
 
 /// Format a value type for display
 pub fn format_value_type(vt: ValueType) -> &'static str {
@@ -20,13 +20,21 @@ pub fn format_function_signature(params: &[ValueType], results: &[ValueType]) ->
     let param_str = if params.is_empty() {
         "".to_string()
     } else {
-        params.iter().map(|&t| format_value_type(t)).collect::<Vec<_>>().join(", ")
+        params
+            .iter()
+            .map(|&t| format_value_type(t))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
 
     let result_str = if results.is_empty() {
         "void".to_string()
     } else {
-        results.iter().map(|&t| format_value_type(t)).collect::<Vec<_>>().join(", ")
+        results
+            .iter()
+            .map(|&t| format_value_type(t))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
 
     format!("({}) -> {}", param_str, result_str)
@@ -91,7 +99,10 @@ pub fn display_imports(module: &Module) {
             ImportKind::Memory(_) => "memory",
             ImportKind::Global(_) => "global",
         };
-        println!("     [{idx}] {} from {}.{}", kind_str, import.module, import.name);
+        println!(
+            "     [{idx}] {} from {}.{}",
+            kind_str, import.module, import.name
+        );
     }
 
     if module.imports.len() > 5 {
@@ -117,8 +128,18 @@ pub fn display_functions(module: &Module) {
         0
     };
 
-    let max_size = module.functions.iter().map(|f| f.code.len()).max().unwrap_or(0);
-    let min_size = module.functions.iter().map(|f| f.code.len()).min().unwrap_or(0);
+    let max_size = module
+        .functions
+        .iter()
+        .map(|f| f.code.len())
+        .max()
+        .unwrap_or(0);
+    let min_size = module
+        .functions
+        .iter()
+        .map(|f| f.code.len())
+        .min()
+        .unwrap_or(0);
 
     println!("     ├─ Code size: {} bytes", total_code_size);
     println!("     ├─ Average function size: {} bytes", avg_size);
@@ -151,16 +172,32 @@ pub fn display_exports(module: &Module) {
     }
 
     if !func_exports.is_empty() {
-        println!("     ├─ Functions ({}): {}", func_exports.len(), func_exports.join(", "));
+        println!(
+            "     ├─ Functions ({}): {}",
+            func_exports.len(),
+            func_exports.join(", ")
+        );
     }
     if !table_exports.is_empty() {
-        println!("     ├─ Tables ({}): {}", table_exports.len(), table_exports.join(", "));
+        println!(
+            "     ├─ Tables ({}): {}",
+            table_exports.len(),
+            table_exports.join(", ")
+        );
     }
     if !memory_exports.is_empty() {
-        println!("     ├─ Memory ({}): {}", memory_exports.len(), memory_exports.join(", "));
+        println!(
+            "     ├─ Memory ({}): {}",
+            memory_exports.len(),
+            memory_exports.join(", ")
+        );
     }
     if !global_exports.is_empty() {
-        println!("     └─ Globals ({}): {}", global_exports.len(), global_exports.join(", "));
+        println!(
+            "     └─ Globals ({}): {}",
+            global_exports.len(),
+            global_exports.join(", ")
+        );
     }
 }
 
@@ -173,7 +210,11 @@ pub fn display_globals(module: &Module) {
 
     println!("  🌐 Globals: {}", module.globals.len());
     for (idx, global) in module.globals.iter().enumerate().take(5) {
-        let mutability = if global.mutable { "mutable" } else { "immutable" };
+        let mutability = if global.mutable {
+            "mutable"
+        } else {
+            "immutable"
+        };
         let type_str = format_value_type(global.value_type);
         println!("     [{idx}] {} ({})", type_str, mutability);
     }
@@ -189,7 +230,10 @@ pub fn display_memory(module: &Module) {
         Some(mem) => {
             println!("  💾 Memory:");
             let initial_bytes = mem.initial * 65536;
-            println!("     ├─ Initial: {} page(s) ({} bytes)", mem.initial, initial_bytes);
+            println!(
+                "     ├─ Initial: {} page(s) ({} bytes)",
+                mem.initial, initial_bytes
+            );
             if let Some(max) = mem.max {
                 let max_bytes = max * 65536;
                 println!("     └─ Maximum: {} page(s) ({} bytes)", max, max_bytes);
@@ -231,7 +275,11 @@ pub fn display_element_segments(module: &Module) {
     }
 
     println!("  🔗 Element Segments: {}", module.elements.len());
-    let total_funcs: usize = module.elements.iter().map(|e| e.function_indices.len()).sum();
+    let total_funcs: usize = module
+        .elements
+        .iter()
+        .map(|e| e.function_indices.len())
+        .sum();
     println!("     Total function references: {}", total_funcs);
 }
 
@@ -252,7 +300,12 @@ pub fn display_module_summary(module: &Module) {
 
     // Summary stats
     println!("  │");
-    println!("  └─ Start function: {}",
-        module.start.map(|idx| idx.to_string()).unwrap_or_else(|| "none".to_string()));
+    println!(
+        "  └─ Start function: {}",
+        module
+            .start
+            .map(|idx| idx.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    );
     println!("  ╰\n");
 }

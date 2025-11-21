@@ -199,9 +199,7 @@ fn main() {
                 resolved_args.native,
             )
             .map_err(|e| match e {
-                WasmrunError::Command(_)
-                | WasmrunError::Server(_)
-                | WasmrunError::Path { .. } => e,
+                WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,
                 _ => e,
             })
         }
