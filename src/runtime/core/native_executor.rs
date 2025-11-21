@@ -1,6 +1,7 @@
 /// Native WASM executor for running WASM files directly
 use super::executor::Executor;
 use super::module::Module;
+use super::values::Value;
 use crate::error::{Result, WasmrunError};
 use crate::runtime::wasi::{create_wasi_linker, WasiEnv};
 use std::fs;
@@ -21,27 +22,73 @@ pub fn execute_wasm_file(wasm_path: &str) -> Result<i32> {
     execute_wasm_bytes(&wasm_bytes)
 }
 
+/// Execute a WASM file natively with arguments
+pub fn execute_wasm_file_with_args(
+    wasm_path: &str,
+    function: Option<String>,
+    args: Vec<String>,
+) -> Result<i32> {
+    if !Path::new(wasm_path).exists() {
+        return Err(WasmrunError::from(format!(
+            "WASM file not found: {wasm_path}"
+        )));
+    }
+
+    let wasm_bytes = fs::read(wasm_path)
+        .map_err(|e| WasmrunError::from(format!("Failed to read WASM file '{wasm_path}': {e}")))?;
+
+    execute_wasm_bytes_with_args(&wasm_bytes, function, args)
+}
+
 /// Execute WASM bytecode from memory
 pub fn execute_wasm_bytes(wasm_bytes: &[u8]) -> Result<i32> {
+    execute_wasm_bytes_with_args(wasm_bytes, None, Vec::new())
+}
+
+/// Execute WASM bytecode from memory with arguments
+pub fn execute_wasm_bytes_with_args(
+    wasm_bytes: &[u8],
+    function: Option<String>,
+    args: Vec<String>,
+) -> Result<i32> {
     let module = Module::parse(wasm_bytes)
         .map_err(|e| WasmrunError::from(format!("Failed to parse WASM module: {e}")))?;
 
     let mut executor = Executor::new(module)
         .map_err(|e| WasmrunError::from(format!("Failed to initialize executor: {e}")))?;
 
-    let wasi_env = Arc::new(Mutex::new(WasiEnv::new()));
+    let wasi_env = Arc::new(Mutex::new(WasiEnv::new().with_args(args)));
     let _wasi_linker = create_wasi_linker(wasi_env);
 
-    let start_func = executor.module().start;
+    // Determine which function to call
+    let func_idx = if let Some(func_name) = function {
+        // User specified a function name - look it up
+        find_export_function(executor.module(), &func_name)
+            .map(|(_, idx)| idx)
+            .ok_or_else(|| {
+                WasmrunError::from(format!(
+                    "Exported function '{}' not found in WASM module",
+                    func_name
+                ))
+            })?
+    } else {
+        // Use default entry point detection
+        let start_func = executor.module().start;
 
-    if let Some(func_idx) = start_func {
-        execute_function(&mut executor, func_idx)?;
-    } else if let Some((_, func_idx)) = find_export_function(executor.module(), "main") {
-        execute_function(&mut executor, func_idx)?;
-    } else if let Some((_, func_idx)) = find_export_function(executor.module(), "_start") {
-        execute_function(&mut executor, func_idx)?;
-    }
+        if let Some(func_idx) = start_func {
+            func_idx
+        } else if let Some((_, func_idx)) = find_export_function(executor.module(), "main") {
+            func_idx
+        } else if let Some((_, func_idx)) = find_export_function(executor.module(), "_start") {
+            func_idx
+        } else {
+            return Err(WasmrunError::from(
+                "No entry point found (checked: start section, main, _start)".to_string(),
+            ));
+        }
+    };
 
+    execute_function(&mut executor, func_idx, Vec::new())?;
     Ok(0)
 }
 
@@ -57,9 +104,9 @@ fn find_export_function(module: &Module, name: &str) -> Option<(String, u32)> {
     None
 }
 
-/// Execute a specific function
-fn execute_function(executor: &mut Executor, func_idx: u32) -> Result<()> {
-    executor.execute(func_idx).map_err(|e| {
+/// Execute a specific function with optional arguments
+fn execute_function(executor: &mut Executor, func_idx: u32, args: Vec<Value>) -> Result<()> {
+    executor.execute_with_args(func_idx, args).map_err(|e| {
         WasmrunError::from(format!(
             "Error executing WASM function (index {func_idx}): {e}"
         ))

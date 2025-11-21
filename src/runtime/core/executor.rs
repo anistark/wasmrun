@@ -709,6 +709,15 @@ impl Executor {
 
     /// Execute a function by index and return its results
     pub fn execute(&mut self, func_idx: u32) -> Result<Vec<Value>, String> {
+        self.execute_with_args(func_idx, Vec::new())
+    }
+
+    /// Execute a function with arguments and return its results
+    pub fn execute_with_args(
+        &mut self,
+        func_idx: u32,
+        args: Vec<Value>,
+    ) -> Result<Vec<Value>, String> {
         // Get function signature and code (clone to avoid borrow issues)
         let func = {
             let func = self
@@ -726,9 +735,13 @@ impl Executor {
             // Initialize locals: parameters + local variables
             let mut locals = Vec::new();
 
-            // Add parameter slots (initialized to zero by default)
-            for _ in 0..func_type.params.len() {
-                locals.push(Value::I32(0)); // Placeholder for parameters
+            // Add parameter slots (initialized with provided arguments or zero)
+            for (i, _param_type) in func_type.params.iter().enumerate() {
+                if i < args.len() {
+                    locals.push(args[i].clone());
+                } else {
+                    locals.push(Value::I32(0)); // Placeholder for missing parameters
+                }
             }
 
             // Add local variable slots

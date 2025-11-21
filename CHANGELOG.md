@@ -8,7 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Native WASM Execution**: Direct interpreter execution of compiled WASM files with `--native` flag
+- **Native WASM Execution via `exec` command**: Direct interpreter execution with full argument passing and function selection
+  - New `wasmrun exec <WASM_FILE> [ARGS...]` subcommand for executing WASM files
+  - Full argument passing to WASM programs via WASI syscalls: `wasmrun exec file.wasm arg1 arg2`
+  - Function selection with `-c` / `--call` flag: `wasmrun exec file.wasm -c function_name args`
   - Automatic entry point detection (_start, main, start functions)
   - Full WASI syscall support for file I/O, environment, arguments, and time
   - Direct stdout/stderr output to terminal for CLI tools
@@ -21,10 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Global variable support
   - WASI syscall implementations (fd_read/write, environ, args, clock, random, proc_exit)
 
+### Changed
+- **BREAKING**: Replaced `--native` flag with dedicated `exec` subcommand for better CLI organization
+  - `wasmrun file.wasm --native` → `wasmrun exec file.wasm`
+  - Now supports passing arguments directly: `wasmrun exec file.wasm arg1 arg2 arg3`
+  - Replaced `-f/--function` with `-c/--call` for clearer function selection semantics
+
 ### Improved
 - Plugin system now gracefully handles invalid/non-existent plugins by creating templates
 - Better error messages for WASM execution failures
 - Proper metadata handling for plugins without crates.io entries
+- Cleaner CLI with dedicated subcommands for different execution modes
 
 
 ## [0.14.0](https://github.com/anistark/wasmrun/releases/tag/v0.14.0) - 2025-11-15

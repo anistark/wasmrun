@@ -103,15 +103,13 @@ fn main() {
             watch,
             verbose: _verbose,
             serve,
-            native,
         }) => {
             debug_println!(
-                "Processing run command: port={}, language={:?}, watch={}, serve={}, native={}",
+                "Processing run command: port={}, language={:?}, watch={}, serve={}",
                 port,
                 language,
                 watch,
-                serve,
-                native
+                serve
             );
             commands::handle_run_command(
                 path,
@@ -121,10 +119,25 @@ fn main() {
                 *watch,
                 false,
                 *serve,
-                *native,
             )
             .map_err(|e| match e {
                 WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,
+                _ => e,
+            })
+        }
+
+        Some(Commands::Exec {
+            wasm_file,
+            call,
+            args,
+        }) => {
+            debug_println!(
+                "Processing exec command with {} args, call: {:?}",
+                args.len(),
+                call
+            );
+            commands::handle_exec_command(wasm_file, &call, args.clone()).map_err(|e| match e {
+                WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
                 _ => e,
             })
         }
@@ -182,11 +195,10 @@ fn main() {
                 }
             };
             debug_println!(
-                "Running project/WASM: {}, language: {:?}, watch: {}, native: {}",
+                "Running project/WASM: {}, language: {:?}, watch: {}",
                 resolved_args.path,
                 resolved_args.language,
-                resolved_args.watch,
-                resolved_args.native
+                resolved_args.watch
             );
             commands::handle_run_command(
                 &None,
@@ -196,7 +208,6 @@ fn main() {
                 resolved_args.watch,
                 false, // verbose mode for default command
                 resolved_args.serve,
-                resolved_args.native,
             )
             .map_err(|e| match e {
                 WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,
