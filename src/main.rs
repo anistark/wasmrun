@@ -136,7 +136,7 @@ fn main() {
                 args.len(),
                 call
             );
-            commands::handle_exec_command(wasm_file, &call, args.clone()).map_err(|e| match e {
+            commands::handle_exec_command(wasm_file, call, args.clone()).map_err(|e| match e {
                 WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
                 _ => e,
             })

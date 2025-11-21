@@ -738,7 +738,7 @@ impl Executor {
             // Add parameter slots (initialized with provided arguments or zero)
             for (i, _param_type) in func_type.params.iter().enumerate() {
                 if i < args.len() {
-                    locals.push(args[i].clone());
+                    locals.push(args[i]);
                 } else {
                     locals.push(Value::I32(0)); // Placeholder for missing parameters
                 }
