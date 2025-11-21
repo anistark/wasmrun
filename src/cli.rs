@@ -66,6 +66,10 @@ pub struct Args {
         help = "Force specific language for compilation"
     )]
     pub language: Option<String>,
+
+    /// Execute WASM file natively (interpreter mode) instead of starting a dev server
+    #[arg(long, help = "Execute WASM natively without starting dev server")]
+    pub native: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -373,12 +377,16 @@ pub struct ResolvedArgs {
     pub command: Option<Commands>,
     pub serve: bool,
     pub language: Option<String>,
+    pub native: bool,
 }
 
 impl ResolvedArgs {
     /// Create from CLI args with path resolution and validation
     pub fn from_args(args: Args) -> Result<Self> {
         let resolved_path = PathResolver::resolve_input_path(args.positional_path, Some(args.path));
+
+        // Only use native execution if explicitly requested via --native flag
+        let native = args.native;
 
         Ok(Self {
             path: resolved_path,
@@ -389,6 +397,7 @@ impl ResolvedArgs {
             command: args.command,
             serve: args.serve,
             language: args.language,
+            native,
         })
     }
 

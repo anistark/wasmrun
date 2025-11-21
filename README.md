@@ -116,6 +116,8 @@ wasmrun cli-tool.wasm --native
 
 **Default Behavior:** Running WASM files starts the dev server on port 8420. Use `--native` to bypass the server and execute the WASM module directly.
 
+**Compatibility Note:** Native execution currently works best with pure WASM modules (e.g., compiled from Go with TinyGo). Modules compiled with **wasm-bindgen** (JavaScript interop framework used by Rust's `wasm-pack`) are not currently supported in native mode, as they require JavaScript runtime features. For wasm-bindgen projects, use the dev server or run the project directory instead of the individual `.wasm` file.
+
 #### Development Server
 
 Start the development server with live reload:
@@ -406,9 +408,15 @@ wasmrun --port 3001  # Use different port
 - Use `wasmrun inspect` to see available exports
 - Check plugin-specific entry file requirements
 
-**"wasm-bindgen module detected"**
-- Use the `.js` file instead of the `.wasm` file directly (wasmrust plugin)
-- Run `wasmrun project-dir` instead of individual files
+**"wasm-bindgen module detected" / "Native execution fails on Rust WASM files"**
+- wasm-bindgen modules require JavaScript runtime features and are not supported in native mode
+- **Recommended approach:**
+  - Run the entire project directory: `wasmrun ./my-rust-project` (dev server)
+  - Use the `.js` file if available (wasmrust plugin output)
+  - Avoid using `--native` flag with wasm-bindgen compiled modules
+- **Workaround if you need native execution:**
+  - Compile with pure WASM (no wasm-bindgen) or use Go/TinyGo for CLI tools
+  - Consider refactoring your Rust code to avoid wasm-bindgen dependencies
 
 ## 📼 Talks/Demos
 

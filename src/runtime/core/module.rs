@@ -159,7 +159,12 @@ impl Module {
             return Err("Invalid WASM magic bytes".to_string());
         }
 
-        module.version = read_leb128_u32(&mut cursor)?;
+        // Version is 4 fixed bytes (little-endian u32), not LEB128!
+        let mut version_bytes = [0u8; 4];
+        cursor
+            .read_exact(&mut version_bytes)
+            .map_err(|_| "File too small - missing version")?;
+        module.version = u32::from_le_bytes(version_bytes);
         if module.version != WASM_VERSION {
             return Err(format!("Unsupported WASM version: {}", module.version));
         }
@@ -182,7 +187,8 @@ impl Module {
 
             let section_end = pos + section_size;
             if section_end > total_len {
-                return Err("Section extends beyond end of module".to_string());
+                return Err(format!("Section {} extends beyond end of module (pos={}, size={}, total={})",
+                    section_id, pos, section_size, total_len));
             }
 
             let section_data = &bytes[pos..section_end];
@@ -212,8 +218,8 @@ impl Module {
                     module.memory = parse_memory_section(section_data)?;
                 }
                 6 => {
-                    // Global section - skip for now to handle future WASM features
-                    // TODO: Properly parse global types including future WASM features
+                    // Global section
+                    module.globals = parse_global_section(section_data)?;
                 }
                 7 => {
                     // Export section
@@ -478,7 +484,8 @@ fn parse_memory_section(data: &[u8]) -> Result<Option<MemoryType>, String> {
 
 /// Parse Global section
 fn parse_global_section(data: &[u8]) -> Result<Vec<GlobalValue>, String> {
-    let mut cursor = Cursor::new(data);
+    let mut cursor = Cursor::new(data.to_vec());
+    let section_end = data.len();
     let count = read_leb128_u32(&mut cursor)? as usize;
 
     let mut globals = Vec::with_capacity(count);
@@ -488,15 +495,8 @@ fn parse_global_section(data: &[u8]) -> Result<Vec<GlobalValue>, String> {
             .ok_or_else(|| format!("Invalid value type in global[{idx}]: 0x{byte:02x}"))?;
         let mutable = read_u8(&mut cursor)? != 0;
 
-        // Read init expression until 0x0b (end)
-        let mut init_expr = Vec::new();
-        loop {
-            let byte = read_u8(&mut cursor)?;
-            init_expr.push(byte);
-            if byte == 0x0b {
-                break;
-            }
-        }
+        // Read init expression until 0x0b (end) with bounds checking
+        let init_expr = parse_expression(&mut cursor, section_end)?;
 
         globals.push(GlobalValue {
             mutable,
@@ -539,7 +539,8 @@ fn parse_export_section(data: &[u8]) -> Result<HashMap<String, ExportDesc>, Stri
 
 /// Parse Element section (table initialization)
 fn parse_element_section(data: &[u8]) -> Result<Vec<ElementSegment>, String> {
-    let mut cursor = Cursor::new(data);
+    let mut cursor = Cursor::new(data.to_vec());
+    let section_end = data.len();
     let count = read_leb128_u32(&mut cursor)? as usize;
 
     let mut elements = Vec::with_capacity(count);
@@ -554,17 +555,13 @@ fn parse_element_section(data: &[u8]) -> Result<Vec<ElementSegment>, String> {
         };
 
         // Parse offset expression (unless passive segment)
-        let mut offset_expr = Vec::new();
-        if (flags & 0x01) == 0 {
+        let offset_expr = if (flags & 0x01) == 0 {
             // Active segment - has offset expression
-            loop {
-                let byte = read_u8(&mut cursor)?;
-                offset_expr.push(byte);
-                if byte == 0x0b {
-                    break;
-                }
-            }
-        }
+            parse_expression(&mut cursor, section_end)?
+        } else {
+            // Passive segment - no offset expression
+            Vec::new()
+        };
 
         // Parse indices/functions
         let count = read_leb128_u32(&mut cursor)? as usize;
@@ -584,7 +581,8 @@ fn parse_element_section(data: &[u8]) -> Result<Vec<ElementSegment>, String> {
 
 /// Parse Data section (memory initialization)
 fn parse_data_section(data: &[u8]) -> Result<Vec<DataSegment>, String> {
-    let mut cursor = Cursor::new(data);
+    let mut cursor = Cursor::new(data.to_vec());
+    let section_end = data.len();
     let count = read_leb128_u32(&mut cursor)? as usize;
 
     let mut segments = Vec::with_capacity(count);
@@ -592,24 +590,31 @@ fn parse_data_section(data: &[u8]) -> Result<Vec<DataSegment>, String> {
         let flags = read_leb128_u32(&mut cursor)?;
 
         // Parse offset expression (unless passive segment)
-        let mut offset_expr = Vec::new();
-        if (flags & 0x01) == 0 {
+        let offset_expr = if (flags & 0x01) == 0 {
             // Active segment - has offset expression
-            loop {
-                let byte = read_u8(&mut cursor)?;
-                offset_expr.push(byte);
-                if byte == 0x0b {
-                    break;
-                }
-            }
-        }
+            parse_expression(&mut cursor, section_end)?
+        } else {
+            // Passive segment - no offset expression
+            Vec::new()
+        };
 
         // Parse data bytes
         let size = read_leb128_u32(&mut cursor)? as usize;
+        let current_pos = cursor.position() as usize;
+
+        // Validate we have enough data remaining
+        if current_pos + size > section_end {
+            return Err(format!(
+                "Data segment size ({}) exceeds available section data (only {} bytes remaining)",
+                size,
+                section_end - current_pos
+            ));
+        }
+
         let mut data_bytes = vec![0u8; size];
         cursor
             .read_exact(&mut data_bytes)
-            .map_err(|_| "Unexpected EOF")?;
+            .map_err(|_| "Failed to read data segment bytes")?;
 
         segments.push(DataSegment {
             offset_expr,
@@ -678,6 +683,40 @@ fn read_limits<T: Read>(cursor: &mut T) -> Result<(u32, Option<u32>), String> {
         None
     };
     Ok((initial, max))
+}
+
+/// Safely parse an expression with bounds checking
+/// Expressions are terminated by 0x0b (END opcode)
+fn parse_expression(cursor: &mut Cursor<Vec<u8>>, section_end: usize) -> Result<Vec<u8>, String> {
+    let mut expr = Vec::new();
+    const MAX_EXPR_SIZE: usize = 16384; // Reasonable limit for expressions
+
+    loop {
+        let current_pos = cursor.position() as usize;
+
+        // Check if we've hit the section boundary
+        if current_pos >= section_end {
+            return Err("Expression parsing exceeded section boundary - missing END marker (0x0b)".to_string());
+        }
+
+        // Check if expression is getting too large (likely infinite loop)
+        if expr.len() > MAX_EXPR_SIZE {
+            return Err(format!(
+                "Expression too large ({} bytes) - likely missing END marker (0x0b)",
+                expr.len()
+            ));
+        }
+
+        let byte = read_u8(cursor)?;
+        expr.push(byte);
+
+        // 0x0b is the END opcode that terminates all expressions
+        if byte == 0x0b {
+            break;
+        }
+    }
+
+    Ok(expr)
 }
 
 #[cfg(test)]
