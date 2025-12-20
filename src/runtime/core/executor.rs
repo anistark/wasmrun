@@ -5,15 +5,14 @@ use super::module::{Module, ValueType};
 use super::values::Value;
 use std::io::Cursor;
 
-/// Result of instruction execution for control flow
+/// Result of instruction execution for control flow (unused but kept for future use)
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum ControlFlow {
     /// Continue to next instruction
     None,
     /// Return from function
     Return,
-    /// Branch to bytecode position
-    Branch(usize),
 }
 
 /// WASM instruction representation
@@ -27,6 +26,9 @@ pub enum Instruction {
     F64Const(f64),
 
     // Numeric operations - i32
+    I32Clz,
+    I32Ctz,
+    I32Popcnt,
     I32Add,
     I32Sub,
     I32Mul,
@@ -42,8 +44,12 @@ pub enum Instruction {
     I32ShrU,
     I32Rotl,
     I32Rotr,
+    I32Eqz,
 
     // Numeric operations - i64
+    I64Clz,
+    I64Ctz,
+    I64Popcnt,
     I64Add,
     I64Sub,
     I64Mul,
@@ -59,6 +65,7 @@ pub enum Instruction {
     I64ShrU,
     I64Rotl,
     I64Rotr,
+    I64Eqz,
 
     // Numeric operations - f32
     F32Add,
@@ -210,6 +217,30 @@ pub enum Instruction {
     Drop,
     Select,
 }
+/// Helper function to read a single byte
+fn read_u8(cursor: &mut Cursor<&[u8]>) -> Result<u8, String> {
+    let mut byte_buf = [0u8; 1];
+    if std::io::Read::read(cursor, &mut byte_buf).is_err() {
+        return Err("EOF while reading byte".to_string());
+    }
+    Ok(byte_buf[0])
+}
+
+/// Decode block type (for block, loop, if instructions)
+fn decode_block_type(cursor: &mut Cursor<&[u8]>) -> Result<Option<ValueType>, String> {
+    let byte = read_u8(cursor)?;
+    match byte {
+        0x40 => Ok(None), // empty block type (no result)
+        0x7F => Ok(Some(ValueType::I32)),
+        0x7E => Ok(Some(ValueType::I64)),
+        0x7D => Ok(Some(ValueType::F32)),
+        0x7C => Ok(Some(ValueType::F64)),
+        // Function type index (0x00-0x3F) - for multi-value blocks
+        // For now, treat as empty (no result)
+        0x00..=0x3F => Ok(None),
+        _ => Err(format!("Invalid block type: 0x{byte:02X}")),
+    }
+}
 
 /// Helper function to decode a LEB128-encoded signed integer
 fn decode_i32_leb128(cursor: &mut Cursor<&[u8]>) -> Result<i32, String> {
@@ -315,6 +346,9 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
             Ok(Instruction::F64Const(f64::from_le_bytes(buf)))
         }
 
+        // i32/i64 test (eqz)
+        0x45 => Ok(Instruction::I64Eqz),
+
         // i32 comparison
         0x46 => Ok(Instruction::I32Eq),
         0x47 => Ok(Instruction::I32Ne),
@@ -326,6 +360,7 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0x4D => Ok(Instruction::I32LeU),
         0x4E => Ok(Instruction::I32GeS),
         0x4F => Ok(Instruction::I32GeU),
+        0x50 => Ok(Instruction::I32Eqz),
 
         // i64 comparison
         0x51 => Ok(Instruction::I64Eq),
@@ -355,6 +390,11 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0x65 => Ok(Instruction::F64Le),
         0x66 => Ok(Instruction::F64Ge),
 
+        // i32 unary operations
+        0x67 => Ok(Instruction::I32Clz),
+        0x68 => Ok(Instruction::I32Ctz),
+        0x69 => Ok(Instruction::I32Popcnt),
+
         // i32 arithmetic operations
         0x6A => Ok(Instruction::I32Add),
         0x6B => Ok(Instruction::I32Sub),
@@ -371,6 +411,11 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0x76 => Ok(Instruction::I32ShrU),
         0x77 => Ok(Instruction::I32Rotl),
         0x78 => Ok(Instruction::I32Rotr),
+
+        // i64 unary operations
+        0x79 => Ok(Instruction::I64Clz),
+        0x7A => Ok(Instruction::I64Ctz),
+        0x7B => Ok(Instruction::I64Popcnt),
 
         // i64 arithmetic operations
         0x7C => Ok(Instruction::I64Add),
@@ -446,13 +491,13 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0x3D => Ok(Instruction::I64Store16),
         0x3E => Ok(Instruction::I64Store32),
         0x3F => {
-            let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
+            // memory.size - reads memory index (0x00)
+            let _mem_idx = read_u8(cursor)?;
             Ok(Instruction::MemorySize)
         }
         0x40 => {
-            let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
+            // memory.grow - reads memory index (0x00)
+            let _mem_idx = read_u8(cursor)?;
             Ok(Instruction::MemoryGrow)
         }
 
@@ -466,9 +511,21 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         // Control flow
         0x00 => Ok(Instruction::Unreachable),
         0x01 => Ok(Instruction::Nop),
-        0x02 => Ok(Instruction::Block(None)),
-        0x03 => Ok(Instruction::Loop(None)),
-        0x04 => Ok(Instruction::If(None)),
+        0x02 => {
+            // block - read block type
+            let block_type = decode_block_type(cursor)?;
+            Ok(Instruction::Block(block_type))
+        }
+        0x03 => {
+            // loop - read block type
+            let block_type = decode_block_type(cursor)?;
+            Ok(Instruction::Loop(block_type))
+        }
+        0x04 => {
+            // if - read block type
+            let block_type = decode_block_type(cursor)?;
+            Ok(Instruction::If(block_type))
+        }
         0x05 => Ok(Instruction::Else),
         0x0B => Ok(Instruction::End),
         0x0C => Ok(Instruction::Br(decode_u32_leb128(cursor)?)),
@@ -506,6 +563,8 @@ pub struct BlockFrame {
     pub start_pos: usize,
     /// Bytecode position after 'end' instruction (branch target)
     pub end_pos: usize,
+    /// For if blocks: whether we're in the then-branch (true) or else-branch (false)
+    pub is_then_branch: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -647,6 +706,7 @@ impl ExecutionContext {
         is_loop: bool,
         start_pos: usize,
         end_pos: usize,
+        is_then_branch: bool,
     ) {
         let stack_depth = self.operand_stack.len();
         self.block_stack.push(BlockFrame {
@@ -655,6 +715,7 @@ impl ExecutionContext {
             is_loop,
             start_pos,
             end_pos,
+            is_then_branch,
         });
     }
 
@@ -796,9 +857,65 @@ impl Executor {
             }
 
             let instr = decode_instruction(cursor)?;
-            self.dispatch_instruction(instr)?;
+            self.dispatch_instruction(instr, cursor)?;
         }
         Ok(())
+    }
+
+    /// Skip bytecode until we find the matching else or end instruction
+    fn skip_to_else_or_end(&mut self, cursor: &mut Cursor<&[u8]>) -> Result<(), String> {
+        let mut depth = 0;
+
+        loop {
+            if cursor.position() >= cursor.get_ref().len() as u64 {
+                return Err("Unexpected EOF while seeking else/end".to_string());
+            }
+
+            let instr = decode_instruction(cursor)?;
+            match instr {
+                Instruction::Block(_) | Instruction::Loop(_) | Instruction::If(_) => {
+                    depth += 1;
+                }
+                Instruction::Else if depth == 0 => {
+                    // Found matching else
+                    return Ok(());
+                }
+                Instruction::End => {
+                    if depth == 0 {
+                        // Found matching end (no else branch)
+                        return Ok(());
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Skip bytecode until we find the matching end instruction
+    fn skip_to_end(&mut self, cursor: &mut Cursor<&[u8]>) -> Result<(), String> {
+        let mut depth = 0;
+
+        loop {
+            if cursor.position() >= cursor.get_ref().len() as u64 {
+                return Err("Unexpected EOF while seeking end".to_string());
+            }
+
+            let instr = decode_instruction(cursor)?;
+            match instr {
+                Instruction::Block(_) | Instruction::Loop(_) | Instruction::If(_) => {
+                    depth += 1;
+                }
+                Instruction::End => {
+                    if depth == 0 {
+                        // Found matching end
+                        return Ok(());
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Call a function with arguments already on stack
@@ -904,13 +1021,73 @@ impl Executor {
     }
 
     /// Dispatch instruction to handler
-    fn dispatch_instruction(&mut self, instr: Instruction) -> Result<(), String> {
+    fn dispatch_instruction(&mut self, instr: Instruction, cursor: &mut Cursor<&[u8]>) -> Result<(), String> {
         match instr {
             // Constants
             Instruction::I32Const(v) => self.context.push(Value::I32(v)),
             Instruction::I64Const(v) => self.context.push(Value::I64(v)),
             Instruction::F32Const(v) => self.context.push(Value::F32(v)),
             Instruction::F64Const(v) => self.context.push(Value::F64(v)),
+
+            // i32 unary operations
+            Instruction::I32Eqz => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => self.context.push(Value::I32(if x == 0 { 1 } else { 0 })),
+                    _ => return Err("Type mismatch for i32.eqz".to_string()),
+                }
+            }
+            Instruction::I32Clz => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => self.context.push(Value::I32(x.leading_zeros() as i32)),
+                    _ => return Err("Type mismatch for i32.clz".to_string()),
+                }
+            }
+            Instruction::I32Ctz => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => self.context.push(Value::I32(x.trailing_zeros() as i32)),
+                    _ => return Err("Type mismatch for i32.ctz".to_string()),
+                }
+            }
+            Instruction::I32Popcnt => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => self.context.push(Value::I32(x.count_ones() as i32)),
+                    _ => return Err("Type mismatch for i32.popcnt".to_string()),
+                }
+            }
+
+            // i64 unary operations
+            Instruction::I64Eqz => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I64(x) => self.context.push(Value::I32(if x == 0 { 1 } else { 0 })),
+                    _ => return Err("Type mismatch for i64.eqz".to_string()),
+                }
+            }
+            Instruction::I64Clz => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I64(x) => self.context.push(Value::I64(x.leading_zeros() as i64)),
+                    _ => return Err("Type mismatch for i64.clz".to_string()),
+                }
+            }
+            Instruction::I64Ctz => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I64(x) => self.context.push(Value::I64(x.trailing_zeros() as i64)),
+                    _ => return Err("Type mismatch for i64.ctz".to_string()),
+                }
+            }
+            Instruction::I64Popcnt => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I64(x) => self.context.push(Value::I64(x.count_ones() as i64)),
+                    _ => return Err("Type mismatch for i64.popcnt".to_string()),
+                }
+            }
 
             // i32 arithmetic
             Instruction::I32Add => {
@@ -1819,7 +1996,16 @@ impl Executor {
             Instruction::Nop => {}
             Instruction::Unreachable => return Err("Unreachable instruction executed".to_string()),
             Instruction::Return => return Ok(()),
-            Instruction::End => {}
+            Instruction::End => {
+                // End of block/loop/if - pop the block frame
+                if let Ok(block) = self.context.pop_block() {
+                    // If block has a result type, the result value should be on stack
+                    // Nothing to do here - value stays on stack
+                    if block.block_type.is_some() {
+                        // Result value is already on the operand stack
+                    }
+                }
+            }
             Instruction::Drop => {
                 self.context.pop()?;
             }
@@ -2080,54 +2266,111 @@ impl Executor {
                 self.context.push(Value::I32(pages));
             }
 
-            // Control flow - simplified implementation
-            Instruction::Block(_block_type) => {
-                // For now, just note the block on the control flow stack
-                // Full implementation would require tracking bytecode positions
-                // This is a simplified version that allows nesting but no actual branching
-                self.context.push_block(_block_type, false, 0, 0);
+            // Memory grow
+            Instruction::MemoryGrow => {
+                let delta = match self.context.pop()? {
+                    Value::I32(n) => n as u32,
+                    _ => return Err("Memory grow delta must be i32".to_string()),
+                };
+                let old_pages = self.context.memory.pages();
+                match self.context.memory.grow(delta) {
+                    Ok(_) => self.context.push(Value::I32(old_pages as i32)),
+                    Err(_) => self.context.push(Value::I32(-1)), // Failure indicated by -1
+                }
             }
-            Instruction::Loop(_block_type) => {
-                // Similar to block - just track the loop
-                self.context.push_block(_block_type, true, 0, 0);
+
+            // Control flow - proper implementation
+            Instruction::Block(block_type) => {
+                // Push block frame with current position
+                let pos = cursor.position() as usize;
+                self.context.push_block(block_type, false, pos, 0, false);
             }
-            Instruction::If(_block_type) => {
+            Instruction::Loop(block_type) => {
+                // Push loop frame with current position (for backward branching)
+                let pos = cursor.position() as usize;
+                self.context.push_block(block_type, true, pos, 0, false);
+            }
+            Instruction::If(block_type) => {
                 // Pop condition from stack
                 let cond = self.context.pop()?;
-                match cond {
-                    Value::I32(_) => {
-                        // Store whether condition is true for else handling
-                        self.context.push_block(_block_type, false, 0, 0);
-                        // Note: Full if/else would need bytecode skipping for false condition
-                    }
+                let cond_value = match cond {
+                    Value::I32(v) => v,
                     _ => return Err("if requires i32 condition".to_string()),
+                };
+
+                if cond_value != 0 {
+                    // Condition is true - execute then-branch
+                    self.context.push_block(block_type, false, 0, 0, true);
+                } else {
+                    // Condition is false - skip to else or end
+                    self.context.push_block(block_type, false, 0, 0, false);
+                    self.skip_to_else_or_end(cursor)?;
                 }
             }
             Instruction::Else => {
-                // Mark else branch
-                // Full implementation would skip bytecode until matching end
+                // We're hitting else, which means we executed the then-branch
+                // Skip to the matching end
+                let block = self.context.current_block()?;
+                if block.is_then_branch {
+                    // We came from the then-branch, skip to end
+                    self.skip_to_end(cursor)?;
+                }
+                // Else: we came from false condition, continue executing
             }
-            Instruction::Br(_label) => {
-                // Branch to label
-                // Full implementation would jump in bytecode
-                // For now, return an error indicating this needs work
-                return Err(
-                    "br (branch) requires bytecode position tracking not yet implemented"
-                        .to_string(),
-                );
+            Instruction::Br(label) => {
+                // Branch to label (0 = innermost block)
+                let label_idx = label as usize;
+                if label_idx >= self.context.block_stack.len() {
+                    return Err(format!("br: invalid label {label}"));
+                }
+
+                // Get the target block (counting from the end)
+                let block_idx = self.context.block_stack.len() - 1 - label_idx;
+                let target_block = &self.context.block_stack[block_idx];
+
+                if target_block.is_loop {
+                    // Branch to loop start - set cursor position
+                    cursor.set_position(target_block.start_pos as u64);
+                } else {
+                    // Branch to end of block - skip to matching end
+                    // We need to skip past this block and all inner blocks
+                    for _ in 0..=label_idx {
+                        self.context.pop_block()?;
+                    }
+                    self.skip_to_end(cursor)?;
+                }
             }
-            Instruction::BrIf(_label) => {
+            Instruction::BrIf(label) => {
                 // Conditional branch
                 let cond = self.context.pop()?;
-                match cond {
-                    Value::I32(v) if v != 0 => {
-                        return Err("br_if (conditional branch) requires bytecode position tracking not yet implemented".to_string());
-                    }
-                    Value::I32(_) => {
-                        // Condition false, continue
-                    }
+                let cond_value = match cond {
+                    Value::I32(v) => v,
                     _ => return Err("br_if requires i32 condition".to_string()),
+                };
+
+                if cond_value != 0 {
+                    // Condition true - do the branch
+                    let label_idx = label as usize;
+                    if label_idx >= self.context.block_stack.len() {
+                        return Err(format!("br_if: invalid label {label}"));
+                    }
+
+                    // Get the target block
+                    let block_idx = self.context.block_stack.len() - 1 - label_idx;
+                    let target_block = &self.context.block_stack[block_idx];
+
+                    if target_block.is_loop {
+                        // Branch to loop start
+                        cursor.set_position(target_block.start_pos as u64);
+                    } else {
+                        // Branch to end of block
+                        for _ in 0..=label_idx {
+                            self.context.pop_block()?;
+                        }
+                        self.skip_to_end(cursor)?;
+                    }
                 }
+                // Condition false - continue normally
             }
             Instruction::BrTable(_, _) => {
                 // Branch table (switch)
@@ -2160,7 +2403,6 @@ impl Executor {
             | Instruction::I64Reinterpret
             | Instruction::F32Reinterpret
             | Instruction::F64Reinterpret
-            | Instruction::MemoryGrow
             | Instruction::Select => {
                 return Err(format!("Instruction not yet implemented: {instr:?}"));
             }

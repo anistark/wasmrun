@@ -1,0 +1,71 @@
+name: Update Homebrew Formula
+
+on:
+  release:
+    types: [published, prereleased]
+
+jobs:
+  update-homebrew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get release info
+        id: release
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"  # Remove 'v' prefix if present
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          IS_PRERELEASE="${{ github.event.release.prerelease }}"
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+
+      - name: Fetch crates.io package info
+        id: crates
+        run: |
+          VERSION="${{ steps.release.outputs.version }}"
+          URL="https://static.crates.io/crates/wasmrun/wasmrun-${VERSION}.crate"
+
+          # Retry up to 5 times with exponential backoff
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          RETRY_DELAY=10
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES: Fetching $URL"
+
+            HTTP_CODE=$(curl -sL -w "%{http_code}" -o /tmp/wasmrun.crate "$URL")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Successfully downloaded crate"
+              SHA256=$(sha256sum /tmp/wasmrun.crate | cut -d' ' -f1)
+              echo "url=$URL" >> $GITHUB_OUTPUT
+              echo "sha256=$SHA256" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "⚠️ Download failed with HTTP $HTTP_CODE"
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Waiting ${RETRY_DELAY}s before retry..."
+                sleep $RETRY_DELAY
+                RETRY_DELAY=$((RETRY_DELAY * 2))  # Exponential backoff
+              fi
+            fi
+          done
+
+          echo "❌ Failed to download crate after $MAX_RETRIES attempts"
+          exit 1
+
+      - name: Trigger homebrew-tools update
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${{ secrets.HOMEBREW_TAP_TOKEN }}" \
+            https://api.github.com/repos/anistark/homebrew-tools/dispatches \
+            -d '{
+              "event_type": "update-formula",
+              "client_payload": {
+                "formula": "wasmrun",
+                "version": "${{ steps.release.outputs.version }}",
+                "url": "${{ steps.crates.outputs.url }}",
+                "sha256": "${{ steps.crates.outputs.sha256 }}"
+              }
+            }'

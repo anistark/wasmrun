@@ -205,6 +205,53 @@ wasmrun exec cli-tool.wasm --help
 
 **Compatibility Note:** Native execution currently works best with pure WASM modules (e.g., compiled from Go with TinyGo). Modules compiled with **wasm-bindgen** (JavaScript interop framework used by Rust's `wasm-pack`) are not currently supported in native mode, as they require JavaScript runtime features. For wasm-bindgen projects, use the dev server or run the project directory instead of the individual `.wasm` file.
 
+### Native Execution Capabilities & Limitations
+
+The native WASM executor is a complete interpreter supporting most WASM features:
+
+**✅ Fully Supported:**
+- All arithmetic operations (i32/i64/f32/f64)
+- Control flow (if/else, loops, blocks)
+- Branching (br, br_if)
+- Function calls (direct and recursive)
+- Memory operations (load, store, grow, size)
+- Local and global variables
+- All comparison and unary operations
+
+**⚠️ Current Limitations:**
+
+**Language Runtime Requirements:**
+- **Rust**: Functions may fail if they require panic hooks, stack unwinding, or memory allocators. Simple pure functions work well.
+- **Go/TinyGo**: Some functions require scheduler initialization or asyncify state. Basic arithmetic and pure functions work reliably.
+
+**Recommended Use Cases:**
+- ✅ Pure computational functions (math, algorithms)
+- ✅ CLI tools compiled with minimal runtime (TinyGo, pure Rust)
+- ✅ Hand-written WAT files
+- ✅ C/C++ with Emscripten `--no-entry` flag
+- ⚠️ Complex Rust/Go applications (use dev server instead)
+
+**Workarounds:**
+- For Rust: Compile with `wasm32-wasi` target and avoid wasm-bindgen
+- For Go: Use TinyGo with `-target wasi`
+- For complex applications: Use `wasmrun` dev server (runs in browser environment)
+- Write pure WASM: Use WAT format for maximum compatibility
+
+**Examples:**
+```sh
+# ✅ Works perfectly - pure WASM
+wasmrun exec pure_math.wasm -c fibonacci 10
+
+# ✅ Works well - simple Rust/Go functions
+wasmrun exec simple.wasm -c add 5 3
+
+# ⚠️ May fail - complex Rust with panic handling
+wasmrun exec complex.wasm -c process_data
+
+# ✅ Alternative - use dev server for complex code
+wasmrun ./my-rust-project
+```
+
 ## 🏗️ Plugin Architecture
 
 Wasmrun's modular plugin architecture enables seamless integration of different programming languages and compilation toolchains into a unified development experience. Here's a detailed guide on [wasmrun plugin architecture](https://blog.anirudha.dev/wasmrun-plugin-architecture).

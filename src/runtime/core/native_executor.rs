@@ -57,7 +57,8 @@ pub fn execute_wasm_bytes_with_args(
     let mut executor = Executor::new(module)
         .map_err(|e| WasmrunError::from(format!("Failed to initialize executor: {e}")))?;
 
-    let wasi_env = Arc::new(Mutex::new(WasiEnv::new().with_args(args)));
+    // Setup WASI environment with arguments
+    let wasi_env = Arc::new(Mutex::new(WasiEnv::new().with_args(args.clone())));
     let _wasi_linker = create_wasi_linker(wasi_env);
 
     // Determine which function to call
@@ -87,8 +88,30 @@ pub fn execute_wasm_bytes_with_args(
         }
     };
 
-    execute_function(&mut executor, func_idx, Vec::new())?;
+    // Convert string arguments to WASM values (basic conversion)
+    let wasm_args = convert_string_args_to_values(&args);
+
+    execute_function(&mut executor, func_idx, wasm_args)?;
     Ok(0)
+}
+
+/// Convert string arguments to WASM values
+/// Simple conversion: tries to parse as i32 first, falls back to i64, otherwise uses 0
+fn convert_string_args_to_values(args: &[String]) -> Vec<Value> {
+    args.iter()
+        .map(|arg| {
+            // Try parsing as i32
+            if let Ok(i32_val) = arg.parse::<i32>() {
+                return Value::I32(i32_val);
+            }
+            // Try parsing as i64
+            if let Ok(i64_val) = arg.parse::<i64>() {
+                return Value::I64(i64_val);
+            }
+            // Default to 0
+            Value::I32(0)
+        })
+        .collect()
 }
 
 /// Find an exported function by name

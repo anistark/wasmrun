@@ -240,7 +240,8 @@ impl Module {
                     let code_bodies = parse_code_section(section_data)?;
                     for (i, body) in code_bodies.into_iter().enumerate() {
                         if i < module.functions.len() {
-                            module.functions[i].code = body;
+                            module.functions[i].locals = body.locals;
+                            module.functions[i].code = body.code;
                         }
                     }
                 }
@@ -420,8 +421,14 @@ fn parse_function_section(data: &[u8]) -> Result<Vec<Function>, String> {
     Ok(functions)
 }
 
+/// Parsed function body with locals and code
+struct FunctionBody {
+    locals: Vec<(u32, ValueType)>,
+    code: Vec<u8>,
+}
+
 /// Parse Code section (function bodies)
-fn parse_code_section(data: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+fn parse_code_section(data: &[u8]) -> Result<Vec<FunctionBody>, String> {
     let mut cursor = Cursor::new(data);
     let count = read_leb128_u32(&mut cursor)? as usize;
 
@@ -435,9 +442,21 @@ fn parse_code_section(data: &[u8]) -> Result<Vec<Vec<u8>>, String> {
             return Err("Code section overflow".to_string());
         }
 
-        // Just save the entire body for now, including locals
-        // We'll parse locals when executing
-        bodies.push(data[body_start..body_end].to_vec());
+        // Parse locals
+        let locals_count = read_leb128_u32(&mut cursor)? as usize;
+        let mut locals = Vec::with_capacity(locals_count);
+
+        for _ in 0..locals_count {
+            let count = read_leb128_u32(&mut cursor)?;
+            let value_type = read_value_type(&mut cursor)?;
+            locals.push((count, value_type));
+        }
+
+        // The rest of the body is the actual instruction code
+        let code_start = cursor.position() as usize;
+        let code = data[code_start..body_end].to_vec();
+
+        bodies.push(FunctionBody { locals, code });
 
         cursor.set_position(body_end as u64);
     }

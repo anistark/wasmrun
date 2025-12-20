@@ -3,6 +3,7 @@ target
 debug
 templates/*
 *.wasm
+*.wat
 
 # MacOS
 .DS_Store
