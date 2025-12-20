@@ -197,7 +197,13 @@ mod exec_integration_tests {
         }
 
         let output = run_wasmrun_exec(vec![
-            "exec", wasm_path, "-c", "add", "100", "200", "extra_arg"
+            "exec",
+            wasm_path,
+            "-c",
+            "add",
+            "100",
+            "200",
+            "extra_arg",
         ]);
 
         // Should execute (might ignore extra args or pass them)
@@ -242,9 +248,7 @@ mod exec_integration_tests {
             return;
         }
 
-        let output = run_wasmrun_exec(vec![
-            "exec", wasm_path, "-c", "add", "5", "3", "--debug"
-        ]);
+        let output = run_wasmrun_exec(vec!["exec", wasm_path, "-c", "add", "5", "3", "--debug"]);
 
         // Debug output should be available
         let stderr = std::str::from_utf8(&output.stderr).unwrap_or("");

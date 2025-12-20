@@ -1021,7 +1021,11 @@ impl Executor {
     }
 
     /// Dispatch instruction to handler
-    fn dispatch_instruction(&mut self, instr: Instruction, cursor: &mut Cursor<&[u8]>) -> Result<(), String> {
+    fn dispatch_instruction(
+        &mut self,
+        instr: Instruction,
+        cursor: &mut Cursor<&[u8]>,
+    ) -> Result<(), String> {
         match instr {
             // Constants
             Instruction::I32Const(v) => self.context.push(Value::I32(v)),
