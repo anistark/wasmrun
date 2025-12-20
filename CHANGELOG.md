@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+...
+
+## [0.15.0](https://github.com/anistark/wasmrun/releases/tag/v0.15.0) - 2025-12-21
+
 ### Added
 - **Native WASM Execution via `exec` command**: Direct interpreter execution with full argument passing and function selection
   - New `wasmrun exec <WASM_FILE> [ARGS...]` subcommand for executing WASM files

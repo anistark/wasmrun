@@ -1,10 +1,10 @@
 [package]
 name = "wasmrun"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 description = "A WebAssembly Runtime"
 license = "MIT"
-authors = ["Kumar Anirudha <wasmrun@anirudha.dev>"]
+authors = ["Kumar Anirudha <wasmrun@anirudha.dev>", "Farhaan Bukhsh"]
 repository = "https://github.com/anistark/wasmrun"
 readme = "README.md"
 keywords = ["wasm", "webassembly", "browser", "runtime", "cli"]
@@ -14,7 +14,7 @@ documentation = "https://docs.rs/wasmrun"
 rust-version = "1.70.0"
 
 [dependencies]
-clap = { version = "4.5.51", features = ["derive"] }
+clap = { version = "4.5.53", features = ["derive"] }
 tiny_http = "0.12"
 webbrowser = "1.0.6"
 notify = "5.1.0"
