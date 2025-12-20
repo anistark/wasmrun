@@ -541,9 +541,6 @@ mod tests {
 
     #[test]
     fn test_server_in_test_mode() {
-        // Verify that cfg!(test) works as expected
-        assert!(cfg!(test));
-
         // Test mode should prevent actual server startup
         let temp_dir = tempdir().unwrap();
         let wasm_file =

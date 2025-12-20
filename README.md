@@ -16,7 +16,7 @@
 - 🌐 **Zero-Config Web Server** - Built-in HTTP server with WASM and web app hosting
 - 📦 **Smart Project Detection** - Automatically detects and configures project types
 - ⚡ **Zero Configuration** - Works out of the box with sensible defaults and automatic project detection
-- 🏃 **Native WASM Execution** - Run compiled WASM files directly with the native interpreter (with `--native` flag)
+- 🏃 **Native WASM Execution** - Run compiled WASM files directly with the native interpreter and pass arguments
 
 ## 🚀 Installation
 
@@ -89,34 +89,21 @@ wasmrun
 # Run a WebAssembly file with dev server (default)
 wasmrun myfile.wasm
 
-# Run a WASM file natively with interpreter
-wasmrun myfile.wasm --native
-
 # Run a project directory
 wasmrun ./my-wasm-project
 
 # With flags
 wasmrun --path ./path/to/your/file.wasm
 wasmrun --path ./my-wasm-project
+
+# Run a WASM file natively with the interpreter
+wasmrun exec myfile.wasm
+
+# Run a WASM file with arguments
+wasmrun exec myfile.wasm arg1 arg2 arg3
 ```
 
 ### 🔧 Commands
-
-#### Native WASM Execution
-
-Run compiled WASM files directly using the native interpreter (useful for CLI tools, test binaries, etc):
-
-```sh
-# Execute WASM file natively
-wasmrun myapp.wasm --native
-
-# Stdout goes directly to terminal
-wasmrun cli-tool.wasm --native
-```
-
-**Default Behavior:** Running WASM files starts the dev server on port 8420. Use `--native` to bypass the server and execute the WASM module directly.
-
-**Compatibility Note:** Native execution currently works best with pure WASM modules (e.g., compiled from Go with TinyGo). Modules compiled with **wasm-bindgen** (JavaScript interop framework used by Rust's `wasm-pack`) are not currently supported in native mode, as they require JavaScript runtime features. For wasm-bindgen projects, use the dev server or run the project directory instead of the individual `.wasm` file.
 
 #### Development Server
 
@@ -186,6 +173,83 @@ Stop any running Wasmrun server:
 
 ```sh
 wasmrun stop
+```
+
+#### Native WASM Execution
+
+Run compiled WASM files directly using the native interpreter with full argument passing and function selection support (useful for CLI tools, test binaries, etc):
+
+```sh
+# Execute WASM file natively (runs entry point: main, _start, or start)
+wasmrun exec myapp.wasm
+
+# Execute with arguments
+wasmrun exec myapp.wasm arg1 arg2 arg3
+
+# Call a specific exported function
+wasmrun exec mylib.wasm -c add 5 3
+wasmrun exec mylib.wasm --call multiply 4 6
+
+# Call a function with arguments
+wasmrun exec myapp.wasm -c process --verbose output.txt
+
+# Stdout goes directly to terminal
+wasmrun exec cli-tool.wasm --help
+```
+
+**Default Behavior:** Running WASM files with `wasmrun file.wasm` (no subcommand) starts the dev server on port 8420. Use the `exec` subcommand to bypass the server and execute the WASM module directly.
+
+**Argument Passing:** The `exec` subcommand fully supports passing arguments to your WASM program. Arguments are captured and made available to the program through WASI syscalls.
+
+**Function Selection:** Use the `-c` or `--call` flag to invoke a specific exported function. If not specified, the runtime automatically detects and calls the entry point function (in order: start section, `main`, or `_start`).
+
+**Compatibility Note:** Native execution currently works best with pure WASM modules (e.g., compiled from Go with TinyGo). Modules compiled with **wasm-bindgen** (JavaScript interop framework used by Rust's `wasm-pack`) are not currently supported in native mode, as they require JavaScript runtime features. For wasm-bindgen projects, use the dev server or run the project directory instead of the individual `.wasm` file.
+
+### Native Execution Capabilities & Limitations
+
+The native WASM executor is a complete interpreter supporting most WASM features:
+
+**✅ Fully Supported:**
+- All arithmetic operations (i32/i64/f32/f64)
+- Control flow (if/else, loops, blocks)
+- Branching (br, br_if)
+- Function calls (direct and recursive)
+- Memory operations (load, store, grow, size)
+- Local and global variables
+- All comparison and unary operations
+
+**⚠️ Current Limitations:**
+
+**Language Runtime Requirements:**
+- **Rust**: Functions may fail if they require panic hooks, stack unwinding, or memory allocators. Simple pure functions work well.
+- **Go/TinyGo**: Some functions require scheduler initialization or asyncify state. Basic arithmetic and pure functions work reliably.
+
+**Recommended Use Cases:**
+- ✅ Pure computational functions (math, algorithms)
+- ✅ CLI tools compiled with minimal runtime (TinyGo, pure Rust)
+- ✅ Hand-written WAT files
+- ✅ C/C++ with Emscripten `--no-entry` flag
+- ⚠️ Complex Rust/Go applications (use dev server instead)
+
+**Workarounds:**
+- For Rust: Compile with `wasm32-wasi` target and avoid wasm-bindgen
+- For Go: Use TinyGo with `-target wasi`
+- For complex applications: Use `wasmrun` dev server (runs in browser environment)
+- Write pure WASM: Use WAT format for maximum compatibility
+
+**Examples:**
+```sh
+# ✅ Works perfectly - pure WASM
+wasmrun exec pure_math.wasm -c fibonacci 10
+
+# ✅ Works well - simple Rust/Go functions
+wasmrun exec simple.wasm -c add 5 3
+
+# ⚠️ May fail - complex Rust with panic handling
+wasmrun exec complex.wasm -c process_data
+
+# ✅ Alternative - use dev server for complex code
+wasmrun ./my-rust-project
 ```
 
 ## 🏗️ Plugin Architecture
@@ -413,7 +477,7 @@ wasmrun --port 3001  # Use different port
 - **Recommended approach:**
   - Run the entire project directory: `wasmrun ./my-rust-project` (dev server)
   - Use the `.js` file if available (wasmrust plugin output)
-  - Avoid using `--native` flag with wasm-bindgen compiled modules
+  - Avoid using `wasmrun exec` with wasm-bindgen compiled modules
 - **Workaround if you need native execution:**
   - Compile with pure WASM (no wasm-bindgen) or use Go/TinyGo for CLI tools
   - Consider refactoring your Rust code to avoid wasm-bindgen dependencies

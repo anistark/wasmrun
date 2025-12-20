@@ -66,10 +66,6 @@ pub struct Args {
         help = "Force specific language for compilation"
     )]
     pub language: Option<String>,
-
-    /// Execute WASM file natively (interpreter mode) instead of starting a dev server
-    #[arg(long, help = "Execute WASM natively without starting dev server")]
-    pub native: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -199,13 +195,29 @@ pub enum Commands {
         /// Serve the UI in browser (default: false)
         #[arg(short = 's', long, help = "Open UI in browser when server starts")]
         serve: bool,
+    },
 
-        /// Execute WASM file natively (without dev server)
+    /// Execute a WASM file directly with arguments
+    Exec {
+        /// Path to the WASM file
         #[arg(
-            long,
-            help = "Run WASM file natively with interpreter (bypasses dev server)"
+            value_hint = clap::ValueHint::FilePath,
+            help = "Path to the WASM file to execute"
         )]
-        native: bool,
+        wasm_file: Option<String>,
+
+        /// Exported function name to call (if not specified, uses entry point)
+        #[arg(
+            short = 'c',
+            long,
+            value_hint = clap::ValueHint::Other,
+            help = "Exported function to call (defaults to entry point: main, _start, or start)"
+        )]
+        call: Option<String>,
+
+        /// Arguments to pass to the WASM program (after the WASM file)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 
     /// Run projects in browser-based multi-language OS mode
@@ -377,16 +389,12 @@ pub struct ResolvedArgs {
     pub command: Option<Commands>,
     pub serve: bool,
     pub language: Option<String>,
-    pub native: bool,
 }
 
 impl ResolvedArgs {
     /// Create from CLI args with path resolution and validation
     pub fn from_args(args: Args) -> Result<Self> {
         let resolved_path = PathResolver::resolve_input_path(args.positional_path, Some(args.path));
-
-        // Only use native execution if explicitly requested via --native flag
-        let native = args.native;
 
         Ok(Self {
             path: resolved_path,
@@ -397,7 +405,6 @@ impl ResolvedArgs {
             command: args.command,
             serve: args.serve,
             language: args.language,
-            native,
         })
     }
 
@@ -471,6 +478,9 @@ impl CommandArgs for Commands {
                 positional_path,
                 ..
             } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
+            Commands::Exec { wasm_file, .. } => {
+                PathResolver::resolve_input_path(wasm_file.clone(), None)
+            }
             Commands::Os {
                 path,
                 positional_path,

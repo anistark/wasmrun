@@ -1,5 +1,6 @@
 mod clean;
 mod compile;
+mod exec;
 mod init;
 mod issue_detector;
 mod module_display;
@@ -11,6 +12,7 @@ mod verify;
 
 pub use clean::handle_clean_command;
 pub use compile::handle_compile_command;
+pub use exec::handle_exec_command;
 pub use os::handle_os_command;
 pub use plugin::run_plugin_command;
 pub use run::handle_run_command;

@@ -4,11 +4,9 @@ use crate::compiler::builder::{BuildConfig, OptimizationLevel, TargetType};
 use crate::compiler::{compile_for_execution, detect_project_language};
 use crate::error::{Result, WasmrunError};
 use crate::plugin::manager::PluginManager;
-use crate::runtime::core::native_executor;
 use crate::utils::PathResolver;
 use std::path::Path;
 
-#[allow(clippy::too_many_arguments)]
 pub fn handle_run_command(
     path: &Option<String>,
     positional_path: &Option<String>,
@@ -17,7 +15,6 @@ pub fn handle_run_command(
     watch: bool,
     verbose: bool,
     serve: bool,
-    native: bool,
 ) -> Result<()> {
     let resolved_path =
         crate::utils::PathResolver::resolve_input_path(positional_path.clone(), path.clone());
@@ -29,7 +26,6 @@ pub fn handle_run_command(
         language.clone(),
         verbose,
         serve,
-        native,
     )
 }
 
@@ -40,7 +36,6 @@ pub fn run_project(
     language: Option<String>,
     verbose: bool,
     serve: bool,
-    native: bool,
 ) -> Result<()> {
     let resolved_path = PathResolver::resolve_input_path(Some(path.clone()), None);
 
@@ -49,7 +44,7 @@ pub fn run_project(
     }
 
     if is_wasm_file(&resolved_path) {
-        return run_wasm_file(&resolved_path, port, serve, native);
+        return run_wasm_file(&resolved_path, port, serve);
     }
 
     if Path::new(&resolved_path).is_dir() {
@@ -68,15 +63,8 @@ fn is_wasm_file(path: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn run_wasm_file(wasm_path: &str, port: Option<u16>, serve: bool, native: bool) -> Result<()> {
+fn run_wasm_file(wasm_path: &str, port: Option<u16>, serve: bool) -> Result<()> {
     println!("🎯 Running WASM file: {wasm_path}");
-
-    if native {
-        println!("🏃 Executing natively (interpreter mode)");
-        native_executor::execute_wasm_file(wasm_path)?;
-        println!("✅ Execution completed");
-        return Ok(());
-    }
 
     let server_port = port.unwrap_or(8420);
     println!("🚀 Starting server on port {server_port}");
