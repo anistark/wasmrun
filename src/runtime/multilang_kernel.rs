@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use crate::logging::LogTrailSystem;
 use crate::runtime::dev_server::DevServerManager;
 use crate::runtime::microkernel::{Pid, WasmInstance, WasmMicroKernel};
+use crate::runtime::network_namespace::NetworkNamespace;
 use crate::runtime::registry::{DevServerStatus, LanguageRuntimeRegistry};
 use crate::runtime::syscalls::{SyscallArgs, SyscallHandler, SyscallResult};
 
@@ -17,6 +18,7 @@ pub struct MultiLanguageKernel {
     dev_server_manager: Arc<DevServerManager>,
     syscall_handler: Arc<Mutex<SyscallHandler>>,
     process_languages: Arc<Mutex<HashMap<Pid, String>>>,
+    network_namespaces: Arc<Mutex<HashMap<Pid, Arc<NetworkNamespace>>>>,
     log_system: Arc<LogTrailSystem>,
 }
 
@@ -51,6 +53,7 @@ impl MultiLanguageKernel {
             dev_server_manager: Arc::new(DevServerManager::new()),
             syscall_handler: Arc::new(Mutex::new(syscall_handler)),
             process_languages: Arc::new(Mutex::new(HashMap::new())),
+            network_namespaces: Arc::new(Mutex::new(HashMap::new())),
             log_system: Arc::new(LogTrailSystem::new()),
         }
     }
@@ -151,7 +154,14 @@ impl MultiLanguageKernel {
             process_languages.insert(pid, language.to_string());
         }
 
-        // 6. Set up development features if enabled
+        // 6. Create network namespace for process
+        {
+            let network_ns = Arc::new(NetworkNamespace::new(pid));
+            let mut namespaces = self.network_namespaces.lock().unwrap();
+            namespaces.insert(pid, network_ns);
+        }
+
+        // 7. Set up development features if enabled
         if config.dev_mode {
             self.setup_dev_environment(pid, language, &config)?;
         }
@@ -294,6 +304,12 @@ impl MultiLanguageKernel {
             process_languages.remove(&pid);
         }
 
+        // Remove network namespace
+        {
+            let mut namespaces = self.network_namespaces.lock().unwrap();
+            namespaces.remove(&pid);
+        }
+
         // Kill the process in the base kernel
         self.base_kernel.kill_process(pid)?;
 
@@ -362,6 +378,21 @@ impl MultiLanguageKernel {
     /// Get reference to the log system
     pub fn log_system(&self) -> Arc<LogTrailSystem> {
         Arc::clone(&self.log_system)
+    }
+
+    /// Get network namespace for a process
+    pub fn get_network_namespace(&self, pid: Pid) -> Option<Arc<NetworkNamespace>> {
+        let namespaces = self.network_namespaces.lock().unwrap();
+        namespaces.get(&pid).cloned()
+    }
+
+    /// Get network statistics for all processes
+    pub fn get_network_stats(&self) -> HashMap<Pid, crate::runtime::network_namespace::NetworkStats> {
+        let namespaces = self.network_namespaces.lock().unwrap();
+        namespaces
+            .iter()
+            .map(|(pid, ns)| (*pid, ns.get_stats()))
+            .collect()
     }
 }
 

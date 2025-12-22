@@ -28,6 +28,9 @@ pub struct Process {
     pub state: ProcessState,
     pub memory_usage: usize,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(skip)]
+    #[allow(dead_code)]
+    pub has_network: bool,
 }
 
 /// Memory region for WASM processes
@@ -158,6 +161,7 @@ impl WasmMicroKernel {
             state: ProcessState::Ready,
             memory_usage: 0,
             created_at: chrono::Utc::now(),
+            has_network: false,
         };
 
         let mut processes = self.processes.write().unwrap();

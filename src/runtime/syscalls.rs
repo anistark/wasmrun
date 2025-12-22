@@ -2,6 +2,11 @@ use crate::runtime::microkernel::{Pid, SyscallInterface, VfsEntry, WasmMicroKern
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{Read as IoRead, Write as IoWrite};
+use std::net::{
+    IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket,
+};
+use std::sync::{Arc, Mutex};
 
 /// System call numbers for OS mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,6 +36,18 @@ pub enum SyscallNumber {
     // I/O operations
     Print = 17,
     Input = 18,
+
+    // Socket operations (WASI)
+    SockOpen = 19,
+    SockBind = 20,
+    SockListen = 21,
+    SockAccept = 22,
+    SockConnect = 23,
+    SockRecv = 24,
+    SockSend = 25,
+    SockShutdown = 26,
+    SockClose = 27,
+    GetAddrInfo = 28,
 }
 
 impl TryFrom<u32> for SyscallNumber {
@@ -56,6 +73,16 @@ impl TryFrom<u32> for SyscallNumber {
             16 => Ok(SyscallNumber::Munmap),
             17 => Ok(SyscallNumber::Print),
             18 => Ok(SyscallNumber::Input),
+            19 => Ok(SyscallNumber::SockOpen),
+            20 => Ok(SyscallNumber::SockBind),
+            21 => Ok(SyscallNumber::SockListen),
+            22 => Ok(SyscallNumber::SockAccept),
+            23 => Ok(SyscallNumber::SockConnect),
+            24 => Ok(SyscallNumber::SockRecv),
+            25 => Ok(SyscallNumber::SockSend),
+            26 => Ok(SyscallNumber::SockShutdown),
+            27 => Ok(SyscallNumber::SockClose),
+            28 => Ok(SyscallNumber::GetAddrInfo),
             _ => Err(anyhow::anyhow!("Unknown syscall number: {value}")),
         }
     }
@@ -93,6 +120,73 @@ pub enum SyscallReturn {
     Unit,
 }
 
+/// Address family for sockets
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddressFamily {
+    Inet = 2,
+    Inet6 = 10,
+    Unix = 1,
+}
+
+impl TryFrom<i64> for AddressFamily {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self> {
+        match value {
+            1 => Ok(AddressFamily::Unix),
+            2 => Ok(AddressFamily::Inet),
+            10 => Ok(AddressFamily::Inet6),
+            _ => Err(anyhow::anyhow!("Unknown address family: {value}")),
+        }
+    }
+}
+
+/// Socket type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SocketType {
+    Stream = 1,
+    Dgram = 2,
+}
+
+impl TryFrom<i64> for SocketType {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i64) -> Result<Self> {
+        match value {
+            1 => Ok(SocketType::Stream),
+            2 => Ok(SocketType::Dgram),
+            _ => Err(anyhow::anyhow!("Unknown socket type: {value}")),
+        }
+    }
+}
+
+/// Socket state
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SocketState {
+    Created,
+    Bound,
+    Listening,
+    Connected,
+}
+
+/// Socket handle (wraps actual socket types)
+#[derive(Debug)]
+pub enum SocketHandle {
+    TcpListener(Arc<Mutex<TcpListener>>),
+    TcpStream(Arc<Mutex<TcpStream>>),
+    UdpSocket(Arc<Mutex<UdpSocket>>),
+}
+
+impl Clone for SocketHandle {
+    fn clone(&self) -> Self {
+        match self {
+            SocketHandle::TcpListener(l) => SocketHandle::TcpListener(Arc::clone(l)),
+            SocketHandle::TcpStream(s) => SocketHandle::TcpStream(Arc::clone(s)),
+            SocketHandle::UdpSocket(u) => SocketHandle::UdpSocket(Arc::clone(u)),
+        }
+    }
+}
+
 /// File descriptor table for a process
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -103,10 +197,20 @@ pub struct FileDescriptorTable {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub struct FileDescriptor {
-    pub path: String,
-    pub offset: usize,
-    pub flags: OpenFlags,
+pub enum FileDescriptor {
+    File {
+        path: String,
+        offset: usize,
+        flags: OpenFlags,
+    },
+    Socket {
+        handle: SocketHandle,
+        address_family: AddressFamily,
+        socket_type: SocketType,
+        state: SocketState,
+        local_addr: Option<SocketAddr>,
+        peer_addr: Option<SocketAddr>,
+    },
 }
 
 #[allow(dead_code)]
@@ -122,13 +226,12 @@ impl Default for FileDescriptorTable {
     fn default() -> Self {
         let mut table = Self {
             descriptors: HashMap::new(),
-            next_fd: 3, // 0, 1, 2 reserved for stdin, stdout, stderr
+            next_fd: 3,
         };
 
-        // Add standard descriptors
         table.descriptors.insert(
             0,
-            FileDescriptor {
+            FileDescriptor::File {
                 path: "/dev/stdin".to_string(),
                 offset: 0,
                 flags: OpenFlags {
@@ -141,7 +244,7 @@ impl Default for FileDescriptorTable {
         );
         table.descriptors.insert(
             1,
-            FileDescriptor {
+            FileDescriptor::File {
                 path: "/dev/stdout".to_string(),
                 offset: 0,
                 flags: OpenFlags {
@@ -154,7 +257,7 @@ impl Default for FileDescriptorTable {
         );
         table.descriptors.insert(
             2,
-            FileDescriptor {
+            FileDescriptor::File {
                 path: "/dev/stderr".to_string(),
                 offset: 0,
                 flags: OpenFlags {
@@ -178,10 +281,34 @@ impl FileDescriptorTable {
 
         self.descriptors.insert(
             fd,
-            FileDescriptor {
+            FileDescriptor::File {
                 path,
                 offset: 0,
                 flags,
+            },
+        );
+
+        fd
+    }
+
+    pub fn open_socket(
+        &mut self,
+        handle: SocketHandle,
+        address_family: AddressFamily,
+        socket_type: SocketType,
+    ) -> i32 {
+        let fd = self.next_fd;
+        self.next_fd += 1;
+
+        self.descriptors.insert(
+            fd,
+            FileDescriptor::Socket {
+                handle,
+                address_family,
+                socket_type,
+                state: SocketState::Created,
+                local_addr: None,
+                peer_addr: None,
             },
         );
 
@@ -240,6 +367,16 @@ impl SyscallHandler {
             SyscallNumber::GetPid => self.handle_getpid(pid),
             SyscallNumber::Kill => self.handle_kill(pid, args),
             SyscallNumber::Print => self.handle_print(pid, args),
+            SyscallNumber::SockOpen => self.handle_sock_open(pid, args),
+            SyscallNumber::SockBind => self.handle_sock_bind(pid, args),
+            SyscallNumber::SockListen => self.handle_sock_listen(pid, args),
+            SyscallNumber::SockAccept => self.handle_sock_accept(pid, args),
+            SyscallNumber::SockConnect => self.handle_sock_connect(pid, args),
+            SyscallNumber::SockRecv => self.handle_sock_recv(pid, args),
+            SyscallNumber::SockSend => self.handle_sock_send(pid, args),
+            SyscallNumber::SockShutdown => self.handle_sock_shutdown(pid, args),
+            SyscallNumber::SockClose => self.handle_sock_close(pid, args),
+            SyscallNumber::GetAddrInfo => self.handle_getaddrinfo(pid, args),
             _ => SyscallResult::Error(format!("Unimplemented syscall: {syscall:?}")),
         }
     }
@@ -301,18 +438,31 @@ impl SyscallHandler {
             None => return SyscallResult::Error(format!("read: invalid file descriptor: {fd}")),
         };
 
-        if !descriptor.flags.read {
-            return SyscallResult::Error("read: file descriptor not open for reading".to_string());
-        }
+        match descriptor {
+            FileDescriptor::File {
+                path,
+                offset,
+                flags,
+            } => {
+                if !flags.read {
+                    return SyscallResult::Error(
+                        "read: file descriptor not open for reading".to_string(),
+                    );
+                }
 
-        match self.kernel.read_file(&descriptor.path) {
-            Ok(data) => {
-                let start = descriptor.offset.min(data.len());
-                let end = (start + count).min(data.len());
-                let result = data[start..end].to_vec();
-                SyscallResult::Success(SyscallReturn::Buffer(result))
+                match self.kernel.read_file(path) {
+                    Ok(data) => {
+                        let start = (*offset).min(data.len());
+                        let end = (start + count).min(data.len());
+                        let result = data[start..end].to_vec();
+                        SyscallResult::Success(SyscallReturn::Buffer(result))
+                    }
+                    Err(e) => SyscallResult::Error(format!("read: {e}")),
+                }
             }
-            Err(e) => SyscallResult::Error(format!("read: {e}")),
+            FileDescriptor::Socket { .. } => {
+                SyscallResult::Error("read: use sock_recv for sockets".to_string())
+            }
         }
     }
 
@@ -332,6 +482,12 @@ impl SyscallHandler {
             _ => return SyscallResult::Error("write: invalid data argument".to_string()),
         };
 
+        if fd == 1 || fd == 2 {
+            let output = String::from_utf8_lossy(&data);
+            println!("[PID {pid}] {output}");
+            return SyscallResult::Success(SyscallReturn::Number(data.len() as i64));
+        }
+
         let fd_table = match self.fd_tables.get(&pid) {
             Some(table) => table,
             None => {
@@ -346,21 +502,22 @@ impl SyscallHandler {
             None => return SyscallResult::Error(format!("write: invalid file descriptor: {fd}")),
         };
 
-        if !descriptor.flags.write {
-            return SyscallResult::Error("write: file descriptor not open for writing".to_string());
-        }
+        match descriptor {
+            FileDescriptor::File { path, flags, .. } => {
+                if !flags.write {
+                    return SyscallResult::Error(
+                        "write: file descriptor not open for writing".to_string(),
+                    );
+                }
 
-        // Handle stdout/stderr specially
-        if fd == 1 || fd == 2 {
-            // In a real implementation, this would go to the browser console
-            let output = String::from_utf8_lossy(&data);
-            println!("[PID {pid}] {output}");
-            return SyscallResult::Success(SyscallReturn::Number(data.len() as i64));
-        }
-
-        match self.kernel.write_file(&descriptor.path, &data) {
-            Ok(_) => SyscallResult::Success(SyscallReturn::Number(data.len() as i64)),
-            Err(e) => SyscallResult::Error(format!("write: {e}")),
+                match self.kernel.write_file(path, &data) {
+                    Ok(_) => SyscallResult::Success(SyscallReturn::Number(data.len() as i64)),
+                    Err(e) => SyscallResult::Error(format!("write: {e}")),
+                }
+            }
+            FileDescriptor::Socket { .. } => {
+                SyscallResult::Error("write: use sock_send for sockets".to_string())
+            }
         }
     }
 
@@ -471,5 +628,754 @@ impl SyscallHandler {
 
         println!("[PID {pid}] {message}");
         SyscallResult::Success(SyscallReturn::Number(message.len() as i64))
+    }
+
+    fn handle_sock_open(&mut self, pid: Pid, args: SyscallArgs) -> SyscallResult {
+        if args.args.len() < 2 {
+            return SyscallResult::Error("sock_open: insufficient arguments".to_string());
+        }
+
+        let address_family = match &args.args[0] {
+            SyscallArg::Number(n) => match AddressFamily::try_from(*n) {
+                Ok(af) => af,
+                Err(e) => return SyscallResult::Error(format!("sock_open: {e}")),
+            },
+            _ => return SyscallResult::Error("sock_open: invalid address family".to_string()),
+        };
+
+        let socket_type = match &args.args[1] {
+            SyscallArg::Number(n) => match SocketType::try_from(*n) {
+                Ok(st) => st,
+                Err(e) => return SyscallResult::Error(format!("sock_open: {e}")),
+            },
+            _ => return SyscallResult::Error("sock_open: invalid socket type".to_string()),
+        };
+
+        if address_family == AddressFamily::Unix {
+            return SyscallResult::Error("sock_open: Unix sockets not yet supported".to_string());
+        }
+
+        let handle = match socket_type {
+            SocketType::Stream => {
+                let dummy_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0);
+                match TcpStream::connect(dummy_addr) {
+                    Ok(_) => {
+                        return SyscallResult::Error("sock_open: unexpected connection".to_string())
+                    }
+                    Err(_) => {
+                        let listener = match TcpListener::bind("0.0.0.0:0") {
+                            Ok(l) => l,
+                            Err(e) => return SyscallResult::Error(format!("sock_open: {e}")),
+                        };
+                        drop(listener);
+
+                        let placeholder = match TcpListener::bind("0.0.0.0:0") {
+                            Ok(l) => l,
+                            Err(e) => return SyscallResult::Error(format!("sock_open: {e}")),
+                        };
+                        SocketHandle::TcpListener(Arc::new(Mutex::new(placeholder)))
+                    }
+                }
+            }
+            SocketType::Dgram => {
+                let socket = match UdpSocket::bind("0.0.0.0:0") {
+                    Ok(s) => s,
+                    Err(e) => return SyscallResult::Error(format!("sock_open: {e}")),
+                };
+                SocketHandle::UdpSocket(Arc::new(Mutex::new(socket)))
+            }
+        };
+
+        let fd_table = self.fd_tables.entry(pid).or_default();
+        let fd = fd_table.open_socket(handle, address_family, socket_type);
+
+        SyscallResult::Success(SyscallReturn::FileDescriptor(fd))
+    }
+
+    fn handle_sock_bind(&mut self, pid: Pid, args: SyscallArgs) -> SyscallResult {
+        if args.args.len() < 3 {
+            return SyscallResult::Error(
+                "sock_bind: insufficient arguments (need fd, ip, port)".to_string(),
+            );
+        }
+
+        let fd = match &args.args[0] {
+            SyscallArg::Number(n) => *n as i32,
+            _ => return SyscallResult::Error("sock_bind: invalid fd".to_string()),
+        };
+
+        let ip_str = match &args.args[1] {
+            SyscallArg::String(s) => s.clone(),
+            _ => return SyscallResult::Error("sock_bind: invalid ip address".to_string()),
+        };
+
+        let port = match &args.args[2] {
+            SyscallArg::Number(n) => *n as u16,
+            _ => return SyscallResult::Error("sock_bind: invalid port".to_string()),
+        };
+
+        let ip: IpAddr = match ip_str.parse() {
+            Ok(addr) => addr,
+            Err(_) => {
+                return SyscallResult::Error(format!("sock_bind: invalid IP address: {ip_str}"))
+            }
+        };
+
+        let bind_addr = SocketAddr::new(ip, port);
+
+        let fd_table = match self.fd_tables.get_mut(&pid) {
+            Some(table) => table,
+            None => return SyscallResult::Error("sock_bind: no fd table".to_string()),
+        };
+
+        let descriptor = match fd_table.get_mut(fd) {
+            Some(desc) => desc,
+            None => return SyscallResult::Error(format!("sock_bind: invalid fd: {fd}")),
+        };
+
+        match descriptor {
+            FileDescriptor::Socket {
+                handle,
+                state,
+                local_addr,
+                ..
+            } => {
+                if *state != SocketState::Created {
+                    return SyscallResult::Error("sock_bind: socket already bound".to_string());
+                }
+
+                let result = match handle {
+                    SocketHandle::TcpListener(listener) => {
+                        let new_listener = match TcpListener::bind(bind_addr) {
+                            Ok(l) => l,
+                            Err(e) => return SyscallResult::Error(format!("sock_bind: {e}")),
+                        };
+                        *listener.lock().unwrap() = new_listener;
+                        Ok(())
+                    }
+                    SocketHandle::UdpSocket(socket) => {
+                        let new_socket = match UdpSocket::bind(bind_addr) {
+                            Ok(s) => s,
+                            Err(e) => return SyscallResult::Error(format!("sock_bind: {e}")),
+                        };
+                        *socket.lock().unwrap() = new_socket;
+                        Ok(())
+                    }
+                    SocketHandle::TcpStream(_) => Err(anyhow::anyhow!("Cannot bind TCP stream")),
+                };
+
+                match result {
+                    Ok(_) => {
+                        *state = SocketState::Bound;
+                        *local_addr = Some(bind_addr);
+                        SyscallResult::Success(SyscallReturn::Number(0))
+                    }
+                    Err(e) => SyscallResult::Error(format!("sock_bind: {e}")),
+                }
+            }
+            FileDescriptor::File { .. } => {
+                SyscallResult::Error("sock_bind: not a socket".to_string())
+            }
+        }
+    }
+
+    fn handle_sock_listen(&mut self, pid: Pid, args: SyscallArgs) -> SyscallResult {
+        if args.args.len() < 2 {
+            return SyscallResult::Error("sock_listen: insufficient arguments".to_string());
+        }
+
+        let fd = match &args.args[0] {
+            SyscallArg::Number(n) => *n as i32,
+            _ => return SyscallResult::Error("sock_listen: invalid fd".to_string()),
+        };
+
+        let _backlog = match &args.args[1] {
+            SyscallArg::Number(n) => *n as i32,
+            _ => return SyscallResult::Error("sock_listen: invalid backlog".to_string()),
+        };
+
+        let fd_table = match self.fd_tables.get_mut(&pid) {
+            Some(table) => table,
+            None => return SyscallResult::Error("sock_listen: no fd table".to_string()),
+        };
+
+        let descriptor = match fd_table.get_mut(fd) {
+            Some(desc) => desc,
+            None => return SyscallResult::Error(format!("sock_listen: invalid fd: {fd}")),
+        };
+
+        match descriptor {
+            FileDescriptor::Socket { handle, state, .. } => {
+                if *state != SocketState::Bound {
+                    return SyscallResult::Error("sock_listen: socket not bound".to_string());
+                }
+
+                match handle {
+                    SocketHandle::TcpListener(_) => {
+                        *state = SocketState::Listening;
+                        SyscallResult::Success(SyscallReturn::Number(0))
+                    }
+                    _ => SyscallResult::Error("sock_listen: not a TCP socket".to_string()),
+                }
+            }
+            FileDescriptor::File { .. } => {
+                SyscallResult::Error("sock_listen: not a socket".to_string())
+            }
+        }
+    }
+
+    fn handle_sock_accept(&mut self, pid: Pid, args: SyscallArgs) -> SyscallResult {
+        if args.args.is_empty() {
+            return SyscallResult::Error("sock_accept: insufficient arguments".to_string());
+        }
+
+        let fd = match &args.args[0] {
+            SyscallArg::Number(n) => *n as i32,
+            _ => return SyscallResult::Error("sock_accept: invalid fd".to_string()),
+        };
+
+        let fd_table = match self.fd_tables.get_mut(&pid) {
+            Some(table) => table,
+            None => return SyscallResult::Error("sock_accept: no fd table".to_string()),
+        };
+
+        let descriptor = match fd_table.get(fd) {
+            Some(desc) => desc,
+            None => return SyscallResult::Error(format!("sock_accept: invalid fd: {fd}")),
+        };
+
+        let (stream, peer_addr) = match descriptor {
+            FileDescriptor::Socket { handle, state, .. } => {
+                if *state != SocketState::Listening {
+                    return SyscallResult::Error("sock_accept: socket not listening".to_string());
+                }
+
+                match handle {
+                    SocketHandle::TcpListener(listener) => {
+                        match listener.lock().unwrap().accept() {
+                            Ok((stream, addr)) => (stream, addr),
+                            Err(e) => return SyscallResult::Error(format!("sock_accept: {e}")),
+                        }
+                    }
+                    _ => {
+                        return SyscallResult::Error(
+                            "sock_accept: not a listening socket".to_string(),
+                        )
+                    }
+                }
+            }
+            FileDescriptor::File { .. } => {
+                return SyscallResult::Error("sock_accept: not a socket".to_string())
+            }
+        };
+
+        let new_fd = fd_table.open_socket(
+            SocketHandle::TcpStream(Arc::new(Mutex::new(stream))),
+            AddressFamily::Inet,
+            SocketType::Stream,
+        );
+
+        if let Some(FileDescriptor::Socket {
+            state,
+            peer_addr: peer,
+            ..
+        }) = fd_table.get_mut(new_fd)
+        {
+            *state = SocketState::Connected;
+            *peer = Some(peer_addr);
+        }
+
+        SyscallResult::Success(SyscallReturn::FileDescriptor(new_fd))
+    }
+
+    fn handle_sock_connect(&mut self, pid: Pid, args: SyscallArgs) -> SyscallResult {
+        if args.args.len() < 3 {
+            return SyscallResult::Error("sock_connect: insufficient arguments".to_string());
+        }
+
+        let fd = match &args.args[0] {
+            SyscallArg::Number(n) => *n as i32,
+            _ => return SyscallResult::Error("sock_connect: invalid fd".to_string()),
+        };
+
+        let ip_str = match &args.args[1] {
+            SyscallArg::String(s) => s.clone(),
+            _ => return SyscallResult::Error("sock_connect: invalid ip".to_string()),
+        };
+
+        let port = match &args.args[2] {
+            SyscallArg::Number(n) => *n as u16,
+            _ => return SyscallResult::Error("sock_connect: invalid port".to_string()),
+        };
+
+        let ip: IpAddr = match ip_str.parse() {
+            Ok(addr) => addr,
+            Err(_) => return SyscallResult::Error(format!("sock_connect: invalid IP: {ip_str}")),
+        };
+
+        let connect_addr = SocketAddr::new(ip, port);
+
+        let fd_table = match self.fd_tables.get_mut(&pid) {
+            Some(table) => table,
+            None => return SyscallResult::Error("sock_connect: no fd table".to_string()),
+        };
+
+        let descriptor = match fd_table.get_mut(fd) {
+            Some(desc) => desc,
+            None => return SyscallResult::Error(format!("sock_connect: invalid fd: {fd}")),
+        };
+
+        match descriptor {
+            FileDescriptor::Socket {
+                handle,
+                state,
+                peer_addr,
+                socket_type,
+                ..
+            } => match socket_type {
+                SocketType::Stream => {
+                    let stream = match TcpStream::connect(connect_addr) {
+                        Ok(s) => s,
+                        Err(e) => return SyscallResult::Error(format!("sock_connect: {e}")),
+                    };
+
+                    *handle = SocketHandle::TcpStream(Arc::new(Mutex::new(stream)));
+                    *state = SocketState::Connected;
+                    *peer_addr = Some(connect_addr);
+                    SyscallResult::Success(SyscallReturn::Number(0))
+                }
+                SocketType::Dgram => match handle {
+                    SocketHandle::UdpSocket(socket) => {
+                        match socket.lock().unwrap().connect(connect_addr) {
+                            Ok(_) => {
+                                *state = SocketState::Connected;
+                                *peer_addr = Some(connect_addr);
+                                SyscallResult::Success(SyscallReturn::Number(0))
+                            }
+                            Err(e) => SyscallResult::Error(format!("sock_connect: {e}")),
+                        }
+                    }
+                    _ => SyscallResult::Error("sock_connect: invalid socket handle".to_string()),
+                },
+            },
+            FileDescriptor::File { .. } => {
+                SyscallResult::Error("sock_connect: not a socket".to_string())
+            }
+        }
+    }
+
+    fn handle_sock_recv(&mut self, pid: Pid, args: SyscallArgs) -> SyscallResult {
+        if args.args.len() < 2 {
+            return SyscallResult::Error("sock_recv: insufficient arguments".to_string());
+        }
+
+        let fd = match &args.args[0] {
+            SyscallArg::Number(n) => *n as i32,
+            _ => return SyscallResult::Error("sock_recv: invalid fd".to_string()),
+        };
+
+        let max_len = match &args.args[1] {
+            SyscallArg::Number(n) => *n as usize,
+            _ => return SyscallResult::Error("sock_recv: invalid length".to_string()),
+        };
+
+        let fd_table = match self.fd_tables.get(&pid) {
+            Some(table) => table,
+            None => return SyscallResult::Error("sock_recv: no fd table".to_string()),
+        };
+
+        let descriptor = match fd_table.get(fd) {
+            Some(desc) => desc,
+            None => return SyscallResult::Error(format!("sock_recv: invalid fd: {fd}")),
+        };
+
+        match descriptor {
+            FileDescriptor::Socket { handle, state, .. } => {
+                if *state != SocketState::Connected {
+                    return SyscallResult::Error("sock_recv: socket not connected".to_string());
+                }
+
+                let mut buffer = vec![0u8; max_len];
+
+                let bytes_read = match handle {
+                    SocketHandle::TcpStream(stream) => {
+                        match stream.lock().unwrap().read(&mut buffer) {
+                            Ok(n) => n,
+                            Err(e) => return SyscallResult::Error(format!("sock_recv: {e}")),
+                        }
+                    }
+                    SocketHandle::UdpSocket(socket) => {
+                        match socket.lock().unwrap().recv(&mut buffer) {
+                            Ok(n) => n,
+                            Err(e) => return SyscallResult::Error(format!("sock_recv: {e}")),
+                        }
+                    }
+                    _ => return SyscallResult::Error("sock_recv: invalid socket type".to_string()),
+                };
+
+                buffer.truncate(bytes_read);
+                SyscallResult::Success(SyscallReturn::Buffer(buffer))
+            }
+            FileDescriptor::File { .. } => {
+                SyscallResult::Error("sock_recv: not a socket".to_string())
+            }
+        }
+    }
+
+    fn handle_sock_send(&mut self, pid: Pid, args: SyscallArgs) -> SyscallResult {
+        if args.args.len() < 2 {
+            return SyscallResult::Error("sock_send: insufficient arguments".to_string());
+        }
+
+        let fd = match &args.args[0] {
+            SyscallArg::Number(n) => *n as i32,
+            _ => return SyscallResult::Error("sock_send: invalid fd".to_string()),
+        };
+
+        let data = match &args.args[1] {
+            SyscallArg::Buffer(buf) => buf.clone(),
+            SyscallArg::String(s) => s.as_bytes().to_vec(),
+            _ => return SyscallResult::Error("sock_send: invalid data".to_string()),
+        };
+
+        let fd_table = match self.fd_tables.get(&pid) {
+            Some(table) => table,
+            None => return SyscallResult::Error("sock_send: no fd table".to_string()),
+        };
+
+        let descriptor = match fd_table.get(fd) {
+            Some(desc) => desc,
+            None => return SyscallResult::Error(format!("sock_send: invalid fd: {fd}")),
+        };
+
+        match descriptor {
+            FileDescriptor::Socket { handle, state, .. } => {
+                if *state != SocketState::Connected {
+                    return SyscallResult::Error("sock_send: socket not connected".to_string());
+                }
+
+                let bytes_sent = match handle {
+                    SocketHandle::TcpStream(stream) => match stream.lock().unwrap().write(&data) {
+                        Ok(n) => n,
+                        Err(e) => return SyscallResult::Error(format!("sock_send: {e}")),
+                    },
+                    SocketHandle::UdpSocket(socket) => match socket.lock().unwrap().send(&data) {
+                        Ok(n) => n,
+                        Err(e) => return SyscallResult::Error(format!("sock_send: {e}")),
+                    },
+                    _ => return SyscallResult::Error("sock_send: invalid socket type".to_string()),
+                };
+
+                SyscallResult::Success(SyscallReturn::Number(bytes_sent as i64))
+            }
+            FileDescriptor::File { .. } => {
+                SyscallResult::Error("sock_send: not a socket".to_string())
+            }
+        }
+    }
+
+    fn handle_sock_shutdown(&mut self, pid: Pid, args: SyscallArgs) -> SyscallResult {
+        if args.args.len() < 2 {
+            return SyscallResult::Error("sock_shutdown: insufficient arguments".to_string());
+        }
+
+        let fd = match &args.args[0] {
+            SyscallArg::Number(n) => *n as i32,
+            _ => return SyscallResult::Error("sock_shutdown: invalid fd".to_string()),
+        };
+
+        let how = match &args.args[1] {
+            SyscallArg::Number(n) => match *n {
+                0 => Shutdown::Read,
+                1 => Shutdown::Write,
+                2 => Shutdown::Both,
+                _ => return SyscallResult::Error("sock_shutdown: invalid how".to_string()),
+            },
+            _ => return SyscallResult::Error("sock_shutdown: invalid how".to_string()),
+        };
+
+        let fd_table = match self.fd_tables.get(&pid) {
+            Some(table) => table,
+            None => return SyscallResult::Error("sock_shutdown: no fd table".to_string()),
+        };
+
+        let descriptor = match fd_table.get(fd) {
+            Some(desc) => desc,
+            None => return SyscallResult::Error(format!("sock_shutdown: invalid fd: {fd}")),
+        };
+
+        match descriptor {
+            FileDescriptor::Socket { handle, .. } => match handle {
+                SocketHandle::TcpStream(stream) => match stream.lock().unwrap().shutdown(how) {
+                    Ok(_) => SyscallResult::Success(SyscallReturn::Number(0)),
+                    Err(e) => SyscallResult::Error(format!("sock_shutdown: {e}")),
+                },
+                _ => SyscallResult::Error(
+                    "sock_shutdown: only TCP streams support shutdown".to_string(),
+                ),
+            },
+            FileDescriptor::File { .. } => {
+                SyscallResult::Error("sock_shutdown: not a socket".to_string())
+            }
+        }
+    }
+
+    fn handle_sock_close(&mut self, pid: Pid, args: SyscallArgs) -> SyscallResult {
+        self.handle_close(pid, args)
+    }
+
+    fn handle_getaddrinfo(&mut self, _pid: Pid, args: SyscallArgs) -> SyscallResult {
+        if args.args.is_empty() {
+            return SyscallResult::Error("getaddrinfo: insufficient arguments".to_string());
+        }
+
+        let hostname = match &args.args[0] {
+            SyscallArg::String(s) => s.clone(),
+            _ => return SyscallResult::Error("getaddrinfo: invalid hostname".to_string()),
+        };
+
+        let port = if args.args.len() > 1 {
+            match &args.args[1] {
+                SyscallArg::Number(n) => *n as u16,
+                SyscallArg::String(s) => s.parse().unwrap_or_default(),
+                _ => 0,
+            }
+        } else {
+            0
+        };
+
+        let addr_str = format!("{hostname}:{port}");
+        let addrs: Result<Vec<SocketAddr>> = addr_str
+            .to_socket_addrs()
+            .map(|iter| iter.collect())
+            .map_err(|e| anyhow::anyhow!("DNS resolution failed: {e}"));
+
+        match addrs {
+            Ok(addresses) => {
+                let addr_strings: Vec<String> =
+                    addresses.iter().map(|addr| addr.to_string()).collect();
+                SyscallResult::Success(SyscallReturn::String(addr_strings.join(",")))
+            }
+            Err(e) => SyscallResult::Error(format!("getaddrinfo: {e}")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn test_socket_types() {
+        assert_eq!(AddressFamily::Inet as i64, 2);
+        assert_eq!(AddressFamily::Inet6 as i64, 10);
+        assert_eq!(SocketType::Stream as i64, 1);
+        assert_eq!(SocketType::Dgram as i64, 2);
+    }
+
+    #[test]
+    fn test_socket_state_transitions() {
+        let initial_state = SocketState::Created;
+        assert_eq!(initial_state, SocketState::Created);
+
+        let bound_state = SocketState::Bound;
+        assert_eq!(bound_state, SocketState::Bound);
+
+        let listening_state = SocketState::Listening;
+        assert_eq!(listening_state, SocketState::Listening);
+
+        let connected_state = SocketState::Connected;
+        assert_eq!(connected_state, SocketState::Connected);
+    }
+
+    #[test]
+    fn test_tcp_socket_creation_and_binding() {
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+        let addr = listener.local_addr().expect("Failed to get address");
+        assert!(addr.port() > 0);
+    }
+
+    #[test]
+    fn test_tcp_client_server_communication() {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+
+        let server_port = 19999;
+
+        let server_handle = thread::spawn(move || {
+            let listener = TcpListener::bind(format!("127.0.0.1:{server_port}"))
+                .expect("Failed to bind server");
+
+            match listener.accept() {
+                Ok((mut stream, _addr)) => {
+                    let mut buffer = [0u8; 1024];
+                    let n = stream.read(&mut buffer).expect("Failed to read");
+                    let received = String::from_utf8_lossy(&buffer[..n]).to_string();
+
+                    let response = b"Hello from server!";
+                    stream.write_all(response).expect("Failed to send");
+
+                    received
+                }
+                Err(e) => panic!("Failed to accept: {e}"),
+            }
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let client_message = "Hello from client!";
+        let mut stream = TcpStream::connect(format!("127.0.0.1:{server_port}"))
+            .expect("Failed to connect");
+
+        stream
+            .write_all(client_message.as_bytes())
+            .expect("Failed to send");
+
+        let mut buffer = [0u8; 1024];
+        let n = stream.read(&mut buffer).expect("Failed to read");
+        let received = String::from_utf8_lossy(&buffer[..n]).to_string();
+
+        let server_received = server_handle.join().expect("Server thread panicked");
+
+        assert_eq!(server_received, client_message);
+        assert_eq!(received, "Hello from server!");
+    }
+
+    #[test]
+    fn test_udp_socket_communication() {
+        use std::net::UdpSocket;
+
+        let receiver = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind receiver");
+        let receiver_addr = receiver.local_addr().expect("Failed to get receiver address");
+
+        let sender = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind sender");
+
+        let message = b"Hello via UDP!";
+        sender
+            .send_to(message, receiver_addr)
+            .expect("Failed to send");
+
+        let mut buffer = [0u8; 1024];
+        let (n, _src) = receiver.recv_from(&mut buffer).expect("Failed to receive");
+
+        assert_eq!(&buffer[..n], message);
+    }
+
+    #[test]
+    fn test_file_descriptor_table() {
+        let mut table = FileDescriptorTable::default();
+
+        assert_eq!(table.descriptors.len(), 3);
+        assert!(table.get(0).is_some());
+        assert!(table.get(1).is_some());
+        assert!(table.get(2).is_some());
+
+        let fd = table.open(
+            "/test/file.txt".to_string(),
+            OpenFlags {
+                read: true,
+                write: false,
+                create: false,
+                truncate: false,
+            },
+        );
+
+        assert_eq!(fd, 3);
+        assert!(table.get(3).is_some());
+
+        assert!(table.close(3));
+        assert!(table.get(3).is_none());
+    }
+
+    #[test]
+    fn test_socket_descriptor() {
+        use std::net::TcpListener;
+
+        let mut table = FileDescriptorTable::default();
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+        let handle = SocketHandle::TcpListener(Arc::new(Mutex::new(listener)));
+
+        let fd = table.open_socket(handle, AddressFamily::Inet, SocketType::Stream);
+
+        assert_eq!(fd, 3);
+
+        if let Some(FileDescriptor::Socket {
+            address_family,
+            socket_type,
+            state,
+            ..
+        }) = table.get(fd)
+        {
+            assert_eq!(*address_family, AddressFamily::Inet);
+            assert_eq!(*socket_type, SocketType::Stream);
+            assert_eq!(*state, SocketState::Created);
+        } else {
+            panic!("Expected socket descriptor");
+        }
+    }
+
+    #[test]
+    fn test_address_family_conversion() {
+        assert_eq!(AddressFamily::try_from(2).unwrap(), AddressFamily::Inet);
+        assert_eq!(AddressFamily::try_from(10).unwrap(), AddressFamily::Inet6);
+        assert_eq!(AddressFamily::try_from(1).unwrap(), AddressFamily::Unix);
+        assert!(AddressFamily::try_from(99).is_err());
+    }
+
+    #[test]
+    fn test_socket_type_conversion() {
+        assert_eq!(SocketType::try_from(1).unwrap(), SocketType::Stream);
+        assert_eq!(SocketType::try_from(2).unwrap(), SocketType::Dgram);
+        assert!(SocketType::try_from(99).is_err());
+    }
+
+    #[test]
+    fn test_syscall_number_conversion() {
+        assert_eq!(
+            SyscallNumber::try_from(19).unwrap(),
+            SyscallNumber::SockOpen
+        );
+        assert_eq!(
+            SyscallNumber::try_from(20).unwrap(),
+            SyscallNumber::SockBind
+        );
+        assert_eq!(
+            SyscallNumber::try_from(21).unwrap(),
+            SyscallNumber::SockListen
+        );
+        assert_eq!(
+            SyscallNumber::try_from(22).unwrap(),
+            SyscallNumber::SockAccept
+        );
+        assert_eq!(
+            SyscallNumber::try_from(23).unwrap(),
+            SyscallNumber::SockConnect
+        );
+        assert_eq!(
+            SyscallNumber::try_from(24).unwrap(),
+            SyscallNumber::SockRecv
+        );
+        assert_eq!(
+            SyscallNumber::try_from(25).unwrap(),
+            SyscallNumber::SockSend
+        );
+        assert_eq!(
+            SyscallNumber::try_from(26).unwrap(),
+            SyscallNumber::SockShutdown
+        );
+        assert_eq!(
+            SyscallNumber::try_from(27).unwrap(),
+            SyscallNumber::SockClose
+        );
+        assert_eq!(
+            SyscallNumber::try_from(28).unwrap(),
+            SyscallNumber::GetAddrInfo
+        );
+        assert!(SyscallNumber::try_from(999).is_err());
     }
 }
