@@ -141,7 +141,11 @@ impl NetworkNamespace {
     }
 
     #[allow(dead_code)]
-    pub fn update_connection_state(&self, socket_fd: SocketFd, state: ConnectionState) -> Result<()> {
+    pub fn update_connection_state(
+        &self,
+        socket_fd: SocketFd,
+        state: ConnectionState,
+    ) -> Result<()> {
         let mut connections = self.connections.write().unwrap();
 
         if let Some(conn) = connections.get_mut(&socket_fd) {
@@ -267,7 +271,8 @@ mod tests {
         assert_eq!(conn.socket_fd, 3);
         assert_eq!(conn.state, ConnectionState::Listening);
 
-        ns.update_connection_state(3, ConnectionState::Connected).unwrap();
+        ns.update_connection_state(3, ConnectionState::Connected)
+            .unwrap();
         let conn = ns.get_connection(3).unwrap();
         assert_eq!(conn.state, ConnectionState::Connected);
 
@@ -283,8 +288,22 @@ mod tests {
         ns.allocate_port(8080, SocketProtocol::Tcp).unwrap();
         ns.allocate_port(8081, SocketProtocol::Udp).unwrap();
 
-        ns.register_connection(3, addr, None, SocketProtocol::Tcp, ConnectionState::Listening).unwrap();
-        ns.register_connection(4, addr, Some(addr), SocketProtocol::Tcp, ConnectionState::Connected).unwrap();
+        ns.register_connection(
+            3,
+            addr,
+            None,
+            SocketProtocol::Tcp,
+            ConnectionState::Listening,
+        )
+        .unwrap();
+        ns.register_connection(
+            4,
+            addr,
+            Some(addr),
+            SocketProtocol::Tcp,
+            ConnectionState::Connected,
+        )
+        .unwrap();
 
         let stats = ns.get_stats();
         assert_eq!(stats.pid, 5);

@@ -1228,8 +1228,8 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         let client_message = "Hello from client!";
-        let mut stream = TcpStream::connect(format!("127.0.0.1:{server_port}"))
-            .expect("Failed to connect");
+        let mut stream =
+            TcpStream::connect(format!("127.0.0.1:{server_port}")).expect("Failed to connect");
 
         stream
             .write_all(client_message.as_bytes())
@@ -1250,7 +1250,9 @@ mod tests {
         use std::net::UdpSocket;
 
         let receiver = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind receiver");
-        let receiver_addr = receiver.local_addr().expect("Failed to get receiver address");
+        let receiver_addr = receiver
+            .local_addr()
+            .expect("Failed to get receiver address");
 
         let sender = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind sender");
 

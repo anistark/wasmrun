@@ -387,7 +387,9 @@ impl MultiLanguageKernel {
     }
 
     /// Get network statistics for all processes
-    pub fn get_network_stats(&self) -> HashMap<Pid, crate::runtime::network_namespace::NetworkStats> {
+    pub fn get_network_stats(
+        &self,
+    ) -> HashMap<Pid, crate::runtime::network_namespace::NetworkStats> {
         let namespaces = self.network_namespaces.lock().unwrap();
         namespaces
             .iter()
