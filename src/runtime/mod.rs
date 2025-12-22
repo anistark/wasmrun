@@ -3,6 +3,7 @@ pub mod dev_server;
 pub mod languages;
 pub mod microkernel;
 pub mod multilang_kernel;
+pub mod network_namespace;
 pub mod os_server;
 pub mod registry;
 pub mod scheduler;
