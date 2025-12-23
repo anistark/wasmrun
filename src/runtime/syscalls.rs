@@ -1380,4 +1380,142 @@ mod tests {
         );
         assert!(SyscallNumber::try_from(999).is_err());
     }
+
+    #[test]
+    fn test_concurrent_tcp_connections() {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::{Arc, Mutex};
+
+        let server_port = 20001;
+        let connection_count = Arc::new(Mutex::new(0));
+        let count_clone = connection_count.clone();
+
+        let server_handle = thread::spawn(move || {
+            let listener = TcpListener::bind(format!("127.0.0.1:{server_port}"))
+                .expect("Failed to bind server");
+
+            for _ in 0..5 {
+                match listener.accept() {
+                    Ok((mut stream, _addr)) => {
+                        let mut count = count_clone.lock().unwrap();
+                        *count += 1;
+
+                        let mut buffer = [0u8; 1024];
+                        let _ = stream.read(&mut buffer);
+                        stream.write_all(b"OK").ok();
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        thread::sleep(Duration::from_millis(100));
+
+        let mut handles = vec![];
+        for _ in 0..5 {
+            let handle = thread::spawn(move || {
+                let mut stream = TcpStream::connect(format!("127.0.0.1:{server_port}"))
+                    .expect("Failed to connect");
+                stream.write_all(b"Hello").expect("Failed to send");
+                let mut buffer = [0u8; 1024];
+                let _ = stream.read(&mut buffer);
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().expect("Client thread panicked");
+        }
+
+        server_handle.join().expect("Server thread panicked");
+
+        let final_count = *connection_count.lock().unwrap();
+        assert_eq!(final_count, 5);
+    }
+
+    #[test]
+    fn test_udp_bidirectional() {
+        use std::net::UdpSocket;
+
+        let socket1 = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind socket1");
+        let socket2 = UdpSocket::bind("127.0.0.1:0").expect("Failed to bind socket2");
+
+        let addr1 = socket1.local_addr().expect("Failed to get socket1 address");
+        let addr2 = socket2.local_addr().expect("Failed to get socket2 address");
+
+        socket1
+            .send_to(b"Message from 1", addr2)
+            .expect("Failed to send");
+        socket2
+            .send_to(b"Message from 2", addr1)
+            .expect("Failed to send");
+
+        let mut buffer = [0u8; 1024];
+        let (n, src) = socket2
+            .recv_from(&mut buffer)
+            .expect("Failed to receive at socket2");
+        assert_eq!(&buffer[..n], b"Message from 1");
+        assert_eq!(src, addr1);
+
+        let (n, src) = socket1
+            .recv_from(&mut buffer)
+            .expect("Failed to receive at socket1");
+        assert_eq!(&buffer[..n], b"Message from 2");
+        assert_eq!(src, addr2);
+    }
+
+    #[test]
+    fn test_tcp_connection_error_handling() {
+        use std::net::TcpStream;
+
+        let result = TcpStream::connect("127.0.0.1:1");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_file_descriptor_exhaustion() {
+        let mut table = FileDescriptorTable::default();
+
+        for i in 0..1000 {
+            let fd = table.open(
+                format!("/test/file{i}.txt"),
+                OpenFlags {
+                    read: true,
+                    write: false,
+                    create: false,
+                    truncate: false,
+                },
+            );
+            assert_eq!(fd, 3 + i);
+        }
+
+        assert_eq!(table.descriptors.len(), 1003);
+    }
+
+    #[test]
+    fn test_socket_state_validation() {
+        let mut table = FileDescriptorTable::default();
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind");
+        let handle = SocketHandle::TcpListener(Arc::new(Mutex::new(listener)));
+        let fd = table.open_socket(handle, AddressFamily::Inet, SocketType::Stream);
+
+        if let Some(FileDescriptor::Socket { state, .. }) = table.get(fd) {
+            assert_eq!(*state, SocketState::Created);
+        }
+
+        if let Some(FileDescriptor::Socket {
+            state, local_addr, ..
+        }) = table.get_mut(fd)
+        {
+            *state = SocketState::Bound;
+            *local_addr = Some("127.0.0.1:8080".parse().unwrap());
+        }
+
+        if let Some(FileDescriptor::Socket { state, .. }) = table.get(fd) {
+            assert_eq!(*state, SocketState::Bound);
+        }
+    }
 }

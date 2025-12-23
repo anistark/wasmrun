@@ -420,3 +420,48 @@ pub enum PortStatus {
         alternative: Option<u16>,
     },
 }
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct NetworkPolicy {
+    pub allowed_destinations: Vec<String>,
+    pub allowed_ports: Vec<u16>,
+    pub bindable_port_range: (u16, u16),
+}
+
+impl Default for NetworkPolicy {
+    fn default() -> Self {
+        Self {
+            allowed_destinations: vec!["*".to_string()],
+            allowed_ports: vec![],
+            bindable_port_range: (10000, 65535),
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl NetworkPolicy {
+    pub fn is_destination_allowed(&self, host: &str) -> bool {
+        if self.allowed_destinations.contains(&"*".to_string()) {
+            return true;
+        }
+        self.allowed_destinations.iter().any(|dest| {
+            if let Some(stripped) = dest.strip_prefix('*') {
+                host.ends_with(stripped)
+            } else {
+                dest == host
+            }
+        })
+    }
+
+    pub fn is_port_allowed(&self, port: u16) -> bool {
+        if self.allowed_ports.is_empty() {
+            return true;
+        }
+        self.allowed_ports.contains(&port)
+    }
+
+    pub fn is_bindable_port(&self, port: u16) -> bool {
+        port >= self.bindable_port_range.0 && port <= self.bindable_port_range.1
+    }
+}

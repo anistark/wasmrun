@@ -369,6 +369,54 @@ impl OsServer {
                 self.handle_restart_project(request)?;
             }
 
+            // API endpoints for port forwarding
+            (Method::Get, path)
+                if path.starts_with("/api/processes/") && path.ends_with("/ports") =>
+            {
+                let parts: Vec<&str> = path.split('/').collect();
+                if parts.len() >= 4 {
+                    if let Ok(pid) = parts[3].parse::<u32>() {
+                        self.handle_list_ports_request(request, pid)?;
+                    } else {
+                        self.send_error(request, "Invalid PID")?;
+                    }
+                } else {
+                    self.send_404(request)?;
+                }
+            }
+
+            (Method::Post, path)
+                if path.starts_with("/api/processes/") && path.contains("/forward") =>
+            {
+                let parts: Vec<&str> = path.split('/').collect();
+                if parts.len() >= 4 {
+                    if let Ok(pid) = parts[3].parse::<u32>() {
+                        self.handle_create_port_forward_request(request, pid)?;
+                    } else {
+                        self.send_error(request, "Invalid PID")?;
+                    }
+                } else {
+                    self.send_404(request)?;
+                }
+            }
+
+            (Method::Delete, path)
+                if path.starts_with("/api/processes/") && path.contains("/forward/") =>
+            {
+                let parts: Vec<&str> = path.split('/').collect();
+                if parts.len() >= 6 {
+                    if let (Ok(pid), Ok(guest_port)) =
+                        (parts[3].parse::<u32>(), parts[5].parse::<u16>())
+                    {
+                        self.handle_delete_port_forward_request(request, pid, guest_port)?;
+                    } else {
+                        self.send_error(request, "Invalid PID or port")?;
+                    }
+                } else {
+                    self.send_404(request)?;
+                }
+            }
+
             // API endpoint for logs
             (Method::Get, "/api/logs") => {
                 self.handle_logs_request(request)?;
@@ -549,6 +597,177 @@ impl OsServer {
         });
 
         let response = Response::from_string(stats_json.to_string())
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+            );
+
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
+        Ok(())
+    }
+
+    fn handle_list_ports_request(&self, request: Request, pid: u32) -> Result<()> {
+        let kernel = self.kernel.read().unwrap();
+
+        let all_network_stats = kernel.get_network_stats();
+        if let Some(network_stats) = all_network_stats.get(&pid) {
+            let mappings = if let Some(ns) = kernel.get_network_namespace(pid) {
+                ns.list_port_mappings()
+            } else {
+                vec![]
+            };
+
+            let response_json = serde_json::json!({
+                "success": true,
+                "pid": pid,
+                "port_mappings": mappings.iter().map(|m| {
+                    serde_json::json!({
+                        "guest_port": m.guest_port,
+                        "host_port": m.host_port,
+                        "protocol": format!("{:?}", m.protocol),
+                        "created_at": m.created_at.duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default().as_secs()
+                    })
+                }).collect::<Vec<_>>(),
+                "network_stats": {
+                    "base_port": network_stats.base_port,
+                    "allocated_ports": network_stats.allocated_ports,
+                    "total_connections": network_stats.total_connections,
+                    "active_connections": network_stats.active_connections,
+                    "listening_sockets": network_stats.listening_sockets,
+                }
+            });
+
+            let response = Response::from_string(response_json.to_string())
+                .with_header(
+                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                )
+                .with_header(
+                    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                );
+
+            request
+                .respond(response)
+                .map_err(|e| WasmrunError::from(e.to_string()))?;
+        } else {
+            self.send_error(request, &format!("Process with PID {pid} not found"))?;
+        }
+        Ok(())
+    }
+
+    fn handle_create_port_forward_request(&self, mut request: Request, pid: u32) -> Result<()> {
+        let mut content = String::new();
+        let mut reader = request.as_reader();
+        if let Err(e) = std::io::Read::read_to_string(&mut reader, &mut content) {
+            return self.send_error(request, &format!("Failed to read request body: {e}"));
+        }
+
+        let body: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => return self.send_error(request, &format!("Invalid JSON: {e}")),
+        };
+
+        let guest_port = match body.get("guest_port").and_then(|v| v.as_u64()) {
+            Some(p) if p <= u16::MAX as u64 => p as u16,
+            _ => return self.send_error(request, "Invalid guest_port"),
+        };
+
+        let protocol = match body.get("protocol").and_then(|v| v.as_str()) {
+            Some("tcp") | Some("Tcp") => crate::runtime::network_namespace::SocketProtocol::Tcp,
+            Some("udp") | Some("Udp") => crate::runtime::network_namespace::SocketProtocol::Udp,
+            _ => return self.send_error(request, "Invalid protocol (must be 'tcp' or 'udp')"),
+        };
+
+        let kernel = self.kernel.read().unwrap();
+        if let Some(ns) = kernel.get_network_namespace(pid) {
+            match ns.allocate_port(guest_port, protocol) {
+                Ok(host_port) => {
+                    let response_json = serde_json::json!({
+                        "success": true,
+                        "pid": pid,
+                        "guest_port": guest_port,
+                        "host_port": host_port,
+                        "protocol": format!("{:?}", protocol)
+                    });
+
+                    let response = Response::from_string(response_json.to_string())
+                        .with_header(
+                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                                .unwrap(),
+                        )
+                        .with_header(
+                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
+                                .unwrap(),
+                        );
+
+                    request
+                        .respond(response)
+                        .map_err(|e| WasmrunError::from(e.to_string()))?;
+                }
+                Err(e) => {
+                    self.send_error(request, &format!("Failed to allocate port: {e}"))?;
+                }
+            }
+        } else {
+            self.send_error(request, &format!("Process with PID {pid} not found"))?;
+        }
+        Ok(())
+    }
+
+    fn handle_delete_port_forward_request(
+        &self,
+        request: Request,
+        pid: u32,
+        guest_port: u16,
+    ) -> Result<()> {
+        let kernel = self.kernel.read().unwrap();
+
+        if let Some(ns) = kernel.get_network_namespace(pid) {
+            match ns.deallocate_port(guest_port) {
+                Ok(()) => {
+                    let response_json = serde_json::json!({
+                        "success": true,
+                        "pid": pid,
+                        "guest_port": guest_port,
+                        "message": "Port mapping removed successfully"
+                    });
+
+                    let response = Response::from_string(response_json.to_string())
+                        .with_header(
+                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                                .unwrap(),
+                        )
+                        .with_header(
+                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
+                                .unwrap(),
+                        );
+
+                    request
+                        .respond(response)
+                        .map_err(|e| WasmrunError::from(e.to_string()))?;
+                }
+                Err(e) => {
+                    self.send_error(request, &format!("Failed to remove port mapping: {e}"))?;
+                }
+            }
+        } else {
+            self.send_error(request, &format!("Process with PID {pid} not found"))?;
+        }
+        Ok(())
+    }
+
+    fn send_error(&self, request: Request, error_msg: &str) -> Result<()> {
+        let response_json = serde_json::json!({
+            "success": false,
+            "error": error_msg
+        });
+
+        let response = Response::from_string(response_json.to_string())
+            .with_status_code(tiny_http::StatusCode(400))
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
