@@ -1,18 +1,13 @@
 import type {ReactNode} from 'react';
+import {useState, useEffect} from 'react';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
 import styles from './community.module.css';
 
-type Maintainer = {
-  name: string;
-  role: string;
-  github: string;
-  avatar?: string;
-};
-
 type Contributor = {
-  name: string;
-  github: string;
+  login: string;
+  avatar_url: string;
+  html_url: string;
   contributions: number;
 };
 
@@ -24,45 +19,68 @@ type Talk = {
   link?: string;
 };
 
-const maintainers: Maintainer[] = [
-  {
-    name: 'Core Team',
-    role: 'Lead Maintainer',
-    github: 'https://github.com/anistark',
-  },
-];
+const maintainerUsernames = ['anistark', 'farhaanbukhsh'];
 
-const topContributors: Contributor[] = [
-];
+const maintainerRoles: Record<string, string> = {
+  anistark: 'Core Maintainer',
+  farhaanbukhsh: 'Core Maintainer',
+};
+
 
 const talks: Talk[] = [
 ];
 
-function MaintainerCard({maintainer}: {maintainer: Maintainer}) {
+function MaintainerCard({contributor, role}: {contributor: Contributor; role: string}) {
   return (
-    <div className={styles.card}>
-      <div className={styles.cardContent}>
-        <Heading as="h3">{maintainer.name}</Heading>
-        <p className={styles.role}>{maintainer.role}</p>
-        <a href={maintainer.github} target="_blank" rel="noopener noreferrer" className={styles.link}>
-          GitHub Profile
-        </a>
+    <a
+      href={contributor.html_url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={styles.cardLink}
+    >
+      <div className={styles.card}>
+        <div className={styles.cardContent}>
+          <div className={styles.contributorHeader}>
+            <img
+              src={contributor.avatar_url}
+              alt={contributor.login}
+              className={styles.avatar}
+            />
+            <div>
+              <Heading as="h3">{contributor.login}</Heading>
+              <p className={styles.role}>{role}</p>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </a>
   );
 }
 
 function ContributorCard({contributor}: {contributor: Contributor}) {
   return (
-    <div className={styles.card}>
-      <div className={styles.cardContent}>
-        <Heading as="h4">{contributor.name}</Heading>
-        <p className={styles.contributions}>{contributor.contributions} contributions</p>
-        <a href={contributor.github} target="_blank" rel="noopener noreferrer" className={styles.link}>
-          GitHub
-        </a>
+    <a
+      href={contributor.html_url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={styles.cardLink}
+    >
+      <div className={styles.card}>
+        <div className={styles.cardContent}>
+          <div className={styles.contributorHeader}>
+            <img
+              src={contributor.avatar_url}
+              alt={contributor.login}
+              className={styles.avatar}
+            />
+            <div>
+              <Heading as="h4">{contributor.login}</Heading>
+              <p className={styles.contributions}>{contributor.contributions} 🔥</p>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </a>
   );
 }
 
@@ -84,6 +102,25 @@ function TalkCard({talk}: {talk: Talk}) {
 }
 
 export default function Community(): ReactNode {
+  const [allContributors, setAllContributors] = useState<Contributor[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('https://api.github.com/repos/anistark/wasmrun/contributors')
+      .then(response => response.json())
+      .then(data => {
+        setAllContributors(data);
+        setLoading(false);
+      })
+      .catch(error => {
+        console.error('Error fetching contributors:', error);
+        setLoading(false);
+      });
+  }, []);
+
+  const maintainers = allContributors.filter(c => maintainerUsernames.includes(c.login));
+  const contributors = allContributors.filter(c => !maintainerUsernames.includes(c.login));
+
   return (
     <Layout
       title="Community"
@@ -99,23 +136,37 @@ export default function Community(): ReactNode {
 
           <section className={styles.section}>
             <Heading as="h2">Maintainers</Heading>
-            <div className={styles.grid}>
-              {maintainers.map((maintainer, idx) => (
-                <MaintainerCard key={idx} maintainer={maintainer} />
-              ))}
-            </div>
-          </section>
-
-          {topContributors.length > 0 && (
-            <section className={styles.section}>
-              <Heading as="h2">Top Contributors</Heading>
+            {loading ? (
+              <p className={styles.loading}>Loading maintainers...</p>
+            ) : maintainers.length > 0 ? (
               <div className={styles.grid}>
-                {topContributors.map((contributor, idx) => (
-                  <ContributorCard key={idx} contributor={contributor} />
+                {maintainers.map((maintainer) => (
+                  <MaintainerCard
+                    key={maintainer.login}
+                    contributor={maintainer}
+                    role={maintainerRoles[maintainer.login] || 'Maintainer'}
+                  />
                 ))}
               </div>
-            </section>
-          )}
+            ) : (
+              <p>No maintainers found.</p>
+            )}
+          </section>
+
+          <section className={styles.section}>
+            <Heading as="h2">Contributors</Heading>
+            {loading ? (
+              <p className={styles.loading}>Loading contributors...</p>
+            ) : contributors.length > 0 ? (
+              <div className={styles.grid}>
+                {contributors.map((contributor) => (
+                  <ContributorCard key={contributor.login} contributor={contributor} />
+                ))}
+              </div>
+            ) : (
+              <p>No contributors found.</p>
+            )}
+          </section>
 
           {talks.length > 0 && (
             <section className={styles.section}>
