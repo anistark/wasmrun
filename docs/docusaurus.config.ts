@@ -79,6 +79,11 @@ const config: Config = {
           position: 'right',
         },
         {
+          href: 'https://crates.io/crates/wasmrun',
+          label: 'Crate',
+          position: 'right',
+        },
+        {
           href: 'https://github.com/anistark/wasmrun',
           label: 'GitHub',
           position: 'right',
@@ -92,19 +97,15 @@ const config: Config = {
         {
           title: 'Quick Links',
           items: [
-            { label: 'Introduction', to: '/docs/intro' },
             { label: 'Installation', to: '/docs/installation' },
             { label: 'Quick Start', to: '/docs/quick-start' },
-            { label: 'Rust Guide', to: '/docs/guides/rust' },
-            { label: 'Go Guide', to: '/docs/guides/go' },
-            { label: 'Python Guide', to: '/docs/guides/python' },
-            { label: 'C/C++ Guide', to: '/docs/guides/c-cpp' },
+            { label: 'Crates.io', href: 'https://crates.io/crates/wasmrun' },
           ],
         },
         {
           title: 'Community',
           items: [
-            { label: 'Community', to: '/community' },
+            { label: 'Overview', to: '/community' },
             { label: 'Issues', href: 'https://github.com/anistark/wasmrun/issues' },
             { label: 'Discussions', href: 'https://github.com/anistark/wasmrun/discussions' },
           ],
@@ -121,16 +122,16 @@ const config: Config = {
           title: 'Social',
           items: [
             {
-              label: 'Twitter',
-              href: 'https://twitter.com/wasmrun',
+              label: 'X (Twitter)',
+              href: 'https://x.com/kranirudha',
             },
             {
               label: 'GitHub',
               href: 'https://github.com/anistark/wasmrun',
             },
             {
-              label: 'Mastodon',
-              href: 'https://mastodon.social/@wasmrun',
+              label: 'Fediverse',
+              href: 'https://fosstodon.org/@ani',
             },
           ],
         },
