@@ -1,0 +1,19 @@
+version: 2
+
+build:
+  os: ubuntu-22.04
+  tools:
+    nodejs: "22"
+  jobs:
+    pre_install:
+      # Install pnpm
+      - npm install -g pnpm@latest
+    pre_build:
+      # Install dependencies
+      - cd docs && pnpm install --frozen-lockfile
+    post_build:
+      # Build Docusaurus site
+      - cd docs && pnpm run build
+      # Move built files to _readthedocs/html for RTD
+      - mkdir -p _readthedocs/html
+      - cp -r docs/build/* _readthedocs/html/
