@@ -6,7 +6,8 @@ const config: Config = {
   title: 'Wasmrun',
   tagline: 'WebAssembly Development Server',
   url: 'https://wasmrun.readthedocs.io',
-  baseUrl: '/',
+  // Use /en/latest/ for production (ReadTheDocs), / for local development
+  baseUrl: process.env.NODE_ENV === 'production' ? '/en/latest/' : '/',
 
   favicon: 'img/favicon.ico',
   organizationName: 'anistark',
