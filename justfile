@@ -63,9 +63,65 @@ lint-fix:
     cargo clippy --fix
     cd ui && pnpm lint:fix
 
-# Build documentation
+# Build Rust API documentation
 docs:
     cargo doc --no-deps --open
+
+# Documentation Website Commands (Docusaurus)
+
+# Start documentation dev server
+docs-dev:
+    #!/usr/bin/env bash
+    cd docs && pnpm start
+
+# Build documentation for production
+docs-build:
+    #!/usr/bin/env bash
+    cd docs && pnpm build
+
+# Serve built documentation
+docs-serve:
+    #!/usr/bin/env bash
+    cd docs && pnpm serve
+
+# Type check documentation TypeScript
+docs-typecheck:
+    #!/usr/bin/env bash
+    cd docs && pnpm typecheck
+
+# Install documentation dependencies
+docs-install:
+    #!/usr/bin/env bash
+    cd docs && pnpm install
+
+# Clear documentation cache
+docs-clear:
+    #!/usr/bin/env bash
+    cd docs && pnpm clear
+
+# Full documentation check (typecheck + build)
+docs-check:
+    #!/usr/bin/env bash
+    echo "🔍 Type checking documentation..."
+    cd docs && pnpm typecheck
+    echo "🏗️  Building documentation..."
+    cd docs && pnpm build
+    echo "✅ Documentation check complete!"
+
+# Clean documentation build artifacts
+docs-clean:
+    #!/usr/bin/env bash
+    cd docs && rm -rf build/ .docusaurus/
+
+# Full documentation workflow: install, check, build
+docs-all: docs-install docs-check
+    @echo "✅ Documentation built successfully!"
+
+# Create a new documentation version
+docs-version VERSION:
+    #!/usr/bin/env bash
+    cd docs && pnpm version {{VERSION}}
+    @echo "✅ Created documentation version {{VERSION}}"
 
 # TODO: Fix Increment version (type can be major, minor, or patch)
 # bump-version TYPE="patch":

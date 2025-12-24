@@ -1,0 +1,98 @@
+.pluginCard {
+  border: 1px solid rgba(45, 80, 22, 0.18);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px) saturate(180%);
+  -webkit-backdrop-filter: blur(10px) saturate(180%);
+  box-shadow: 0 8px 32px 0 rgba(45, 80, 22, 0.15);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #1a1a1a;
+}
+
+[data-theme='dark'] .pluginCard {
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+  color: #a7f3d0;
+}
+
+.pluginCard:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 48px 0 rgba(45, 80, 22, 0.25);
+  border-color: var(--ifm-color-primary);
+}
+
+[data-theme='dark'] .pluginCard:hover {
+  box-shadow: 0 12px 48px 0 rgba(16, 185, 129, 0.4);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.pluginHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.pluginName {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--ifm-color-primary);
+}
+
+.badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.builtinBadge {
+  background: var(--ifm-color-success);
+  color: white;
+}
+
+.externalBadge {
+  background: var(--ifm-color-info);
+  color: white;
+}
+
+.pluginDescription {
+  margin-bottom: 1rem;
+  color: var(--ifm-color-emphasis-800);
+}
+
+.installSection {
+  margin: 1rem 0;
+}
+
+.requirements {
+  margin: 1rem 0;
+}
+
+.requirements ul {
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+  padding-left: 1.5rem;
+}
+
+.requirements li {
+  margin-bottom: 0.25rem;
+}
+
+.pluginFooter {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+  display: flex;
+  align-items: center;
+}
+
+.pluginFooter code {
+  background: var(--ifm-code-background);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}

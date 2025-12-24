@@ -1,0 +1,54 @@
+.commandDemo {
+  margin: 1.5rem 0;
+  border: 1px solid rgba(45, 80, 22, 0.18);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px) saturate(180%);
+  -webkit-backdrop-filter: blur(10px) saturate(180%);
+  box-shadow: 0 8px 32px 0 rgba(45, 80, 22, 0.15);
+  color: #1a1a1a;
+}
+
+[data-theme='dark'] .commandDemo {
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+  color: #a7f3d0;
+}
+
+.commandSection,
+.outputSection {
+  padding: 0;
+}
+
+.commandSection {
+  background: var(--ifm-color-emphasis-100);
+}
+
+.outputSection {
+  background: var(--ifm-color-emphasis-50);
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.sectionLabel {
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--ifm-color-emphasis-700);
+  background: var(--ifm-color-emphasis-100);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.commandSection .sectionLabel {
+  background: var(--ifm-color-emphasis-200);
+}
+
+.commandDemo :global(.prism-code) {
+  margin: 0;
+}
+
+.commandDemo :global(pre) {
+  margin: 0;
+  border-radius: 0;
+}
