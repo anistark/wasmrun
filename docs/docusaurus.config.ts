@@ -49,7 +49,7 @@ const config: Config = {
       title: 'Wasmrun',
       logo: {
         alt: 'Wasmrun Logo',
-        src: 'img/logo.svg',
+        src: 'img/logo.png',
       },
       items: [
         {
@@ -117,7 +117,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Wasmrun Team. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Wasmrun Team.`,
     },
 
     prism: {
