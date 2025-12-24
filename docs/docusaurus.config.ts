@@ -64,6 +64,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/community',
+          label: 'Community',
+          position: 'left',
+        },
+        {
           type: 'docsVersionDropdown',
           position: 'right',
         },
@@ -84,26 +89,21 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Documentation',
+          title: 'Quick Links',
           items: [
             { label: 'Introduction', to: '/docs/intro' },
             { label: 'Installation', to: '/docs/installation' },
             { label: 'Quick Start', to: '/docs/quick-start' },
-          ],
-        },
-        {
-          title: 'Guides',
-          items: [
-            { label: 'Rust', to: '/docs/guides/rust' },
-            { label: 'Go', to: '/docs/guides/go' },
-            { label: 'Python', to: '/docs/guides/python' },
-            { label: 'C/C++', to: '/docs/guides/c-cpp' },
+            { label: 'Rust Guide', to: '/docs/guides/rust' },
+            { label: 'Go Guide', to: '/docs/guides/go' },
+            { label: 'Python Guide', to: '/docs/guides/python' },
+            { label: 'C/C++ Guide', to: '/docs/guides/c-cpp' },
           ],
         },
         {
           title: 'Community',
           items: [
-            { label: 'GitHub', href: 'https://github.com/anistark/wasmrun' },
+            { label: 'Community', to: '/community' },
             { label: 'Issues', href: 'https://github.com/anistark/wasmrun/issues' },
             { label: 'Discussions', href: 'https://github.com/anistark/wasmrun/discussions' },
           ],
@@ -114,6 +114,23 @@ const config: Config = {
             { label: 'Tutorials', to: '/tutorials' },
             { label: 'Rust API Docs', href: 'https://docs.rs/wasmrun' },
             { label: 'Crates.io', href: 'https://crates.io/crates/wasmrun' },
+          ],
+        },
+        {
+          title: 'Social',
+          items: [
+            {
+              label: 'Twitter',
+              href: 'https://twitter.com/wasmrun',
+            },
+            {
+              label: 'GitHub',
+              href: 'https://github.com/anistark/wasmrun',
+            },
+            {
+              label: 'Mastodon',
+              href: 'https://mastodon.social/@wasmrun',
+            },
           ],
         },
       ],

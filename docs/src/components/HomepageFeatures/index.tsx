@@ -5,48 +5,50 @@ import styles from './styles.module.css';
 
 type FeatureItem = {
   title: string;
-  Svg: React.ComponentType<React.ComponentProps<'svg'>>;
+  Svg?: React.ComponentType<React.ComponentProps<'svg'>>;
+  image?: string;
   description: ReactNode;
 };
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'Easy to Use',
-    Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
+    title: 'Built with Rust',
+    image: require('@site/static/img/ills/wasm-ferris.png').default,
     description: (
       <>
-        Docusaurus was designed from the ground up to be easily installed and
-        used to get your website up and running quickly.
+        Leveraging Rust&apos;s performance and safety guarantees to provide a blazing-fast
+        development server. Memory-safe and reliable WebAssembly execution.
       </>
     ),
   },
   {
-    title: 'Focus on What Matters',
-    Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
+    title: 'Fullstack WASM',
+    image: require('@site/static/img/ills/wasm-card-back.png').default,
     description: (
       <>
-        Docusaurus lets you focus on your docs, and we&apos;ll do the chores. Go
-        ahead and move your docs into the <code>docs</code> directory.
+        Build complete applications with WebAssembly. Support for multiple languages including
+        Rust, Go, Python, and C/C++. Run anywhere with true cross-platform compatibility.
       </>
     ),
   },
   {
-    title: 'Powered by React',
-    Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
+    title: 'Sandboxed & Secure',
+    image: require('@site/static/img/ills/security-ills.png').default,
     description: (
       <>
-        Extend or customize your website layout by reusing React. Docusaurus can
-        be extended while reusing the same header and footer.
+        Isolated execution environments with per-process network namespaces.
+        WASI socket API support ensures your applications run securely without compromising functionality.
       </>
     ),
   },
 ];
 
-function Feature({title, Svg, description}: FeatureItem) {
+function Feature({title, Svg, image, description}: FeatureItem) {
   return (
     <div className={clsx('col col--4')}>
       <div className="text--center">
-        <Svg className={styles.featureSvg} role="img" />
+        {Svg && <Svg className={styles.featureSvg} role="img" />}
+        {image && <img src={image} className={styles.featureSvg} alt={title} />}
       </div>
       <div className="text--center padding-horiz--md">
         <Heading as="h3">{title}</Heading>
