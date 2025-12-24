@@ -1,0 +1,43 @@
+.commandDemo {
+  margin: 1.5rem 0;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--ifm-card-background-color);
+}
+
+.commandSection,
+.outputSection {
+  padding: 0;
+}
+
+.commandSection {
+  background: var(--ifm-color-emphasis-100);
+}
+
+.outputSection {
+  background: var(--ifm-color-emphasis-50);
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.sectionLabel {
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--ifm-color-emphasis-700);
+  background: var(--ifm-color-emphasis-100);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.commandSection .sectionLabel {
+  background: var(--ifm-color-emphasis-200);
+}
+
+.commandDemo :global(.prism-code) {
+  margin: 0;
+}
+
+.commandDemo :global(pre) {
+  margin: 0;
+  border-radius: 0;
+}
