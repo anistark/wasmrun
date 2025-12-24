@@ -1,8 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import styles from './Changelog.module.css';
 
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/anistark/wasmrun/main/CHANGELOG.md';
+
+// Generate slug from heading text (similar to GitHub)
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Remove markdown links, keep text
+    .replace(/[^\w\s-]/g, '') // Remove special chars except word chars, spaces, hyphens
+    .replace(/\s+/g, '-') // Replace spaces with hyphens
+    .replace(/-+/g, '-') // Replace multiple hyphens with single
+    .replace(/^-|-$/g, ''); // Remove leading/trailing hyphens
+}
 
 export default function Changelog(): JSX.Element {
   const [content, setContent] = useState<string>('Loading changelog...');
@@ -56,9 +68,23 @@ export default function Changelog(): JSX.Element {
     );
   }
 
+  // Custom components for ReactMarkdown with heading IDs
+  const components: Components = {
+    h2: ({ children, ...props }) => {
+      const text = children?.toString() || '';
+      const id = slugify(text);
+      return <h2 id={id} {...props}>{children}</h2>;
+    },
+    h3: ({ children, ...props }) => {
+      const text = children?.toString() || '';
+      const id = slugify(text);
+      return <h3 id={id} {...props}>{children}</h3>;
+    },
+  };
+
   return (
     <div className={styles.changelog}>
-      <ReactMarkdown>{content}</ReactMarkdown>
+      <ReactMarkdown components={components}>{content}</ReactMarkdown>
     </div>
   );
 }

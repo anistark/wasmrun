@@ -70,6 +70,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/changelog',
+          label: 'Changelog',
+          position: 'left',
+        },
+        {
           type: 'docsVersionDropdown',
           position: 'right',
         },
@@ -99,6 +104,7 @@ const config: Config = {
           items: [
             { label: 'Installation', to: '/docs/installation' },
             { label: 'Quick Start', to: '/docs/quick-start' },
+            { label: 'Changelog', to: '/changelog' },
             { label: 'Crates.io', href: 'https://crates.io/crates/wasmrun' },
           ],
         },
