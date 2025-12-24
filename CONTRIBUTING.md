@@ -4,6 +4,12 @@
 
 Thank you for considering contributing to Wasmrun! This guide will help you understand the project structure, development workflow, and how to make meaningful contributions.
 
+## 📚 Documentation
+
+**Official documentation is available at [wasmrun.readthedocs.io](https://wasmrun.readthedocs.io)**
+
+Visit our documentation site for comprehensive guides, API references, and examples. This contributing guide focuses on development practices and plugin architecture.
+
 ## 🏗️ Project Architecture
 
 Wasmrun is designed with a modular architecture that separates concerns clearly:

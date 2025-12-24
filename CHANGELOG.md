@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-...
+### Added
+- **OS Mode Network Isolation**: Per-process network namespace isolation for WASM processes (#51)
+  - Full WASI socket API implementation (socket, bind, listen, accept, connect, send, recv)
+  - Isolated network namespaces for each process preventing cross-process interference
+  - Network syscall support (sock_open, sock_bind, sock_listen, sock_accept, sock_connect, sock_send, sock_recv, sock_shutdown)
+- **Port Forwarding**: Port forwarding capabilities for OS mode (#52)
+  - Forward ports from host to WASM processes
+  - Enable external access to services running in isolated WASM environments
+- **Official Documentation**: Comprehensive documentation site using Docusaurus (#53, #54)
+  - **ReadTheDocs integration**: Official docs now hosted at [wasmrun.readthedocs.io](https://wasmrun.readthedocs.io)
+  - Automatic deployment on commits
+  - Structured documentation with guides, API references, and examples
+
+### Documentation
+- Official documentation is now available at **[wasmrun.readthedocs.io](https://wasmrun.readthedocs.io)** - this is the recommended reference for all wasmrun features and usage
 
 ## [0.15.0](https://github.com/anistark/wasmrun/releases/tag/v0.15.0) - 2025-12-21
 

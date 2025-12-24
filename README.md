@@ -18,6 +18,12 @@
 - ⚡ **Zero Configuration** - Works out of the box with sensible defaults and automatic project detection
 - 🏃 **Native WASM Execution** - Run compiled WASM files directly with the native interpreter and pass arguments
 
+## 📚 Documentation
+
+**Official documentation is available at [wasmrun.readthedocs.io](https://wasmrun.readthedocs.io)**
+
+For comprehensive guides, API references, tutorials, and examples, visit our documentation site.
+
 ## 🚀 Installation
 
 ### From Cargo (Recommended)
