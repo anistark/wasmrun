@@ -4,7 +4,7 @@ import { themes as prismThemes } from 'prism-react-renderer';
 
 const config: Config = {
   title: 'Wasmrun',
-  tagline: 'WebAssembly Development Server',
+  tagline: 'WebAssembly Runtime',
   url: 'https://wasmrun.readthedocs.io',
   // Use /en/latest/ for production (ReadTheDocs), / for local development
   baseUrl: process.env.NODE_ENV === 'production' ? '/en/latest/' : '/',

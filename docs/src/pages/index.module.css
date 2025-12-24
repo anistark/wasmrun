@@ -55,7 +55,7 @@
 }
 
 [data-theme='dark'] .heroBanner {
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 9, 2, 0.75);
   border-bottom: 1px solid rgba(16, 185, 129, 0.2);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
   color: #a7f3d0;
