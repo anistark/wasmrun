@@ -21,21 +21,6 @@ const sidebars: SidebarsConfig = {
 
     {
       type: 'category',
-      label: 'Features',
-      collapsed: false,
-      items: [
-        'features/plugin-system',
-        'features/live-reload',
-        'features/native-execution',
-        'features/wasi-support',
-        'features/network-isolation',
-        'features/port-forwarding',
-        'features/os-mode',
-      ],
-    },
-
-    {
-      type: 'category',
       label: 'CLI Reference',
       collapsed: true,
       items: [

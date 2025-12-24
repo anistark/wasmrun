@@ -1,0 +1,59 @@
+.changelog {
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.changelog h2 {
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--ifm-color-emphasis-300);
+}
+
+.changelog h3 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--ifm-color-primary);
+}
+
+.changelog ul {
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.changelog li {
+  margin-bottom: 0.5rem;
+}
+
+.changelog code {
+  background-color: var(--ifm-code-background);
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.changelog a {
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+}
+
+.changelog a:hover {
+  text-decoration: underline;
+}
+
+.changelogError {
+  padding: 2rem;
+  background-color: var(--ifm-color-warning-contrast-background);
+  border-left: 4px solid var(--ifm-color-warning);
+  border-radius: 4px;
+  margin: 2rem 0;
+}
+
+.changelogError p {
+  margin: 0.5rem 0;
+}
+
+.changelogError a {
+  color: var(--ifm-color-primary);
+  font-weight: bold;
+}
