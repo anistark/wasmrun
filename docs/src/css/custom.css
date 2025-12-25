@@ -46,13 +46,17 @@
 }
 
 html {
-  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 50%, #bbf7d0 100%);
+  background-image: url('/img/backgrounds/light-mode-bg.jpg');
+  background-size: cover;
+  background-position: center;
   background-attachment: fixed;
   min-height: 100vh;
 }
 
 [data-theme='dark'] html {
-  background: linear-gradient(135deg, #000000 0%, #000000 50%, #0a0f0a 100%);
+  background-image: url('/img/backgrounds/page-background.jpg');
+  background-size: cover;
+  background-position: center;
   background-attachment: fixed;
 }
 

@@ -26,7 +26,7 @@
 }
 
 [data-theme='dark'] .communityPage {
-  background-image: url('/img/backgrounds/dark-mode-bg.jpg');
+  background-image: url('/img/backgrounds/page-background.jpg');
 }
 
 [data-theme='dark'] .communityPage::before {
