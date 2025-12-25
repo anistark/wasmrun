@@ -53,7 +53,7 @@ html {
   min-height: 100vh;
 }
 
-[data-theme='dark'] html {
+html[data-theme='dark'] {
   background-image: url('/img/backgrounds/page-background.jpg');
   background-size: cover;
   background-position: center;
@@ -109,6 +109,10 @@ html {
   color: #2d5016;
 }
 
+.footer__copyright {
+  color: #0f2409 !important;
+}
+
 [data-theme='dark'] .footer {
   background: rgba(0, 0, 0, 0.95) !important;
   border-top: 1px solid rgba(16, 185, 129, 0.2);
@@ -126,6 +130,10 @@ html {
 
 [data-theme='dark'] .footer__link-item:hover {
   color: #d1fae5;
+}
+
+[data-theme='dark'] .footer__copyright {
+  color: #a7f3d0 !important;
 }
 
 .menu {

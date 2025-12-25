@@ -104,8 +104,8 @@ const config: Config = {
           items: [
             { label: 'Installation', to: '/docs/installation' },
             { label: 'Quick Start', to: '/docs/quick-start' },
-            { label: 'Changelog', to: '/changelog' },
             { label: 'Crates.io', href: 'https://crates.io/crates/wasmrun' },
+            { label: 'Changelog', to: '/changelog' },
           ],
         },
         {
@@ -119,9 +119,10 @@ const config: Config = {
         {
           title: 'Resources',
           items: [
-            { label: 'Tutorials', to: '/tutorials' },
-            { label: 'Rust API Docs', href: 'https://docs.rs/wasmrun' },
-            { label: 'Crates.io', href: 'https://crates.io/crates/wasmrun' },
+            { label: 'Tutorials (Soon)', to: '/tutorials' },
+            { label: 'docs.rs', href: 'https://docs.rs/wasmrun' },
+            { label: 'lib.rs', href: 'https://lib.rs/wasmrun' },
+            { label: 'crates.io', href: 'https://crates.io/crates/wasmrun' },
           ],
         },
         {
