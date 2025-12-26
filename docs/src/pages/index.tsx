@@ -23,6 +23,11 @@ function HomepageHeader() {
             to="/docs/intro">
             Quick Start - 5min ⏱️
           </Link>
+          <Link
+            className="button button--secondary button--lg"
+            href="https://github.com/anistark/wasmrun">
+            Github ↗
+          </Link>
         </div>
       </div>
     </header>

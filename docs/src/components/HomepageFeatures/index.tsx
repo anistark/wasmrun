@@ -27,13 +27,13 @@ const FeatureList: FeatureItem[] = [
     description: (
       <>
         Build complete applications with WebAssembly. Support for multiple languages including
-        Rust, Go, Python, and C/C++. Run anywhere with true cross-platform compatibility.
+        Rust, Go, Python, ASC and C/C++. Run anywhere with true cross-platform compatibility.
       </>
     ),
   },
   {
     title: 'Sandboxed & Secure',
-    image: require('@site/static/img/ills/security-ills.png').default,
+    image: require('@site/static/img/ills/wasm-sandbox.png').default,
     description: (
       <>
         Isolated execution environments with per-process network namespaces.

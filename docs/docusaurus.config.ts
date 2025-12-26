@@ -4,7 +4,7 @@ import { themes as prismThemes } from 'prism-react-renderer';
 
 const config: Config = {
   title: 'Wasmrun',
-  tagline: 'WebAssembly Development Server',
+  tagline: 'WebAssembly Runtime',
   url: 'https://wasmrun.readthedocs.io',
   // Use /en/latest/ for production (ReadTheDocs), / for local development
   baseUrl: process.env.NODE_ENV === 'production' ? '/en/latest/' : '/',
@@ -70,6 +70,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/changelog',
+          label: 'Changelog',
+          position: 'left',
+        },
+        {
           type: 'docsVersionDropdown',
           position: 'right',
         },
@@ -100,6 +105,7 @@ const config: Config = {
             { label: 'Installation', to: '/docs/installation' },
             { label: 'Quick Start', to: '/docs/quick-start' },
             { label: 'Crates.io', href: 'https://crates.io/crates/wasmrun' },
+            { label: 'Changelog', to: '/changelog' },
           ],
         },
         {
@@ -113,9 +119,10 @@ const config: Config = {
         {
           title: 'Resources',
           items: [
-            { label: 'Tutorials', to: '/tutorials' },
-            { label: 'Rust API Docs', href: 'https://docs.rs/wasmrun' },
-            { label: 'Crates.io', href: 'https://crates.io/crates/wasmrun' },
+            { label: 'Tutorials (Soon)', to: '/tutorials' },
+            { label: 'docs.rs', href: 'https://docs.rs/wasmrun' },
+            { label: 'lib.rs', href: 'https://lib.rs/wasmrun' },
+            { label: 'crates.io', href: 'https://crates.io/crates/wasmrun' },
           ],
         },
         {

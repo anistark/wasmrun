@@ -298,5 +298,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **v0.10.x**: Project rename and external plugin system
 - **v0.11.x**: Configuration refactoring and examples
 - **v0.13.x**: OS Mode, UI refactor with Preact, and waspy integration
+- **v0.14.x**: Real-time logs panel, distribution packages (RPM/APT), external plugin migration
+- **v0.15.x**: Native WASM execution with exec command, complete runtime implementation
 
 Checkout all [releases](https://github.com/anistark/wasmrun/releases) and [tags](https://github.com/anistark/wasmrun/tags).
