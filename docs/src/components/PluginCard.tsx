@@ -18,7 +18,7 @@ export default function PluginCard({
   installCmd,
   description,
   requirements = [],
-}: PluginCardProps): JSX.Element {
+}: PluginCardProps): React.ReactElement {
   const badge = type === 'builtin' ? '✓ Built-in' : '📦 External';
   const badgeClass = type === 'builtin' ? styles.builtinBadge : styles.externalBadge;
 

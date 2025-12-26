@@ -11,7 +11,7 @@ const sidebars: SidebarsConfig = {
       label: 'Plugins',
       collapsed: false,
       items: [
-        'plugins/overview',
+        'plugins/index',
         {
           type: 'category',
           label: 'Languages',
@@ -41,7 +41,7 @@ const sidebars: SidebarsConfig = {
       label: 'Wasmrun Web',
       collapsed: true,
       items: [
-        'web/overview',
+        'web/index',
       ],
     },
 
@@ -50,7 +50,7 @@ const sidebars: SidebarsConfig = {
       label: 'Wasmrun OS',
       collapsed: false,
       items: [
-        'os/overview',
+        'os/index',
         'os/network-isolation',
         'os/port-forwarding',
       ],
@@ -70,7 +70,7 @@ const sidebars: SidebarsConfig = {
       label: 'CLI Reference',
       collapsed: true,
       items: [
-        'cli/overview',
+        'cli/index',
         'cli/run',
         'cli/exec',
         'cli/compile',

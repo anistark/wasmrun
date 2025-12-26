@@ -7,7 +7,7 @@ interface InstallTabsProps {
   defaultValue?: 'cargo' | 'deb' | 'rpm' | 'source';
 }
 
-export default function InstallTabs({ defaultValue = 'cargo' }: InstallTabsProps): JSX.Element {
+export default function InstallTabs({ defaultValue = 'cargo' }: InstallTabsProps): React.ReactElement {
   return (
     <Tabs defaultValue={defaultValue} groupId="installation-method">
       <TabItem value="cargo" label="Cargo (Recommended)">

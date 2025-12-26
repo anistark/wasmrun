@@ -358,4 +358,4 @@ emcc -s WASI=1 main.c -o app.wasm
 - [compile](./compile.md) - Compile projects to WASM
 - [verify](./verify.md) - Verify WASM files
 - [inspect](./inspect.md) - Inspect WASM structure
-- [Native Execution Guide](/docs/features/native-execution) - Detailed guide
+- [WASI Integration](/docs/integrations/wasi) - WASI support details

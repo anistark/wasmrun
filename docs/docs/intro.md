@@ -93,9 +93,9 @@ Ready to build with WebAssembly? Check out the [Installation](./installation.md)
 
 ## Learn More
 
-- **[Language Guides](./guides/rust.md)** - Learn how to use Wasmrun with your preferred language
-- **[Features](./features/plugin-system.md)** - Explore Wasmrun's capabilities in depth
-- **[CLI Reference](./cli/overview.md)** - Complete command-line documentation
+- **[Language Guides](./plugins/languages/rust.md)** - Learn how to use Wasmrun with your preferred language
+- **[Plugin System](./plugins/)** - Explore Wasmrun's capabilities in depth
+- **[CLI Reference](./cli/)** - Complete command-line documentation
 - **[Development](./development/architecture.md)** - Contribute to Wasmrun or create plugins
 
 ## Community

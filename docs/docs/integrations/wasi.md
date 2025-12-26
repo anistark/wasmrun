@@ -209,7 +209,7 @@ For features not in WASI:
 
 ## See Also
 
-- [Native Execution](./native-execution.md) - WASM interpreter details
-- [Network Isolation](./network-isolation.md) - Network capabilities
-- [CLI exec Command](../cli/exec.md) - Execution reference
-- [Language Guides](../guides/rust.md) - Language-specific WASI usage
+- [CLI exec Command](../cli/exec.md) - Native WASM execution
+- [Network Isolation](../os/network-isolation.md) - Network capabilities
+- [CLI Reference](../cli/) - Execution reference
+- [Language Guides](../plugins/languages/rust.md) - Language-specific WASI usage

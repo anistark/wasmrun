@@ -323,7 +323,7 @@ OS mode provides per-process network namespace isolation:
 - No interference between processes
 - Clean separation
 
-See [Network Isolation Feature](/docs/features/network-isolation) for details.
+See [Network Isolation](/docs/os/network-isolation) for details.
 
 ## Port Forwarding
 
@@ -334,7 +334,7 @@ OS mode supports port forwarding to access services:
 wasmrun os --port 8420  # UI on 8420, app on 3000
 ```
 
-See [Port Forwarding Feature](/docs/features/port-forwarding) for configuration.
+See [Port Forwarding](/docs/os/port-forwarding) for configuration.
 
 ## Performance
 
@@ -462,6 +462,6 @@ Features demonstrated:
 
 - [run](./run.md) - Standard development server for WASM
 - [exec](./exec.md) - Native WASM execution
-- [OS Mode Feature](/docs/features/os-mode) - Detailed feature guide
-- [Network Isolation](/docs/features/network-isolation) - Security details
-- [Port Forwarding](/docs/features/port-forwarding) - Configuration guide
+- [OS Mode](/docs/os) - Detailed feature guide
+- [Network Isolation](/docs/os/network-isolation) - Security details
+- [Port Forwarding](/docs/os/port-forwarding) - Configuration guide

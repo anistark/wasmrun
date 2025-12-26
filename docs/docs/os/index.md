@@ -347,5 +347,5 @@ wasmrun os . --language python --forward 8080:5000 --watch
 
 - [Network Isolation](./network-isolation.md) - Network namespace details
 - [Port Forwarding](./port-forwarding.md) - Port forwarding guide
-- [Live Reload](./live-reload.md) - Live reload details
+- [Live Reload](../server/live-reload.md) - Live reload details
 - [CLI os Command](../cli/os.md) - Full command reference

@@ -413,9 +413,9 @@ See the [Creating Plugins Guide](/docs/development/creating-plugins) for detaile
 
 ## See Also
 
-- [Plugin System Feature](/docs/features/plugin-system) - Plugin architecture
+- [Plugin System](/docs/plugins) - Plugin architecture
 - [Creating Plugins](/docs/development/creating-plugins) - Build custom plugins
-- [Rust Guide](/docs/guides/rust) - Using wasmrust
-- [Go Guide](/docs/guides/go) - Using wasmgo
-- [Python Guide](/docs/guides/python) - Using waspy
-- [AssemblyScript Guide](/docs/guides/assemblyscript) - Using wasmasc
+- [Rust Guide](/docs/plugins/languages/rust) - Using wasmrust
+- [Go Guide](/docs/plugins/languages/go) - Using wasmgo
+- [Python Guide](/docs/plugins/languages/python) - Using waspy
+- [AssemblyScript Guide](/docs/plugins/languages/assemblyscript) - Using wasmasc

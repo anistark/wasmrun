@@ -14,7 +14,7 @@ AssemblyScript is a TypeScript-like language that compiles to WebAssembly. The `
 
 - **Node.js** 16 or higher
 - **npm, yarn, pnpm, or bun** (package manager)
-- **wasmrun** installed (see [Installation](../installation.md))
+- **wasmrun** installed (see [Installation](../../installation.md))
 
 ## Plugin Installation
 

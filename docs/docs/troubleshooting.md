@@ -615,5 +615,5 @@ See [Too Many Open Files](#too-many-open-files)
 
 - **[Installation](installation.md)**: Detailed installation instructions
 - **[Quick Start](quick-start.md)**: Get started quickly
-- **[CLI Reference](cli/overview.md)**: Command reference
+- **[CLI Reference](cli/)**: Command reference
 - **[Debugging](development/debugging.md)**: Advanced debugging techniques

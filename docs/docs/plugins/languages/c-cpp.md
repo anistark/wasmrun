@@ -13,7 +13,7 @@ C/C++ has excellent WebAssembly support through Emscripten. Wasmrun includes bui
 ## Prerequisites
 
 - **Emscripten SDK** ([install from emscripten.org](https://emscripten.org/docs/getting_started/downloads.html))
-- **wasmrun** installed (see [Installation](../installation.md))
+- **wasmrun** installed (see [Installation](../../installation.md))
 
 ## Quick Start
 
