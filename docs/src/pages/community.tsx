@@ -28,6 +28,39 @@ const maintainerRoles: Record<string, string> = {
 
 
 const talks: Talk[] = [
+  {
+    title: 'Bringing Python to WebAssembly',
+    speaker: 'Kumar Anirudha & Farhaan Bukhsh',
+    event: 'PyCon Thailand 2025, Bangkok',
+    date: 'Oct 18, 2025',
+  },
+  {
+    title: 'Your Next Server Might Be a Browser',
+    speaker: 'Kumar Anirudha',
+    event: 'IndiaFOSS 2025, Bengaluru',
+    date: 'Sept 20, 2025',
+    link: 'https://www.youtube.com/watch?v=NXGxSM9Mqes',
+  },
+  {
+    title: 'Compiling Python to WASM',
+    speaker: 'Kumar Anirudha & Farhaan Bukhsh',
+    event: 'PyCon India 2025, Bengaluru',
+    date: 'Sept 13, 2025',
+  },
+  {
+    title: 'WASM and Python: The Future of Serverless Computing',
+    speaker: 'Kumar Anirudha & Farhaan Bukhsh',
+    event: 'EuroPython 2025, Prague, Czech Republic',
+    date: 'July 16, 2025',
+    link: 'https://www.youtube.com/watch?v=qes-hzyVIGU',
+  },
+  {
+    title: 'WASM and Python',
+    speaker: 'Kumar Anirudha & Farhaan Bukhsh',
+    event: 'BangPypers Meetup',
+    date: 'May 24, 2025',
+    link: 'https://x.com/__bangpypers__/status/1926174903264252149',
+  },
 ];
 
 function MaintainerCard({contributor, role}: {contributor: Contributor; role: string}) {
