@@ -16,7 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - IPv4 and IPv6 address resolution with host DNS resolver integration
   - Comprehensive error handling with validation for hostnames and ports
   - Support for both numeric and string port formats
-  - 11 comprehensive test cases covering all edge cases and error scenarios
 - **Port Forwarding**: Port forwarding capabilities for OS mode (#52)
   - Forward ports from host to WASM processes
   - Enable external access to services running in isolated WASM environments
