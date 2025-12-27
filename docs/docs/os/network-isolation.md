@@ -37,6 +37,13 @@ Wasmrun implements the complete WASI socket API:
 - **UDP sockets** for datagram communication
 - **Unix domain sockets** (local communication)
 
+### DNS Resolution
+- `getaddrinfo` - Hostname to IP address resolution
+  - IPv4 and IPv6 address resolution
+  - Integration with host DNS resolver (respects `/etc/resolv.conf`)
+  - Support for numeric and string port formats
+  - Comprehensive error handling and validation
+
 ## How It Works
 
 ### Network Namespace Creation
@@ -77,6 +84,32 @@ fn main() {
 ```bash
 # Run with network isolation
 wasmrun os ./network-app
+```
+
+### DNS Resolution Example
+
+```rust
+// Rust example with DNS resolution
+use std::net::ToSocketAddrs;
+
+fn main() {
+    // Resolve hostname to IP addresses
+    let addrs: Vec<_> = "google.com:443"
+        .to_socket_addrs()
+        .unwrap()
+        .collect();
+
+    println!("Resolved addresses: {:?}", addrs);
+
+    // Connect to resolved address
+    let stream = std::net::TcpStream::connect(&addrs[0]).unwrap();
+    println!("Connected to {}", addrs[0]);
+}
+```
+
+```bash
+# Run with DNS resolution support
+wasmrun os ./dns-app
 ```
 
 ### OS Mode Integration
