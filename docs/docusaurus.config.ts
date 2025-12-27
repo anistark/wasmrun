@@ -6,8 +6,14 @@ const config: Config = {
   title: 'Wasmrun',
   tagline: 'WebAssembly Runtime',
   url: 'https://wasmrun.readthedocs.io',
-  // Use /en/latest/ for production (ReadTheDocs), / for local development
-  baseUrl: process.env.NODE_ENV === 'production' ? '/en/latest/' : '/',
+  // Use /en/{version}/ for production (ReadTheDocs), / for local development
+  // READTHEDOCS_VERSION is provided by ReadTheDocs:
+  //   - PR builds: PR number (e.g., "59")
+  //   - Main branch: "latest"
+  //   - Releases: version tag (e.g., "v0.1.0") or "stable"
+  baseUrl: process.env.NODE_ENV === 'production'
+    ? `/en/${process.env.READTHEDOCS_VERSION || 'latest'}/`
+    : '/',
 
   favicon: 'img/favicon.ico',
   organizationName: 'anistark',
@@ -30,11 +36,6 @@ const config: Config = {
           editUrl: 'https://github.com/anistark/wasmrun/edit/main/docs/',
           showLastUpdateAuthor: true,
           showLastUpdateTime: true,
-          versions: {
-            current: {
-              label: 'Next 🚧',
-            },
-          },
         },
         blog: false,
         theme: {
@@ -73,10 +74,6 @@ const config: Config = {
           to: '/changelog',
           label: 'Changelog',
           position: 'left',
-        },
-        {
-          type: 'docsVersionDropdown',
-          position: 'right',
         },
         {
           href: 'https://docs.rs/wasmrun',

@@ -12,8 +12,44 @@ default:
     @just --list
     @echo "\nCurrent version: {{version}}"
 
+# Sync version from Cargo.toml to package.json files
+sync-version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    VERSION="{{version}}"
+    echo "📦 Syncing version $VERSION from Cargo.toml..."
+    # Update docs/package.json
+    if [ -f "docs/package.json" ]; then
+        CURRENT=$(grep -m 1 '"version":' docs/package.json | cut -d '"' -f 4)
+        if [ "$CURRENT" != "$VERSION" ]; then
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                sed -i '' "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" docs/package.json
+            else
+                sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" docs/package.json
+            fi
+            echo "  ✓ Updated docs/package.json: $CURRENT → $VERSION"
+        else
+            echo "  ✓ docs/package.json already at version $VERSION"
+        fi
+    fi
+    # Update ui/package.json
+    if [ -f "ui/package.json" ]; then
+        CURRENT=$(grep -m 1 '"version":' ui/package.json | cut -d '"' -f 4)
+        if [ "$CURRENT" != "$VERSION" ]; then
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                sed -i '' "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" ui/package.json
+            else
+                sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" ui/package.json
+            fi
+            echo "  ✓ Updated ui/package.json: $CURRENT → $VERSION"
+        else
+            echo "  ✓ ui/package.json already at version $VERSION"
+        fi
+    fi
+    echo "✅ Version sync complete!"
+
 # Build the project in debug mode
-build: format lint test
+build: sync-version format lint test
     cargo build --release
 
 # Clean the project
