@@ -30,11 +30,6 @@ const config: Config = {
           editUrl: 'https://github.com/anistark/wasmrun/edit/main/docs/',
           showLastUpdateAuthor: true,
           showLastUpdateTime: true,
-          versions: {
-            current: {
-              label: 'Next 🚧',
-            },
-          },
         },
         blog: false,
         theme: {
@@ -73,10 +68,6 @@ const config: Config = {
           to: '/changelog',
           label: 'Changelog',
           position: 'left',
-        },
-        {
-          type: 'docsVersionDropdown',
-          position: 'right',
         },
         {
           href: 'https://docs.rs/wasmrun',

@@ -24,7 +24,7 @@ anyhow = "1.0.100"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.7"
 dirs = "6.0.0"
-serde_json = "1.0.145"
+serde_json = "1.0.148"
 libloading = "0.9.0"
 chrono = { version = "0.4.42", features = ["serde"] }
 regex = "1.12.2"
@@ -33,7 +33,7 @@ regex = "1.12.2"
 libloading = "0.9.0"
 
 [dev-dependencies]
-tempfile = "3.23.0"
+tempfile = "3.24.0"
 
 [build-dependencies]
 regex = "1.11.2"
