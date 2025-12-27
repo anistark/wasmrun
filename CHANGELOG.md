@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Full WASI socket API implementation (socket, bind, listen, accept, connect, send, recv)
   - Isolated network namespaces for each process preventing cross-process interference
   - Network syscall support (sock_open, sock_bind, sock_listen, sock_accept, sock_connect, sock_send, sock_recv, sock_shutdown)
+- **DNS Resolution**: Complete GetAddrInfo syscall implementation for hostname resolution
+  - IPv4 and IPv6 address resolution with host DNS resolver integration
+  - Comprehensive error handling with validation for hostnames and ports
+  - Support for both numeric and string port formats
 - **Port Forwarding**: Port forwarding capabilities for OS mode (#52)
   - Forward ports from host to WASM processes
   - Enable external access to services running in isolated WASM environments

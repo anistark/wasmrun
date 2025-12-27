@@ -99,6 +99,10 @@ lint-fix:
     cargo clippy --fix
     cd ui && pnpm lint:fix
 
+# Run all checks (lint + docs-check)
+check: lint docs-check
+    @echo "✅ All checks passed!"
+
 # Build Rust API documentation
 docs:
     cargo doc --no-deps --open
