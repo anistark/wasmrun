@@ -13,7 +13,7 @@ The `waspy` plugin enables Python to WebAssembly compilation, allowing you to ru
 ## Prerequisites
 
 - **Python** 3.8 or higher
-- **wasmrun** installed (see [Installation](../installation.md))
+- **wasmrun** installed (see [Installation](../../installation.md))
 
 ## Plugin Installation
 

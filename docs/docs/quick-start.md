@@ -259,23 +259,23 @@ Now that you've created your first WebAssembly project, here's what to explore n
 
 ### Learn More About Your Language
 
-- **[Rust Guide](./guides/rust.md)** - Deep dive into Rust and WebAssembly
-- **[Go Guide](./guides/go.md)** - Using TinyGo for WebAssembly
-- **[Python Guide](./guides/python.md)** - Python to WebAssembly with waspy
-- **[C/C++ Guide](./guides/c-cpp.md)** - Traditional C/C++ compilation
-- **[AssemblyScript Guide](./guides/assemblyscript.md)** - TypeScript-like WebAssembly
+- **[Rust Guide](./plugins/languages/rust.md)** - Deep dive into Rust and WebAssembly
+- **[Go Guide](./plugins/languages/go.md)** - Using TinyGo for WebAssembly
+- **[Python Guide](./plugins/languages/python.md)** - Python to WebAssembly with waspy
+- **[C/C++ Guide](./plugins/languages/c-cpp.md)** - Traditional C/C++ compilation
+- **[AssemblyScript Guide](./plugins/languages/assemblyscript.md)** - TypeScript-like WebAssembly
 
 ### Explore Features
 
-- **[Plugin System](./features/plugin-system.md)** - Understand the plugin architecture
-- **[Live Reload](./features/live-reload.md)** - Development workflow optimization
-- **[Native Execution](./features/native-execution.md)** - Run WASM without a browser
-- **[WASI Support](./features/wasi-support.md)** - System interface capabilities
-- **[OS Mode](./features/os-mode.md)** - Multi-language browser environment
+- **[Plugin System](./plugins/)** - Understand the plugin architecture
+- **[Live Reload](./server/live-reload.md)** - Development workflow optimization
+- **[Native Execution](./cli/exec.md)** - Run WASM without a browser
+- **[WASI Support](./integrations/wasi.md)** - System interface capabilities
+- **[OS Mode](./os/)** - Multi-language browser environment
 
 ### Reference Documentation
 
-- **[CLI Reference](./cli/overview.md)** - Complete command-line documentation
+- **[CLI Reference](./cli/)** - Complete command-line documentation
 - **[Troubleshooting](./troubleshooting.md)** - Common issues and solutions
 
 ## Tips for Success
@@ -291,7 +291,7 @@ Now that you've created your first WebAssembly project, here's what to explore n
 If you run into issues:
 
 - Check the [Troubleshooting](./troubleshooting.md) guide
-- Review the [CLI Reference](./cli/overview.md) for command details
+- Review the [CLI Reference](./cli/) for command details
 - Visit [GitHub Issues](https://github.com/anistark/wasmrun/issues)
 - Join the [Discussions](https://github.com/anistark/wasmrun/discussions)
 

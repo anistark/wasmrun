@@ -8,14 +8,60 @@ const sidebars: SidebarsConfig = {
 
     {
       type: 'category',
-      label: 'Language Guides',
+      label: 'Plugins',
       collapsed: false,
       items: [
-        'guides/rust',
-        'guides/go',
-        'guides/python',
-        'guides/c-cpp',
-        'guides/assemblyscript',
+        'plugins/index',
+        {
+          type: 'category',
+          label: 'Languages',
+          collapsed: false,
+          items: [
+            'plugins/languages/rust',
+            'plugins/languages/go',
+            'plugins/languages/python',
+            'plugins/languages/c-cpp',
+            'plugins/languages/assemblyscript',
+          ],
+        },
+      ],
+    },
+
+    {
+      type: 'category',
+      label: 'Wasmrun Server',
+      collapsed: false,
+      items: [
+        'server/live-reload',
+      ],
+    },
+
+    {
+      type: 'category',
+      label: 'Wasmrun Web',
+      collapsed: true,
+      items: [
+        'web/index',
+      ],
+    },
+
+    {
+      type: 'category',
+      label: 'Wasmrun OS',
+      collapsed: false,
+      items: [
+        'os/index',
+        'os/network-isolation',
+        'os/port-forwarding',
+      ],
+    },
+
+    {
+      type: 'category',
+      label: 'Integrations',
+      collapsed: false,
+      items: [
+        'integrations/wasi',
       ],
     },
 
@@ -24,7 +70,7 @@ const sidebars: SidebarsConfig = {
       label: 'CLI Reference',
       collapsed: true,
       items: [
-        'cli/overview',
+        'cli/index',
         'cli/run',
         'cli/exec',
         'cli/compile',

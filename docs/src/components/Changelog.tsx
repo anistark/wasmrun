@@ -16,7 +16,7 @@ function slugify(text: string): string {
     .replace(/^-|-$/g, ''); // Remove leading/trailing hyphens
 }
 
-export default function Changelog(): JSX.Element {
+export default function Changelog(): React.ReactElement {
   const [content, setContent] = useState<string>('Loading changelog...');
   const [error, setError] = useState<string | null>(null);
 

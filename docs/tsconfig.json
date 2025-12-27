@@ -3,6 +3,12 @@
   "compilerOptions": {
     "baseUrl": ".",
     "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "lib": ["DOM", "ES2020"],
+    "types": ["@docusaurus/module-type-aliases", "@docusaurus/types", "node"],
     "paths": {
       "@site/*": ["./src/*"]
     }

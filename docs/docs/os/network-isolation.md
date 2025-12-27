@@ -228,7 +228,7 @@ wasmrun os ./app-b --forward 8081:8080
 
 ## See Also
 
-- [OS Mode](./os-mode.md) - Full OS mode documentation
+- [OS Mode](./) - Full OS mode documentation
 - [Port Forwarding](./port-forwarding.md) - Exposing isolated services
-- [WASI Support](./wasi-support.md) - WASI socket APIs
+- [WASI Support](../integrations/wasi.md) - WASI socket APIs
 - [CLI os Command](../cli/os.md) - OS mode command reference

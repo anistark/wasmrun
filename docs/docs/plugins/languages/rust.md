@@ -15,7 +15,7 @@ Rust provides excellent WebAssembly support with mature tooling and great perfor
 Before you start, ensure you have:
 
 - **Rust** 1.70 or higher ([install from rustup.rs](https://rustup.rs/))
-- **wasmrun** installed (see [Installation](../installation.md))
+- **wasmrun** installed (see [Installation](../../installation.md))
 - **wasm32 target** installed:
   ```bash
   rustup target add wasm32-unknown-unknown
@@ -420,7 +420,7 @@ wasmrun plugin install wasmrust
 
 ## Next Steps
 
-- Explore [WASI Support](../features/wasi-support.md) for system interface capabilities
-- Learn about [Native Execution](../features/native-execution.md) in depth
-- Check out [Live Reload](../features/live-reload.md) for development workflow
-- Review the [CLI Reference](../cli/overview.md) for all available commands
+- Explore [WASI Support](../../integrations/wasi.md) for system interface capabilities
+- Learn about [Native Execution](../../cli/exec.md) in depth
+- Check out [Live Reload](../../server/live-reload.md) for development workflow
+- Review the [CLI Reference](../../cli/) for all available commands

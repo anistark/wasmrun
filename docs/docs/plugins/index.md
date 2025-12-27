@@ -188,6 +188,6 @@ wasmrun --language go
 
 ## See Also
 
-- [Language Guides](../guides/rust.md) - Detailed guides for each language
+- [Language Guides](./languages/rust.md) - Detailed guides for each language
 - [Creating Plugins](../development/creating-plugins.md) - Building custom plugins
 - [CLI Reference](../cli/plugin.md) - Complete plugin command reference

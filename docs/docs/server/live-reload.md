@@ -169,7 +169,7 @@ wasmrun os ./node-app --watch --language nodejs
 wasmrun os ./python-app --watch --language python
 ```
 
-See [OS Mode](./os-mode.md) for more details.
+See [OS Mode](../os/) for more details.
 
 ## Troubleshooting
 

@@ -14,7 +14,7 @@ Go supports WebAssembly through TinyGo, a Go compiler designed for small places.
 
 - **TinyGo** 0.28 or higher ([install from tinygo.org](https://tinygo.org/getting-started/install/))
 - **Go** 1.19 or higher (TinyGo dependency)
-- **wasmrun** installed (see [Installation](../installation.md))
+- **wasmrun** installed (see [Installation](../../installation.md))
 
 ## Plugin Installation
 

@@ -14,7 +14,7 @@ export default function CommandDemo({
   language = 'bash',
   output,
   showCopy = true,
-}: CommandDemoProps): JSX.Element {
+}: CommandDemoProps): React.ReactElement {
   return (
     <div className={styles.commandDemo}>
       <div className={styles.commandSection}>

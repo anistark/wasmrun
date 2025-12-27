@@ -291,6 +291,6 @@ curl http://localhost:3000/health
 ## See Also
 
 - [Network Isolation](./network-isolation.md) - Network namespace details
-- [OS Mode](./os-mode.md) - Full OS mode documentation
+- [OS Mode](./) - Full OS mode documentation
 - [CLI os Command](../cli/os.md) - Command reference
 - Example: [Node.js Express API](https://github.com/anistark/wasmrun/tree/main/examples/nodejs-express-api) - Complete example
