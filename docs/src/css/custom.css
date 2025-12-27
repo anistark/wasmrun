@@ -387,3 +387,12 @@ article span {
     pointer-events: auto !important;
   }
 }
+
+/* Version badge styling */
+[data-theme='dark'] .theme-doc-version-badge {
+  color: #1f2937 !important;
+}
+
+[data-theme='dark'] .badge--secondary {
+  color: #1f2937 !important;
+}
