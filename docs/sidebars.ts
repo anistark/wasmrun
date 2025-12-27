@@ -8,22 +8,19 @@ const sidebars: SidebarsConfig = {
 
     {
       type: 'category',
-      label: 'Plugins',
-      collapsed: false,
+      label: 'CLI Reference',
+      collapsed: true,
       items: [
-        'plugins/index',
-        {
-          type: 'category',
-          label: 'Languages',
-          collapsed: false,
-          items: [
-            'plugins/languages/rust',
-            'plugins/languages/go',
-            'plugins/languages/python',
-            'plugins/languages/c-cpp',
-            'plugins/languages/assemblyscript',
-          ],
-        },
+        'cli/index',
+        'cli/run',
+        'cli/exec',
+        'cli/compile',
+        'cli/plugin',
+        'cli/verify',
+        'cli/inspect',
+        'cli/clean',
+        'cli/stop',
+        'cli/os',
       ],
     },
 
@@ -58,28 +55,31 @@ const sidebars: SidebarsConfig = {
 
     {
       type: 'category',
-      label: 'Integrations',
+      label: 'Plugins',
       collapsed: false,
       items: [
-        'integrations/wasi',
+        'plugins/index',
+        {
+          type: 'category',
+          label: 'Languages',
+          collapsed: false,
+          items: [
+            'plugins/languages/rust',
+            'plugins/languages/go',
+            'plugins/languages/python',
+            'plugins/languages/c-cpp',
+            'plugins/languages/assemblyscript',
+          ],
+        },
       ],
     },
 
     {
       type: 'category',
-      label: 'CLI Reference',
-      collapsed: true,
+      label: 'Integrations',
+      collapsed: false,
       items: [
-        'cli/index',
-        'cli/run',
-        'cli/exec',
-        'cli/compile',
-        'cli/plugin',
-        'cli/verify',
-        'cli/inspect',
-        'cli/clean',
-        'cli/stop',
-        'cli/os',
+        'integrations/wasi',
       ],
     },
 
