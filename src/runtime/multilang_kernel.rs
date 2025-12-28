@@ -31,6 +31,9 @@ pub struct OsRunConfig {
     pub port: Option<u16>,
     pub hot_reload: bool,
     pub debugging: bool,
+    pub expose: bool,
+    pub tunnel_server: Option<String>,
+    pub tunnel_secret: Option<String>,
 }
 
 impl Default for MultiLanguageKernel {

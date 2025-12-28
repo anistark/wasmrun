@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Public Tunneling with Bore Client**: Expose local WASM apps to the internet via bore.pub (#61)
+  - Complete bore protocol implementation (HELLO, AUTH, port registration)
+  - Automatic reconnection with background keepalive thread
+  - Connection status tracking (Disconnected, Connecting, Connected, Reconnecting, Failed)
+  - Support for public bore.pub server (default) and custom self-hosted bore servers
+  - Optional authentication for private bore servers
+  - REST API endpoints: `/api/tunnel/start`, `/api/tunnel/status`, `/api/tunnel/stop`
+  - Configuration via `OsRunConfig`: `expose`, `tunnel_server`, `tunnel_secret`
 - **OS Mode Network Isolation**: Per-process network namespace isolation for WASM processes (#51)
   - Full WASI socket API implementation (socket, bind, listen, accept, connect, send, recv)
   - Isolated network namespaces for each process preventing cross-process interference

@@ -1,6 +1,7 @@
 use crate::error::{Result, WasmrunError};
 use crate::logging::{LogEntry, LogSource, LogTrailSystem};
 use crate::runtime::multilang_kernel::{MultiLanguageKernel, OsRunConfig};
+use crate::runtime::tunnel::BoreClient;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -14,6 +15,7 @@ pub struct OsServer {
     project_pid: Arc<RwLock<Option<u32>>>,
     template_cache: HashMap<String, String>,
     log_system: Arc<LogTrailSystem>,
+    tunnel_client: Arc<RwLock<Option<BoreClient>>>,
 }
 
 impl OsServer {
@@ -25,6 +27,7 @@ impl OsServer {
             project_pid: Arc::new(RwLock::new(None)),
             template_cache: HashMap::new(),
             log_system,
+            tunnel_client: Arc::new(RwLock::new(None)),
         };
 
         // Load and process templates
@@ -424,6 +427,19 @@ impl OsServer {
 
             (Method::Get, "/api/logs/recent") => {
                 self.handle_recent_logs_request(request)?;
+            }
+
+            // Tunnel API endpoints
+            (Method::Post, "/api/tunnel/start") => {
+                self.handle_tunnel_start_request(request)?;
+            }
+
+            (Method::Get, "/api/tunnel/status") => {
+                self.handle_tunnel_status_request(request)?;
+            }
+
+            (Method::Post, "/api/tunnel/stop") => {
+                self.handle_tunnel_stop_request(request)?;
             }
 
             // Serve static assets
@@ -1305,6 +1321,158 @@ impl OsServer {
             "count": logs.len(),
             "logs": logs
         });
+
+        let response = Response::from_string(response_json.to_string())
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+            );
+
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
+
+        Ok(())
+    }
+
+    fn handle_tunnel_start_request(&self, request: Request) -> Result<()> {
+        let mut tunnel_guard = self.tunnel_client.write().unwrap();
+
+        if tunnel_guard.is_some() {
+            let response_json = serde_json::json!({
+                "success": false,
+                "error": "Tunnel is already running"
+            });
+
+            let response = Response::from_string(response_json.to_string())
+                .with_header(
+                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                )
+                .with_header(
+                    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                );
+
+            request
+                .respond(response)
+                .map_err(|e| WasmrunError::from(e.to_string()))?;
+            return Ok(());
+        }
+
+        let server = self
+            .config
+            .tunnel_server
+            .clone()
+            .unwrap_or_else(|| "bore.pub:7835".to_string());
+        let secret = self.config.tunnel_secret.clone();
+        let local_port = self.config.port.unwrap_or(8420);
+
+        let mut client = BoreClient::new(server, secret, local_port);
+
+        match client.connect() {
+            Ok(public_url) => {
+                let response_json = serde_json::json!({
+                    "success": true,
+                    "public_url": public_url,
+                    "status": "Connected"
+                });
+
+                *tunnel_guard = Some(client);
+
+                let response = Response::from_string(response_json.to_string())
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+            Err(e) => {
+                let response_json = serde_json::json!({
+                    "success": false,
+                    "error": e
+                });
+
+                let response = Response::from_string(response_json.to_string())
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                    );
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_tunnel_status_request(&self, request: Request) -> Result<()> {
+        let tunnel_guard = self.tunnel_client.read().unwrap();
+
+        let response_json = if let Some(ref client) = *tunnel_guard {
+            let status = client.get_status();
+            let status_str = match status {
+                crate::runtime::tunnel::bore::TunnelStatus::Disconnected => "Disconnected",
+                crate::runtime::tunnel::bore::TunnelStatus::Connecting => "Connecting",
+                crate::runtime::tunnel::bore::TunnelStatus::Connected => "Connected",
+                crate::runtime::tunnel::bore::TunnelStatus::Reconnecting => "Reconnecting",
+                crate::runtime::tunnel::bore::TunnelStatus::Failed => "Failed",
+            };
+
+            serde_json::json!({
+                "success": true,
+                "status": status_str,
+                "public_url": client.get_public_url(),
+                "public_port": client.get_public_port()
+            })
+        } else {
+            serde_json::json!({
+                "success": true,
+                "status": "Not started"
+            })
+        };
+
+        let response = Response::from_string(response_json.to_string())
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+            );
+
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
+
+        Ok(())
+    }
+
+    fn handle_tunnel_stop_request(&self, request: Request) -> Result<()> {
+        let mut tunnel_guard = self.tunnel_client.write().unwrap();
+
+        let response_json = if let Some(ref client) = *tunnel_guard {
+            client.stop();
+            *tunnel_guard = None;
+
+            serde_json::json!({
+                "success": true,
+                "message": "Tunnel stopped"
+            })
+        } else {
+            serde_json::json!({
+                "success": false,
+                "error": "No tunnel is running"
+            })
+        };
 
         let response = Response::from_string(response_json.to_string())
             .with_header(

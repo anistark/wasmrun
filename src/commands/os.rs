@@ -133,7 +133,10 @@ fn os_create_config(
         dev_mode: true,
         port: None,
         hot_reload: watch,
-        debugging: false, // TODO: Add --debug flag
+        debugging: false,
+        expose: false,
+        tunnel_server: None,
+        tunnel_secret: None,
     })
 }
 
