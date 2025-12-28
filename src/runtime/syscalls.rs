@@ -1126,19 +1126,51 @@ impl SyscallHandler {
 
     fn handle_getaddrinfo(&mut self, _pid: Pid, args: SyscallArgs) -> SyscallResult {
         if args.args.is_empty() {
-            return SyscallResult::Error("getaddrinfo: insufficient arguments".to_string());
+            return SyscallResult::Error(
+                "getaddrinfo: insufficient arguments (expected hostname)".to_string(),
+            );
         }
 
         let hostname = match &args.args[0] {
-            SyscallArg::String(s) => s.clone(),
-            _ => return SyscallResult::Error("getaddrinfo: invalid hostname".to_string()),
+            SyscallArg::String(s) => {
+                if s.is_empty() {
+                    return SyscallResult::Error(
+                        "getaddrinfo: hostname cannot be empty".to_string(),
+                    );
+                }
+                s.clone()
+            }
+            _ => {
+                return SyscallResult::Error(
+                    "getaddrinfo: invalid hostname argument type (expected string)".to_string(),
+                )
+            }
         };
 
         let port = if args.args.len() > 1 {
             match &args.args[1] {
-                SyscallArg::Number(n) => *n as u16,
-                SyscallArg::String(s) => s.parse().unwrap_or_default(),
-                _ => 0,
+                SyscallArg::Number(n) => {
+                    if *n < 0 || *n > 65535 {
+                        return SyscallResult::Error(format!(
+                            "getaddrinfo: invalid port number {n} (must be 0-65535)"
+                        ));
+                    }
+                    *n as u16
+                }
+                SyscallArg::String(s) => match s.parse::<u16>() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return SyscallResult::Error(format!(
+                            "getaddrinfo: invalid port string '{s}' (must be a number 0-65535)"
+                        ));
+                    }
+                },
+                _ => {
+                    return SyscallResult::Error(
+                        "getaddrinfo: invalid port argument type (expected number or string)"
+                            .to_string(),
+                    )
+                }
             }
         } else {
             0
@@ -1148,10 +1180,15 @@ impl SyscallHandler {
         let addrs: Result<Vec<SocketAddr>> = addr_str
             .to_socket_addrs()
             .map(|iter| iter.collect())
-            .map_err(|e| anyhow::anyhow!("DNS resolution failed: {e}"));
+            .map_err(|e| anyhow::anyhow!("DNS resolution failed for '{hostname}': {e}"));
 
         match addrs {
             Ok(addresses) => {
+                if addresses.is_empty() {
+                    return SyscallResult::Error(format!(
+                        "getaddrinfo: no addresses found for hostname '{hostname}'"
+                    ));
+                }
                 let addr_strings: Vec<String> =
                     addresses.iter().map(|addr| addr.to_string()).collect();
                 SyscallResult::Success(SyscallReturn::String(addr_strings.join(",")))
@@ -1516,6 +1553,260 @@ mod tests {
 
         if let Some(FileDescriptor::Socket { state, .. }) = table.get(fd) {
             assert_eq!(*state, SocketState::Bound);
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_localhost() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![
+                SyscallArg::String("localhost".to_string()),
+                SyscallArg::Number(8080),
+            ],
+        };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Success(SyscallReturn::String(addrs)) => {
+                assert!(!addrs.is_empty());
+                assert!(addrs.contains("127.0.0.1:8080") || addrs.contains("[::1]:8080"));
+            }
+            _ => panic!("Expected successful DNS resolution for localhost"),
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_ipv4() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![
+                SyscallArg::String("127.0.0.1".to_string()),
+                SyscallArg::Number(80),
+            ],
+        };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Success(SyscallReturn::String(addrs)) => {
+                assert_eq!(addrs, "127.0.0.1:80");
+            }
+            _ => panic!("Expected successful DNS resolution for IPv4 address"),
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_ipv6() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![
+                SyscallArg::String("::1".to_string()),
+                SyscallArg::Number(80),
+            ],
+        };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Success(SyscallReturn::String(addrs)) => {
+                assert!(addrs.contains("[::1]:80"));
+            }
+            _ => panic!("Expected successful DNS resolution for IPv6 address"),
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_invalid_hostname() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![
+                SyscallArg::String(
+                    "invalid-hostname-that-does-not-exist-12345.invalid".to_string(),
+                ),
+                SyscallArg::Number(80),
+            ],
+        };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Error(msg) => {
+                assert!(msg.contains("getaddrinfo") || msg.contains("DNS"));
+            }
+            _ => panic!("Expected error for invalid hostname"),
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_no_port() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![SyscallArg::String("localhost".to_string())],
+        };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Success(SyscallReturn::String(addrs)) => {
+                assert!(!addrs.is_empty());
+                assert!(addrs.contains("127.0.0.1:0") || addrs.contains("[::1]:0"));
+            }
+            _ => panic!("Expected successful DNS resolution with default port 0"),
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_string_port() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![
+                SyscallArg::String("localhost".to_string()),
+                SyscallArg::String("8080".to_string()),
+            ],
+        };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Success(SyscallReturn::String(addrs)) => {
+                assert!(!addrs.is_empty());
+                assert!(addrs.contains("127.0.0.1:8080") || addrs.contains("[::1]:8080"));
+            }
+            _ => panic!("Expected successful DNS resolution with string port"),
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_no_args() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs { args: vec![] };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Error(msg) => {
+                assert!(msg.contains("insufficient"));
+            }
+            _ => panic!("Expected error for no arguments"),
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_google() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![
+                SyscallArg::String("google.com".to_string()),
+                SyscallArg::Number(443),
+            ],
+        };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Success(SyscallReturn::String(addrs)) => {
+                assert!(!addrs.is_empty());
+                assert!(addrs.contains(":443"));
+            }
+            SyscallResult::Error(msg) => {
+                eprintln!(
+                    "DNS resolution for google.com failed (network may be unavailable): {msg}"
+                );
+            }
+            _ => panic!("Unexpected result type"),
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_empty_hostname() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![SyscallArg::String("".to_string()), SyscallArg::Number(80)],
+        };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Error(msg) => {
+                assert!(msg.contains("empty"));
+            }
+            _ => panic!("Expected error for empty hostname"),
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_invalid_port() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![
+                SyscallArg::String("localhost".to_string()),
+                SyscallArg::Number(99999),
+            ],
+        };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Error(msg) => {
+                assert!(msg.contains("port"));
+                assert!(msg.contains("65535"));
+            }
+            _ => panic!("Expected error for invalid port number"),
+        }
+    }
+
+    #[test]
+    fn test_dns_resolution_invalid_port_string() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![
+                SyscallArg::String("localhost".to_string()),
+                SyscallArg::String("not-a-port".to_string()),
+            ],
+        };
+
+        let result = handler.handle_getaddrinfo(pid, args);
+
+        match result {
+            SyscallResult::Error(msg) => {
+                assert!(msg.contains("invalid port string"));
+            }
+            _ => panic!("Expected error for invalid port string"),
         }
     }
 }
