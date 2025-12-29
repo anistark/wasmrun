@@ -283,4 +283,3 @@ services:
 
 - [bore GitHub Repository](https://github.com/ekzhang/bore)
 - [bore Protocol Specification](https://github.com/ekzhang/bore#how-it-works)
-- [wasmrun OS Mode Architecture](../../OS_IMPLEMENTATION.md)
