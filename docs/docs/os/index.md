@@ -15,6 +15,7 @@ OS Mode enables:
 - **Real-time logs panel** for stdout/stderr monitoring
 - **Network isolation** for secure multi-process execution
 - **Port forwarding** for external service access
+- **Public tunneling** via bore.pub for internet exposure
 - **Live reload** for development
 - **Multiple runtimes** in parallel
 
@@ -116,6 +117,26 @@ wasmrun os ./node-server --language nodejs --forward 8080:3000
 ```
 
 See [Port Forwarding](./port-forwarding.md) for details.
+
+### Public Tunneling
+
+Expose your local WASM applications to the internet using bore.pub:
+
+```bash
+# Start tunnel via API
+# POST /api/tunnel/start
+
+# Your app gets a public URL like:
+# http://bore.pub:12345
+```
+
+**Features:**
+- Public bore.pub server (default) or custom self-hosted servers
+- Automatic reconnection on disconnect
+- Connection status monitoring
+- Optional authentication for private servers
+
+See [Public Tunneling](./public-tunneling.md) for details.
 
 ## Use Cases
 
@@ -347,5 +368,6 @@ wasmrun os . --language python --forward 8080:5000 --watch
 
 - [Network Isolation](./network-isolation.md) - Network namespace details
 - [Port Forwarding](./port-forwarding.md) - Port forwarding guide
+- [Public Tunneling](./public-tunneling.md) - Expose apps to the internet
 - [Live Reload](../server/live-reload.md) - Live reload details
 - [CLI os Command](../cli/os.md) - Full command reference

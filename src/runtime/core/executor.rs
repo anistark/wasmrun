@@ -3226,7 +3226,7 @@ mod tests {
         assert_eq!(results[1], Value::I32(5));
     }
 
-    // Phase 1e tests: Global operations
+    // Global operations tests
     #[test]
     fn test_global_get_set() {
         use crate::runtime::core::module::{Function, FunctionType, GlobalValue};
@@ -3263,7 +3263,7 @@ mod tests {
         assert_eq!(results[0], Value::I32(42));
     }
 
-    // Phase 1e tests: Memory operations via context
+    // Memory operations tests via context
     #[test]
     fn test_memory_direct_i32_store_load() {
         use crate::runtime::core::module::MemoryType;

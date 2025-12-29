@@ -8,5 +8,6 @@ pub mod os_server;
 pub mod registry;
 pub mod scheduler;
 pub mod syscalls;
+pub mod tunnel;
 pub mod wasi;
 pub mod wasi_fs;
