@@ -21,12 +21,6 @@
 
 **📖 [Full Documentation](https://wasmrun.readthedocs.io)**
 
-- [Quick Start Guide](https://wasmrun.readthedocs.io/en/latest/quick-start.html)
-- [Installation Guide](https://wasmrun.readthedocs.io/en/latest/installation.html)
-- [Language Guides](https://wasmrun.readthedocs.io/en/latest/plugins/languages/rust.html) (Rust, Go, Python, C/C++, AssemblyScript)
-- [CLI Reference](https://wasmrun.readthedocs.io/en/latest/cli/overview.html)
-- [Troubleshooting](https://wasmrun.readthedocs.io/en/latest/troubleshooting.html)
-
 ## 🚀 Quick Start
 
 ### Installation
@@ -35,7 +29,7 @@
 cargo install wasmrun
 ```
 
-For other installation methods (DEB, RPM, from source), see the [Installation Guide](https://wasmrun.readthedocs.io/en/latest/installation.html).
+For other installation methods (DEB, RPM, from source), see the [Installation Guide](https://wasmrun.readthedocs.io/en/latest/docs/installation).
 
 ### Basic Usage
 
@@ -57,7 +51,7 @@ wasmrun plugin install wasmrust
 wasmrun plugin install wasmgo
 ```
 
-See the [Quick Start Guide](https://wasmrun.readthedocs.io/en/latest/quick-start.html) for a complete tutorial.
+See the [Quick Start Guide](https://wasmrun.readthedocs.io/en/latest/docs/quick-start) for a complete tutorial.
 
 ## 🔌 Plugin System
 
@@ -72,25 +66,15 @@ Wasmrun uses a plugin architecture for language support:
 - Python: `wasmrun plugin install waspy`
 - AssemblyScript: `wasmrun plugin install wasmasc`
 
-Learn more in the [Plugin Documentation](https://wasmrun.readthedocs.io/en/latest/plugins/overview.html).
+Learn more in the [Plugin Documentation](https://wasmrun.readthedocs.io/en/latest/docs/plugins/).
 
 ## 🤝 Contributing
 
-We welcome contributions! See our [Contributing Guide](https://wasmrun.readthedocs.io/en/latest/development/contributing.html) for:
-
-- Development setup
-- Code style guidelines
-- Testing guidelines
-- PR process
-
-Or check out:
-- [Architecture Documentation](https://wasmrun.readthedocs.io/en/latest/development/architecture.html)
-- [Creating Plugins](https://wasmrun.readthedocs.io/en/latest/development/creating-plugins.html)
-- [Debugging Guide](https://wasmrun.readthedocs.io/en/latest/development/debugging.html)
+We welcome contributions! See our [Contributing Guide](https://wasmrun.readthedocs.io/en/latest/docs/development/contributing).
 
 ## 🎤 Community
 
-- [Community Page](https://wasmrun.readthedocs.io/community) - Talks, demos, and contributors
+- [Community Page](https://wasmrun.readthedocs.io/en/latest/community/) - Talks, demos, and contributors
 - [GitHub Issues](https://github.com/anistark/wasmrun/issues)
 - [GitHub Discussions](https://github.com/anistark/wasmrun/discussions)
 

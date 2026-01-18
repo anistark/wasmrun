@@ -6,16 +6,7 @@ Thank you for your interest in contributing to Wasmrun! We welcome all contribut
 
 For comprehensive contributing guidelines, please visit our documentation:
 
-**👉 [Complete Contributing Guide](https://wasmrun.readthedocs.io/en/latest/development/contributing.html)**
-
-This includes:
-- Development setup and prerequisites
-- Using `just` commands for development
-- Code style guidelines
-- Testing guidelines
-- PR review checklist
-- UI development workflow
-- Examples development guide
+**👉 [Complete Contributing Guide](https://wasmrun.readthedocs.io/en/latest/docs/development/contributing)**
 
 ## 🚀 Quick Start for Contributors
 
@@ -45,7 +36,7 @@ just lint
 
 ### 3. Make Your Changes
 
-Follow the guidelines in our [Contributing Guide](https://wasmrun.readthedocs.io/en/latest/development/contributing.html).
+Follow the guidelines in our [Contributing Guide](https://wasmrun.readthedocs.io/en/latest/docs/development/contributing).
 
 ### 4. Submit a Pull Request
 
@@ -57,16 +48,16 @@ Follow the guidelines in our [Contributing Guide](https://wasmrun.readthedocs.io
 
 ## 📖 Developer Documentation
 
-- **[Architecture](https://wasmrun.readthedocs.io/en/latest/development/architecture.html)** - Understand the codebase structure
-- **[Creating Plugins](https://wasmrun.readthedocs.io/en/latest/development/creating-plugins.html)** - Build your own language plugins
-- **[Debugging](https://wasmrun.readthedocs.io/en/latest/development/debugging.html)** - Debug mode and troubleshooting
+- **[Architecture](https://wasmrun.readthedocs.io/en/latest/docs/development/architecture)** - Understand the codebase structure
+- **[Creating Plugins](https://wasmrun.readthedocs.io/en/latest/docs/development/creating-plugins)** - Build your own language plugins
+- **[Debugging](https://wasmrun.readthedocs.io/en/latest/docs/development/debugging)** - Debug mode and troubleshooting
 
 ## 🐛 Bug Reports
 
 Found a bug? Please check:
 
 1. [Existing issues](https://github.com/anistark/wasmrun/issues)
-2. [Troubleshooting guide](https://wasmrun.readthedocs.io/en/latest/troubleshooting.html)
+2. [Troubleshooting guide](https://wasmrun.readthedocs.io/en/latest/docs/troubleshooting)
 
 If it's a new issue, [create an issue](https://github.com/anistark/wasmrun/issues/new) with:
 - OS and version
