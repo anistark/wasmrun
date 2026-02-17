@@ -447,40 +447,44 @@ impl WasiFilesystem {
         }
     }
 
-    /// Resolve a virtual WASI path to a real host path
+    /// Resolve a virtual WASI path to a real host path.
+    /// Uses longest-prefix matching so specific mounts shadow broader ones.
     fn resolve_path(&self, virtual_path: &str) -> Result<PathBuf> {
         let mounts = self.mounts.read().unwrap();
 
-        // Find the matching mount point
-        for (guest_path, host_path) in mounts.iter() {
-            if virtual_path.starts_with(guest_path) {
-                let relative = virtual_path
-                    .strip_prefix(guest_path)
-                    .unwrap_or(virtual_path)
-                    .trim_start_matches('/');
+        let best_match = mounts
+            .iter()
+            .filter(|(guest_path, _)| {
+                virtual_path == guest_path.as_str()
+                    || virtual_path.starts_with(&format!("{}/", guest_path.trim_end_matches('/')))
+                    || guest_path.as_str() == "/"
+            })
+            .max_by_key(|(guest_path, _)| guest_path.len());
 
-                let resolved = host_path.join(relative);
+        let (guest_path, host_path) =
+            best_match.ok_or_else(|| anyhow::anyhow!("Path not mounted: {virtual_path}"))?;
 
-                // Security check: ensure resolved path is within the mount
-                let canonical_mount = host_path.canonicalize()?;
-                let canonical_resolved = if let Ok(canon) = resolved.canonicalize() {
-                    canon
-                } else if let Some(parent) = resolved.parent() {
-                    // If file doesn't exist yet, check parent
-                    parent.canonicalize()?
-                } else {
-                    anyhow::bail!("Invalid path: {virtual_path}");
-                };
+        let relative = virtual_path
+            .strip_prefix(guest_path)
+            .unwrap_or(virtual_path)
+            .trim_start_matches('/');
 
-                if !canonical_resolved.starts_with(&canonical_mount) {
-                    anyhow::bail!("Path escapes mount point: {virtual_path}");
-                }
+        let resolved = host_path.join(relative);
 
-                return Ok(resolved);
-            }
+        let canonical_mount = host_path.canonicalize()?;
+        let canonical_resolved = if let Ok(canon) = resolved.canonicalize() {
+            canon
+        } else if let Some(parent) = resolved.parent() {
+            parent.canonicalize()?
+        } else {
+            anyhow::bail!("Invalid path: {virtual_path}");
+        };
+
+        if !canonical_resolved.starts_with(&canonical_mount) {
+            anyhow::bail!("Path escapes mount point: {virtual_path}");
         }
 
-        anyhow::bail!("Path not mounted: {virtual_path}")
+        Ok(resolved)
     }
 
     /// Calculate the size of a directory recursively

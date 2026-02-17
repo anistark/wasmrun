@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::runtime::scheduler::ProcessScheduler;
@@ -84,8 +85,8 @@ pub struct WasmInstance {
 pub struct WasmMicroKernel {
     processes: Arc<RwLock<HashMap<Pid, Process>>>,
     wasm_instances: Arc<RwLock<HashMap<Pid, WasmInstance>>>,
-    filesystem: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     wasi_fs: Arc<WasiFilesystem>,
+    workspace_root: Arc<PathBuf>,
     next_pid: Arc<Mutex<Pid>>,
     scheduler: Arc<ProcessScheduler>,
     scheduler_running: Arc<Mutex<bool>>,
@@ -99,11 +100,19 @@ impl Default for WasmMicroKernel {
 
 impl WasmMicroKernel {
     pub fn new() -> Self {
+        let workspace_root = std::env::temp_dir().join(format!("wasmrun-{}", std::process::id()));
+        std::fs::create_dir_all(&workspace_root).expect("Failed to create workspace root");
+
+        let wasi_fs = Arc::new(WasiFilesystem::new());
+        wasi_fs
+            .mount("/", &workspace_root)
+            .expect("Failed to mount workspace root");
+
         Self {
             processes: Arc::new(RwLock::new(HashMap::new())),
             wasm_instances: Arc::new(RwLock::new(HashMap::new())),
-            filesystem: Arc::new(Mutex::new(HashMap::new())),
-            wasi_fs: Arc::new(WasiFilesystem::new()),
+            wasi_fs,
+            workspace_root: Arc::new(workspace_root),
             next_pid: Arc::new(Mutex::new(1)),
             scheduler: Arc::new(ProcessScheduler::new()),
             scheduler_running: Arc::new(Mutex::new(false)),
@@ -243,75 +252,55 @@ impl WasmMicroKernel {
         stats
     }
 
-    /// Initialize the virtual file system
+    /// Initialize the virtual file system with standard directories
     pub fn init_vfs(&self) -> Result<()> {
-        let mut fs = self.filesystem.lock().unwrap();
-
-        // Create basic directory structure
-        fs.insert("/".to_string(), vec![]);
-        fs.insert("/tmp".to_string(), vec![]);
-        fs.insert("/home".to_string(), vec![]);
-        fs.insert("/usr".to_string(), vec![]);
-        fs.insert("/usr/bin".to_string(), vec![]);
-
+        for dir in &["tmp", "home", "usr/bin", "projects"] {
+            std::fs::create_dir_all(self.workspace_root.join(dir))?;
+        }
         Ok(())
+    }
+
+    /// Ensure a process workspace directory exists and return its virtual path
+    pub fn ensure_process_workspace(&self, pid: Pid) -> Result<String> {
+        let dir = self.workspace_root.join(format!("projects/{pid}"));
+        std::fs::create_dir_all(&dir)?;
+        Ok(format!("/projects/{pid}"))
     }
 }
 
 impl SyscallInterface for WasmMicroKernel {
     fn read_file(&self, path: &str) -> Result<Vec<u8>> {
-        let fs = self.filesystem.lock().unwrap();
-        fs.get(path)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("File not found: {path}"))
+        self.wasi_fs.read_file(path)
     }
 
     fn write_file(&self, path: &str, data: &[u8]) -> Result<()> {
-        let mut fs = self.filesystem.lock().unwrap();
-        fs.insert(path.to_string(), data.to_vec());
-        Ok(())
+        self.wasi_fs.write_file(path, data)
     }
 
     fn list_directory(&self, path: &str) -> Result<Vec<VfsEntry>> {
-        let fs = self.filesystem.lock().unwrap();
-        let mut entries = vec![];
-
-        for (file_path, data) in fs.iter() {
-            if file_path.starts_with(path) && file_path != path {
-                let relative_path = file_path.strip_prefix(path).unwrap_or(file_path);
-                if !relative_path.is_empty() && !relative_path.starts_with('/') {
-                    continue;
-                }
-
-                let is_directory = data.is_empty() && file_path.ends_with('/');
-                entries.push(VfsEntry {
-                    path: file_path.clone(),
-                    is_directory,
-                    size: if is_directory { None } else { Some(data.len()) },
-                    created_at: chrono::Utc::now(),
-                    modified_at: chrono::Utc::now(),
-                });
-            }
-        }
-
-        Ok(entries)
+        let entries = self.wasi_fs.path_readdir(path)?;
+        let now = chrono::Utc::now();
+        Ok(entries
+            .into_iter()
+            .map(|e| VfsEntry {
+                path: format!("{}/{}", path.trim_end_matches('/'), e.name),
+                is_directory: e.is_dir,
+                size: if e.is_dir {
+                    None
+                } else {
+                    Some(e.size as usize)
+                },
+                created_at: now,
+                modified_at: now,
+            })
+            .collect())
     }
 
     fn create_directory(&self, path: &str) -> Result<()> {
-        let mut fs = self.filesystem.lock().unwrap();
-        let dir_path = if path.ends_with('/') {
-            path.to_string()
-        } else {
-            format!("{path}/")
-        };
-        fs.insert(dir_path, vec![]);
-        Ok(())
+        self.wasi_fs.path_create_directory(path)
     }
 
     fn delete_file(&self, path: &str) -> Result<()> {
-        let mut fs = self.filesystem.lock().unwrap();
-        fs.remove(path)
-            .ok_or_else(|| anyhow::anyhow!("File not found: {path}"))?;
-        Ok(())
+        self.wasi_fs.path_unlink_file(path)
     }
 }
