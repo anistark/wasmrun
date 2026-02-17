@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatic deployment on commits
   - Structured documentation with guides, API references, and examples
 
+### Fixed
+- **Unified Dual Filesystems**: Removed disconnected in-memory `HashMap` VFS from `WasmMicroKernel`, routing all filesystem operations through `WasiFilesystem` as the single source of truth
+  - `SyscallInterface` now delegates to WASI FS for read, write, list, mkdir, and delete
+  - `WasiFilesystem::resolve_path()` uses longest-prefix matching to correctly shadow the root mount with specific mounts
+  - `NodeJSRuntime::run_project()` writes files via WASI FS so they are visible to the HTTP API (`/api/fs/*`)
+  - Added per-process workspace directories under `/projects/{pid}`
+
 ### Documentation
 - Official documentation is now available at **[wasmrun.readthedocs.io](https://wasmrun.readthedocs.io)** - this is the recommended reference for all wasmrun features and usage
 
