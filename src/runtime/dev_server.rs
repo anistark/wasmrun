@@ -7,6 +7,7 @@ use tiny_http::{Response, Server};
 
 use super::microkernel::Pid;
 use super::registry::DevServerStatus;
+use super::wasi_fs::WasiFilesystem;
 
 pub struct DevServerManager {
     servers: Arc<Mutex<HashMap<Pid, DevServerHandle>>>,
@@ -31,7 +32,13 @@ impl DevServerManager {
         }
     }
 
-    pub fn start_server(&self, pid: Pid, port: u16, project_root: String) -> Result<()> {
+    pub fn start_server(
+        &self,
+        pid: Pid,
+        port: u16,
+        project_root: String,
+        wasi_fs: Arc<WasiFilesystem>,
+    ) -> Result<()> {
         let stop_signal = Arc::new(Mutex::new(false));
         let stop_signal_clone = Arc::clone(&stop_signal);
 
@@ -47,7 +54,7 @@ impl DevServerManager {
         }
 
         thread::spawn(move || {
-            if let Err(e) = serve_wasi_files(port, &project_root, stop_signal_clone) {
+            if let Err(e) = serve_wasi_files(port, &project_root, wasi_fs, stop_signal_clone) {
                 eprintln!("Dev server error for PID {pid}: {e}");
             }
         });
@@ -95,7 +102,12 @@ impl DevServerManager {
     }
 }
 
-fn serve_wasi_files(port: u16, project_root: &str, stop_signal: Arc<Mutex<bool>>) -> Result<()> {
+fn serve_wasi_files(
+    port: u16,
+    project_root: &str,
+    wasi_fs: Arc<WasiFilesystem>,
+    stop_signal: Arc<Mutex<bool>>,
+) -> Result<()> {
     let addr = format!("127.0.0.1:{port}");
     let server =
         Server::http(&addr).map_err(|e| anyhow::anyhow!("Failed to start dev server: {e}"))?;
@@ -110,30 +122,28 @@ fn serve_wasi_files(port: u16, project_root: &str, stop_signal: Arc<Mutex<bool>>
             }
         }
 
-        let mut path = request.url().to_string();
-        if path == "/" {
-            path = "/index.html".to_string();
+        let mut url_path = request.url().to_string();
+        if url_path == "/" {
+            url_path = "/index.html".to_string();
         }
 
-        let file_path = Path::new(project_root).join(path.trim_start_matches('/'));
+        let vfs_path = format!(
+            "{}/{}",
+            project_root.trim_end_matches('/'),
+            url_path.trim_start_matches('/')
+        );
 
-        let response = if file_path.exists() && file_path.is_file() {
-            match std::fs::read(&file_path) {
-                Ok(content) => {
-                    let content_type = get_content_type(&file_path);
-                    Response::from_data(content).with_header(
-                        tiny_http::Header::from_bytes(
-                            &b"Content-Type"[..],
-                            content_type.as_bytes(),
-                        )
+        let response = match wasi_fs.read_file(&vfs_path) {
+            Ok(content) => {
+                let content_type = get_content_type(Path::new(&url_path));
+                Response::from_data(content).with_header(
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes())
                         .unwrap(),
-                    )
-                }
-                Err(_) => Response::from_string("404 Not Found")
-                    .with_status_code(tiny_http::StatusCode(404)),
+                )
             }
-        } else {
-            Response::from_string("404 Not Found").with_status_code(tiny_http::StatusCode(404))
+            Err(_) => {
+                Response::from_string("404 Not Found").with_status_code(tiny_http::StatusCode(404))
+            }
         };
 
         let _ = request.respond(response);
@@ -161,7 +171,15 @@ fn get_content_type(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
     use std::time::Duration;
+    use tempfile::tempdir;
+
+    fn create_wasi_fs_with_mount(mount_path: &str, host_dir: &Path) -> Arc<WasiFilesystem> {
+        let fs = Arc::new(WasiFilesystem::new());
+        fs.mount(mount_path, host_dir).unwrap();
+        fs
+    }
 
     #[test]
     fn test_dev_server_manager_creation() {
@@ -171,8 +189,11 @@ mod tests {
 
     #[test]
     fn test_start_server() {
+        let temp = tempdir().unwrap();
+        let wasi_fs = create_wasi_fs_with_mount("/projects/1", temp.path());
+
         let manager = DevServerManager::new();
-        let result = manager.start_server(1, 9999, "/tmp".to_string());
+        let result = manager.start_server(1, 9999, "/projects/1".to_string(), wasi_fs);
         assert!(result.is_ok());
 
         std::thread::sleep(Duration::from_millis(100));
@@ -186,8 +207,13 @@ mod tests {
 
     #[test]
     fn test_stop_server() {
+        let temp = tempdir().unwrap();
+        let wasi_fs = create_wasi_fs_with_mount("/projects/2", temp.path());
+
         let manager = DevServerManager::new();
-        manager.start_server(2, 9998, "/tmp".to_string()).unwrap();
+        manager
+            .start_server(2, 9998, "/projects/2".to_string(), wasi_fs)
+            .unwrap();
 
         std::thread::sleep(Duration::from_millis(100));
 
@@ -198,9 +224,19 @@ mod tests {
 
     #[test]
     fn test_list_servers() {
+        let temp3 = tempdir().unwrap();
+        let temp4 = tempdir().unwrap();
+        let wasi_fs = Arc::new(WasiFilesystem::new());
+        wasi_fs.mount("/projects/3", temp3.path()).unwrap();
+        wasi_fs.mount("/projects/4", temp4.path()).unwrap();
+
         let manager = DevServerManager::new();
-        manager.start_server(3, 9997, "/tmp".to_string()).unwrap();
-        manager.start_server(4, 9996, "/tmp".to_string()).unwrap();
+        manager
+            .start_server(3, 9997, "/projects/3".to_string(), Arc::clone(&wasi_fs))
+            .unwrap();
+        manager
+            .start_server(4, 9996, "/projects/4".to_string(), Arc::clone(&wasi_fs))
+            .unwrap();
 
         std::thread::sleep(Duration::from_millis(100));
 
@@ -223,5 +259,44 @@ mod tests {
         );
         assert_eq!(get_content_type(Path::new("file.css")), "text/css");
         assert_eq!(get_content_type(Path::new("file.json")), "application/json");
+    }
+
+    #[test]
+    fn test_dev_server_serves_wasi_files() {
+        let temp = tempdir().unwrap();
+        std::fs::write(temp.path().join("index.html"), b"<h1>Hello</h1>").unwrap();
+        std::fs::write(temp.path().join("style.css"), b"body {}").unwrap();
+
+        let wasi_fs = create_wasi_fs_with_mount("/projects/10", temp.path());
+
+        let manager = DevServerManager::new();
+        manager
+            .start_server(10, 19876, "/projects/10".to_string(), wasi_fs)
+            .unwrap();
+
+        std::thread::sleep(Duration::from_millis(200));
+
+        let mut resp = ureq::get("http://127.0.0.1:19876/").call().unwrap();
+        let mut body = String::new();
+        resp.body_mut()
+            .as_reader()
+            .read_to_string(&mut body)
+            .unwrap();
+        assert_eq!(body, "<h1>Hello</h1>");
+
+        let mut resp = ureq::get("http://127.0.0.1:19876/style.css")
+            .call()
+            .unwrap();
+        let mut body = String::new();
+        resp.body_mut()
+            .as_reader()
+            .read_to_string(&mut body)
+            .unwrap();
+        assert_eq!(body, "body {}");
+
+        let result = ureq::get("http://127.0.0.1:19876/missing.txt").call();
+        assert!(result.is_err());
+
+        manager.stop_server(10).unwrap();
     }
 }
