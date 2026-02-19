@@ -124,6 +124,11 @@ impl WasmMicroKernel {
         &self.wasi_fs
     }
 
+    /// Get a shared handle to the WASI filesystem
+    pub fn wasi_filesystem_arc(&self) -> Arc<WasiFilesystem> {
+        Arc::clone(&self.wasi_fs)
+    }
+
     pub fn start_scheduler(&self) -> Result<()> {
         let mut running = self.scheduler_running.lock().unwrap();
         if *running {

@@ -212,12 +212,12 @@ impl MultiLanguageKernel {
             .get_runtime(language)
             .ok_or_else(|| anyhow::anyhow!("Runtime not found: {language}"))?;
 
-        // Set up development server
         if runtime.create_dev_server().is_some() {
             let port = config.port.unwrap_or_else(|| 8000 + (pid as u16));
             let project_root = format!("/projects/{pid}");
+            let wasi_fs = self.base_kernel.wasi_filesystem_arc();
             self.dev_server_manager
-                .start_server(pid, port, project_root)?;
+                .start_server(pid, port, project_root, wasi_fs)?;
             println!("✅ Dev server started for PID {pid} on port {port}");
         }
 

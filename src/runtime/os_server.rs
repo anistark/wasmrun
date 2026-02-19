@@ -3,10 +3,18 @@ use crate::logging::{LogEntry, LogSource, LogTrailSystem};
 use crate::runtime::multilang_kernel::{MultiLanguageKernel, OsRunConfig};
 use crate::runtime::tunnel::BoreClient;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use tiny_http::{Header, Method, Request, Response, Server};
+
+const TEMPLATE_INDEX_HTML: &str = include_str!("../../templates/os/index.html");
+const TEMPLATE_OS_JS: &str = include_str!("../../templates/os/os.js");
+const TEMPLATE_INDEX_CSS: &str = include_str!("../../templates/os/index.css");
+const TEMPLATE_LOGGING_JS: &str = include_str!("../../templates/os/logging.js");
+const TEMPLATE_LOGS_HTML: &str = include_str!("../../templates/os/logs.html");
+
+const ASSET_LOGO_PNG: &[u8] = include_bytes!("../../templates/assets/logo.png");
+const ASSET_LOGO_TEXT_PNG: &[u8] = include_bytes!("../../templates/assets/logo-text.png");
 
 /// OS Mode server providing the browser-based development interface
 pub struct OsServer {
@@ -36,22 +44,8 @@ impl OsServer {
         Ok(server)
     }
 
-    /// Load OS mode templates and process variables
+    /// Load OS mode templates from embedded data and process variables
     fn load_templates(&mut self) -> Result<()> {
-        let templates_dir = Path::new("templates/os");
-
-        if !templates_dir.exists() {
-            return Err(WasmrunError::from(
-                "OS mode templates not found. Please ensure templates/os/ directory exists.",
-            ));
-        }
-
-        // Load main template
-        let index_path = templates_dir.join("index.html");
-        let mut index_content = fs::read_to_string(&index_path)
-            .map_err(|e| WasmrunError::from(format!("Failed to read index.html: {e}")))?;
-
-        // Process template variables
         let project_name = Path::new(&self.config.project_path)
             .file_name()
             .unwrap_or_default()
@@ -65,71 +59,34 @@ impl OsServer {
             .as_deref()
             .unwrap_or(&detected_language);
 
-        // Replace template variables
-        index_content = index_content
+        let port_str = self.config.port.unwrap_or(8420).to_string();
+
+        let index_content = TEMPLATE_INDEX_HTML
             .replace("$PROJECT_NAME$", &project_name)
             .replace("$LANGUAGE$", language)
             .replace("$PROJECT_PATH$", &self.config.project_path)
-            .replace("$PORT$", &self.config.port.unwrap_or(8420).to_string());
-
-        // Load and replace placeholders with actual CSS and JS
-        let css_path = templates_dir.join("index.css");
-        if css_path.exists() {
-            let _css_content = fs::read_to_string(&css_path)
-                .map_err(|e| WasmrunError::from(format!("Failed to read CSS bundle: {e}")))?;
-            index_content = index_content.replace(
+            .replace("$PORT$", &port_str)
+            .replace(
                 "<!-- @style-placeholder -->",
                 "<link rel=\"stylesheet\" href=\"/index.css\">",
-            );
-        }
-
-        let js_path = templates_dir.join("os.js");
-        if js_path.exists() {
-            index_content = index_content.replace(
+            )
+            .replace(
                 "<!-- @script-placeholder -->",
                 "<script src=\"/os.js\"></script>",
             );
-        }
 
         self.template_cache
             .insert("index.html".to_string(), index_content);
-
-        // Load JavaScript bundle
-        let js_path = templates_dir.join("os.js");
-        if js_path.exists() {
-            let js_content = fs::read_to_string(&js_path)
-                .map_err(|e| WasmrunError::from(format!("Failed to read JS bundle: {e}")))?;
-            self.template_cache.insert("os.js".to_string(), js_content);
-        }
-
-        // Load CSS styles
-        let css_path = templates_dir.join("index.css");
-        if css_path.exists() {
-            let css_content = fs::read_to_string(&css_path)
-                .map_err(|e| WasmrunError::from(format!("Failed to read CSS bundle: {e}")))?;
-            self.template_cache
-                .insert("index.css".to_string(), css_content);
-        }
-
-        // Load logging module
-        let logging_js_path = templates_dir.join("logging.js");
-        if logging_js_path.exists() {
-            let logging_js_content = fs::read_to_string(&logging_js_path)
-                .map_err(|e| WasmrunError::from(format!("Failed to read logging.js: {e}")))?;
-            self.template_cache
-                .insert("logging.js".to_string(), logging_js_content);
-        }
-
-        // Load logs panel HTML
-        let logs_path = templates_dir.join("logs.html");
-        if logs_path.exists() {
-            let logs_content = fs::read_to_string(&logs_path)
-                .map_err(|e| WasmrunError::from(format!("Failed to read logs.html: {e}")))?;
-            let logs_content =
-                logs_content.replace("$PORT$", &self.config.port.unwrap_or(8420).to_string());
-            self.template_cache
-                .insert("logs.html".to_string(), logs_content);
-        }
+        self.template_cache
+            .insert("os.js".to_string(), TEMPLATE_OS_JS.to_string());
+        self.template_cache
+            .insert("index.css".to_string(), TEMPLATE_INDEX_CSS.to_string());
+        self.template_cache
+            .insert("logging.js".to_string(), TEMPLATE_LOGGING_JS.to_string());
+        self.template_cache.insert(
+            "logs.html".to_string(),
+            TEMPLATE_LOGS_HTML.replace("$PORT$", &port_str),
+        );
 
         self.log_system.log(LogEntry::info(
             LogSource::Kernel,
@@ -912,27 +869,15 @@ impl OsServer {
         }
     }
 
-    /// Serve static assets
+    /// Serve static assets from embedded data
     fn serve_asset(&self, request: Request, asset_path: &str) -> Result<()> {
-        let full_path = Path::new("templates/assets").join(asset_path);
-
-        if !full_path.exists() {
-            return self.send_404(request);
-        }
-
-        let content = fs::read(&full_path)
-            .map_err(|e| WasmrunError::from(format!("Failed to read asset: {e}")))?;
-
-        let content_type = match full_path.extension().and_then(|ext| ext.to_str()) {
-            Some("png") => "image/png",
-            Some("jpg") | Some("jpeg") => "image/jpeg",
-            Some("svg") => "image/svg+xml",
-            Some("css") => "text/css",
-            Some("js") => "application/javascript",
-            _ => "application/octet-stream",
+        let (content, content_type): (&[u8], &str) = match asset_path {
+            "logo.png" => (ASSET_LOGO_PNG, "image/png"),
+            "logo-text.png" => (ASSET_LOGO_TEXT_PNG, "image/png"),
+            _ => return self.send_404(request),
         };
 
-        let response = Response::from_data(content).with_header(
+        let response = Response::from_data(content.to_vec()).with_header(
             Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap(),
         );
 
