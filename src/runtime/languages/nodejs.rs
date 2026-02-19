@@ -191,20 +191,18 @@ impl LanguageRuntime for NodeJSRuntime {
     }
 
     fn run_project(&self, bundle: ProjectBundle, kernel: &mut WasmMicroKernel) -> Result<Pid> {
-        // Create a process for the Node.js project
         let pid = kernel.create_process(bundle.name.clone(), "nodejs".to_string(), None)?;
 
-        // Load the Node.js runtime WASM
         let wasm_binary = self.load_wasm_binary()?;
         kernel.load_wasm_module(pid, &wasm_binary)?;
 
-        // Write project files to the virtual filesystem
-        for (path, content) in bundle.files {
-            let vfs_path = format!("/projects/{pid}/{path}");
-            kernel.write_file(&vfs_path, &content)?;
+        let workspace = kernel.ensure_process_workspace(pid)?;
+
+        for (path, content) in &bundle.files {
+            let vfs_path = format!("{workspace}/{path}");
+            kernel.wasi_filesystem().write_file(&vfs_path, content)?;
         }
 
-        // Write package.json with metadata
         let deps_obj: HashMap<String, String> = bundle
             .dependencies
             .iter()
@@ -221,8 +219,10 @@ impl LanguageRuntime for NodeJSRuntime {
             "license": bundle.metadata.license
         }))?;
 
-        let package_path = format!("/projects/{pid}/package.json");
-        kernel.write_file(&package_path, &package_json)?;
+        let package_path = format!("{workspace}/package.json");
+        kernel
+            .wasi_filesystem()
+            .write_file(&package_path, &package_json)?;
 
         Ok(pid)
     }
