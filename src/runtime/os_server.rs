@@ -156,27 +156,13 @@ impl OsServer {
         Ok(())
     }
 
-    /// Start the project in the kernel
+    /// Start the project in the kernel.
+    /// Called once during server boot — uses a write lock on project_pid internally.
     fn start_project(&self) -> Result<()> {
-        let mut kernel = self.kernel.write().unwrap();
-
-        // Mount the project directory into WASI filesystem
-        if let Err(e) = kernel.mount_project(&self.config.project_path) {
-            eprintln!("⚠️ Failed to mount project directory: {e}");
-        }
-
-        match kernel.auto_detect_and_run(self.config.clone()) {
+        let mut project_pid = self.project_pid.write().unwrap();
+        match self.run_project_in_kernel() {
             Ok(pid) => {
-                let mut project_pid = self.project_pid.write().unwrap();
                 *project_pid = Some(pid);
-                self.log_system.log(
-                    LogEntry::info(
-                        LogSource::Kernel,
-                        format!("Project started with PID: {pid}"),
-                    )
-                    .with_pid(pid),
-                );
-                println!("✅ Project started with PID: {pid}");
                 Ok(())
             }
             Err(e) => {
@@ -185,9 +171,34 @@ impl OsServer {
                     format!("Failed to start project in kernel: {e}"),
                 ));
                 eprintln!("⚠️ Failed to start project in kernel: {e}");
-                // Continue serving the interface even if project fails
                 Ok(())
             }
+        }
+    }
+
+    /// Core project startup logic. Acquires the kernel write lock, mounts the
+    /// project, and runs it. Returns the new PID on success.
+    /// Does NOT touch project_pid — callers are responsible for that.
+    fn run_project_in_kernel(&self) -> Result<u32> {
+        let mut kernel = self.kernel.write().unwrap();
+
+        if let Err(e) = kernel.mount_project(&self.config.project_path) {
+            eprintln!("⚠️ Failed to mount project directory: {e}");
+        }
+
+        match kernel.auto_detect_and_run(self.config.clone()) {
+            Ok(pid) => {
+                self.log_system.log(
+                    LogEntry::info(
+                        LogSource::Kernel,
+                        format!("Project started with PID: {pid}"),
+                    )
+                    .with_pid(pid),
+                );
+                println!("✅ Project started with PID: {pid}");
+                Ok(pid)
+            }
+            Err(e) => Err(WasmrunError::from(e.to_string())),
         }
     }
 
@@ -419,130 +430,87 @@ impl OsServer {
         Ok(())
     }
 
-    /// Handle start project request
+    /// Handle start project request.
+    /// Check-and-start is atomic under a single project_pid write lock.
     fn handle_start_project(&self, request: Request) -> Result<()> {
-        let project_pid = self.project_pid.read().unwrap();
-        if project_pid.is_some() {
-            let response_json = serde_json::json!({
-                "success": false,
-                "error": "Project is already running"
-            });
+        let mut project_pid = self.project_pid.write().unwrap();
 
-            let response = Response::from_string(response_json.to_string())
-                .with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                )
-                .with_header(
-                    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                );
-
-            request
-                .respond(response)
-                .map_err(|e| WasmrunError::from(e.to_string()))?;
+        let response_json = if project_pid.is_some() {
+            serde_json::json!({ "success": false, "error": "Project is already running" })
         } else {
-            drop(project_pid); // Release read lock
-            match self.start_project() {
-                Ok(_) => {
-                    let pid = *self.project_pid.read().unwrap();
-                    let response_json = serde_json::json!({
-                        "success": true,
-                        "pid": pid
-                    });
-
-                    let response = Response::from_string(response_json.to_string())
-                        .with_header(
-                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                                .unwrap(),
-                        )
-                        .with_header(
-                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
-                                .unwrap(),
-                        );
-
-                    request
-                        .respond(response)
-                        .map_err(|e| WasmrunError::from(e.to_string()))?;
+            match self.run_project_in_kernel() {
+                Ok(pid) => {
+                    *project_pid = Some(pid);
+                    serde_json::json!({ "success": true, "pid": pid })
                 }
                 Err(e) => {
-                    let response_json = serde_json::json!({
-                        "success": false,
-                        "error": e.to_string()
-                    });
-
-                    let response = Response::from_string(response_json.to_string())
-                        .with_status_code(tiny_http::StatusCode(500))
-                        .with_header(
-                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                                .unwrap(),
-                        )
-                        .with_header(
-                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
-                                .unwrap(),
-                        );
-
-                    request
-                        .respond(response)
-                        .map_err(|e| WasmrunError::from(e.to_string()))?;
+                    serde_json::json!({ "success": false, "error": e.to_string() })
                 }
             }
-        }
+        };
+
+        let status = if response_json["success"].as_bool() == Some(true) {
+            200
+        } else if project_pid.is_some() {
+            409
+        } else {
+            500
+        };
+
+        let response = Response::from_string(response_json.to_string())
+            .with_status_code(tiny_http::StatusCode(status))
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+            );
+
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
         Ok(())
     }
 
-    /// Handle restart project request
+    /// Handle restart project request.
+    /// Kill-and-restart is atomic under a single project_pid write lock.
     fn handle_restart_project(&self, request: Request) -> Result<()> {
-        // Stop the current project if running
-        {
-            let pid_opt = *self.project_pid.read().unwrap();
-            if let Some(pid) = pid_opt {
-                let mut kernel = self.kernel.write().unwrap();
-                let _ = kernel.kill_process(pid);
-                let mut project_pid = self.project_pid.write().unwrap();
-                *project_pid = None;
-            }
+        let mut project_pid = self.project_pid.write().unwrap();
+
+        if let Some(pid) = *project_pid {
+            let mut kernel = self.kernel.write().unwrap();
+            let _ = kernel.kill_process(pid);
         }
+        *project_pid = None;
 
-        // Start the project again
-        match self.start_project() {
-            Ok(_) => {
-                let pid = *self.project_pid.read().unwrap();
-                let response_json = serde_json::json!({
-                    "success": true,
-                    "pid": pid
-                });
-
-                let response = Response::from_string(response_json.to_string())
-                    .with_header(
-                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                    )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
-
-                request
-                    .respond(response)
-                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+        let response_json = match self.run_project_in_kernel() {
+            Ok(pid) => {
+                *project_pid = Some(pid);
+                serde_json::json!({ "success": true, "pid": pid })
             }
             Err(e) => {
-                let response_json = serde_json::json!({
-                    "success": false,
-                    "error": e.to_string()
-                });
-
-                let response = Response::from_string(response_json.to_string())
-                    .with_status_code(tiny_http::StatusCode(500))
-                    .with_header(
-                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                    )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
-
-                request
-                    .respond(response)
-                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+                serde_json::json!({ "success": false, "error": e.to_string() })
             }
-        }
+        };
+
+        let status = if response_json["success"].as_bool() == Some(true) {
+            200
+        } else {
+            500
+        };
+
+        let response = Response::from_string(response_json.to_string())
+            .with_status_code(tiny_http::StatusCode(status))
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+            );
+
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
         Ok(())
     }
 
