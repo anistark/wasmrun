@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
@@ -42,13 +42,16 @@ pub enum ConnectionState {
     Connected,
 }
 
+const PORT_RANGE_SIZE: u16 = 1000;
+const PORT_RANGE_START: u16 = 10000;
+
 pub struct NetworkNamespace {
     pid: Pid,
     base_port: u16,
     port_mappings: Arc<RwLock<HashMap<GuestPort, PortMapping>>>,
     connections: Arc<RwLock<HashMap<SocketFd, ConnectionInfo>>>,
-    #[allow(dead_code)]
     next_host_port: Arc<RwLock<u16>>,
+    allocated_host_ports: Arc<RwLock<HashSet<u16>>>,
 }
 
 impl NetworkNamespace {
@@ -61,16 +64,14 @@ impl NetworkNamespace {
             port_mappings: Arc::new(RwLock::new(HashMap::new())),
             connections: Arc::new(RwLock::new(HashMap::new())),
             next_host_port: Arc::new(RwLock::new(base_port)),
+            allocated_host_ports: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
     pub fn calculate_base_port(pid: Pid) -> u16 {
-        let base = 10000_u32 + (pid * 1000);
-        if base > 65535 {
-            ((base % 55535) + 10000) as u16
-        } else {
-            base as u16
-        }
+        let base = PORT_RANGE_START as u64 + (pid as u64 * PORT_RANGE_SIZE as u64);
+        let usable_range = (u16::MAX - PORT_RANGE_START) as u64;
+        (PORT_RANGE_START as u64 + (base - PORT_RANGE_START as u64) % usable_range) as u16
     }
 
     #[allow(dead_code)]
@@ -82,12 +83,32 @@ impl NetworkNamespace {
         }
 
         let mut next_port = self.next_host_port.write().unwrap();
-        let host_port = *next_port;
-        *next_port += 1;
+        let mut allocated = self.allocated_host_ports.write().unwrap();
 
-        if *next_port >= self.base_port + 1000 {
-            *next_port = self.base_port;
-        }
+        let start = *next_port;
+        let host_port = loop {
+            let candidate = *next_port;
+            *next_port = if candidate >= self.base_port.saturating_add(PORT_RANGE_SIZE - 1) {
+                self.base_port
+            } else {
+                candidate + 1
+            };
+
+            if !allocated.contains(&candidate) {
+                break candidate;
+            }
+
+            if *next_port == start {
+                anyhow::bail!(
+                    "Port range exhausted for PID {} (base {}, {} ports)",
+                    self.pid,
+                    self.base_port,
+                    PORT_RANGE_SIZE
+                );
+            }
+        };
+
+        allocated.insert(host_port);
 
         let mapping = PortMapping {
             guest_port,
@@ -104,11 +125,14 @@ impl NetworkNamespace {
     pub fn deallocate_port(&self, guest_port: GuestPort) -> Result<()> {
         let mut mappings = self.port_mappings.write().unwrap();
 
-        if mappings.remove(&guest_port).is_none() {
-            anyhow::bail!("Port {guest_port} not allocated");
+        match mappings.remove(&guest_port) {
+            Some(mapping) => {
+                let mut allocated = self.allocated_host_ports.write().unwrap();
+                allocated.remove(&mapping.host_port);
+                Ok(())
+            }
+            None => anyhow::bail!("Port {guest_port} not allocated"),
         }
-
-        Ok(())
     }
 
     #[allow(dead_code)]
@@ -232,6 +256,19 @@ mod tests {
     }
 
     #[test]
+    fn test_base_port_large_pids_no_overflow() {
+        let port_100 = NetworkNamespace::calculate_base_port(100);
+        assert!(port_100 >= PORT_RANGE_START);
+
+        let port_max = NetworkNamespace::calculate_base_port(u32::MAX);
+        assert!(port_max >= PORT_RANGE_START);
+        assert!(port_max <= u16::MAX);
+
+        let port_1m = NetworkNamespace::calculate_base_port(1_000_000);
+        assert!(port_1m >= PORT_RANGE_START);
+    }
+
+    #[test]
     fn test_port_allocation() {
         let ns = NetworkNamespace::new(1);
 
@@ -251,6 +288,63 @@ mod tests {
         ns.allocate_port(8080, SocketProtocol::Tcp).unwrap();
         assert!(ns.deallocate_port(8080).is_ok());
         assert!(ns.deallocate_port(8080).is_err());
+    }
+
+    #[test]
+    fn test_deallocated_port_is_reusable() {
+        let ns = NetworkNamespace::new(1);
+
+        let p1 = ns.allocate_port(80, SocketProtocol::Tcp).unwrap();
+        ns.deallocate_port(80).unwrap();
+
+        // Fill remaining range so wraparound happens
+        for i in 1..PORT_RANGE_SIZE {
+            ns.allocate_port(1000 + i, SocketProtocol::Tcp).unwrap();
+        }
+
+        // Next allocation wraps around and should find the freed port
+        let p_wrap = ns.allocate_port(9999, SocketProtocol::Tcp).unwrap();
+        assert_eq!(p_wrap, p1);
+    }
+
+    #[test]
+    fn test_port_range_exhaustion() {
+        let ns = NetworkNamespace::new(2);
+
+        for i in 0..PORT_RANGE_SIZE {
+            ns.allocate_port(i, SocketProtocol::Tcp).unwrap();
+        }
+
+        let result = ns.allocate_port(PORT_RANGE_SIZE, SocketProtocol::Tcp);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("exhausted"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_wraparound_skips_allocated() {
+        let ns = NetworkNamespace::new(1);
+        let base = ns.base_port;
+
+        // Allocate the first port
+        let p0 = ns.allocate_port(80, SocketProtocol::Tcp).unwrap();
+        assert_eq!(p0, base);
+
+        // Fill up to near the end of the range
+        for i in 1..(PORT_RANGE_SIZE - 1) {
+            ns.allocate_port(1000 + i, SocketProtocol::Tcp).unwrap();
+        }
+
+        // Deallocate a port in the middle
+        ns.deallocate_port(1005).unwrap();
+
+        // Next alloc takes the last slot, then wraps
+        let p_last = ns.allocate_port(5000, SocketProtocol::Tcp).unwrap();
+        assert_eq!(p_last, base + PORT_RANGE_SIZE - 1);
+
+        // This one wraps and must skip p0 (still allocated), landing on the freed slot
+        let p_reuse = ns.allocate_port(5001, SocketProtocol::Tcp).unwrap();
+        assert_eq!(p_reuse, base + 5); // the one we deallocated (offset 5 from base)
     }
 
     #[test]

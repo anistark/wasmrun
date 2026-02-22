@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Embedded OS Templates**: All templates/assets embedded via `include_str!`/`include_bytes!` — works from any CWD and via `cargo install`
 - **OsServer Race Conditions**: Start/restart handlers now hold a single `project_pid` write lock for the full check-and-act sequence (no TOCTOU)
 - **sock_open Broken Implementation**: TCP `sock_open` no longer attempts a dummy connect to `0.0.0.0:0`; uses a `SocketHandle::Placeholder` with deferred creation at `sock_bind`/`sock_connect`
+- **Port Allocation Overflow**: `calculate_base_port()` uses `u64` arithmetic (no overflow for any PID); `allocate_port()` tracks used host ports in a `HashSet` and skips conflicts on wraparound
 - **Docs Build**: Added missing `@docusaurus/plugin-content-pages` direct dependency
 
 ### Security
