@@ -253,6 +253,7 @@ mod tests {
 
         let port_max = NetworkNamespace::calculate_base_port(u32::MAX);
         assert!(port_max >= PORT_RANGE_START);
+        assert!(port_max <= u16::MAX);
 
         let port_1m = NetworkNamespace::calculate_base_port(1_000_000);
         assert!(port_1m >= PORT_RANGE_START);
