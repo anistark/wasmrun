@@ -45,7 +45,6 @@ impl Default for MultiLanguageKernel {
 
 #[allow(dead_code)]
 impl MultiLanguageKernel {
-    /// Create a new multi-language kernel
     pub fn new() -> Self {
         let base_kernel = WasmMicroKernel::new();
         let syscall_handler = SyscallHandler::new(base_kernel.clone());
