@@ -33,11 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Structured documentation with guides, API references, and examples
 
 ### Fixed
-- **Unified Dual Filesystems**: Removed disconnected in-memory `HashMap` VFS from `WasmMicroKernel`, routing all filesystem operations through `WasiFilesystem` as the single source of truth
-  - `SyscallInterface` now delegates to WASI FS for read, write, list, mkdir, and delete
-  - `WasiFilesystem::resolve_path()` uses longest-prefix matching to correctly shadow the root mount with specific mounts
-  - `NodeJSRuntime::run_project()` writes files via WASI FS so they are visible to the HTTP API (`/api/fs/*`)
-  - Added per-process workspace directories under `/projects/{pid}`
+- **Unified Dual Filesystems**: Removed disconnected in-memory `HashMap` VFS, all FS operations now route through `WasiFilesystem`
+- **Dev Server Reads Through WASI FS**: `serve_wasi_files()` now uses `wasi_fs.read_file()` instead of host `std::fs::read()` with broken virtual paths
+- **Embedded OS Templates**: All templates/assets embedded via `include_str!`/`include_bytes!` — works from any CWD and via `cargo install`
+- **OsServer Race Conditions**: Start/restart handlers now hold a single `project_pid` write lock for the full check-and-act sequence (no TOCTOU)
+- **sock_open Broken Implementation**: TCP `sock_open` no longer attempts a dummy connect to `0.0.0.0:0`; uses a `SocketHandle::Placeholder` with deferred creation at `sock_bind`/`sock_connect`
+- **Docs Build**: Added missing `@docusaurus/plugin-content-pages` direct dependency
+
+### Security
+- **CORS Restricted by Default**: `Access-Control-Allow-Origin` now defaults to `http://127.0.0.1:{port}` instead of `*`; opt-in via `--allow-cors` flag
+- **Path Traversal Protection**: `SyscallInterface` methods reject `..` segments and relative paths
+- **Kill Permission Checks**: `kill` syscall now enforces self-kill or parent→child only; unrelated processes are denied
 
 ### Documentation
 - Official documentation is now available at **[wasmrun.readthedocs.io](https://wasmrun.readthedocs.io)** - this is the recommended reference for all wasmrun features and usage

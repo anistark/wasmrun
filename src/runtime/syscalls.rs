@@ -3,9 +3,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read as IoRead, Write as IoWrite};
-use std::net::{
-    IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket,
-};
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::sync::{Arc, Mutex};
 
 /// System call numbers for OS mode
@@ -172,6 +170,7 @@ pub enum SocketState {
 /// Socket handle (wraps actual socket types)
 #[derive(Debug)]
 pub enum SocketHandle {
+    Placeholder,
     TcpListener(Arc<Mutex<TcpListener>>),
     TcpStream(Arc<Mutex<TcpStream>>),
     UdpSocket(Arc<Mutex<UdpSocket>>),
@@ -180,6 +179,7 @@ pub enum SocketHandle {
 impl Clone for SocketHandle {
     fn clone(&self) -> Self {
         match self {
+            SocketHandle::Placeholder => SocketHandle::Placeholder,
             SocketHandle::TcpListener(l) => SocketHandle::TcpListener(Arc::clone(l)),
             SocketHandle::TcpStream(s) => SocketHandle::TcpStream(Arc::clone(s)),
             SocketHandle::UdpSocket(u) => SocketHandle::UdpSocket(Arc::clone(u)),
@@ -671,27 +671,7 @@ impl SyscallHandler {
         }
 
         let handle = match socket_type {
-            SocketType::Stream => {
-                let dummy_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0);
-                match TcpStream::connect(dummy_addr) {
-                    Ok(_) => {
-                        return SyscallResult::Error("sock_open: unexpected connection".to_string())
-                    }
-                    Err(_) => {
-                        let listener = match TcpListener::bind("0.0.0.0:0") {
-                            Ok(l) => l,
-                            Err(e) => return SyscallResult::Error(format!("sock_open: {e}")),
-                        };
-                        drop(listener);
-
-                        let placeholder = match TcpListener::bind("0.0.0.0:0") {
-                            Ok(l) => l,
-                            Err(e) => return SyscallResult::Error(format!("sock_open: {e}")),
-                        };
-                        SocketHandle::TcpListener(Arc::new(Mutex::new(placeholder)))
-                    }
-                }
-            }
+            SocketType::Stream => SocketHandle::Placeholder,
             SocketType::Dgram => {
                 let socket = match UdpSocket::bind("0.0.0.0:0") {
                     Ok(s) => s,
@@ -760,6 +740,14 @@ impl SyscallHandler {
                 }
 
                 let result = match handle {
+                    SocketHandle::Placeholder => {
+                        let listener = match TcpListener::bind(bind_addr) {
+                            Ok(l) => l,
+                            Err(e) => return SyscallResult::Error(format!("sock_bind: {e}")),
+                        };
+                        *handle = SocketHandle::TcpListener(Arc::new(Mutex::new(listener)));
+                        Ok(())
+                    }
                     SocketHandle::TcpListener(listener) => {
                         let new_listener = match TcpListener::bind(bind_addr) {
                             Ok(l) => l,
@@ -1822,6 +1810,107 @@ mod tests {
                 assert!(msg.contains("invalid port string"));
             }
             _ => panic!("Expected error for invalid port string"),
+        }
+    }
+
+    #[test]
+    fn test_sock_open_stream_creates_placeholder() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![
+                SyscallArg::Number(AddressFamily::Inet as i64),
+                SyscallArg::Number(SocketType::Stream as i64),
+            ],
+        };
+        let result = handler.handle_sock_open(pid, args);
+        let fd = match result {
+            SyscallResult::Success(SyscallReturn::FileDescriptor(fd)) => fd,
+            other => panic!("Expected fd, got {other:?}"),
+        };
+
+        let table = handler.fd_tables.get(&pid).unwrap();
+        match table.get(fd) {
+            Some(FileDescriptor::Socket {
+                handle,
+                state,
+                socket_type,
+                ..
+            }) => {
+                assert!(matches!(handle, SocketHandle::Placeholder));
+                assert_eq!(*state, SocketState::Created);
+                assert_eq!(*socket_type, SocketType::Stream);
+            }
+            other => panic!("Expected placeholder socket, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sock_open_then_bind_creates_listener() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let open_args = SyscallArgs {
+            args: vec![
+                SyscallArg::Number(AddressFamily::Inet as i64),
+                SyscallArg::Number(SocketType::Stream as i64),
+            ],
+        };
+        let fd = match handler.handle_sock_open(pid, open_args) {
+            SyscallResult::Success(SyscallReturn::FileDescriptor(fd)) => fd,
+            other => panic!("Expected fd, got {other:?}"),
+        };
+
+        let bind_args = SyscallArgs {
+            args: vec![
+                SyscallArg::Number(fd as i64),
+                SyscallArg::String("127.0.0.1".to_string()),
+                SyscallArg::Number(0),
+            ],
+        };
+        let result = handler.handle_sock_bind(pid, bind_args);
+        assert!(
+            matches!(result, SyscallResult::Success(_)),
+            "bind failed: {result:?}"
+        );
+
+        let table = handler.fd_tables.get(&pid).unwrap();
+        match table.get(fd) {
+            Some(FileDescriptor::Socket { handle, state, .. }) => {
+                assert!(matches!(handle, SocketHandle::TcpListener(_)));
+                assert_eq!(*state, SocketState::Bound);
+            }
+            other => panic!("Expected bound listener, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_sock_open_dgram_creates_socket_immediately() {
+        let kernel = WasmMicroKernel::default();
+        let mut handler = SyscallHandler::new(kernel);
+        let pid: Pid = 1;
+
+        let args = SyscallArgs {
+            args: vec![
+                SyscallArg::Number(AddressFamily::Inet as i64),
+                SyscallArg::Number(SocketType::Dgram as i64),
+            ],
+        };
+        let result = handler.handle_sock_open(pid, args);
+        let fd = match result {
+            SyscallResult::Success(SyscallReturn::FileDescriptor(fd)) => fd,
+            other => panic!("Expected fd, got {other:?}"),
+        };
+
+        let table = handler.fd_tables.get(&pid).unwrap();
+        match table.get(fd) {
+            Some(FileDescriptor::Socket { handle, .. }) => {
+                assert!(matches!(handle, SocketHandle::UdpSocket(_)));
+            }
+            other => panic!("Expected UDP socket, got {other:?}"),
         }
     }
 
