@@ -273,16 +273,29 @@ impl WasmMicroKernel {
     }
 }
 
+fn validate_path(path: &str) -> Result<()> {
+    if path.split('/').any(|seg| seg == "..") {
+        anyhow::bail!("Path traversal not allowed: {path}");
+    }
+    if !path.starts_with('/') {
+        anyhow::bail!("Paths must be absolute: {path}");
+    }
+    Ok(())
+}
+
 impl SyscallInterface for WasmMicroKernel {
     fn read_file(&self, path: &str) -> Result<Vec<u8>> {
+        validate_path(path)?;
         self.wasi_fs.read_file(path)
     }
 
     fn write_file(&self, path: &str, data: &[u8]) -> Result<()> {
+        validate_path(path)?;
         self.wasi_fs.write_file(path, data)
     }
 
     fn list_directory(&self, path: &str) -> Result<Vec<VfsEntry>> {
+        validate_path(path)?;
         let entries = self.wasi_fs.path_readdir(path)?;
         let now = chrono::Utc::now();
         Ok(entries
@@ -302,10 +315,69 @@ impl SyscallInterface for WasmMicroKernel {
     }
 
     fn create_directory(&self, path: &str) -> Result<()> {
+        validate_path(path)?;
         self.wasi_fs.path_create_directory(path)
     }
 
     fn delete_file(&self, path: &str) -> Result<()> {
+        validate_path(path)?;
         self.wasi_fs.path_unlink_file(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_path_rejects_traversal() {
+        assert!(validate_path("/etc/../passwd").is_err());
+        assert!(validate_path("/projects/1/../../etc/passwd").is_err());
+        assert!(validate_path("/..").is_err());
+    }
+
+    #[test]
+    fn test_validate_path_rejects_relative() {
+        assert!(validate_path("relative/path").is_err());
+        assert!(validate_path("../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_validate_path_accepts_valid() {
+        assert!(validate_path("/").is_ok());
+        assert!(validate_path("/projects/1/file.txt").is_ok());
+        assert!(validate_path("/tmp").is_ok());
+    }
+
+    #[test]
+    fn test_syscall_interface_rejects_traversal() {
+        let kernel = WasmMicroKernel::new();
+        assert!(kernel.read_file("/tmp/../../etc/passwd").is_err());
+        assert!(kernel
+            .write_file("/tmp/../../../root/.ssh/id_rsa", b"x")
+            .is_err());
+        assert!(kernel.list_directory("/projects/../..").is_err());
+        assert!(kernel.create_directory("/tmp/../../evil").is_err());
+        assert!(kernel.delete_file("/tmp/../../etc/hosts").is_err());
+    }
+
+    #[test]
+    fn test_syscall_interface_rejects_relative_paths() {
+        let kernel = WasmMicroKernel::new();
+        assert!(kernel.read_file("relative").is_err());
+        assert!(kernel.write_file("no-slash", b"data").is_err());
+    }
+
+    #[test]
+    fn test_create_process_with_parent() {
+        let kernel = WasmMicroKernel::new();
+        let parent = kernel
+            .create_process("parent".into(), "rust".into(), None)
+            .unwrap();
+        let child = kernel
+            .create_process("child".into(), "rust".into(), Some(parent))
+            .unwrap();
+        let proc = kernel.get_process(child).unwrap();
+        assert_eq!(proc.parent_pid, Some(parent));
     }
 }

@@ -149,21 +149,29 @@ fn main() {
             language,
             watch,
             verbose,
+            allow_cors,
         }) => {
             debug_println!(
-                "Processing os command: port={}, language={:?}, watch={}, verbose={}",
+                "Processing os command: port={}, language={:?}, watch={}, verbose={}, allow_cors={}",
                 port,
                 language,
                 watch,
-                verbose
+                verbose,
+                allow_cors
             );
-            commands::handle_os_command(path, positional_path, *port, language, *watch, *verbose)
-                .map_err(|e| match e {
-                    WasmrunError::Command(_)
-                    | WasmrunError::Server(_)
-                    | WasmrunError::Path { .. } => e,
-                    _ => e,
-                })
+            commands::handle_os_command(
+                path,
+                positional_path,
+                *port,
+                language,
+                *watch,
+                *verbose,
+                *allow_cors,
+            )
+            .map_err(|e| match e {
+                WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,
+                _ => e,
+            })
         }
 
         Some(Commands::Plugin(plugin_cmd)) => {

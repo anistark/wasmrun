@@ -599,7 +599,7 @@ impl SyscallHandler {
         SyscallResult::Success(SyscallReturn::ProcessId(pid))
     }
 
-    fn handle_kill(&mut self, _caller_pid: Pid, args: SyscallArgs) -> SyscallResult {
+    fn handle_kill(&mut self, caller_pid: Pid, args: SyscallArgs) -> SyscallResult {
         if args.args.is_empty() {
             return SyscallResult::Error("kill: insufficient arguments".to_string());
         }
@@ -608,6 +608,21 @@ impl SyscallHandler {
             SyscallArg::Number(n) => *n as Pid,
             _ => return SyscallResult::Error("kill: invalid pid argument".to_string()),
         };
+
+        if caller_pid != target_pid {
+            let target = self.kernel.get_process(target_pid);
+            match target {
+                Some(proc) if proc.parent_pid == Some(caller_pid) => {}
+                Some(_) => {
+                    return SyscallResult::Error(format!(
+                        "kill: PID {caller_pid} not permitted to kill PID {target_pid}"
+                    ));
+                }
+                None => {
+                    return SyscallResult::Error(format!("kill: no such process: {target_pid}"));
+                }
+            }
+        }
 
         match self.kernel.kill_process(target_pid) {
             Ok(_) => SyscallResult::Success(SyscallReturn::Number(0)),
@@ -1807,6 +1822,78 @@ mod tests {
                 assert!(msg.contains("invalid port string"));
             }
             _ => panic!("Expected error for invalid port string"),
+        }
+    }
+
+    #[test]
+    fn test_kill_self_allowed() {
+        let kernel = WasmMicroKernel::default();
+        let pid = kernel
+            .create_process("self".into(), "rust".into(), None)
+            .unwrap();
+        let mut handler = SyscallHandler::new(kernel);
+
+        let args = SyscallArgs {
+            args: vec![SyscallArg::Number(pid as i64)],
+        };
+        let result = handler.handle_kill(pid, args);
+        assert!(matches!(result, SyscallResult::Success(_)));
+    }
+
+    #[test]
+    fn test_kill_child_allowed() {
+        let kernel = WasmMicroKernel::default();
+        let parent = kernel
+            .create_process("parent".into(), "rust".into(), None)
+            .unwrap();
+        let child = kernel
+            .create_process("child".into(), "rust".into(), Some(parent))
+            .unwrap();
+        let mut handler = SyscallHandler::new(kernel);
+
+        let args = SyscallArgs {
+            args: vec![SyscallArg::Number(child as i64)],
+        };
+        let result = handler.handle_kill(parent, args);
+        assert!(matches!(result, SyscallResult::Success(_)));
+    }
+
+    #[test]
+    fn test_kill_unrelated_denied() {
+        let kernel = WasmMicroKernel::default();
+        let pid_a = kernel
+            .create_process("a".into(), "rust".into(), None)
+            .unwrap();
+        let pid_b = kernel
+            .create_process("b".into(), "rust".into(), None)
+            .unwrap();
+        let mut handler = SyscallHandler::new(kernel);
+
+        let args = SyscallArgs {
+            args: vec![SyscallArg::Number(pid_b as i64)],
+        };
+        let result = handler.handle_kill(pid_a, args);
+        match result {
+            SyscallResult::Error(msg) => assert!(msg.contains("not permitted")),
+            _ => panic!("Expected permission error"),
+        }
+    }
+
+    #[test]
+    fn test_kill_nonexistent_process() {
+        let kernel = WasmMicroKernel::default();
+        let pid = kernel
+            .create_process("caller".into(), "rust".into(), None)
+            .unwrap();
+        let mut handler = SyscallHandler::new(kernel);
+
+        let args = SyscallArgs {
+            args: vec![SyscallArg::Number(999)],
+        };
+        let result = handler.handle_kill(pid, args);
+        match result {
+            SyscallResult::Error(msg) => assert!(msg.contains("no such process")),
+            _ => panic!("Expected no-such-process error"),
         }
     }
 }

@@ -41,17 +41,24 @@ pub fn handle_os_command(
     language: &Option<String>,
     watch: bool,
     verbose: bool,
+    allow_cors: bool,
 ) -> Result<()> {
     let resolved_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
 
-    // Validate OS language
     let validated_language = if let Some(lang) = language {
         Some(os_validate_language(lang)?)
     } else {
         None
     };
 
-    os_run_project(resolved_path, port, validated_language, watch, verbose)
+    os_run_project(
+        resolved_path,
+        port,
+        validated_language,
+        watch,
+        verbose,
+        allow_cors,
+    )
 }
 
 /// Validate OS mode language
@@ -66,12 +73,12 @@ pub fn os_run_project(
     language: Option<OsLanguage>,
     watch: bool,
     verbose: bool,
+    allow_cors: bool,
 ) -> Result<()> {
     if verbose {
         println!("🔍 OS Mode: Analyzing project path: {path}");
     }
 
-    // Validate that the path exists and is a directory
     if !Path::new(&path).exists() {
         return Err(WasmrunError::from(format!(
             "Project path does not exist: {path}"
@@ -84,7 +91,7 @@ pub fn os_run_project(
         )));
     }
 
-    os_start_kernel_and_server(path, port, language, watch, verbose)
+    os_start_kernel_and_server(path, port, language, watch, verbose, allow_cors)
 }
 
 /// Start the OS mode kernel and server
@@ -94,6 +101,7 @@ fn os_start_kernel_and_server(
     language: Option<OsLanguage>,
     watch: bool,
     verbose: bool,
+    allow_cors: bool,
 ) -> Result<()> {
     println!("🚀 Starting wasmrun in OS mode for project: {path}");
 
@@ -109,13 +117,8 @@ fn os_start_kernel_and_server(
         println!("🔍 Verbose output enabled");
     }
 
-    // Create OS run configuration
-    let config = os_create_config(path, language, watch, verbose)?;
-
-    // Initialize the multi-language kernel
+    let config = os_create_config(path, language, watch, verbose, allow_cors)?;
     let kernel = os_initialize_kernel(config.clone())?;
-
-    // Create and start the OS server
     let server = os_create_server(kernel, config)?;
     os_start_server(server, port)
 }
@@ -126,6 +129,7 @@ fn os_create_config(
     language: Option<OsLanguage>,
     watch: bool,
     _verbose: bool,
+    allow_cors: bool,
 ) -> Result<OsRunConfig> {
     Ok(OsRunConfig {
         project_path,
@@ -137,6 +141,7 @@ fn os_create_config(
         expose: false,
         tunnel_server: None,
         tunnel_secret: None,
+        allow_cors,
     })
 }
 

@@ -24,11 +24,17 @@ pub struct OsServer {
     template_cache: HashMap<String, String>,
     log_system: Arc<LogTrailSystem>,
     tunnel_client: Arc<RwLock<Option<BoreClient>>>,
+    cors_origin: String,
 }
 
 impl OsServer {
     pub fn new(kernel: MultiLanguageKernel, config: OsRunConfig) -> Result<Self> {
         let log_system = kernel.log_system();
+        let cors_origin = if config.allow_cors {
+            "*".to_string()
+        } else {
+            format!("http://127.0.0.1:{}", config.port.unwrap_or(8420))
+        };
         let mut server = Self {
             kernel: Arc::new(RwLock::new(kernel)),
             config,
@@ -36,6 +42,7 @@ impl OsServer {
             template_cache: HashMap::new(),
             log_system,
             tunnel_client: Arc::new(RwLock::new(None)),
+            cors_origin,
         };
 
         // Load and process templates
@@ -94,6 +101,14 @@ impl OsServer {
         ));
         println!("✅ OS mode templates loaded");
         Ok(())
+    }
+
+    fn cors_header(&self) -> Header {
+        Header::from_bytes(
+            &b"Access-Control-Allow-Origin"[..],
+            self.cors_origin.as_bytes(),
+        )
+        .unwrap()
     }
 
     /// Detect the project language
@@ -208,6 +223,29 @@ impl OsServer {
         let url = request.url().to_string();
 
         match (method, url.as_str()) {
+            (Method::Options, _) => {
+                let response = Response::from_string("")
+                    .with_header(self.cors_header())
+                    .with_header(
+                        Header::from_bytes(
+                            &b"Access-Control-Allow-Methods"[..],
+                            &b"GET, POST, DELETE, OPTIONS"[..],
+                        )
+                        .unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(
+                            &b"Access-Control-Allow-Headers"[..],
+                            &b"Content-Type"[..],
+                        )
+                        .unwrap(),
+                    )
+                    .with_status_code(tiny_http::StatusCode(204));
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+
             // Serve the main OS interface
             (Method::Get, "/") => {
                 if let Some(content) = self.template_cache.get("index.html") {
@@ -462,9 +500,7 @@ impl OsServer {
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
-            .with_header(
-                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-            );
+            .with_header(self.cors_header());
 
         request
             .respond(response)
@@ -504,9 +540,7 @@ impl OsServer {
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
-            .with_header(
-                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-            );
+            .with_header(self.cors_header());
 
         request
             .respond(response)
@@ -541,9 +575,7 @@ impl OsServer {
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
-            .with_header(
-                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-            );
+            .with_header(self.cors_header());
 
         request
             .respond(response)
@@ -587,9 +619,7 @@ impl OsServer {
                 .with_header(
                     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                 )
-                .with_header(
-                    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                );
+                .with_header(self.cors_header());
 
             request
                 .respond(response)
@@ -640,10 +670,7 @@ impl OsServer {
                             Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
                                 .unwrap(),
                         )
-                        .with_header(
-                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
-                                .unwrap(),
-                        );
+                        .with_header(self.cors_header());
 
                     request
                         .respond(response)
@@ -682,10 +709,7 @@ impl OsServer {
                             Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
                                 .unwrap(),
                         )
-                        .with_header(
-                            Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..])
-                                .unwrap(),
-                        );
+                        .with_header(self.cors_header());
 
                     request
                         .respond(response)
@@ -712,9 +736,7 @@ impl OsServer {
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
-            .with_header(
-                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-            );
+            .with_header(self.cors_header());
 
         request
             .respond(response)
@@ -890,9 +912,7 @@ impl OsServer {
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
-            .with_header(
-                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-            );
+            .with_header(self.cors_header());
 
         request
             .respond(response)
@@ -943,9 +963,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -962,9 +980,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -999,9 +1015,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -1018,9 +1032,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -1061,9 +1073,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -1080,9 +1090,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -1116,9 +1124,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -1135,9 +1141,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -1171,9 +1175,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -1190,9 +1192,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -1215,9 +1215,7 @@ impl OsServer {
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
-            .with_header(
-                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-            );
+            .with_header(self.cors_header());
 
         request
             .respond(response)
@@ -1239,9 +1237,7 @@ impl OsServer {
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
-            .with_header(
-                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-            );
+            .with_header(self.cors_header());
 
         request
             .respond(response)
@@ -1263,9 +1259,7 @@ impl OsServer {
                 .with_header(
                     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                 )
-                .with_header(
-                    Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                );
+                .with_header(self.cors_header());
 
             request
                 .respond(response)
@@ -1297,9 +1291,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -1315,9 +1307,7 @@ impl OsServer {
                     .with_header(
                         Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                     )
-                    .with_header(
-                        Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-                    );
+                    .with_header(self.cors_header());
 
                 request
                     .respond(response)
@@ -1358,9 +1348,7 @@ impl OsServer {
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
-            .with_header(
-                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-            );
+            .with_header(self.cors_header());
 
         request
             .respond(response)
@@ -1391,9 +1379,7 @@ impl OsServer {
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
-            .with_header(
-                Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
-            );
+            .with_header(self.cors_header());
 
         request
             .respond(response)

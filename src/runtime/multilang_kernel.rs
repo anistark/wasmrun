@@ -34,6 +34,7 @@ pub struct OsRunConfig {
     pub expose: bool,
     pub tunnel_server: Option<String>,
     pub tunnel_secret: Option<String>,
+    pub allow_cors: bool,
 }
 
 impl Default for MultiLanguageKernel {

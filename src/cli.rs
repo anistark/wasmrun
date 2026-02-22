@@ -261,6 +261,13 @@ pub enum Commands {
         /// Enable verbose output
         #[arg(short = 'v', long, help = "Show detailed build output")]
         verbose: bool,
+
+        /// Allow wildcard CORS (Access-Control-Allow-Origin: *)
+        #[arg(
+            long,
+            help = "Allow cross-origin requests from any domain (default: localhost only)"
+        )]
+        allow_cors: bool,
     },
 
     /// Plugin management commands
