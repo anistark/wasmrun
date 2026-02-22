@@ -1,6 +1,6 @@
 {
   "name": "wasmrun-ui",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "type": "module",
   "description": "Preact-based UI for Wasmrun",
   "scripts": {

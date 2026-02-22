@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 /// System call numbers for OS mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SyscallNumber {
-    // File system operations
     Open = 1,
     Read = 2,
     Write = 3,
@@ -18,24 +17,9 @@ pub enum SyscallNumber {
     Rmdir = 6,
     Unlink = 7,
     Stat = 8,
-
-    // Process operations
-    Fork = 9,
-    Exec = 10,
-    Exit = 11,
-    Wait = 12,
     Kill = 13,
     GetPid = 14,
-
-    // Memory operations
-    Mmap = 15,
-    Munmap = 16,
-
-    // I/O operations
     Print = 17,
-    Input = 18,
-
-    // Socket operations (WASI)
     SockOpen = 19,
     SockBind = 20,
     SockListen = 21,
@@ -61,16 +45,9 @@ impl TryFrom<u32> for SyscallNumber {
             6 => Ok(SyscallNumber::Rmdir),
             7 => Ok(SyscallNumber::Unlink),
             8 => Ok(SyscallNumber::Stat),
-            9 => Ok(SyscallNumber::Fork),
-            10 => Ok(SyscallNumber::Exec),
-            11 => Ok(SyscallNumber::Exit),
-            12 => Ok(SyscallNumber::Wait),
             13 => Ok(SyscallNumber::Kill),
             14 => Ok(SyscallNumber::GetPid),
-            15 => Ok(SyscallNumber::Mmap),
-            16 => Ok(SyscallNumber::Munmap),
             17 => Ok(SyscallNumber::Print),
-            18 => Ok(SyscallNumber::Input),
             19 => Ok(SyscallNumber::SockOpen),
             20 => Ok(SyscallNumber::SockBind),
             21 => Ok(SyscallNumber::SockListen),
@@ -158,7 +135,7 @@ impl TryFrom<i64> for SocketType {
     }
 }
 
-/// Socket state
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketState {
     Created,
@@ -167,7 +144,7 @@ pub enum SocketState {
     Connected,
 }
 
-/// Socket handle (wraps actual socket types)
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum SocketHandle {
     Placeholder,
@@ -362,6 +339,7 @@ impl SyscallHandler {
             SyscallNumber::Write => self.handle_write(pid, args),
             SyscallNumber::Close => self.handle_close(pid, args),
             SyscallNumber::Mkdir => self.handle_mkdir(pid, args),
+            SyscallNumber::Rmdir => self.handle_rmdir(pid, args),
             SyscallNumber::Unlink => self.handle_unlink(pid, args),
             SyscallNumber::Stat => self.handle_stat(pid, args),
             SyscallNumber::GetPid => self.handle_getpid(pid),
@@ -377,7 +355,6 @@ impl SyscallHandler {
             SyscallNumber::SockShutdown => self.handle_sock_shutdown(pid, args),
             SyscallNumber::SockClose => self.handle_sock_close(pid, args),
             SyscallNumber::GetAddrInfo => self.handle_getaddrinfo(pid, args),
-            _ => SyscallResult::Error(format!("Unimplemented syscall: {syscall:?}")),
         }
     }
 
@@ -560,6 +537,22 @@ impl SyscallHandler {
         match self.kernel.create_directory(path) {
             Ok(_) => SyscallResult::Success(SyscallReturn::Number(0)),
             Err(e) => SyscallResult::Error(format!("mkdir: {e}")),
+        }
+    }
+
+    fn handle_rmdir(&mut self, _pid: Pid, args: SyscallArgs) -> SyscallResult {
+        if args.args.is_empty() {
+            return SyscallResult::Error("rmdir: insufficient arguments".to_string());
+        }
+
+        let path = match &args.args[0] {
+            SyscallArg::String(s) => s,
+            _ => return SyscallResult::Error("rmdir: invalid path argument".to_string()),
+        };
+
+        match self.kernel.wasi_filesystem().path_remove_directory(path) {
+            Ok(_) => SyscallResult::Success(SyscallReturn::Number(0)),
+            Err(e) => SyscallResult::Error(format!("rmdir: {e}")),
         }
     }
 

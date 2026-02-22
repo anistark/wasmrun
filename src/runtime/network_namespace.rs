@@ -10,7 +10,6 @@ pub type SocketFd = i32;
 pub type HostPort = u16;
 pub type GuestPort = u16;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketProtocol {
     Tcp,
@@ -54,6 +53,7 @@ pub struct NetworkNamespace {
     allocated_host_ports: Arc<RwLock<HashSet<u16>>>,
 }
 
+#[allow(dead_code)]
 impl NetworkNamespace {
     pub fn new(pid: Pid) -> Self {
         let base_port = Self::calculate_base_port(pid);
@@ -74,7 +74,6 @@ impl NetworkNamespace {
         (PORT_RANGE_START as u64 + (base - PORT_RANGE_START as u64) % usable_range) as u16
     }
 
-    #[allow(dead_code)]
     pub fn allocate_port(&self, guest_port: GuestPort, protocol: SocketProtocol) -> Result<u16> {
         let mut mappings = self.port_mappings.write().unwrap();
 
@@ -121,7 +120,6 @@ impl NetworkNamespace {
         Ok(host_port)
     }
 
-    #[allow(dead_code)]
     pub fn deallocate_port(&self, guest_port: GuestPort) -> Result<()> {
         let mut mappings = self.port_mappings.write().unwrap();
 
@@ -135,13 +133,11 @@ impl NetworkNamespace {
         }
     }
 
-    #[allow(dead_code)]
     pub fn get_host_port(&self, guest_port: GuestPort) -> Option<HostPort> {
         let mappings = self.port_mappings.read().unwrap();
         mappings.get(&guest_port).map(|m| m.host_port)
     }
 
-    #[allow(dead_code)]
     pub fn register_connection(
         &self,
         socket_fd: SocketFd,
@@ -164,7 +160,6 @@ impl NetworkNamespace {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn update_connection_state(
         &self,
         socket_fd: SocketFd,
@@ -180,7 +175,6 @@ impl NetworkNamespace {
         }
     }
 
-    #[allow(dead_code)]
     pub fn unregister_connection(&self, socket_fd: SocketFd) -> Result<()> {
         let mut connections = self.connections.write().unwrap();
 
@@ -191,19 +185,16 @@ impl NetworkNamespace {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn get_connection(&self, socket_fd: SocketFd) -> Option<ConnectionInfo> {
         let connections = self.connections.read().unwrap();
         connections.get(&socket_fd).cloned()
     }
 
-    #[allow(dead_code)]
     pub fn list_port_mappings(&self) -> Vec<PortMapping> {
         let mappings = self.port_mappings.read().unwrap();
         mappings.values().cloned().collect()
     }
 
-    #[allow(dead_code)]
     pub fn list_connections(&self) -> Vec<ConnectionInfo> {
         let connections = self.connections.read().unwrap();
         connections.values().cloned().collect()
@@ -262,7 +253,6 @@ mod tests {
 
         let port_max = NetworkNamespace::calculate_base_port(u32::MAX);
         assert!(port_max >= PORT_RANGE_START);
-        assert!(port_max <= u16::MAX);
 
         let port_1m = NetworkNamespace::calculate_base_port(1_000_000);
         assert!(port_1m >= PORT_RANGE_START);

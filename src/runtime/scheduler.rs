@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use super::microkernel::{Pid, Process, ProcessState};
+use super::microkernel::Pid;
 
+#[allow(dead_code)]
 pub struct ProcessScheduler {
     ready_queue: Arc<Mutex<VecDeque<Pid>>>,
     current_process: Arc<Mutex<Option<Pid>>>,
-    #[allow(dead_code)]
     time_slice_ms: u64,
 }
 
@@ -16,6 +16,7 @@ impl Default for ProcessScheduler {
     }
 }
 
+#[allow(dead_code)]
 impl ProcessScheduler {
     pub fn new() -> Self {
         Self {
@@ -40,7 +41,6 @@ impl ProcessScheduler {
         }
     }
 
-    #[allow(dead_code)]
     pub fn schedule_next(&self) -> Option<Pid> {
         let mut queue = self.ready_queue.lock().unwrap();
         let mut current = self.current_process.lock().unwrap();
@@ -54,27 +54,22 @@ impl ProcessScheduler {
         next_pid
     }
 
-    #[allow(dead_code)]
     pub fn get_current(&self) -> Option<Pid> {
         *self.current_process.lock().unwrap()
     }
 
-    #[allow(dead_code)]
     pub fn get_time_slice(&self) -> u64 {
         self.time_slice_ms
     }
 
-    #[allow(dead_code)]
     pub fn set_time_slice(&mut self, ms: u64) {
         self.time_slice_ms = ms;
     }
 
-    #[allow(dead_code)]
     pub fn queue_size(&self) -> usize {
         self.ready_queue.lock().unwrap().len()
     }
 
-    #[allow(dead_code)]
     pub fn block_current(&self) -> Option<Pid> {
         let mut current = self.current_process.lock().unwrap();
         let blocked_pid = *current;
@@ -82,30 +77,8 @@ impl ProcessScheduler {
         blocked_pid
     }
 
-    #[allow(dead_code)]
     pub fn unblock_process(&self, pid: Pid) {
         self.add_process(pid);
-    }
-}
-
-#[allow(dead_code)]
-pub fn update_process_state_for_schedule(
-    processes: &mut std::collections::HashMap<Pid, Process>,
-    old_pid: Option<Pid>,
-    new_pid: Option<Pid>,
-) {
-    if let Some(pid) = old_pid {
-        if let Some(process) = processes.get_mut(&pid) {
-            if process.state == ProcessState::Running {
-                process.state = ProcessState::Ready;
-            }
-        }
-    }
-
-    if let Some(pid) = new_pid {
-        if let Some(process) = processes.get_mut(&pid) {
-            process.state = ProcessState::Running;
-        }
     }
 }
 

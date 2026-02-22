@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 use tiny_http::{Response, Server};
 
 use super::microkernel::Pid;
@@ -76,7 +77,7 @@ impl DevServerManager {
         servers.get(&pid).map(|s| DevServerStatus::Running(s.port))
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn get_port(&self, pid: Pid) -> Option<u16> {
         let servers = self.servers.lock().unwrap();
         servers.get(&pid).map(|s| s.port)
@@ -88,17 +89,6 @@ impl DevServerManager {
             .values()
             .map(|s| (s.pid, s.port, DevServerStatus::Running(s.port)))
             .collect()
-    }
-
-    #[allow(dead_code)]
-    pub fn reload_server(&self, pid: Pid) -> Result<()> {
-        let servers = self.servers.lock().unwrap();
-        if let Some(_server) = servers.get(&pid) {
-            println!("Reloading dev server for PID {pid}");
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("Server not found for PID {pid}"))
-        }
     }
 }
 
@@ -114,13 +104,19 @@ fn serve_wasi_files(
 
     println!("Dev server (WASI files) started on http://{addr}");
 
-    for request in server.incoming_requests() {
-        {
-            let should_stop = *stop_signal.lock().unwrap();
-            if should_stop {
+    loop {
+        if *stop_signal.lock().unwrap() {
+            break;
+        }
+
+        let request = match server.recv_timeout(Duration::from_millis(250)) {
+            Ok(Some(req)) => req,
+            Ok(None) => continue,
+            Err(e) => {
+                eprintln!("Dev server recv error: {e}");
                 break;
             }
-        }
+        };
 
         let mut url_path = request.url().to_string();
         if url_path == "/" {
@@ -298,5 +294,27 @@ mod tests {
         assert!(result.is_err());
 
         manager.stop_server(10).unwrap();
+    }
+
+    #[test]
+    fn test_stop_signal_terminates_promptly() {
+        let temp = tempdir().unwrap();
+        let wasi_fs = create_wasi_fs_with_mount("/projects/20", temp.path());
+
+        let stop = Arc::new(Mutex::new(false));
+        let stop_clone = Arc::clone(&stop);
+
+        let handle = thread::spawn(move || {
+            serve_wasi_files(19877, "/projects/20", wasi_fs, stop_clone).unwrap();
+        });
+
+        thread::sleep(Duration::from_millis(200));
+
+        *stop.lock().unwrap() = true;
+
+        // Should join within ~500ms (250ms poll + margin), not hang forever
+        let joined = thread::spawn(move || handle.join().unwrap());
+        thread::sleep(Duration::from_millis(500));
+        assert!(joined.is_finished(), "Server thread did not stop promptly");
     }
 }
