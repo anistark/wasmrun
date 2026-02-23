@@ -34,7 +34,7 @@ pub struct Process {
     pub has_network: bool,
 }
 
-/// Memory region for WASM processes
+/// Memory region for WASM processes (used when WASM execution is implemented)
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct MemoryRegion {
@@ -43,7 +43,6 @@ pub struct MemoryRegion {
     pub permissions: MemoryPermissions,
 }
 
-/// Memory permissions
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct MemoryPermissions {
@@ -62,7 +61,6 @@ pub struct VfsEntry {
     pub modified_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// System call interface
 #[allow(dead_code)]
 pub trait SyscallInterface: Send + Sync {
     fn read_file(&self, path: &str) -> Result<Vec<u8>>;
@@ -72,7 +70,7 @@ pub trait SyscallInterface: Send + Sync {
     fn delete_file(&self, path: &str) -> Result<()>;
 }
 
-/// WASM instance wrapper
+/// WASM instance wrapper (fields read when WASM execution is implemented)
 #[allow(dead_code)]
 pub struct WasmInstance {
     pub binary: Vec<u8>,
@@ -98,6 +96,7 @@ impl Default for WasmMicroKernel {
     }
 }
 
+#[allow(dead_code)]
 impl WasmMicroKernel {
     pub fn new() -> Self {
         let workspace_root = std::env::temp_dir().join(format!("wasmrun-{}", std::process::id()));
@@ -147,7 +146,6 @@ impl WasmMicroKernel {
     }
 
     /// Stop the kernel scheduler
-    #[allow(dead_code)]
     pub fn stop_scheduler(&self) -> Result<()> {
         let mut running = self.scheduler_running.lock().unwrap();
         *running = false;
@@ -190,20 +188,17 @@ impl WasmMicroKernel {
     }
 
     /// Get process information
-    #[allow(dead_code)]
     pub fn get_process(&self, pid: Pid) -> Option<Process> {
         let processes = self.processes.read().unwrap();
         processes.get(&pid).cloned()
     }
 
     /// List all processes
-    #[allow(dead_code)]
     pub fn list_processes(&self) -> Vec<Process> {
         let processes = self.processes.read().unwrap();
         processes.values().cloned().collect()
     }
 
-    #[allow(dead_code)]
     pub fn kill_process(&self, pid: Pid) -> Result<()> {
         {
             let mut processes = self.processes.write().unwrap();

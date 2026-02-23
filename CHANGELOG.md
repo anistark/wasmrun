@@ -7,46 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+...
+
+## [0.15.1](https://github.com/anistark/wasmrun/releases/tag/v0.15.1) - 2026-02-22
+
 ### Added
-- **Public Tunneling with Bore Client**: Expose local WASM apps to the internet via bore.pub (#61)
-  - Complete bore protocol implementation (HELLO, AUTH, port registration)
-  - Automatic reconnection with background keepalive thread
-  - Connection status tracking (Disconnected, Connecting, Connected, Reconnecting, Failed)
-  - Support for public bore.pub server (default) and custom self-hosted bore servers
-  - Optional authentication for private bore servers
-  - REST API endpoints: `/api/tunnel/start`, `/api/tunnel/status`, `/api/tunnel/stop`
-  - Configuration via `OsRunConfig`: `expose`, `tunnel_server`, `tunnel_secret`
-- **OS Mode Network Isolation**: Per-process network namespace isolation for WASM processes (#51)
-  - Full WASI socket API implementation (socket, bind, listen, accept, connect, send, recv)
-  - Isolated network namespaces for each process preventing cross-process interference
-  - Network syscall support (sock_open, sock_bind, sock_listen, sock_accept, sock_connect, sock_send, sock_recv, sock_shutdown)
-- **DNS Resolution**: Complete GetAddrInfo syscall implementation for hostname resolution
-  - IPv4 and IPv6 address resolution with host DNS resolver integration
-  - Comprehensive error handling with validation for hostnames and ports
-  - Support for both numeric and string port formats
-- **Port Forwarding**: Port forwarding capabilities for OS mode (#52)
-  - Forward ports from host to WASM processes
-  - Enable external access to services running in isolated WASM environments
-- **Official Documentation**: Comprehensive documentation site using Docusaurus (#53, #54)
-  - **ReadTheDocs integration**: Official docs now hosted at [wasmrun.readthedocs.io](https://wasmrun.readthedocs.io)
-  - Automatic deployment on commits
-  - Structured documentation with guides, API references, and examples
+- **Public Tunneling with Bore Client**: Expose local WASM apps to the internet via bore.pub (#62)
+- **OS Mode Network Isolation**: Per-process network namespace with full WASI socket API (#51)
+- **DNS Resolution**: GetAddrInfo syscall with IPv4/IPv6 support (#61)
+- **Port Forwarding**: Forward host ports to isolated WASM processes (#52)
+- **Rmdir Syscall**: Implemented `Rmdir` dispatching to `wasi_fs.path_remove_directory()`
+- **Official Documentation**: Docusaurus site at [wasmrun.readthedocs.io](https://wasmrun.readthedocs.io) (#53, #54)
 
 ### Fixed
-- **Unified Dual Filesystems**: Removed disconnected in-memory `HashMap` VFS, all FS operations now route through `WasiFilesystem`
-- **Dev Server Reads Through WASI FS**: `serve_wasi_files()` now uses `wasi_fs.read_file()` instead of host `std::fs::read()` with broken virtual paths
-- **Embedded OS Templates**: All templates/assets embedded via `include_str!`/`include_bytes!` — works from any CWD and via `cargo install`
-- **OsServer Race Conditions**: Start/restart handlers now hold a single `project_pid` write lock for the full check-and-act sequence (no TOCTOU)
-- **sock_open Broken Implementation**: TCP `sock_open` no longer attempts a dummy connect to `0.0.0.0:0`; uses a `SocketHandle::Placeholder` with deferred creation at `sock_bind`/`sock_connect`
-- **Docs Build**: Added missing `@docusaurus/plugin-content-pages` direct dependency
+- **Unified Dual Filesystems**: Removed disconnected in-memory VFS; all FS operations route through `WasiFilesystem`
+- **Dev Server Reads Through WASI FS**: Uses `wasi_fs.read_file()` instead of broken host FS reads
+- **Embedded OS Templates**: All templates embedded via `include_str!`/`include_bytes!` — works from any CWD
+- **OsServer Race Conditions**: Start/restart handlers hold a single write lock (no TOCTOU)
+- **sock_open Broken Implementation**: TCP uses `SocketHandle::Placeholder` with deferred creation at bind/connect
+- **Port Allocation Overflow**: `calculate_base_port()` uses `u64` arithmetic; `allocate_port()` tracks used ports and skips conflicts on wraparound
+- **Dev Server Stop Signal**: Replaced blocking `incoming_requests()` with `recv_timeout()` polling
+- **Dead Code Cleanup**: Removed unimplemented syscalls (`Fork`/`Exec`/`Exit`/`Wait`/`Mmap`/`Munmap`/`Input`); consolidated `#[allow(dead_code)]` annotations
+- **Docs Build**: Added missing `@docusaurus/plugin-content-pages` dependency
 
 ### Security
-- **CORS Restricted by Default**: `Access-Control-Allow-Origin` now defaults to `http://127.0.0.1:{port}` instead of `*`; opt-in via `--allow-cors` flag
-- **Path Traversal Protection**: `SyscallInterface` methods reject `..` segments and relative paths
-- **Kill Permission Checks**: `kill` syscall now enforces self-kill or parent→child only; unrelated processes are denied
-
-### Documentation
-- Official documentation is now available at **[wasmrun.readthedocs.io](https://wasmrun.readthedocs.io)** - this is the recommended reference for all wasmrun features and usage
+- **CORS Restricted by Default**: Defaults to `http://127.0.0.1:{port}`; opt-in `--allow-cors` for wildcard
+- **Path Traversal Protection**: Syscall interface rejects `..` segments and relative paths
+- **Kill Permission Checks**: Only self-kill or parent→child allowed
 
 ## [0.15.0](https://github.com/anistark/wasmrun/releases/tag/v0.15.0) - 2025-12-21
 

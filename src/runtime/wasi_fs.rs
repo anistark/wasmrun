@@ -14,27 +14,20 @@ use std::sync::{Arc, RwLock};
 pub type WasiFd = u32;
 
 /// WASI filesystem manager for OS mode
+#[allow(dead_code)]
 pub struct WasiFilesystem {
-    /// Mounted directories (virtual path -> host path)
     mounts: Arc<RwLock<HashMap<String, PathBuf>>>,
-    /// File descriptor table (fd -> open file info)
     fd_table: Arc<RwLock<HashMap<WasiFd, OpenFile>>>,
-    /// Next available file descriptor
-    #[allow(dead_code)]
     next_fd: Arc<RwLock<WasiFd>>,
-    /// Configuration
     config: WasiConfig,
 }
 
 /// WASI filesystem configuration
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct WasiConfig {
-    /// Allow access to host filesystem
-    #[allow(dead_code)]
     pub allow_host_access: bool,
-    /// Read-only mode
     pub read_only: bool,
-    /// Maximum file size for operations (in bytes)
     pub max_file_size: usize,
 }
 
@@ -48,23 +41,17 @@ impl Default for WasiConfig {
     }
 }
 
-/// Information about an open file
-#[derive(Debug, Clone)]
 #[allow(dead_code)]
+#[derive(Debug, Clone)]
 struct OpenFile {
-    /// Resolved host path
     path: PathBuf,
-    /// File open flags
     flags: OpenFlags,
-    /// Current offset in the file
     offset: usize,
-    /// Virtual path (as seen by WASI)
     virtual_path: String,
 }
 
-/// File open flags (WASI-compatible)
-#[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
 pub struct OpenFlags {
     pub read: bool,
     pub write: bool,
@@ -91,6 +78,7 @@ impl Default for WasiFilesystem {
     }
 }
 
+#[allow(dead_code)]
 impl WasiFilesystem {
     /// Create a new WASI filesystem manager
     pub fn new() -> Self {
@@ -139,21 +127,18 @@ impl WasiFilesystem {
     }
 
     /// Unmount a virtual path
-    #[allow(dead_code)]
     pub fn unmount(&self, guest_path: &str) -> Option<PathBuf> {
         let mut mounts = self.mounts.write().unwrap();
         mounts.remove(guest_path)
     }
 
     /// List all current mounts
-    #[allow(dead_code)]
     pub fn list_mounts(&self) -> Vec<(String, PathBuf)> {
         let mounts = self.mounts.read().unwrap();
         mounts.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
 
     /// WASI path_open - Open or create a file
-    #[allow(dead_code)]
     pub fn path_open(&self, virtual_path: &str, flags: OpenFlags) -> Result<WasiFd> {
         if self.config.read_only && (flags.write || flags.create) {
             anyhow::bail!("Filesystem is in read-only mode");
@@ -203,7 +188,6 @@ impl WasiFilesystem {
     }
 
     /// WASI fd_read - Read from a file descriptor
-    #[allow(dead_code)]
     pub fn fd_read(&self, fd: WasiFd, count: usize) -> Result<Vec<u8>> {
         let mut fd_table = self.fd_table.write().unwrap();
         let open_file = fd_table
@@ -224,7 +208,6 @@ impl WasiFilesystem {
     }
 
     /// WASI fd_write - Write to a file descriptor
-    #[allow(dead_code)]
     pub fn fd_write(&self, fd: WasiFd, data: &[u8]) -> Result<usize> {
         if self.config.read_only {
             anyhow::bail!("Filesystem is in read-only mode");
@@ -271,7 +254,6 @@ impl WasiFilesystem {
     }
 
     /// WASI fd_close - Close a file descriptor
-    #[allow(dead_code)]
     pub fn fd_close(&self, fd: WasiFd) -> Result<()> {
         let mut fd_table = self.fd_table.write().unwrap();
         fd_table
@@ -281,7 +263,6 @@ impl WasiFilesystem {
     }
 
     /// WASI fd_seek - Seek to a position in a file
-    #[allow(dead_code)]
     pub fn fd_seek(&self, fd: WasiFd, offset: i64, whence: SeekWhence) -> Result<usize> {
         let mut fd_table = self.fd_table.write().unwrap();
         let open_file = fd_table
@@ -319,7 +300,6 @@ impl WasiFilesystem {
     }
 
     /// WASI path_remove_directory - Remove a directory
-    #[allow(dead_code)]
     pub fn path_remove_directory(&self, virtual_path: &str) -> Result<()> {
         if self.config.read_only {
             anyhow::bail!("Filesystem is in read-only mode");
@@ -364,7 +344,6 @@ impl WasiFilesystem {
     }
 
     /// WASI path_filestat_get - Get file/directory metadata
-    #[allow(dead_code)]
     pub fn path_filestat_get(&self, virtual_path: &str) -> Result<FileStats> {
         let host_path = self.resolve_path(virtual_path)?;
         let metadata = fs::metadata(&host_path)?;
@@ -380,7 +359,6 @@ impl WasiFilesystem {
     }
 
     /// Check if a path exists
-    #[allow(dead_code)]
     pub fn path_exists(&self, virtual_path: &str) -> bool {
         self.resolve_path(virtual_path)
             .map(|p| p.exists())
@@ -515,8 +493,8 @@ impl WasiFilesystem {
 }
 
 /// Seek position reference
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeekWhence {
     Start,
     Current,
