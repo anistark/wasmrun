@@ -1484,8 +1484,11 @@ class WASIImplementation {
   }
 }
 
-// Export the WASI implementation
+// Export the WASI implementation (global for template-based UI)
 window.WASI = {
   WASIImplementation,
   ERRNO: WASI,
 }
+
+// ES module exports for TypeScript/bundler contexts
+export { WASIImplementation, WasiFS, WASI as WASI_ERRNO, FILETYPE }

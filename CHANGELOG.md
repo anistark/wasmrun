@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Browser Runtime Loader**: Client-side WASM runtime loader for browser-based execution
+  - New `WasmRunner` class (`ui/src/os/WasmRunner.ts`) — fetches runtime + project files, populates WASI virtual FS, instantiates and runs WASM
+  - Fetches runtime `.wasm` and project files from server APIs in parallel
+  - Decodes base64 project files and writes them to the WASI virtual filesystem with proper directory structure
+  - Entry file auto-detection: parses `package.json` main field, falls back to common candidates (`index.js`, `main.py`, etc.)
+  - Status lifecycle: `idle` → `loading-runtime` → `loading-files` → `populating-fs` → `starting` → `running` → `stopped`/`error`
+  - Callbacks for stdout, stderr, status changes, errors, and exit codes
+  - Added ES module exports to WASI shim + TypeScript declarations (`wasmrun_wasi_impl.d.ts`)
 - **Project Files API**: Serve project files to browser for WASI virtual filesystem population
   - New `project_files` module (`src/runtime/project_files.rs`) — recursively reads project directory, encodes files as base64
   - `GET /api/project/files` endpoint — returns all project files as a JSON bundle `{ files: { "path": "base64content" }, ... }`
