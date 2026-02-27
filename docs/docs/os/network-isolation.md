@@ -81,7 +81,7 @@ fn main() {
 }
 ```
 
-```bash
+```sh
 # Run with network isolation
 wasmrun os ./network-app
 ```
@@ -107,7 +107,7 @@ fn main() {
 }
 ```
 
-```bash
+```sh
 # Run with DNS resolution support
 wasmrun os ./dns-app
 ```
@@ -116,7 +116,7 @@ wasmrun os ./dns-app
 
 Network isolation is automatically enabled in OS mode:
 
-```bash
+```sh
 # Node.js server with isolated network
 wasmrun os ./node-server --language nodejs
 
@@ -149,7 +149,7 @@ Process B (namespace 2) binds to :8080 → Success (different namespace)
 
 To expose services running in isolated namespaces to the host or external networks, use the port forwarding feature:
 
-```bash
+```sh
 # Forward host port to WASM process port
 wasmrun os ./app --forward 8080:3000
 ```
@@ -162,7 +162,7 @@ See [Port Forwarding](./port-forwarding.md) for details.
 
 Network isolation is enabled by default in OS mode:
 
-```bash
+```sh
 # Isolation automatically enabled
 wasmrun os ./app
 ```
@@ -198,7 +198,7 @@ loopback_enabled = true
 
 ### Permission Denied
 
-```bash
+```sh
 # If namespace creation fails due to permissions
 sudo wasmrun os ./app
 
@@ -208,7 +208,7 @@ sudo sysctl -w kernel.unprivileged_userns_clone=1
 
 ### Connection Refused
 
-```bash
+```sh
 # Ensure service is listening in the namespace
 # Check logs for bind errors
 wasmrun os ./app --verbose
@@ -239,7 +239,7 @@ server.listen(3000, () => {
 });
 ```
 
-```bash
+```sh
 # Run with network isolation
 wasmrun os ./server --language nodejs
 
@@ -249,7 +249,7 @@ wasmrun os ./server --language nodejs --forward 8080:3000
 
 ### Multiple Isolated Processes
 
-```bash
+```sh
 # Terminal 1: Process A on port 8080 in namespace A
 wasmrun os ./app-a --forward 8080:8080
 

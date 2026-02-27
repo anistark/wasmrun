@@ -6,7 +6,7 @@ Wasmrun includes a comprehensive debug mode that provides detailed logging to he
 
 Enable debug logging with the `--debug` flag:
 
-```bash
+```sh
 # Enable debug mode for any command
 wasmrun --debug run ./project
 wasmrun --debug plugin install wasmrust
@@ -50,7 +50,7 @@ Debug logs are organized by system component:
 ### CLI & Arguments
 Logs command parsing and validation:
 
-```bash
+```sh
 wasmrun --debug run ./project
 ```
 
@@ -65,7 +65,7 @@ Output:
 ### Plugin System
 Logs plugin loading, detection, and execution:
 
-```bash
+```sh
 wasmrun --debug plugin list
 ```
 
@@ -83,7 +83,7 @@ Output:
 ### Server Operations
 Logs HTTP server startup and request handling:
 
-```bash
+```sh
 wasmrun --debug run ./project --port 3000
 ```
 
@@ -99,7 +99,7 @@ Output:
 ### Compilation
 Logs build processes, tool detection, and file operations:
 
-```bash
+```sh
 wasmrun --debug compile ./project
 ```
 
@@ -117,7 +117,7 @@ Output:
 ### File Operations
 Logs path resolution and file validation:
 
-```bash
+```sh
 wasmrun --debug verify ./file.wasm
 ```
 
@@ -239,19 +239,19 @@ Output:
 
 Redirect debug output to a file:
 
-```bash
+```sh
 wasmrun --debug compile ./my-project 2> debug.log
 ```
 
 ### Debugging Plugin Detection
 
-```bash
+```sh
 wasmrun --debug plugin list --all 2> plugin_debug.log
 ```
 
 ### Debugging Server Startup Issues
 
-```bash
+```sh
 wasmrun --debug run ./project --port 3000 2> server_debug.log
 ```
 
@@ -342,7 +342,7 @@ debug_println!("Absolute path: {}", absolute_path.display());
 
 ### Plugin Not Loading
 
-```bash
+```sh
 wasmrun --debug run ./project --language rust 2>&1 | grep -i plugin
 ```
 
@@ -353,7 +353,7 @@ Look for:
 
 ### Compilation Failures
 
-```bash
+```sh
 wasmrun --debug compile ./project 2>&1 | grep -i -A 5 "error\|fail"
 ```
 
@@ -364,7 +364,7 @@ Look for:
 
 ### Server Startup Problems
 
-```bash
+```sh
 wasmrun --debug run ./project 2>&1 | grep -i -A 5 "server\|port"
 ```
 
@@ -375,7 +375,7 @@ Look for:
 
 ### Performance Issues
 
-```bash
+```sh
 wasmrun --debug run ./project 2>&1 | grep -i "TIME"
 ```
 
@@ -388,7 +388,7 @@ Look for:
 
 ### Filter by Category
 
-```bash
+```sh
 # Only server-related logs
 wasmrun --debug run ./project 2>&1 | grep "server/"
 
@@ -401,7 +401,7 @@ wasmrun --debug compile ./project 2>&1 | grep "TIME"
 
 ### Filter by Log Level
 
-```bash
+```sh
 # Only ENTER/EXIT for call flow
 wasmrun --debug run ./project 2>&1 | grep -E "ENTER|EXIT"
 
@@ -416,7 +416,7 @@ wasmrun --debug compile ./project 2>&1 | grep "TIME"
 
 Debug mode is disabled by default. Only use it when troubleshooting.
 
-```bash
+```sh
 # Normal operation (no debug output)
 wasmrun run ./project
 ```

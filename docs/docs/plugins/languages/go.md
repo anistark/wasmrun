@@ -18,13 +18,13 @@ Go supports WebAssembly through TinyGo, a Go compiler designed for small places.
 
 ## Plugin Installation
 
-```bash
+```sh
 wasmrun plugin install wasmgo
 ```
 
 ## Quick Start
 
-```bash
+```sh
 # Create project
 mkdir my-go-wasm && cd my-go-wasm
 go mod init my-go-wasm
@@ -46,7 +46,7 @@ wasmrun run . --watch
 
 ## Native Execution
 
-```bash
+```sh
 # Build for WASI
 tinygo build -target=wasi -o app.wasm .
 

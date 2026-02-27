@@ -4,7 +4,7 @@ Compile a WebAssembly project with optimization options.
 
 ## Synopsis
 
-```bash
+```sh
 wasmrun compile [PROJECT] [OPTIONS]
 ```
 
@@ -27,7 +27,7 @@ The command detects your project language and uses the appropriate compiler tool
 
 Path to the project directory.
 
-```bash
+```sh
 wasmrun compile --path ./my-project
 wasmrun compile -p ./my-project
 ```
@@ -42,7 +42,7 @@ You can also use a positional argument: `wasmrun compile ./my-project`
 
 Output directory for compiled files.
 
-```bash
+```sh
 wasmrun compile --output ./dist
 wasmrun compile -o ./build
 ```
@@ -53,7 +53,7 @@ Default: Current directory (`.`)
 
 Compilation optimization level.
 
-```bash
+```sh
 wasmrun compile --optimization release
 wasmrun compile --optimization size
 ```
@@ -72,7 +72,7 @@ Default: `release`
 
 Show detailed compilation output.
 
-```bash
+```sh
 wasmrun compile --verbose
 wasmrun compile -v
 ```
@@ -83,7 +83,7 @@ wasmrun compile -v
 
 Compile current project:
 
-```bash
+```sh
 wasmrun compile
 ```
 
@@ -91,7 +91,7 @@ wasmrun compile
 
 Compile a specific project:
 
-```bash
+```sh
 wasmrun compile ./my-rust-project
 ```
 
@@ -99,7 +99,7 @@ wasmrun compile ./my-rust-project
 
 Save to specific directory:
 
-```bash
+```sh
 wasmrun compile ./my-project --output ./dist
 ```
 
@@ -107,7 +107,7 @@ wasmrun compile ./my-project --output ./dist
 
 Minimize file size:
 
-```bash
+```sh
 wasmrun compile --optimization size
 ```
 
@@ -115,13 +115,13 @@ wasmrun compile --optimization size
 
 Build with debug symbols:
 
-```bash
+```sh
 wasmrun compile --optimization debug --verbose
 ```
 
 ### Complete Production Build
 
-```bash
+```sh
 wasmrun compile ./my-project \
   --output ./dist \
   --optimization release \
@@ -132,7 +132,7 @@ wasmrun compile ./my-project \
 
 ### Debug Mode
 
-```bash
+```sh
 wasmrun compile --optimization debug
 ```
 
@@ -144,7 +144,7 @@ wasmrun compile --optimization debug
 
 ### Release Mode (Default)
 
-```bash
+```sh
 wasmrun compile --optimization release
 ```
 
@@ -155,7 +155,7 @@ wasmrun compile --optimization release
 
 ### Size Mode
 
-```bash
+```sh
 wasmrun compile --optimization size
 ```
 
@@ -182,7 +182,7 @@ dist/
 
 Compiles using Cargo with appropriate target:
 
-```bash
+```sh
 # Standard compilation
 wasmrun compile
 
@@ -200,7 +200,7 @@ Generated files:
 
 Uses TinyGo compiler:
 
-```bash
+```sh
 wasmrun plugin install wasmgo
 wasmrun compile
 ```
@@ -209,7 +209,7 @@ wasmrun compile
 
 Compiles Python to WASM using waspy:
 
-```bash
+```sh
 wasmrun plugin install waspy
 wasmrun compile
 ```
@@ -218,7 +218,7 @@ wasmrun compile
 
 Uses Emscripten:
 
-```bash
+```sh
 wasmrun compile
 ```
 
@@ -226,7 +226,7 @@ wasmrun compile
 
 Uses AssemblyScript compiler:
 
-```bash
+```sh
 wasmrun plugin install wasmasc
 wasmrun compile
 ```
@@ -303,7 +303,7 @@ Progress output:
 
 For development iterations:
 
-```bash
+```sh
 wasmrun compile --optimization debug
 ```
 
@@ -311,13 +311,13 @@ wasmrun compile --optimization debug
 
 For web deployment:
 
-```bash
+```sh
 wasmrun compile --optimization size
 ```
 
 Then compress further:
 
-```bash
+```sh
 gzip -9 dist/module.wasm
 brotli -9 dist/module.wasm
 ```
@@ -326,7 +326,7 @@ brotli -9 dist/module.wasm
 
 Leverage cargo's parallelism (Rust):
 
-```bash
+```sh
 CARGO_BUILD_JOBS=8 wasmrun compile
 ```
 
@@ -336,7 +336,7 @@ CARGO_BUILD_JOBS=8 wasmrun compile
 
 Enable verbose mode to see detailed errors:
 
-```bash
+```sh
 wasmrun compile --verbose
 ```
 
@@ -344,7 +344,7 @@ wasmrun compile --verbose
 
 Install the required language plugin:
 
-```bash
+```sh
 wasmrun plugin install <plugin-name>
 ```
 
@@ -352,7 +352,7 @@ wasmrun plugin install <plugin-name>
 
 Ensure language toolchain is installed:
 
-```bash
+```sh
 # Rust
 rustup target add wasm32-unknown-unknown
 
@@ -370,7 +370,7 @@ npm install -g assemblyscript
 
 Check output directory permissions:
 
-```bash
+```sh
 chmod 755 ./dist
 wasmrun compile --output ./dist
 ```
@@ -379,7 +379,7 @@ wasmrun compile --output ./dist
 
 Try size optimization:
 
-```bash
+```sh
 wasmrun compile --optimization size
 ```
 
@@ -396,13 +396,13 @@ codegen-units = 1
 
 After compilation, verify the WASM file:
 
-```bash
+```sh
 wasmrun verify ./dist/module.wasm --detailed
 ```
 
 Inspect the compiled module:
 
-```bash
+```sh
 wasmrun inspect ./dist/module.wasm
 ```
 

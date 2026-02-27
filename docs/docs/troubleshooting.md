@@ -11,13 +11,13 @@ Common issues and solutions when using Wasmrun.
 **Solution**:
 
 For built-in language support:
-```bash
+```sh
 # C/C++ is built-in, no installation needed
 wasmrun --language c ./my-project
 ```
 
 For external plugins, install them first:
-```bash
+```sh
 # Install the appropriate plugin
 wasmrun plugin install wasmrust   # Rust plugin
 wasmrun plugin install wasmgo     # Go plugin
@@ -35,20 +35,20 @@ wasmrun plugin list
 **Solution**:
 
 Check which dependencies are needed:
-```bash
+```sh
 wasmrun plugin info <plugin-name>
 ```
 
 Install missing tools:
 
 **For Rust (wasmrust plugin)**:
-```bash
+```sh
 rustup target add wasm32-unknown-unknown
 cargo install wasm-pack  # Optional, for web apps
 ```
 
 **For Go (wasmgo plugin)**:
-```bash
+```sh
 # Install TinyGo from: https://tinygo.org/
 # macOS:
 brew install tinygo
@@ -56,12 +56,12 @@ brew install tinygo
 ```
 
 **For Python (waspy plugin)**:
-```bash
+```sh
 # No dependencies! waspy is a pure Rust compiler
 ```
 
 **For AssemblyScript (wasmasc plugin)**:
-```bash
+```sh
 npm install -g assemblyscript
 # or
 yarn global add assemblyscript
@@ -70,7 +70,7 @@ pnpm add -g assemblyscript
 ```
 
 **For C/C++ (built-in)**:
-```bash
+```sh
 # Install Emscripten from: https://emscripten.org/
 ```
 
@@ -81,7 +81,7 @@ pnpm add -g assemblyscript
 **Solution**:
 
 Force a specific plugin:
-```bash
+```sh
 wasmrun --language rust ./project
 wasmrun --language go ./project
 wasmrun --language python ./project
@@ -104,23 +104,23 @@ Or ensure your project has proper configuration files:
 
 1. Check internet connection
 2. Verify cargo is installed and updated:
-```bash
+```sh
 rustup update
 cargo --version
 ```
 
 3. Check crates.io is accessible:
-```bash
+```sh
 cargo search wasmrust
 ```
 
 4. Try with verbose output:
-```bash
+```sh
 wasmrun --debug plugin install wasmrust
 ```
 
 5. Manually install via cargo:
-```bash
+```sh
 cargo install wasmrust
 # Then check if wasmrun detects it
 wasmrun plugin list
@@ -135,18 +135,18 @@ wasmrun plugin list
 **Solution**:
 
 1. Update Rust toolchain:
-```bash
+```sh
 rustup update stable
 ```
 
 2. Clear cargo cache and retry:
-```bash
+```sh
 rm -rf ~/.cargo/registry/cache
 cargo install wasmrun
 ```
 
 3. Install from source:
-```bash
+```sh
 git clone https://github.com/anistark/wasmrun.git
 cd wasmrun
 cargo install --path .
@@ -159,7 +159,7 @@ cargo install --path .
 **Solution**:
 
 **For DEB packages**:
-```bash
+```sh
 # Fix dependency issues
 sudo apt install -f
 
@@ -169,7 +169,7 @@ sudo apt-get install -f
 ```
 
 **For RPM packages**:
-```bash
+```sh
 # Use dnf (Fedora/RHEL 8+)
 sudo dnf install wasmrun-*.rpm
 
@@ -187,7 +187,7 @@ sudo dnf install -f
 **Solution**:
 
 Add cargo bin directory to PATH:
-```bash
+```sh
 # Add to ~/.bashrc or ~/.zshrc
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -196,7 +196,7 @@ source ~/.bashrc  # or ~/.zshrc
 ```
 
 Verify installation:
-```bash
+```sh
 which wasmrun
 wasmrun --version
 ```
@@ -210,17 +210,17 @@ wasmrun --version
 **Solution**:
 
 Option 1: Stop existing wasmrun server
-```bash
+```sh
 wasmrun stop
 ```
 
 Option 2: Use a different port
-```bash
+```sh
 wasmrun run ./project --port 3001
 ```
 
 Option 3: Find and kill the process using the port
-```bash
+```sh
 # macOS/Linux
 lsof -ti:8420 | xargs kill -9
 
@@ -236,23 +236,23 @@ kill -9 <PID>
 **Solution**:
 
 1. Check port availability:
-```bash
+```sh
 lsof -i:8420  # Check default port
 ```
 
 2. Try with debug mode:
-```bash
+```sh
 wasmrun --debug run ./project
 ```
 
 3. Check file permissions:
-```bash
+```sh
 ls -la ./project
 # Ensure you have read permissions
 ```
 
 4. Verify project structure:
-```bash
+```sh
 # Ensure entry files exist
 ls -la ./project/src/
 ```
@@ -269,18 +269,18 @@ ls -la ./project/src/
    - `main()` function
    - `_start()` function
    - Or use `-c/--call` to specify a function:
-   ```bash
+   ```sh
    wasmrun exec file.wasm -c my_function
    ```
 
 2. Inspect your WASM file:
-```bash
+```sh
 wasmrun inspect file.wasm
 # Check for exported functions
 ```
 
 3. Verify compilation output:
-```bash
+```sh
 wasmrun compile ./project --verbose
 ```
 
@@ -291,13 +291,13 @@ wasmrun compile ./project --verbose
 **Solution**:
 
 1. Check dependencies:
-```bash
+```sh
 wasmrun plugin info <language>
 # Install any missing dependencies
 ```
 
 2. Verify project structure:
-```bash
+```sh
 # For Rust
 cat Cargo.toml
 # Check wasm32 target
@@ -312,12 +312,12 @@ cat Makefile
 ```
 
 3. Try with verbose output:
-```bash
+```sh
 wasmrun compile ./project --verbose
 ```
 
 4. Use debug mode:
-```bash
+```sh
 wasmrun --debug compile ./project
 ```
 
@@ -330,25 +330,25 @@ wasmrun --debug compile ./project
 Check standard output locations:
 
 **For Rust**:
-```bash
+```sh
 ls ./target/wasm32-unknown-unknown/release/*.wasm
 ls ./target/wasm32-unknown-unknown/debug/*.wasm
 ```
 
 **For Go (TinyGo)**:
-```bash
+```sh
 ls ./*.wasm
 ls ./build/*.wasm
 ```
 
 **For C (Emscripten)**:
-```bash
+```sh
 ls ./build/*.wasm
 ls ./*.wasm
 ```
 
 Or compile with specified output:
-```bash
+```sh
 wasmrun compile ./project --output ./build/
 ```
 
@@ -363,7 +363,7 @@ wasmrun compile ./project --output ./build/
 **Solution**:
 
 Option 1: Run the project directory (uses dev server):
-```bash
+```sh
 wasmrun run ./my-rust-project
 ```
 
@@ -376,13 +376,13 @@ Option 2: Compile without wasm-bindgen:
 // Use wasm32-wasi target instead
 ```
 
-```bash
+```sh
 cargo build --target wasm32-wasi
 wasmrun exec target/wasm32-wasi/release/my_project.wasm
 ```
 
 Option 3: Use Go/TinyGo for CLI tools:
-```bash
+```sh
 tinygo build -o output.wasm -target wasi main.go
 wasmrun exec output.wasm
 ```
@@ -398,12 +398,12 @@ wasmrun exec output.wasm
 **Recommended approaches**:
 
 1. Run the project directory (dev server):
-```bash
+```sh
 wasmrun ./my-rust-project
 ```
 
 2. Use wasm32-wasi target for CLI tools:
-```bash
+```sh
 cargo build --target wasm32-wasi
 wasmrun exec target/wasm32-wasi/release/project.wasm
 ```
@@ -429,13 +429,13 @@ pub extern "C" fn add(a: i32, b: i32) -> i32 {
 **Solution**:
 
 1. Check function signature:
-```bash
+```sh
 wasmrun inspect file.wasm
 # Verify function is exported
 ```
 
 2. Try with explicit function call:
-```bash
+```sh
 wasmrun exec file.wasm -c function_name arg1 arg2
 ```
 
@@ -451,7 +451,7 @@ pub extern "C" fn simple_fn(x: i32) -> i32 {
 ```
 
 **Go/TinyGo**: May need scheduler initialization
-```bash
+```sh
 # Use -scheduler=none for simple functions
 tinygo build -o out.wasm -scheduler=none main.go
 ```
@@ -465,12 +465,12 @@ tinygo build -o out.wasm -scheduler=none main.go
 **Solution**:
 
 1. Ensure `--watch` flag is used:
-```bash
+```sh
 wasmrun run ./project --watch
 ```
 
 2. Check file permissions:
-```bash
+```sh
 ls -la ./project/src/
 ```
 
@@ -482,7 +482,7 @@ ls -la ./project/src/
 - `.ts` for AssemblyScript
 
 4. Try restarting the server:
-```bash
+```sh
 wasmrun stop
 wasmrun run ./project --watch
 ```
@@ -496,12 +496,12 @@ wasmrun run ./project --watch
 Increase file descriptor limit:
 
 **macOS**:
-```bash
+```sh
 ulimit -n 4096
 ```
 
 **Linux**:
-```bash
+```sh
 ulimit -n 4096
 # Or permanently in /etc/security/limits.conf
 ```
@@ -512,7 +512,7 @@ ulimit -n 4096
 
 Get detailed information about what's happening:
 
-```bash
+```sh
 # Any command with debug output
 wasmrun --debug run ./project
 wasmrun --debug compile ./project
@@ -524,7 +524,7 @@ wasmrun --debug compile ./project 2> debug.log
 
 ### Get Plugin Information
 
-```bash
+```sh
 # List all plugins
 wasmrun plugin list
 
@@ -538,7 +538,7 @@ ls -la ~/.wasmrun/plugins/
 
 ### Verify WASM File
 
-```bash
+```sh
 # Basic verification
 wasmrun verify file.wasm
 
@@ -551,7 +551,7 @@ wasmrun inspect file.wasm
 
 ### Check System Information
 
-```bash
+```sh
 # Wasmrun version
 wasmrun --version
 

@@ -342,13 +342,13 @@ optimization = true
 
 ### Step 4: Publish to crates.io
 
-```bash
+```sh
 cargo publish
 ```
 
 ### Step 5: Installation by Users
 
-```bash
+```sh
 wasmrun plugin install wasmrun-mylang
 ```
 
@@ -540,7 +540,7 @@ External plugins are installed to `~/.wasmrun/`:
 
 ### Installation
 
-```bash
+```sh
 wasmrun plugin install wasmrust
 ```
 

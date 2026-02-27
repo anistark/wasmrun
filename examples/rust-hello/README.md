@@ -15,7 +15,7 @@ This is a simple Rust project that compiles to WebAssembly and demonstrates basi
 
 Make sure you have the required tools installed:
 
-```bash
+```sh
 # Install wasm-pack if you haven't already
 cargo install wasm-pack
 
@@ -25,7 +25,7 @@ wasm-pack build --target web --out-dir pkg
 
 ## Running with wasmrun
 
-```bash
+```sh
 # From the project root directory
 wasmrun --path examples/rust-hello/pkg/rust_hello.wasm
 ```

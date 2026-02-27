@@ -4,7 +4,7 @@ Compile and run a WebAssembly project with a live development server.
 
 ## Synopsis
 
-```bash
+```sh
 wasmrun run [PROJECT] [OPTIONS]
 ```
 
@@ -27,7 +27,7 @@ When you run this command, Wasmrun will:
 
 Path to the project directory.
 
-```bash
+```sh
 wasmrun run --path ./my-project
 wasmrun run -p ./my-project
 ```
@@ -42,7 +42,7 @@ You can also use a positional argument: `wasmrun run ./my-project`
 
 Port number for the development server.
 
-```bash
+```sh
 wasmrun run --port 3000
 wasmrun run -P 8080
 ```
@@ -54,7 +54,7 @@ wasmrun run -P 8080
 
 Force a specific language for compilation instead of auto-detection.
 
-```bash
+```sh
 wasmrun run --language rust
 wasmrun run -l go
 ```
@@ -79,7 +79,7 @@ If not specified, Wasmrun auto-detects the language by looking for:
 
 Enable watch mode for live-reloading on file changes.
 
-```bash
+```sh
 wasmrun run --watch
 ```
 
@@ -89,7 +89,7 @@ When enabled, Wasmrun monitors your source files and automatically recompiles wh
 
 Show detailed build output during compilation.
 
-```bash
+```sh
 wasmrun run --verbose
 wasmrun run -v
 ```
@@ -98,7 +98,7 @@ wasmrun run -v
 
 Automatically open the UI in your default browser when the server starts.
 
-```bash
+```sh
 wasmrun run --serve
 wasmrun run -s
 ```
@@ -109,7 +109,7 @@ wasmrun run -s
 
 Start development server in current directory:
 
-```bash
+```sh
 wasmrun run
 ```
 
@@ -117,7 +117,7 @@ wasmrun run
 
 Run a specific project:
 
-```bash
+```sh
 wasmrun run ./my-rust-project
 ```
 
@@ -125,7 +125,7 @@ wasmrun run ./my-rust-project
 
 Use a different port:
 
-```bash
+```sh
 wasmrun run --port 3000
 ```
 
@@ -133,7 +133,7 @@ wasmrun run --port 3000
 
 Enable live-reloading:
 
-```bash
+```sh
 wasmrun run --watch
 ```
 
@@ -141,7 +141,7 @@ wasmrun run --watch
 
 Start server with watch mode and auto-open browser:
 
-```bash
+```sh
 wasmrun run ./my-project --watch --serve --port 3000
 ```
 
@@ -149,7 +149,7 @@ wasmrun run ./my-project --watch --serve --port 3000
 
 Override auto-detection:
 
-```bash
+```sh
 wasmrun run ./my-project --language rust
 ```
 
@@ -157,7 +157,7 @@ wasmrun run ./my-project --language rust
 
 See detailed compilation logs:
 
-```bash
+```sh
 wasmrun run --verbose
 ```
 
@@ -165,7 +165,7 @@ wasmrun run --verbose
 
 Typical development workflow:
 
-```bash
+```sh
 # 1. Create or navigate to your project
 cd my-wasm-project
 
@@ -196,13 +196,13 @@ Access your application at the provided URL.
 
 Requires `wasm32-unknown-unknown` target:
 
-```bash
+```sh
 rustup target add wasm32-unknown-unknown
 ```
 
 For web applications with wasm-bindgen:
 
-```bash
+```sh
 wasmrun plugin install wasmrust
 wasmrun run
 ```
@@ -211,7 +211,7 @@ wasmrun run
 
 Requires TinyGo:
 
-```bash
+```sh
 wasmrun plugin install wasmgo
 wasmrun run
 ```
@@ -220,7 +220,7 @@ wasmrun run
 
 Requires waspy plugin:
 
-```bash
+```sh
 wasmrun plugin install waspy
 wasmrun run
 ```
@@ -229,7 +229,7 @@ wasmrun run
 
 Built-in support, requires Emscripten:
 
-```bash
+```sh
 wasmrun run
 ```
 
@@ -237,7 +237,7 @@ wasmrun run
 
 Requires wasmasc plugin:
 
-```bash
+```sh
 wasmrun plugin install wasmasc
 wasmrun run
 ```
@@ -255,7 +255,7 @@ To stop the development server:
 
 If the port is already occupied:
 
-```bash
+```sh
 # Use a different port
 wasmrun run --port 8421
 
@@ -267,7 +267,7 @@ wasmrun stop
 
 Enable verbose mode to see detailed errors:
 
-```bash
+```sh
 wasmrun run --verbose
 ```
 
@@ -275,7 +275,7 @@ wasmrun run --verbose
 
 Install the required language plugin:
 
-```bash
+```sh
 # For Rust
 wasmrun plugin install wasmrust
 

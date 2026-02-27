@@ -56,7 +56,7 @@ External plugins are distributed via crates.io and installed dynamically to `~/.
 
 ### Installing Plugins
 
-```bash
+```sh
 # Install external plugins
 wasmrun plugin install wasmrust   # Rust support
 wasmrun plugin install wasmgo     # Go support
@@ -74,7 +74,7 @@ wasmrun plugin install wasmasc    # AssemblyScript support
 
 ### Listing Plugins
 
-```bash
+```sh
 # List all available plugins (built-in + installed)
 wasmrun plugin list
 
@@ -92,7 +92,7 @@ Output includes:
 
 ### Managing Plugins
 
-```bash
+```sh
 # Uninstall a plugin
 wasmrun plugin uninstall <plugin-name>
 
@@ -142,7 +142,7 @@ Once installed, plugins automatically detect their supported projects based on:
 
 You can override detection with the `--language` flag:
 
-```bash
+```sh
 wasmrun --language rust ./my-project
 ```
 
@@ -160,7 +160,7 @@ See [Creating Plugins](../development/creating-plugins.md) for a comprehensive g
 
 ### Plugin Not Available
 
-```bash
+```sh
 # For built-in plugins
 wasmrun --language c        # C/C++ (built-in)
 
@@ -170,7 +170,7 @@ wasmrun plugin install wasmrust
 
 ### Plugin Dependencies Missing
 
-```bash
+```sh
 # Check what dependencies are required
 wasmrun plugin info wasmrust
 
@@ -180,7 +180,7 @@ rustup target add wasm32-unknown-unknown  # For wasmrust
 
 ### Wrong Plugin Selected
 
-```bash
+```sh
 # Force a specific plugin
 wasmrun --language rust
 wasmrun --language go

@@ -375,7 +375,7 @@ pub fn run_server(config: ServerConfig) -> Result<()> {
     }
     if path_obj
         .extension()
-        .map_or(true, |ext| ext.to_string_lossy().to_lowercase() != "wasm")
+        .is_none_or(|ext| ext.to_string_lossy().to_lowercase() != "wasm")
     {
         return Err(WasmrunError::path(format!(
             "Not a WASM file: {}",

@@ -4,13 +4,13 @@ Wasmrun provides a comprehensive command-line interface for working with WebAsse
 
 ## Command Structure
 
-```bash
+```sh
 wasmrun [COMMAND] [OPTIONS] [ARGS]
 ```
 
 ### Basic Usage
 
-```bash
+```sh
 # Run a project in current directory
 wasmrun
 
@@ -43,7 +43,7 @@ These options work with any command:
 
 Enable detailed debug output for troubleshooting.
 
-```bash
+```sh
 wasmrun --debug run ./my-project
 ```
 
@@ -51,7 +51,7 @@ wasmrun --debug run ./my-project
 
 Show help information for a command.
 
-```bash
+```sh
 wasmrun --help
 wasmrun run --help
 ```
@@ -60,7 +60,7 @@ wasmrun run --help
 
 Display version information.
 
-```bash
+```sh
 wasmrun --version
 ```
 
@@ -70,7 +70,7 @@ wasmrun --version
 
 Wasmrun supports both positional and flag-based path arguments:
 
-```bash
+```sh
 # Positional argument (recommended)
 wasmrun run ./my-project
 
@@ -87,7 +87,7 @@ Positional arguments take precedence over the `--path` flag if both are provided
 
 Specify the server port for development:
 
-```bash
+```sh
 wasmrun run --port 3000
 wasmrun run -P 3000
 ```
@@ -100,7 +100,7 @@ Valid range: `1-65535`
 
 Force a specific language for compilation:
 
-```bash
+```sh
 wasmrun run --language rust
 wasmrun run -l go
 ```
@@ -120,7 +120,7 @@ If not specified, Wasmrun will auto-detect the language based on project files.
 
 Enable live-reloading on file changes:
 
-```bash
+```sh
 wasmrun run --watch
 wasmrun run -W
 ```
@@ -129,7 +129,7 @@ wasmrun run -W
 
 Automatically open the UI in your default browser:
 
-```bash
+```sh
 wasmrun run --serve
 wasmrun run -s
 ```
@@ -147,7 +147,7 @@ Wasmrun uses standard exit codes:
 
 ### Start Development Server
 
-```bash
+```sh
 # Current directory
 wasmrun
 
@@ -160,7 +160,7 @@ wasmrun run ./my-project --watch --serve
 
 ### Execute WASM File
 
-```bash
+```sh
 # Run a WASM file
 wasmrun exec ./output.wasm
 
@@ -173,7 +173,7 @@ wasmrun exec ./math.wasm --call multiply -- 4 7
 
 ### Build for Production
 
-```bash
+```sh
 # Compile with release optimization
 wasmrun compile ./my-project --optimization release
 
@@ -183,7 +183,7 @@ wasmrun compile ./my-project --output ./dist
 
 ### Plugin Management
 
-```bash
+```sh
 # List all plugins
 wasmrun plugin list
 
@@ -205,13 +205,13 @@ Wasmrun looks for configuration in:
 
 For detailed help on any command:
 
-```bash
+```sh
 wasmrun [COMMAND] --help
 ```
 
 For general help:
 
-```bash
+```sh
 wasmrun --help
 ```
 

@@ -4,7 +4,7 @@ Manage Wasmrun language plugins.
 
 ## Synopsis
 
-```bash
+```sh
 wasmrun plugin <SUBCOMMAND> [OPTIONS]
 ```
 
@@ -18,13 +18,13 @@ The `plugin` command provides a complete plugin management system for Wasmrun. P
 
 List all available plugins.
 
-```bash
+```sh
 wasmrun plugin list
 ```
 
 Show detailed information:
 
-```bash
+```sh
 wasmrun plugin list --all
 wasmrun plugin list -a
 ```
@@ -45,7 +45,7 @@ Example output:
 
 Install a plugin from crates.io, URL, or local path.
 
-```bash
+```sh
 wasmrun plugin install <PLUGIN>
 ```
 
@@ -54,7 +54,7 @@ Options:
 
 Examples:
 
-```bash
+```sh
 # From crates.io (recommended)
 wasmrun plugin install wasmrust
 
@@ -72,13 +72,13 @@ wasmrun plugin install ./path/to/plugin
 
 Remove an installed plugin.
 
-```bash
+```sh
 wasmrun plugin uninstall <PLUGIN>
 ```
 
 Example:
 
-```bash
+```sh
 wasmrun plugin uninstall wasmrust
 ```
 
@@ -86,19 +86,19 @@ wasmrun plugin uninstall wasmrust
 
 Update a plugin to the latest version.
 
-```bash
+```sh
 wasmrun plugin update <PLUGIN>
 ```
 
 Update all plugins:
 
-```bash
+```sh
 wasmrun plugin update all
 ```
 
 Examples:
 
-```bash
+```sh
 # Update specific plugin
 wasmrun plugin update wasmrust
 
@@ -110,14 +110,14 @@ wasmrun plugin update all
 
 Enable or disable a plugin.
 
-```bash
+```sh
 wasmrun plugin enable <PLUGIN>
 wasmrun plugin enable <PLUGIN> --disable
 ```
 
 Examples:
 
-```bash
+```sh
 # Enable plugin
 wasmrun plugin enable wasmrust
 
@@ -129,13 +129,13 @@ wasmrun plugin enable wasmrust --disable
 
 Show detailed information about a plugin.
 
-```bash
+```sh
 wasmrun plugin info <PLUGIN>
 ```
 
 Example:
 
-```bash
+```sh
 wasmrun plugin info wasmrust
 ```
 
@@ -199,7 +199,7 @@ Plugins are installed in:
 
 Provides Rust WebAssembly compilation with wasm-bindgen.
 
-```bash
+```sh
 # Install
 wasmrun plugin install wasmrust
 
@@ -217,7 +217,7 @@ Features:
 
 TinyGo compiler for Go WebAssembly projects.
 
-```bash
+```sh
 # Install
 wasmrun plugin install wasmgo
 
@@ -234,7 +234,7 @@ Features:
 
 Compile Python code to WebAssembly.
 
-```bash
+```sh
 # Install
 wasmrun plugin install waspy
 
@@ -251,7 +251,7 @@ Features:
 
 AssemblyScript (TypeScript-like) compiler.
 
-```bash
+```sh
 # Install
 wasmrun plugin install wasmasc
 
@@ -268,7 +268,7 @@ Features:
 
 ### Initial Setup
 
-```bash
+```sh
 # List available plugins
 wasmrun plugin list
 
@@ -282,7 +282,7 @@ wasmrun plugin info wasmrust
 
 ### Updating Plugins
 
-```bash
+```sh
 # Check for updates
 wasmrun plugin list --all
 
@@ -295,7 +295,7 @@ wasmrun plugin update all
 
 ### Managing Plugins
 
-```bash
+```sh
 # Temporarily disable a plugin
 wasmrun plugin enable wasmrust --disable
 
@@ -315,7 +315,7 @@ Requires:
 - `wasm32-unknown-unknown` target
 - wasm-bindgen-cli (optional)
 
-```bash
+```sh
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli
 ```
@@ -325,7 +325,7 @@ cargo install wasm-bindgen-cli
 Requires:
 - TinyGo
 
-```bash
+```sh
 # macOS
 brew install tinygo
 
@@ -339,7 +339,7 @@ sudo dpkg -i tinygo_0.30.0_amd64.deb
 Requires:
 - Python 3.8+
 
-```bash
+```sh
 python3 --version
 ```
 
@@ -349,7 +349,7 @@ Requires:
 - Node.js
 - npm/yarn/pnpm/bun
 
-```bash
+```sh
 node --version
 npm --version
 ```
@@ -360,7 +360,7 @@ npm --version
 
 Check installation:
 
-```bash
+```sh
 wasmrun plugin list --all
 ls ~/.wasmrun/plugins/
 ```
@@ -369,7 +369,7 @@ ls ~/.wasmrun/plugins/
 
 Enable verbose cargo output:
 
-```bash
+```sh
 CARGO_LOG=trace wasmrun plugin install wasmrust
 ```
 
@@ -377,7 +377,7 @@ CARGO_LOG=trace wasmrun plugin install wasmrust
 
 Each plugin may have dependencies. Check with:
 
-```bash
+```sh
 wasmrun plugin info <plugin-name>
 ```
 
@@ -387,13 +387,13 @@ Then install required tools.
 
 Check plugin status:
 
-```bash
+```sh
 wasmrun plugin info <plugin-name>
 ```
 
 Try reinstalling:
 
-```bash
+```sh
 wasmrun plugin uninstall <plugin-name>
 wasmrun plugin install <plugin-name>
 ```
@@ -402,7 +402,7 @@ wasmrun plugin install <plugin-name>
 
 Ensure no projects are using it:
 
-```bash
+```sh
 wasmrun stop
 wasmrun plugin uninstall <plugin-name>
 ```

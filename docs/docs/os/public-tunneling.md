@@ -19,7 +19,7 @@ wasmrun supports the [bore](https://github.com/ekzhang/bore) tunneling protocol,
 
 The simplest way to expose your app is using the public bore.pub server:
 
-```bash
+```sh
 # Start your OS mode application
 wasmrun os -p ./my-app
 
@@ -33,7 +33,7 @@ Your app will be assigned a public URL like: `http://bore.pub:12345`
 
 For production use or custom domains, you can run your own bore server:
 
-```bash
+```sh
 # On your VPS (one-time setup)
 cargo install bore-cli
 bore server --secret mysecret123
@@ -268,7 +268,7 @@ services:
 
 ### Dynamic DNS with DuckDNS
 
-```bash
+```sh
 # Update DuckDNS every 5 minutes (cron)
 */5 * * * * curl "https://www.duckdns.org/update?domains=myapp&token=YOUR_TOKEN&ip="
 ```

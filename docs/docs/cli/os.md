@@ -4,7 +4,7 @@ Run projects in browser-based multi-language OS mode.
 
 ## Synopsis
 
-```bash
+```sh
 wasmrun os [PROJECT] [OPTIONS]
 ```
 
@@ -32,7 +32,7 @@ OS mode is ideal for:
 
 Path to the project directory.
 
-```bash
+```sh
 wasmrun os --path ./my-project
 wasmrun os -p ./my-project
 ```
@@ -47,7 +47,7 @@ You can also use a positional argument: `wasmrun os ./my-project`
 
 Port number for the OS mode server.
 
-```bash
+```sh
 wasmrun os --port 3000
 wasmrun os -P 8080
 ```
@@ -59,7 +59,7 @@ wasmrun os -P 8080
 
 Force a specific language for OS mode execution.
 
-```bash
+```sh
 wasmrun os --language nodejs
 wasmrun os -l python
 ```
@@ -78,7 +78,7 @@ If not specified, Wasmrun auto-detects based on project files:
 
 Enable watch mode for live-reloading on file changes.
 
-```bash
+```sh
 wasmrun os --watch
 ```
 
@@ -86,7 +86,7 @@ wasmrun os --watch
 
 Show detailed build output.
 
-```bash
+```sh
 wasmrun os --verbose
 wasmrun os -v
 ```
@@ -97,7 +97,7 @@ wasmrun os -v
 
 Start OS mode for current project:
 
-```bash
+```sh
 wasmrun os
 ```
 
@@ -105,25 +105,25 @@ wasmrun os
 
 Run a specific project in OS mode:
 
-```bash
+```sh
 wasmrun os ./nodejs-api
 ```
 
 ### With Custom Port
 
-```bash
+```sh
 wasmrun os --port 3000
 ```
 
 ### Node.js Project
 
-```bash
+```sh
 wasmrun os ./my-express-app --language nodejs
 ```
 
 ### Python Project
 
-```bash
+```sh
 wasmrun os ./my-python-app --language python
 ```
 
@@ -131,13 +131,13 @@ wasmrun os ./my-python-app --language python
 
 Enable live-reloading:
 
-```bash
+```sh
 wasmrun os --watch
 ```
 
 ### Full Configuration
 
-```bash
+```sh
 wasmrun os ./my-project \
   --port 3000 \
   --language nodejs \
@@ -190,7 +190,7 @@ app.listen(3000, () => {
 
 Run:
 
-```bash
+```sh
 wasmrun os --language nodejs
 ```
 
@@ -221,7 +221,7 @@ if __name__ == '__main__':
 
 Run:
 
-```bash
+```sh
 wasmrun os --language python
 ```
 
@@ -264,7 +264,7 @@ When you start OS mode, you get a browser-based interface with:
 
 ### Express API Server
 
-```bash
+```sh
 # Start Express app in OS mode
 wasmrun os ./express-api --language nodejs --port 3000
 ```
@@ -281,7 +281,7 @@ express-api/
 
 ### Python Flask App
 
-```bash
+```sh
 wasmrun os ./flask-app --language python
 ```
 
@@ -297,7 +297,7 @@ flask-app/
 
 ### Full-Stack Application
 
-```bash
+```sh
 wasmrun os ./fullstack-app --watch
 ```
 
@@ -329,7 +329,7 @@ See [Network Isolation](/docs/os/network-isolation) for details.
 
 OS mode supports port forwarding to access services:
 
-```bash
+```sh
 # Forward port 3000 to access Express server
 wasmrun os --port 8420  # UI on 8420, app on 3000
 ```
@@ -383,7 +383,7 @@ OS mode performance:
 
 Press `Ctrl+C` or use:
 
-```bash
+```sh
 wasmrun stop
 ```
 
@@ -391,7 +391,7 @@ wasmrun stop
 
 ### Port Already in Use
 
-```bash
+```sh
 # Use different port
 wasmrun os --port 8421
 
@@ -403,7 +403,7 @@ wasmrun stop
 
 Force language selection:
 
-```bash
+```sh
 wasmrun os --language nodejs
 ```
 
@@ -411,7 +411,7 @@ wasmrun os --language nodejs
 
 Ensure dependencies are in `package.json` or `requirements.txt`:
 
-```bash
+```sh
 # Node.js
 npm install
 
@@ -448,7 +448,7 @@ OS mode requires a modern browser with:
 
 See `examples/nodejs-express-api/` for a complete example:
 
-```bash
+```sh
 wasmrun os ./examples/nodejs-express-api
 ```
 

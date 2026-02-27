@@ -14,10 +14,10 @@ Rust provides excellent WebAssembly support with mature tooling and great perfor
 
 Before you start, ensure you have:
 
-- **Rust** 1.70 or higher ([install from rustup.rs](https://rustup.rs/))
+- **Rust** 1.85 or higher ([install from rustup.rs](https://rustup.rs/))
 - **wasmrun** installed (see [Installation](../../installation.md))
 - **wasm32 target** installed:
-  ```bash
+  ```sh
   rustup target add wasm32-unknown-unknown
   ```
 
@@ -25,13 +25,13 @@ Before you start, ensure you have:
 
 Install the Rust plugin for Wasmrun:
 
-```bash
+```sh
 wasmrun plugin install wasmrust
 ```
 
 Verify installation:
 
-```bash
+```sh
 wasmrun plugin info wasmrust
 ```
 
@@ -41,7 +41,7 @@ wasmrun plugin info wasmrust
 
 Create a new Rust library project:
 
-```bash
+```sh
 cargo new --lib my-wasm-project
 cd my-wasm-project
 ```
@@ -166,7 +166,7 @@ pub fn sort_array(mut numbers: Vec<i32>) -> Vec<i32> {
 
 Start the development server with live reload:
 
-```bash
+```sh
 wasmrun run . --watch
 ```
 
@@ -178,7 +178,7 @@ This will:
 
 ### Specify Port
 
-```bash
+```sh
 wasmrun run . --port 3000 --watch
 ```
 
@@ -186,13 +186,13 @@ wasmrun run . --port 3000 --watch
 
 To just compile without starting a server:
 
-```bash
+```sh
 wasmrun compile .
 ```
 
 With optimization:
 
-```bash
+```sh
 wasmrun compile . --optimization release
 ```
 
@@ -249,7 +249,7 @@ path = "src/main.rs"
 
 See [`examples/rust-hello`](https://github.com/anistark/wasmrun/tree/main/examples/rust-hello) for a complete working example with multiple exported functions.
 
-```bash
+```sh
 # Clone the repository
 git clone https://github.com/anistark/wasmrun.git
 cd wasmrun/examples/rust-hello
@@ -262,7 +262,7 @@ wasmrun run .
 
 See [`examples/web-leptos`](https://github.com/anistark/wasmrun/tree/main/examples/web-leptos) for a full web application using the Leptos framework.
 
-```bash
+```sh
 cd wasmrun/examples/web-leptos
 wasmrun run . --watch
 ```
@@ -294,7 +294,7 @@ fn main() {
 
 ### Compile and Execute
 
-```bash
+```sh
 # Compile
 cargo build --target wasm32-wasi --release
 
@@ -304,7 +304,7 @@ wasmrun exec ./target/wasm32-wasi/release/app.wasm
 
 ### Call Specific Functions
 
-```bash
+```sh
 # Call a specific exported function
 wasmrun exec ./mylib.wasm --call add 5 3
 ```
@@ -344,7 +344,7 @@ pub fn process_string(input: &str) -> String {
 
 For production builds:
 
-```bash
+```sh
 # Optimize for size
 cargo build --target wasm32-unknown-unknown --release
 
@@ -388,19 +388,19 @@ Warning: wasm-bindgen module detected
 ```
 
 **Solution:** wasm-bindgen modules need a browser environment. Use the dev server instead:
-```bash
+```sh
 wasmrun run .
 ```
 
 ### Build Failures
 
 **Missing target:**
-```bash
+```sh
 rustup target add wasm32-unknown-unknown
 ```
 
 **Plugin not found:**
-```bash
+```sh
 wasmrun plugin install wasmrust
 ```
 

@@ -18,13 +18,13 @@ AssemblyScript is a TypeScript-like language that compiles to WebAssembly. The `
 
 ## Plugin Installation
 
-```bash
+```sh
 wasmrun plugin install wasmasc
 ```
 
 ## Quick Start
 
-```bash
+```sh
 # Create project
 mkdir my-asc-wasm && cd my-asc-wasm
 npm init -y

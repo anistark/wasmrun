@@ -10,14 +10,14 @@ Install Wasmrun using one of the following methods based on your operating syste
 
 The easiest way to install Wasmrun is via Cargo, Rust's package manager:
 
-```bash
+```sh
 cargo install wasmrun
 ```
 
 This installs the latest stable version from [crates.io](https://crates.io/crates/wasmrun).
 
 **Requirements:**
-- Rust 1.70 or higher
+- Rust 1.85 or higher
 - Cargo (comes with Rust)
 
 If you don't have Rust installed, get it from [rustup.rs](https://rustup.rs/).
@@ -32,7 +32,7 @@ For Debian-based Linux distributions, download and install the DEB package:
 
 2. **Install the package:**
 
-```bash
+```sh
 # Install the downloaded DEB package
 sudo apt install ./wasmrun_*.deb
 
@@ -55,7 +55,7 @@ For Red Hat-based Linux distributions, download and install the RPM package:
 
 2. **Install the package:**
 
-```bash
+```sh
 # Install using rpm
 sudo rpm -i wasmrun-*.rpm
 
@@ -77,7 +77,7 @@ sudo yum install ./wasmrun-*.rpm
 
 Build and install Wasmrun from source for the latest development version or if prebuilt packages aren't available for your platform:
 
-```bash
+```sh
 # Clone the repository
 git clone https://github.com/anistark/wasmrun.git
 cd wasmrun
@@ -89,7 +89,7 @@ cargo install --path .
 This will compile Wasmrun and install it to `~/.cargo/bin/wasmrun`.
 
 **Build requirements:**
-- Rust 1.70 or higher
+- Rust 1.85 or higher
 - Git
 
 ## Release Tracking
@@ -104,7 +104,7 @@ Stay updated with the latest releases:
 
 After installation, verify that Wasmrun is working correctly:
 
-```bash
+```sh
 # Check version
 wasmrun --version
 
@@ -118,7 +118,7 @@ wasmrun --help
 
 Wasmrun supports multiple languages through plugins. After installing Wasmrun, you can install language support:
 
-```bash
+```sh
 # List available plugins
 wasmrun plugin list
 
@@ -143,7 +143,7 @@ wasmrun plugin install wasmasc
 
 If you installed via Cargo, update with:
 
-```bash
+```sh
 cargo install wasmrun --force
 ```
 
@@ -155,7 +155,7 @@ For DEB/RPM packages:
 
 ### From Source
 
-```bash
+```sh
 cd wasmrun
 git pull
 cargo install --path . --force
@@ -168,12 +168,12 @@ cargo install --path . --force
 If `wasmrun` is not found after installation:
 
 1. **Check cargo bin directory is in PATH:**
-```bash
+```sh
 echo $PATH | grep cargo
 ```
 
 2. **Add to PATH** (if missing):
-```bash
+```sh
 # Add to ~/.bashrc or ~/.zshrc
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -185,7 +185,7 @@ source ~/.bashrc  # or source ~/.zshrc
 
 If you get permission errors:
 
-```bash
+```sh
 # Ensure the binary is executable
 chmod +x ~/.cargo/bin/wasmrun
 ```
@@ -198,7 +198,7 @@ If plugin installation fails:
 2. **Verify disk space** - Plugins are installed to `~/.wasmrun/plugins/`
 3. **Check permissions** - Ensure you can write to `~/.wasmrun/`
 
-```bash
+```sh
 # Create directory if it doesn't exist
 mkdir -p ~/.wasmrun/plugins
 ```
@@ -207,7 +207,7 @@ mkdir -p ~/.wasmrun/plugins
 
 ### Cargo Installation
 
-```bash
+```sh
 cargo uninstall wasmrun
 
 # Also remove plugins and cache (optional)
@@ -216,13 +216,13 @@ rm -rf ~/.wasmrun
 
 ### DEB Package
 
-```bash
+```sh
 sudo apt remove wasmrun
 ```
 
 ### RPM Package
 
-```bash
+```sh
 sudo rpm -e wasmrun
 # or
 sudo dnf remove wasmrun

@@ -17,13 +17,13 @@ The `waspy` plugin enables Python to WebAssembly compilation, allowing you to ru
 
 ## Plugin Installation
 
-```bash
+```sh
 wasmrun plugin install waspy
 ```
 
 ## Quick Start
 
-```bash
+```sh
 # Create project
 mkdir my-python-wasm && cd my-python-wasm
 

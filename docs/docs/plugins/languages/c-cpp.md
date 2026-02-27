@@ -17,7 +17,7 @@ C/C++ has excellent WebAssembly support through Emscripten. Wasmrun includes bui
 
 ## Quick Start
 
-```bash
+```sh
 # Create project
 mkdir my-c-wasm && cd my-c-wasm
 
@@ -62,13 +62,13 @@ wasmrun run .
 
 ### Basic Compilation
 
-```bash
+```sh
 emcc hello.c -o hello.html
 ```
 
 ### Optimization
 
-```bash
+```sh
 # Optimize for size
 emcc -Os hello.c -o hello.wasm
 
@@ -78,7 +78,7 @@ emcc -O3 hello.c -o hello.wasm
 
 ### WASI Target
 
-```bash
+```sh
 emcc --target=wasm32-wasi hello.c -o hello.wasm
 ```
 

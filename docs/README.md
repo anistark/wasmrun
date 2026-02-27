@@ -4,13 +4,13 @@ This docs are built using [Docusaurus](https://docusaurus.io/), a modern static 
 
 ## Installation
 
-```bash
+```sh
 yarn
 ```
 
 ## Local Development
 
-```bash
+```sh
 yarn start
 ```
 
@@ -18,7 +18,7 @@ This command starts a local development server and opens up a browser window. Mo
 
 ## Build
 
-```bash
+```sh
 yarn build
 ```
 
@@ -28,13 +28,13 @@ This command generates static content into the `build` directory and can be serv
 
 Using SSH:
 
-```bash
+```sh
 USE_SSH=true yarn deploy
 ```
 
 Not using SSH:
 
-```bash
+```sh
 GIT_USER=<Your GitHub username> yarn deploy
 ```
 

@@ -35,7 +35,7 @@ Wasmrun's native executor implements WASI preview1 syscalls:
 - **stderr** (fd 2) - Standard error
 
 All stdio operations work seamlessly with terminal:
-```bash
+```sh
 wasmrun exec app.wasm < input.txt > output.txt
 ```
 
@@ -69,7 +69,7 @@ fn main() {
 }
 ```
 
-```bash
+```sh
 # Pass arguments to WASM
 wasmrun exec app.wasm arg1 arg2 arg3
 ```
@@ -99,7 +99,7 @@ fn main() {
 }
 ```
 
-```bash
+```sh
 # File I/O works with native execution
 wasmrun exec file-tool.wasm
 ```
@@ -116,7 +116,7 @@ fn main() {
 }
 ```
 
-```bash
+```sh
 # Pipe input/output
 echo "Hello" | wasmrun exec stdin-reader.wasm
 ```
@@ -148,7 +148,7 @@ opt-level = "z"
 lto = true
 ```
 
-```bash
+```sh
 # Compile with wasm32-wasi target
 rustup target add wasm32-wasi
 cargo build --target wasm32-wasi --release
@@ -159,7 +159,7 @@ wasmrun exec target/wasm32-wasi/release/app.wasm
 
 ### Go/TinyGo
 
-```bash
+```sh
 # Compile with WASI target
 tinygo build -target wasi -o app.wasm main.go
 
@@ -169,7 +169,7 @@ wasmrun exec app.wasm
 
 ### C/C++
 
-```bash
+```sh
 # Compile with Emscripten WASI support
 emcc -o app.wasm main.c -s STANDALONE_WASM=1
 
@@ -183,7 +183,7 @@ WASI uses capability-based security:
 
 ### Preopened Directories
 Only directories explicitly opened are accessible:
-```bash
+```sh
 # Current directory is preopened by default
 wasmrun exec app.wasm
 ```

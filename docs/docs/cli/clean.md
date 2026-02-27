@@ -4,7 +4,7 @@ Clean build artifacts and temporary files.
 
 ## Synopsis
 
-```bash
+```sh
 wasmrun clean [PROJECT] [OPTIONS]
 ```
 
@@ -25,7 +25,7 @@ The `clean` command removes build artifacts, temporary files, and cached data cr
 
 Path to the project directory to clean.
 
-```bash
+```sh
 wasmrun clean --path ./my-project
 wasmrun clean -p ./my-project
 ```
@@ -40,7 +40,7 @@ You can also use a positional argument: `wasmrun clean ./my-project`
 
 Clean both project artifacts AND Wasmrun's temporary directories.
 
-```bash
+```sh
 wasmrun clean --all
 wasmrun clean -a
 ```
@@ -78,7 +78,7 @@ The `--all` flag does NOT remove installed plugins from `~/.wasmrun/plugins/`. U
 
 Remove build artifacts from current directory:
 
-```bash
+```sh
 wasmrun clean
 ```
 
@@ -96,7 +96,7 @@ Output:
 
 Clean a specific project directory:
 
-```bash
+```sh
 wasmrun clean ./my-rust-project
 ```
 
@@ -104,7 +104,7 @@ wasmrun clean ./my-rust-project
 
 Remove all build artifacts and temp files:
 
-```bash
+```sh
 wasmrun clean --all
 ```
 
@@ -129,7 +129,7 @@ Output:
 
 Clean several projects:
 
-```bash
+```sh
 wasmrun clean ./project1
 wasmrun clean ./project2
 wasmrun clean ./project3
@@ -137,7 +137,7 @@ wasmrun clean ./project3
 
 Or with a loop:
 
-```bash
+```sh
 for project in projects/*; do
     wasmrun clean "$project"
 done
@@ -147,7 +147,7 @@ done
 
 Ensure fresh build:
 
-```bash
+```sh
 wasmrun clean && wasmrun compile
 ```
 
@@ -157,7 +157,7 @@ wasmrun clean && wasmrun compile
 
 Remove accumulated build artifacts:
 
-```bash
+```sh
 # Clean current project
 wasmrun clean --all
 
@@ -169,7 +169,7 @@ du -sh ~/.wasmrun/
 
 If builds are failing or behaving unexpectedly:
 
-```bash
+```sh
 wasmrun clean --all
 wasmrun compile --verbose
 ```
@@ -178,7 +178,7 @@ wasmrun compile --verbose
 
 Ensure clean slate in CI:
 
-```bash
+```sh
 # In CI script
 wasmrun clean --all
 wasmrun compile --optimization release
@@ -188,7 +188,7 @@ wasmrun compile --optimization release
 
 Clean before changing optimization:
 
-```bash
+```sh
 wasmrun clean
 wasmrun compile --optimization size
 ```
@@ -197,7 +197,7 @@ wasmrun compile --optimization size
 
 Start fresh:
 
-```bash
+```sh
 wasmrun clean --all
 wasmrun plugin install wasmrust
 wasmrun run
@@ -262,7 +262,7 @@ Cleaning is fast:
 
 ### vs Cargo Clean
 
-```bash
+```sh
 # Cargo
 cargo clean
 
@@ -274,7 +274,7 @@ Wasmrun's clean also removes Wasmrun-specific artifacts beyond Cargo's scope.
 
 ### vs npm/pnpm clean
 
-```bash
+```sh
 # npm
 npm run clean  # (if configured)
 
@@ -290,7 +290,7 @@ Wasmrun handles WebAssembly build artifacts specifically.
 
 If you get permission errors:
 
-```bash
+```sh
 # Check ownership
 ls -la target/
 
@@ -303,7 +303,7 @@ wasmrun clean
 
 Some files may be locked by running processes:
 
-```bash
+```sh
 # Stop server first
 wasmrun stop
 
@@ -315,7 +315,7 @@ wasmrun clean --all
 
 Directory in use by another process:
 
-```bash
+```sh
 # Check for running processes
 lsof | grep wasmrun
 
@@ -330,7 +330,7 @@ wasmrun clean
 
 Currently, clean always removes files. A future `--dry-run` option will show what would be removed:
 
-```bash
+```sh
 # Future feature
 wasmrun clean --dry-run
 ```
@@ -339,7 +339,7 @@ wasmrun clean --dry-run
 
 To clean specific items only:
 
-```bash
+```sh
 # Clean Rust target only
 rm -rf target/
 
@@ -354,21 +354,21 @@ rm -rf dist/
 
 ### Before Compile
 
-```bash
+```sh
 wasmrun clean
 wasmrun compile --optimization release
 ```
 
 ### Before Run
 
-```bash
+```sh
 wasmrun clean --all
 wasmrun run --watch
 ```
 
 ### After Development
 
-```bash
+```sh
 # Done for the day
 wasmrun stop
 wasmrun clean --all
