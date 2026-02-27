@@ -8,7 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Runtime Binary Management (OS Mode Stage 1.1)**: Fetch, cache, and serve wasmhub language runtimes for browser WASM execution
+- **Project Files API**: Serve project files to browser for WASI virtual filesystem population
+  - New `project_files` module (`src/runtime/project_files.rs`) — recursively reads project directory, encodes files as base64
+  - `GET /api/project/files` endpoint — returns all project files as a JSON bundle `{ files: { "path": "base64content" }, ... }`
+  - `.gitignore` support with glob pattern matching (`*`, `**`, `?`)
+  - Default ignore patterns for common directories (`node_modules`, `target`, `.git`, `__pycache__`, etc.) and binary extensions (`.o`, `.so`, `.wasm`, etc.)
+  - Size limits: 10MB per file, 50MB total, 5000 file count cap
+  - Skipped files reported in response with reasons
+  - 20 new unit tests for file collection, ignore patterns, glob matching, base64 encoding, and edge cases
+- **Runtime Binary Management**: Fetch, cache, and serve wasmhub language runtimes for browser WASM execution
   - New `runtime_cache` module (`src/runtime/runtime_cache.rs`) — downloads `.wasm` runtimes from wasmhub on first use, caches to `~/.wasmrun/runtimes/`
   - `GET /api/runtime/<language>` endpoint — serves cached runtime binaries with `application/wasm` content type
   - `GET /api/runtimes` endpoint — returns detected language, cache status, and available wasmhub runtimes
@@ -18,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 16 new unit tests for cache roundtrip, integrity, language detection, and checksums
 
 ### Dependencies
+- Added `base64` (0.22) for project file content encoding
 - Added `sha2` (0.10) for cryptographic checksum validation
 - Moved `ureq` from dev-dependencies to dependencies for runtime fetching
 

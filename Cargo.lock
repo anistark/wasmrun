@@ -1406,6 +1406,7 @@ name = "wasmrun"
 version = "0.15.1"
 dependencies = [
  "anyhow",
+ "base64",
  "chrono",
  "clap",
  "dirs",

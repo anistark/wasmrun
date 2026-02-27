@@ -5,6 +5,7 @@ pub mod microkernel;
 pub mod multilang_kernel;
 pub mod network_namespace;
 pub mod os_server;
+pub mod project_files;
 pub mod registry;
 pub mod runtime_cache;
 pub mod scheduler;

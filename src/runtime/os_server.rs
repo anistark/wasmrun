@@ -1,6 +1,7 @@
 use crate::error::{Result, WasmrunError};
 use crate::logging::{LogEntry, LogSource, LogTrailSystem};
 use crate::runtime::multilang_kernel::{MultiLanguageKernel, OsRunConfig};
+use crate::runtime::project_files::ProjectFilesCollector;
 use crate::runtime::runtime_cache::RuntimeCache;
 use crate::runtime::tunnel::BoreClient;
 use std::collections::HashMap;
@@ -343,6 +344,11 @@ impl OsServer {
             // API endpoint for available runtimes manifest
             (Method::Get, "/api/runtimes") => {
                 self.handle_runtimes_list_request(request)?;
+            }
+
+            // API endpoint for project files bundle (base64-encoded)
+            (Method::Get, "/api/project/files") => {
+                self.handle_project_files_request(request)?;
             }
 
             // API endpoint for kernel statistics
@@ -821,6 +827,74 @@ impl OsServer {
         request
             .respond(response)
             .map_err(|e| WasmrunError::from(e.to_string()))?;
+
+        Ok(())
+    }
+
+    fn handle_project_files_request(&self, request: Request) -> Result<()> {
+        let collector = match ProjectFilesCollector::new(&self.config.project_path) {
+            Ok(c) => c,
+            Err(e) => {
+                self.log_system.log(LogEntry::error(
+                    LogSource::Kernel,
+                    format!("Failed to read project files: {e}"),
+                ));
+                return self.send_error(request, &format!("Failed to read project files: {e}"));
+            }
+        };
+
+        match collector.collect() {
+            Ok(bundle) => {
+                self.log_system.log(LogEntry::info(
+                    LogSource::Kernel,
+                    format!(
+                        "Serving {} project files ({} bytes)",
+                        bundle.file_count, bundle.total_size
+                    ),
+                ));
+
+                let response_json = serde_json::json!({
+                    "success": true,
+                    "files": bundle.files,
+                    "file_count": bundle.file_count,
+                    "total_size": bundle.total_size,
+                    "project_path": bundle.project_path,
+                    "skipped": bundle.skipped,
+                });
+
+                let response = Response::from_string(response_json.to_string())
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(self.cors_header());
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+            Err(e) => {
+                self.log_system.log(LogEntry::error(
+                    LogSource::Kernel,
+                    format!("Failed to collect project files: {e}"),
+                ));
+
+                let error_json = serde_json::json!({
+                    "success": false,
+                    "error": format!("Failed to collect project files: {e}")
+                });
+
+                let response = Response::from_string(error_json.to_string())
+                    .with_status_code(tiny_http::StatusCode(500))
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(self.cors_header());
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+        }
 
         Ok(())
     }
