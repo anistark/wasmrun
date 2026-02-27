@@ -1,6 +1,7 @@
 use crate::error::{Result, WasmrunError};
 use crate::logging::{LogEntry, LogSource, LogTrailSystem};
 use crate::runtime::multilang_kernel::{MultiLanguageKernel, OsRunConfig};
+use crate::runtime::runtime_cache::RuntimeCache;
 use crate::runtime::tunnel::BoreClient;
 use std::collections::HashMap;
 use std::path::Path;
@@ -24,6 +25,7 @@ pub struct OsServer {
     template_cache: HashMap<String, String>,
     log_system: Arc<LogTrailSystem>,
     tunnel_client: Arc<RwLock<Option<BoreClient>>>,
+    runtime_cache: RuntimeCache,
     cors_origin: String,
 }
 
@@ -35,6 +37,7 @@ impl OsServer {
         } else {
             format!("http://127.0.0.1:{}", config.port.unwrap_or(8420))
         };
+        let runtime_cache = RuntimeCache::new()?;
         let mut server = Self {
             kernel: Arc::new(RwLock::new(kernel)),
             config,
@@ -42,6 +45,7 @@ impl OsServer {
             template_cache: HashMap::new(),
             log_system,
             tunnel_client: Arc::new(RwLock::new(None)),
+            runtime_cache,
             cors_origin,
         };
 
@@ -328,6 +332,17 @@ impl OsServer {
                 request
                     .respond(response)
                     .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+
+            // API endpoint for runtime binary (serves cached wasmhub runtime)
+            (Method::Get, path) if path.starts_with("/api/runtime/") => {
+                let language = &path[13..]; // Remove "/api/runtime/"
+                self.handle_runtime_request(request, language)?;
+            }
+
+            // API endpoint for available runtimes manifest
+            (Method::Get, "/api/runtimes") => {
+                self.handle_runtimes_list_request(request)?;
             }
 
             // API endpoint for kernel statistics
@@ -722,6 +737,91 @@ impl OsServer {
         } else {
             self.send_error(request, &format!("Process with PID {pid} not found"))?;
         }
+        Ok(())
+    }
+
+    fn handle_runtime_request(&self, request: Request, language: &str) -> Result<()> {
+        if language.is_empty() || language.contains("..") || language.contains('/') {
+            return self.send_error(request, "Invalid language identifier");
+        }
+
+        let wasmhub_lang = crate::runtime::runtime_cache::wasmhub_language(language);
+
+        match self.runtime_cache.get_runtime(wasmhub_lang) {
+            Ok(wasm_bytes) => {
+                self.log_system.log(LogEntry::info(
+                    LogSource::Kernel,
+                    format!("Serving {language} runtime ({} bytes)", wasm_bytes.len()),
+                ));
+
+                let response = Response::from_data(wasm_bytes)
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/wasm"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"Cache-Control"[..], &b"public, max-age=86400"[..])
+                            .unwrap(),
+                    )
+                    .with_header(self.cors_header());
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+            Err(e) => {
+                self.log_system.log(LogEntry::error(
+                    LogSource::Kernel,
+                    format!("Failed to fetch {language} runtime: {e}"),
+                ));
+
+                let error_json = serde_json::json!({
+                    "success": false,
+                    "error": format!("Runtime not available for '{language}': {e}")
+                });
+
+                let response = Response::from_string(error_json.to_string())
+                    .with_status_code(tiny_http::StatusCode(404))
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(self.cors_header());
+
+                request
+                    .respond(response)
+                    .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_runtimes_list_request(&self, request: Request) -> Result<()> {
+        let detected_language = self.detect_project_language()?;
+        let wasmhub_lang = crate::runtime::runtime_cache::wasmhub_language(&detected_language);
+
+        let mut response_json = serde_json::json!({
+            "detected_language": detected_language,
+            "wasmhub_runtime": wasmhub_lang,
+            "cached": self.runtime_cache.is_cached(wasmhub_lang),
+            "cached_version": self.runtime_cache.cached_version(wasmhub_lang),
+        });
+
+        if let Ok(manifest) = self.runtime_cache.fetch_manifest() {
+            response_json["wasmhub_version"] = serde_json::Value::String(manifest.version);
+            response_json["available_languages"] =
+                serde_json::json!(manifest.languages.keys().collect::<Vec<_>>());
+        }
+
+        let response = Response::from_string(response_json.to_string())
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+            .with_header(self.cors_header());
+
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
+
         Ok(())
     }
 

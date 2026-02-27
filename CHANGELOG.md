@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-...
+### Added
+- **Runtime Binary Management (OS Mode Stage 1.1)**: Fetch, cache, and serve wasmhub language runtimes for browser WASM execution
+  - New `runtime_cache` module (`src/runtime/runtime_cache.rs`) — downloads `.wasm` runtimes from wasmhub on first use, caches to `~/.wasmrun/runtimes/`
+  - `GET /api/runtime/<language>` endpoint — serves cached runtime binaries with `application/wasm` content type
+  - `GET /api/runtimes` endpoint — returns detected language, cache status, and available wasmhub runtimes
+  - SHA-256 checksum validation on all downloaded runtimes
+  - Language name mapping for wasmhub (nodejs→quickjs, python→rustpython)
+  - Cache integrity checks with automatic re-download on corruption
+  - 16 new unit tests for cache roundtrip, integrity, language detection, and checksums
+
+### Dependencies
+- Added `sha2` (0.10) for cryptographic checksum validation
+- Moved `ureq` from dev-dependencies to dependencies for runtime fetching
 
 ## [0.15.1](https://github.com/anistark/wasmrun/releases/tag/v0.15.1) - 2026-02-22
 
