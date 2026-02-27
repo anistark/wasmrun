@@ -4,7 +4,7 @@ Execute a WebAssembly file directly with native execution.
 
 ## Synopsis
 
-```bash
+```sh
 wasmrun exec <WASM_FILE> [OPTIONS] [-- ARGS...]
 ```
 
@@ -25,7 +25,7 @@ The command uses Wasmtime as the runtime engine with full WASI (WebAssembly Syst
 
 Path to the WebAssembly file to execute (required).
 
-```bash
+```sh
 wasmrun exec ./output.wasm
 wasmrun exec /path/to/module.wasm
 ```
@@ -34,7 +34,7 @@ wasmrun exec /path/to/module.wasm
 
 Arguments to pass to the WASM program. Use `--` to separate Wasmrun options from program arguments.
 
-```bash
+```sh
 wasmrun exec ./calculator.wasm -- 5 10
 wasmrun exec ./tool.wasm -- --input file.txt --output result.txt
 ```
@@ -49,7 +49,7 @@ Specify which exported function to call. If not provided, Wasmrun looks for stan
 2. `_start`
 3. `start`
 
-```bash
+```sh
 wasmrun exec ./math.wasm --call multiply -- 4 7
 wasmrun exec ./module.wasm -c custom_entry
 ```
@@ -72,7 +72,7 @@ If no standard entry point is found, you must specify one with `--call`.
 
 Run a WASM file:
 
-```bash
+```sh
 wasmrun exec ./hello.wasm
 ```
 
@@ -80,7 +80,7 @@ wasmrun exec ./hello.wasm
 
 Pass arguments to the program:
 
-```bash
+```sh
 wasmrun exec ./calculator.wasm -- 5 + 3
 ```
 
@@ -93,7 +93,7 @@ Output:
 
 Execute a specific exported function:
 
-```bash
+```sh
 wasmrun exec ./math.wasm --call multiply -- 6 7
 ```
 
@@ -106,7 +106,7 @@ Output:
 
 Pass flags and options to the WASM program:
 
-```bash
+```sh
 wasmrun exec ./tool.wasm -- --input data.json --format yaml --output result.yaml
 ```
 
@@ -114,7 +114,7 @@ wasmrun exec ./tool.wasm -- --input data.json --format yaml --output result.yaml
 
 Use with Unix pipes:
 
-```bash
+```sh
 echo "hello world" | wasmrun exec ./processor.wasm
 ```
 
@@ -122,7 +122,7 @@ echo "hello world" | wasmrun exec ./processor.wasm
 
 Integrate into shell scripts:
 
-```bash
+```sh
 #!/bin/bash
 result=$(wasmrun exec ./compute.wasm -- $1 $2)
 echo "Result: $result"
@@ -164,7 +164,7 @@ if let Ok(value) = env::var("MY_VAR") {
 }
 ```
 
-```bash
+```sh
 MY_VAR=hello wasmrun exec ./app.wasm
 ```
 
@@ -179,7 +179,7 @@ for arg in env::args() {
 }
 ```
 
-```bash
+```sh
 wasmrun exec ./app.wasm -- arg1 arg2 arg3
 ```
 
@@ -198,7 +198,7 @@ fn main() {
 
 Compile and run:
 
-```bash
+```sh
 cargo build --target wasm32-wasi --release
 wasmrun exec ./target/wasm32-wasi/release/my-app.wasm -- hello world
 ```
@@ -221,7 +221,7 @@ func main() {
 
 Compile and run:
 
-```bash
+```sh
 tinygo build -target=wasi -o app.wasm main.go
 wasmrun exec ./app.wasm -- hello world
 ```
@@ -242,7 +242,7 @@ int main(int argc, char *argv[]) {
 
 Compile and run:
 
-```bash
+```sh
 emcc main.c -o app.wasm
 wasmrun exec ./app.wasm -- hello world
 ```
@@ -251,7 +251,7 @@ wasmrun exec ./app.wasm -- hello world
 
 The exec command returns the exit code from the WASM program:
 
-```bash
+```sh
 wasmrun exec ./app.wasm
 echo $?  # Shows WASM program's exit code
 ```
@@ -289,7 +289,7 @@ Native execution with `exec` is fast because:
 
 Enable debug output to see detailed execution information:
 
-```bash
+```sh
 wasmrun --debug exec ./app.wasm
 ```
 
@@ -309,7 +309,7 @@ Debug output includes:
 
 Solution: Specify function with `--call`:
 
-```bash
+```sh
 wasmrun exec ./module.wasm --call my_function
 ```
 
@@ -321,7 +321,7 @@ wasmrun exec ./module.wasm --call my_function
 
 Solution: Verify the file:
 
-```bash
+```sh
 wasmrun verify ./module.wasm --detailed
 ```
 
@@ -333,7 +333,7 @@ wasmrun verify ./module.wasm --detailed
 
 Solution: Inspect available functions:
 
-```bash
+```sh
 wasmrun inspect ./module.wasm
 ```
 
@@ -341,7 +341,7 @@ wasmrun inspect ./module.wasm
 
 If you get WASI-related errors, ensure your WASM was compiled for WASI target:
 
-```bash
+```sh
 # Rust
 cargo build --target wasm32-wasi
 

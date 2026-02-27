@@ -4,7 +4,7 @@ Stop any running Wasmrun server instance.
 
 ## Synopsis
 
-```bash
+```sh
 wasmrun stop
 ```
 
@@ -23,7 +23,7 @@ The `stop` command gracefully terminates any running Wasmrun development server.
 
 ### Stop Running Server
 
-```bash
+```sh
 wasmrun stop
 ```
 
@@ -56,27 +56,27 @@ The stop command:
 
 Stop the server:
 
-```bash
+```sh
 wasmrun stop
 ```
 
 ### Check if Server is Running
 
-```bash
+```sh
 wasmrun stop
 # If output says "No server running", port is free
 ```
 
 ### Stop and Restart
 
-```bash
+```sh
 wasmrun stop
 wasmrun run --port 3000
 ```
 
 ### Stop Before Changing Projects
 
-```bash
+```sh
 wasmrun stop
 cd ../other-project
 wasmrun run
@@ -86,7 +86,7 @@ wasmrun run
 
 If `wasmrun stop` doesn't work:
 
-```bash
+```sh
 # Find process
 ps aux | grep wasmrun
 
@@ -103,7 +103,7 @@ pkill -9 wasmrun
 
 If you see "port already in use":
 
-```bash
+```sh
 # Stop existing server
 wasmrun stop
 
@@ -113,7 +113,7 @@ wasmrun run --port 8420
 
 Or use a different port:
 
-```bash
+```sh
 wasmrun run --port 8421
 ```
 
@@ -121,7 +121,7 @@ wasmrun run --port 8421
 
 If you started a server and closed the terminal:
 
-```bash
+```sh
 # Stop it from any terminal
 wasmrun stop
 ```
@@ -130,7 +130,7 @@ wasmrun stop
 
 Only one server can run at a time. To switch projects:
 
-```bash
+```sh
 # Stop current server
 wasmrun stop
 
@@ -143,7 +143,7 @@ wasmrun run
 
 Clean shutdown before logging off:
 
-```bash
+```sh
 wasmrun stop
 wasmrun clean --all
 ```
@@ -163,7 +163,7 @@ These files are automatically created when the server starts and cleaned up when
 
 If `wasmrun stop` doesn't respond:
 
-```bash
+```sh
 # Force kill
 pkill -9 wasmrun
 ```
@@ -172,7 +172,7 @@ pkill -9 wasmrun
 
 Check if the process is actually running:
 
-```bash
+```sh
 # List wasmrun processes
 ps aux | grep wasmrun
 
@@ -192,7 +192,7 @@ If server keeps restarting, check for:
 
 If you lack permission to stop the process:
 
-```bash
+```sh
 # Check who owns the process
 ps aux | grep wasmrun
 
@@ -204,7 +204,7 @@ sudo wasmrun stop
 
 If the PID file is missing:
 
-```bash
+```sh
 # Manually find and kill
 ps aux | grep "wasmrun.*run"
 kill <PID>
@@ -224,7 +224,7 @@ kill <PID>
 
 Only use if graceful fails:
 
-```bash
+```sh
 pkill -9 wasmrun
 ```
 
@@ -238,7 +238,7 @@ Force shutdown (SIGKILL):
 
 ### Before Cleaning
 
-```bash
+```sh
 wasmrun stop
 wasmrun clean --all
 ```
@@ -247,14 +247,14 @@ wasmrun clean --all
 
 Not necessary, but good practice:
 
-```bash
+```sh
 wasmrun stop
 wasmrun compile --optimization release
 ```
 
 ### Before Plugin Updates
 
-```bash
+```sh
 wasmrun stop
 wasmrun plugin update all
 wasmrun run
@@ -264,7 +264,7 @@ wasmrun run
 
 ### Check if Server is Running
 
-```bash
+```sh
 # Method 1: Try to stop
 wasmrun stop
 
@@ -277,7 +277,7 @@ lsof -i :8420
 
 ### Get Server PID
 
-```bash
+```sh
 # From PID file
 cat .wasmrun-server/pid
 
@@ -287,7 +287,7 @@ pgrep -f "wasmrun.*run"
 
 ### Get Server Port
 
-```bash
+```sh
 # From port file
 cat .wasmrun-server/port
 
@@ -299,7 +299,7 @@ lsof -i -P | grep wasmrun
 
 ### Stop All Wasmrun Processes
 
-```bash
+```sh
 #!/bin/bash
 # stop-all.sh
 wasmrun stop
@@ -311,14 +311,14 @@ echo "All Wasmrun processes stopped"
 
 Add to system shutdown hooks:
 
-```bash
+```sh
 # ~/.bash_logout or shutdown script
 wasmrun stop
 ```
 
 ### CI/CD Cleanup
 
-```bash
+```sh
 # In CI script after tests
 wasmrun stop || true
 wasmrun clean --all

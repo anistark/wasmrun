@@ -38,7 +38,7 @@ Wasmrun uses an extensible plugin system that makes it easy to add support for n
 
 **Native WASM Execution**
 Run compiled WASM files directly with the native interpreter:
-```bash
+```sh
 wasmrun exec myapp.wasm arg1 arg2
 wasmrun exec mylib.wasm --call add 5 3
 ```

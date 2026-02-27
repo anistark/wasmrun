@@ -4,7 +4,7 @@ Verify WebAssembly file format and structure.
 
 ## Synopsis
 
-```bash
+```sh
 wasmrun verify <WASM_FILE> [OPTIONS]
 ```
 
@@ -32,14 +32,14 @@ This is useful for:
 
 Path to the WebAssembly file to verify (required).
 
-```bash
+```sh
 wasmrun verify ./module.wasm
 wasmrun verify /path/to/output.wasm
 ```
 
 You can also use the `--path` flag:
 
-```bash
+```sh
 wasmrun verify --path ./module.wasm
 wasmrun verify -p ./module.wasm
 ```
@@ -50,7 +50,7 @@ wasmrun verify -p ./module.wasm
 
 Show detailed verification results including section information.
 
-```bash
+```sh
 wasmrun verify ./module.wasm --detailed
 wasmrun verify ./module.wasm -d
 ```
@@ -61,7 +61,7 @@ wasmrun verify ./module.wasm -d
 
 Verify a WASM file:
 
-```bash
+```sh
 wasmrun verify ./output.wasm
 ```
 
@@ -78,7 +78,7 @@ Success output:
 
 Get comprehensive information:
 
-```bash
+```sh
 wasmrun verify ./module.wasm --detailed
 ```
 
@@ -119,7 +119,7 @@ Validation:
 
 Check all WASM files in a directory:
 
-```bash
+```sh
 for file in dist/*.wasm; do
     wasmrun verify "$file"
 done
@@ -245,7 +245,7 @@ Solution: Recompile to fix indices.
 
 Verify before deploying to production:
 
-```bash
+```sh
 #!/bin/bash
 if wasmrun verify ./dist/app.wasm; then
     echo "Deploying..."
@@ -260,7 +260,7 @@ fi
 
 After compilation:
 
-```bash
+```sh
 wasmrun compile ./my-project
 wasmrun verify ./output.wasm --detailed
 ```
@@ -269,7 +269,7 @@ wasmrun verify ./output.wasm --detailed
 
 In test scripts:
 
-```bash
+```sh
 # test.sh
 wasmrun compile --optimization release
 wasmrun verify ./dist/*.wasm || exit 1
@@ -280,7 +280,7 @@ wasmrun exec ./dist/test.wasm
 
 If compilation produces unexpected results:
 
-```bash
+```sh
 wasmrun compile ./project --verbose
 wasmrun verify ./output.wasm --detailed
 ```
@@ -289,7 +289,7 @@ wasmrun verify ./output.wasm --detailed
 
 ### wasm-validate (WABT)
 
-```bash
+```sh
 # WABT tool
 wasm-validate module.wasm
 
@@ -306,7 +306,7 @@ Wasmrun's verify provides:
 
 For inspection rather than validation:
 
-```bash
+```sh
 # For detailed inspection
 wasmrun inspect module.wasm
 
@@ -318,20 +318,20 @@ wasmrun verify module.wasm
 
 ### After Compilation
 
-```bash
+```sh
 wasmrun compile ./project
 wasmrun verify ./output.wasm
 ```
 
 ### Before Execution
 
-```bash
+```sh
 wasmrun verify ./app.wasm && wasmrun exec ./app.wasm
 ```
 
 ### With Inspection
 
-```bash
+```sh
 wasmrun verify ./module.wasm --detailed
 wasmrun inspect ./module.wasm
 ```

@@ -4,7 +4,7 @@ Perform detailed inspection on a WebAssembly file.
 
 ## Synopsis
 
-```bash
+```sh
 wasmrun inspect <WASM_FILE>
 ```
 
@@ -26,14 +26,14 @@ Use this to:
 
 Path to the WebAssembly file to inspect (required).
 
-```bash
+```sh
 wasmrun inspect ./module.wasm
 wasmrun inspect /path/to/output.wasm
 ```
 
 You can also use the `--path` flag:
 
-```bash
+```sh
 wasmrun inspect --path ./module.wasm
 wasmrun inspect -p ./module.wasm
 ```
@@ -44,7 +44,7 @@ wasmrun inspect -p ./module.wasm
 
 Inspect a WASM module:
 
-```bash
+```sh
 wasmrun inspect ./output.wasm
 ```
 
@@ -99,19 +99,19 @@ Example output:
 
 ### Find Specific Function
 
-```bash
+```sh
 wasmrun inspect ./module.wasm | grep "my_function"
 ```
 
 ### List All Exports
 
-```bash
+```sh
 wasmrun inspect ./module.wasm | grep -A 20 "Exports:"
 ```
 
 ### Check Memory Configuration
 
-```bash
+```sh
 wasmrun inspect ./module.wasm | grep -A 5 "Memory:"
 ```
 
@@ -183,7 +183,7 @@ Non-standard sections:
 
 Look for exported main function:
 
-```bash
+```sh
 wasmrun inspect ./app.wasm | grep -E "(main|_start|start)"
 ```
 
@@ -191,7 +191,7 @@ wasmrun inspect ./app.wasm | grep -E "(main|_start|start)"
 
 Verify WASI dependencies:
 
-```bash
+```sh
 wasmrun inspect ./app.wasm | grep "wasi_snapshot_preview1"
 ```
 
@@ -199,7 +199,7 @@ wasmrun inspect ./app.wasm | grep "wasi_snapshot_preview1"
 
 Ensure required functions are exported:
 
-```bash
+```sh
 wasmrun inspect ./library.wasm | grep "Exports:"
 ```
 
@@ -207,7 +207,7 @@ wasmrun inspect ./library.wasm | grep "Exports:"
 
 Find what imports are needed:
 
-```bash
+```sh
 wasmrun inspect ./module.wasm | grep -A 50 "Imports:"
 ```
 
@@ -215,7 +215,7 @@ wasmrun inspect ./module.wasm | grep -A 50 "Imports:"
 
 Check memory configuration:
 
-```bash
+```sh
 wasmrun inspect ./app.wasm | grep -A 3 "Memory:"
 ```
 
@@ -223,7 +223,7 @@ wasmrun inspect ./app.wasm | grep -A 3 "Memory:"
 
 ### After Compilation
 
-```bash
+```sh
 wasmrun compile ./project
 wasmrun inspect ./output.wasm
 ```
@@ -232,14 +232,14 @@ wasmrun inspect ./output.wasm
 
 Understand what function to call:
 
-```bash
+```sh
 wasmrun inspect ./module.wasm
 wasmrun exec ./module.wasm --call my_function
 ```
 
 ### With Verification
 
-```bash
+```sh
 wasmrun verify ./module.wasm
 wasmrun inspect ./module.wasm
 ```
@@ -248,7 +248,7 @@ wasmrun inspect ./module.wasm
 
 ### wasm-objdump (WABT)
 
-```bash
+```sh
 # WABT tool
 wasm-objdump -x module.wasm
 
@@ -265,7 +265,7 @@ Wasmrun provides:
 
 For full disassembly:
 
-```bash
+```sh
 # wasm2wat shows full WAT format
 wasm2wat module.wasm
 
@@ -327,7 +327,7 @@ Can't find main, _start, or start function.
 
 Solution: Use `--call` with `exec`:
 
-```bash
+```sh
 wasmrun inspect ./module.wasm  # Find function name
 wasmrun exec ./module.wasm --call my_function
 ```

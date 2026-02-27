@@ -19,7 +19,7 @@ pub fn run_wasm_file(path: &str, port: u16, serve: bool) -> Result<()> {
     let path_obj = std::path::Path::new(path);
     debug_println!("Checking file extension for path: {}", path);
 
-    if !path_obj.extension().is_some_and(|ext| ext == "wasm") {
+    if path_obj.extension().is_none_or(|ext| ext != "wasm") {
         if path_obj.extension().is_some_and(|ext| ext == "js") {
             debug_println!("Detected JS file, delegating to handle_js_file");
             return handle_js_file(path, port, serve);

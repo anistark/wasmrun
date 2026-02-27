@@ -22,7 +22,7 @@ This feature works in conjunction with [Network Isolation](./network-isolation.m
 
 ### Single Port Forward
 
-```bash
+```sh
 # Forward host port 8080 to process port 3000
 wasmrun os ./app --forward 8080:3000
 
@@ -32,14 +32,14 @@ wasmrun os ./app --forward 8080:3000
 
 ### Multiple Ports
 
-```bash
+```sh
 # Forward multiple ports
 wasmrun os ./app --forward 8080:3000 --forward 8081:3001
 ```
 
 ### Same Port
 
-```bash
+```sh
 # Forward same port number
 wasmrun os ./app --forward 3000:3000
 ```
@@ -72,7 +72,7 @@ app.get('/', (req, res) => {
 app.listen(3000);
 ```
 
-```bash
+```sh
 # Forward host :8080 to process :3000
 wasmrun os ./node-server --language nodejs --forward 8080:3000
 
@@ -94,7 +94,7 @@ if __name__ == '__main__':
     app.run(port=5000)
 ```
 
-```bash
+```sh
 # Expose API on host port 3000
 wasmrun os ./api --language python --forward 3000:5000
 
@@ -103,7 +103,7 @@ wasmrun os ./api --language python --forward 3000:5000
 
 ### Database Services
 
-```bash
+```sh
 # PostgreSQL in isolated namespace
 wasmrun os ./postgres-app --forward 5432:5432
 
@@ -115,7 +115,7 @@ psql -h localhost -p 5432 -U user database
 
 Run multiple isolated processes on the same internal port, exposed via different host ports:
 
-```bash
+```sh
 # Terminal 1: Service A (namespace A, internal :8080)
 wasmrun os ./service-a --forward 3000:8080
 
@@ -143,7 +143,7 @@ By default, forwarded ports bind to localhost only:
 ### Firewall Rules
 
 Port forwarding respects host firewall rules:
-```bash
+```sh
 # Host firewall still controls external access
 # Even if forwarded, external access may be blocked
 ```
@@ -159,7 +159,7 @@ Each process is isolated:
 
 ### Via CLI
 
-```bash
+```sh
 # Command-line forwarding
 wasmrun os ./app \
     --forward 8080:3000 \
@@ -178,7 +178,7 @@ forwards = [
 ]
 ```
 
-```bash
+```sh
 # Reads from .wasmrun.toml
 wasmrun os ./app
 ```
@@ -187,7 +187,7 @@ wasmrun os ./app
 
 Port forwarding works with live reload for development:
 
-```bash
+```sh
 # Forward ports + watch for changes
 wasmrun os ./app --forward 8080:3000 --watch
 
@@ -199,7 +199,7 @@ wasmrun os ./app --forward 8080:3000 --watch
 
 ### Port Already in Use
 
-```bash
+```sh
 # Error: host port 8080 already in use
 # Solution: Use different host port
 wasmrun os ./app --forward 8081:3000
@@ -207,7 +207,7 @@ wasmrun os ./app --forward 8081:3000
 
 ### Connection Refused
 
-```bash
+```sh
 # Ensure process is listening
 # Check process logs
 wasmrun os ./app --forward 8080:3000 --verbose
@@ -218,7 +218,7 @@ netstat -an | grep 8080
 
 ### Firewall Blocking
 
-```bash
+```sh
 # On Linux, check firewall rules
 sudo iptables -L -n
 
@@ -256,7 +256,7 @@ app.listen(PORT, () => {
 });
 ```
 
-```bash
+```sh
 # Forward and run
 wasmrun os . --language nodejs --forward 8080:3000
 
@@ -280,7 +280,7 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 ```
 
-```bash
+```sh
 # Forward and run
 wasmrun os . --language python --forward 3000:5000
 

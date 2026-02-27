@@ -12,14 +12,14 @@ For comprehensive contributing guidelines, please visit our documentation:
 
 ### 1. Fork and Clone
 
-```bash
+```sh
 git clone https://github.com/yourusername/wasmrun.git
 cd wasmrun
 ```
 
 ### 2. Development Setup
 
-```bash
+```sh
 # Install Just task runner
 cargo install just
 

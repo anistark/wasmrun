@@ -19,7 +19,7 @@ Let's create a simple WebAssembly project using Rust. Don't worry if you prefer 
 
 ### Step 1: Install the Rust Plugin
 
-```bash
+```sh
 # Install the Rust plugin for Wasmrun
 wasmrun plugin install wasmrust
 ```
@@ -30,7 +30,7 @@ This downloads and installs the `wasmrust` plugin, which adds Rust support to Wa
 
 Create a new directory for your project:
 
-```bash
+```sh
 mkdir my-first-wasm
 cd my-first-wasm
 ```
@@ -70,7 +70,7 @@ pub fn add(a: i32, b: i32) -> i32 {
 
 Start the development server with live reload:
 
-```bash
+```sh
 wasmrun run . --watch
 ```
 
@@ -99,13 +99,13 @@ console.log(add(5, 3));        // 8
 
 You can also run WASM modules natively without a browser. First, compile a standalone WASM module:
 
-```bash
+```sh
 wasmrun compile .
 ```
 
 Then execute it natively:
 
-```bash
+```sh
 wasmrun exec ./target/wasm32-unknown-unknown/release/my_first_wasm.wasm --call add 10 20
 ```
 
@@ -113,7 +113,7 @@ wasmrun exec ./target/wasm32-unknown-unknown/release/my_first_wasm.wasm --call a
 
 Wasmrun comes with several example projects that demonstrate different features and languages. Clone the repository to try them:
 
-```bash
+```sh
 # Clone the repository
 git clone https://github.com/anistark/wasmrun.git
 cd wasmrun/examples
@@ -121,7 +121,7 @@ cd wasmrun/examples
 
 ### Rust Examples
 
-```bash
+```sh
 # Simple Rust hello world
 cd rust-hello
 wasmrun run .
@@ -133,7 +133,7 @@ wasmrun run . --watch
 
 ### Go Examples
 
-```bash
+```sh
 # Install Go plugin first
 wasmrun plugin install wasmgo
 
@@ -149,7 +149,7 @@ wasmrun exec ./path/to/compiled.wasm --call main
 
 ### Python Example
 
-```bash
+```sh
 # Install Python plugin first
 wasmrun plugin install waspy
 
@@ -160,7 +160,7 @@ wasmrun run .
 
 ### C/C++ Example
 
-```bash
+```sh
 # C example (no plugin needed - built-in support)
 cd c-hello
 wasmrun run .
@@ -168,7 +168,7 @@ wasmrun run .
 
 ### AssemblyScript Examples
 
-```bash
+```sh
 # Install AssemblyScript plugin first
 wasmrun plugin install wasmasc
 
@@ -187,7 +187,7 @@ Here are the most common commands you'll use:
 
 ### Development Server
 
-```bash
+```sh
 # Run with auto-reload
 wasmrun run ./my-project --watch
 
@@ -200,7 +200,7 @@ wasmrun run ./my-project --language rust
 
 ### Compilation
 
-```bash
+```sh
 # Compile project
 wasmrun compile ./my-project
 
@@ -213,7 +213,7 @@ wasmrun compile ./my-project --verbose
 
 ### Native Execution
 
-```bash
+```sh
 # Execute WASM file
 wasmrun exec myfile.wasm
 
@@ -226,7 +226,7 @@ wasmrun exec myfile.wasm --call add 5 3
 
 ### Plugin Management
 
-```bash
+```sh
 # List all plugins
 wasmrun plugin list
 
@@ -242,7 +242,7 @@ wasmrun plugin uninstall wasmrust
 
 ### Inspection & Verification
 
-```bash
+```sh
 # Verify WASM file
 wasmrun verify myfile.wasm
 

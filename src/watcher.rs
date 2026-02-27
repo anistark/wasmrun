@@ -6,7 +6,7 @@ use std::time::Duration;
 
 #[allow(dead_code)]
 pub struct ProjectWatcher {
-    debounced_receiver: Option<Receiver<Result<Vec<DebouncedEvent>, Vec<notify::Error>>>>,
+    debounced_receiver: Option<Receiver<Result<Vec<DebouncedEvent>, notify::Error>>>,
     #[allow(dead_code)]
     watcher: Option<notify_debouncer_mini::Debouncer<RecommendedWatcher>>,
 }
@@ -27,7 +27,7 @@ impl ProjectWatcher {
         // Channel for events
         let (tx, rx) = channel();
 
-        let mut debouncer = new_debouncer(Duration::from_millis(500), None, tx)
+        let mut debouncer = new_debouncer(Duration::from_millis(500), tx)
             .map_err(|e| format!("Failed to create file watcher: {e}"))?;
 
         debouncer
@@ -44,7 +44,7 @@ impl ProjectWatcher {
     }
 
     #[allow(dead_code)]
-    pub fn wait_for_change(&self) -> Option<Result<Vec<DebouncedEvent>, Vec<notify::Error>>> {
+    pub fn wait_for_change(&self) -> Option<Result<Vec<DebouncedEvent>, notify::Error>> {
         if let Some(rx) = &self.debounced_receiver {
             rx.recv().ok()
         } else {

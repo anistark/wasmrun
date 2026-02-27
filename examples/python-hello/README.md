@@ -19,7 +19,7 @@ This example includes:
 
 ## Running
 
-```bash
+```sh
 wasmrun run examples/python-hello
 ```
 
@@ -27,6 +27,6 @@ wasmrun run examples/python-hello
 
 This requires the `waspy` external plugin:
 
-```bash
+```sh
 wasmrun plugin install waspy
 ```

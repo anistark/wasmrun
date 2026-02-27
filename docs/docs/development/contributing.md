@@ -8,7 +8,7 @@ We welcome contributions to Wasmrun! This guide will help you get started with c
 
 **Required Tools:**
 
-```bash
+```sh
 # Just task runner (recommended)
 cargo install just
 
@@ -18,7 +18,7 @@ rustup target add wasm32-unknown-unknown
 
 **Optional Tools for Plugin Testing:**
 
-```bash
+```sh
 # For C/C++ plugin testing
 # Install Emscripten from: https://emscripten.org/
 
@@ -37,20 +37,20 @@ npm install -g assemblyscript
 
 1. **Fork and Clone**:
 
-```bash
+```sh
 git clone https://github.com/yourusername/wasmrun.git
 cd wasmrun
 ```
 
 2. **Build**:
 
-```bash
+```sh
 just build  # Or: cargo build --release
 ```
 
 3. **Run Tests**:
 
-```bash
+```sh
 just test          # Run all tests
 
 # Run specific test modules
@@ -60,7 +60,7 @@ cargo test server::tests -- --test-threads=1
 
 4. **Code Quality**:
 
-```bash
+```sh
 just format        # Format code with rustfmt
 just lint          # Run clippy lints
 ```
@@ -71,7 +71,7 @@ just lint          # Run clippy lints
 
 Wasmrun uses a `justfile` for common development tasks:
 
-```bash
+```sh
 # Development commands
 just build           # Build in release mode
 just test            # Run all tests
@@ -93,7 +93,7 @@ just publish         # Publish to crates.io and GitHub
 
 Before pushing your changes, ensure:
 
-```bash
+```sh
 # 1. Format code
 just format
 # or
@@ -147,7 +147,7 @@ When adding new functionality:
 
 The `wasmrun-ui` is built with [Preact](https://preactjs.com/), [TypeScript](https://www.typescriptlang.org/), and [Tailwind CSS](https://tailwindcss.com/):
 
-```bash
+```sh
 # UI development setup (from ui/ directory)
 cd ui
 pnpm install         # Install UI dependencies
@@ -178,14 +178,14 @@ The UI is embedded into the Rust binary during build, so changes require a full 
 
 ### 1. Create a Branch
 
-```bash
+```sh
 git checkout -b feature/my-new-plugin
 git checkout -b feature/enhance-rust-plugin
 ```
 
 ### 2. Development and Testing
 
-```bash
+```sh
 # Make your changes
 just format           # Format code
 just lint             # Check lints
@@ -261,7 +261,7 @@ When reporting bugs:
 
 For plugin-related issues:
 
-```bash
+```sh
 # Get plugin information
 wasmrun plugin info [plugin-name]
 
@@ -292,7 +292,7 @@ For plugin-specific features:
 
 ### Running Tests
 
-```bash
+```sh
 # Run all tests
 just test
 
@@ -346,7 +346,7 @@ The `examples/` directory contains sample WebAssembly projects for different pro
 
 Examples work with standard wasmrun commands:
 
-```bash
+```sh
 # Test compilation and running
 wasmrun examples/rust-hello
 wasmrun compile examples/go-hello

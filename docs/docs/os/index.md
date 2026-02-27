@@ -26,7 +26,7 @@ This feature uses WebContainers technology to run full runtimes in the browser.
 ### Node.js
 Full Node.js runtime with npm package support:
 
-```bash
+```sh
 # Run Node.js application
 wasmrun os ./node-app --language nodejs
 
@@ -47,7 +47,7 @@ wasmrun os ./node-app --language nodejs --forward 8080:3000
 ### Python
 Python runtime with pip package support:
 
-```bash
+```sh
 # Run Python application
 wasmrun os ./python-app --language python
 
@@ -77,7 +77,7 @@ OS Mode includes a built-in real-time logs viewer:
 ### Access
 
 The logs panel is automatically shown when running in OS mode:
-```bash
+```sh
 wasmrun os ./app --language nodejs
 # Browser opens with split view:
 # - Top: Application output
@@ -97,7 +97,7 @@ Logs are categorized by stream:
 
 Each OS mode process runs in an isolated network namespace:
 
-```bash
+```sh
 # Process A
 wasmrun os ./app-a --language nodejs
 
@@ -111,7 +111,7 @@ See [Network Isolation](./network-isolation.md) for details.
 
 Expose services to host/external networks:
 
-```bash
+```sh
 # Forward host :8080 to process :3000
 wasmrun os ./node-server --language nodejs --forward 8080:3000
 ```
@@ -122,7 +122,7 @@ See [Port Forwarding](./port-forwarding.md) for details.
 
 Expose your local WASM applications to the internet using bore.pub:
 
-```bash
+```sh
 # Start tunnel via API
 # POST /api/tunnel/start
 
@@ -142,7 +142,7 @@ See [Public Tunneling](./public-tunneling.md) for details.
 
 ### Web Development
 
-```bash
+```sh
 # Next.js development server
 wasmrun os ./nextjs-app --language nodejs --forward 3000:3000 --watch
 
@@ -152,7 +152,7 @@ wasmrun os ./api --language python --forward 5000:5000 --watch
 
 ### API Development
 
-```bash
+```sh
 # Express API with auto-reload
 wasmrun os ./express-api --language nodejs --watch --forward 8080:3000
 
@@ -162,7 +162,7 @@ wasmrun os ./fastapi-app --language python --watch --forward 8000:8000
 
 ### Testing & Debugging
 
-```bash
+```sh
 # Run with verbose logging
 wasmrun os ./app --language nodejs --verbose
 
@@ -174,7 +174,7 @@ wasmrun os ./app --language python --debug
 
 ### Language Selection
 
-```bash
+```sh
 # Explicitly specify language
 wasmrun os ./app --language nodejs
 wasmrun os ./app --language python
@@ -185,7 +185,7 @@ wasmrun os ./app
 
 ### Port Configuration
 
-```bash
+```sh
 # Custom server port (default: 8420)
 wasmrun os ./app --port 3000
 
@@ -195,14 +195,14 @@ wasmrun os ./app --forward 8080:3000
 
 ### Watch Mode
 
-```bash
+```sh
 # Enable live reload
 wasmrun os ./app --watch --language nodejs
 ```
 
 ### Verbose Output
 
-```bash
+```sh
 # Show detailed logs
 wasmrun os ./app --verbose
 ```
@@ -235,7 +235,7 @@ auto_scroll = true
 
 ### Environment Variables
 
-```bash
+```sh
 # Set environment variables
 PORT=3000 wasmrun os ./app --language nodejs
 
@@ -292,7 +292,7 @@ app.listen(PORT, () => {
 });
 ```
 
-```bash
+```sh
 # Run in OS mode
 wasmrun os . --language nodejs --forward 8080:3000 --watch
 ```
@@ -313,7 +313,7 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 ```
 
-```bash
+```sh
 # Run in OS mode
 wasmrun os . --language python --forward 8080:5000 --watch
 ```
@@ -334,7 +334,7 @@ wasmrun os . --language python --forward 8080:5000 --watch
 
 ### WebContainer Boot Failed
 
-```bash
+```sh
 # Ensure modern browser (Chrome 88+, Firefox 89+)
 # Check browser console for errors
 # Try different browser
@@ -342,7 +342,7 @@ wasmrun os . --language python --forward 8080:5000 --watch
 
 ### Dependencies Install Failed
 
-```bash
+```sh
 # Check package.json/requirements.txt syntax
 # Verify network connectivity
 # Check logs panel for error details
@@ -350,7 +350,7 @@ wasmrun os . --language python --forward 8080:5000 --watch
 
 ### Port Forwarding Not Working
 
-```bash
+```sh
 # Verify process is listening on correct port
 # Check firewall settings
 # Ensure port is not already in use
@@ -358,7 +358,7 @@ wasmrun os . --language python --forward 8080:5000 --watch
 
 ### Live Reload Not Triggering
 
-```bash
+```sh
 # Ensure --watch flag is set
 # Check file watcher is detecting changes
 # Use --verbose to see file change events

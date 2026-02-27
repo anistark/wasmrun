@@ -27,7 +27,7 @@ This is a sample Node.js Express application designed to test wasmrun's OS mode 
 
 Once running, you can test the endpoints:
 
-```bash
+```sh
 # Health check
 curl http://localhost:3000/health
 
