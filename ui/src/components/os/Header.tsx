@@ -34,7 +34,11 @@ export default function Header({
             label={
               runtimeStatus === 'running'
                 ? `Runtime Active (PID: ${kernelStats?.project_pid || 'N/A'})`
-                : 'Loading Runtime...'
+                : runtimeStatus === 'stopped'
+                  ? 'Runtime Stopped'
+                  : runtimeStatus === 'error'
+                    ? 'Runtime Error'
+                    : 'Loading Runtime…'
             }
           />
         </div>

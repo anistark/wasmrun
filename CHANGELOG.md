@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Console Output in UI**: Live stdout/stderr display from WASM execution
+  - New `ConsolePanel` component (`ui/src/components/os/ConsolePanel.tsx`) — displays color-coded stdout (green), stderr (red), and system (blue) output with timestamps
+  - WasmRunner integrated into `OSMode.tsx` — Run/Stop buttons, status lifecycle tracking, auto-scroll
+  - `StatusIndicator` updated with `stopped` state styling (blue)
+  - Console panel activated in sidebar (removed "Coming Soon")
+  - Added `ConsoleLine` type to `osTypes.ts`
 - **Browser Runtime Loader**: Client-side WASM runtime loader for browser-based execution
   - New `WasmRunner` class (`ui/src/os/WasmRunner.ts`) — fetches runtime + project files, populates WASI virtual FS, instantiates and runs WASM
   - Fetches runtime `.wasm` and project files from server APIs in parallel

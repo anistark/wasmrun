@@ -39,7 +39,14 @@ export interface PanelType {
   icon: string
 }
 
-export type StatusType = 'loading' | 'running' | 'error'
+export type StatusType = 'loading' | 'running' | 'error' | 'stopped'
+
+export interface ConsoleLine {
+  id: number
+  stream: 'stdout' | 'stderr' | 'system'
+  text: string
+  timestamp: number
+}
 
 export interface LogEntry {
   timestamp: string

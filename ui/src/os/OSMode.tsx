@@ -1,21 +1,48 @@
-import { useState, useEffect, useCallback } from 'preact/hooks'
+import { useState, useEffect, useCallback, useRef } from 'preact/hooks'
 import Header from '../components/os/Header'
 import Sidebar from '../components/os/Sidebar'
 import ApplicationPanel from '../components/os/ApplicationPanel'
 import KernelStatusPanel from '../components/os/KernelStatusPanel'
+import ConsolePanel from '../components/os/ConsolePanel'
 import FilesystemPanel from '../components/os/FilesystemPanel'
 import LogsPanel from '../components/os/LogsPanel'
 import { panels } from '../components/os/panels'
 import { formatUptime, formatBytes } from '../utils/osUtils'
-import type { KernelStats, FilesystemStats, DirEntry, StatusType } from '../types/osTypes'
+import { WasmRunner } from './WasmRunner'
+import type { WasmRunnerStatus } from './WasmRunner'
+import type {
+  KernelStats,
+  FilesystemStats,
+  DirEntry,
+  StatusType,
+  ConsoleLine,
+} from '../types/osTypes'
+
+function wasmToRuntimeStatus(ws: WasmRunnerStatus): StatusType {
+  switch (ws) {
+    case 'running':
+      return 'running'
+    case 'error':
+      return 'error'
+    case 'stopped':
+      return 'stopped'
+    default:
+      return 'loading'
+  }
+}
 
 export default function OSMode() {
   const [activePanel, setActivePanel] = useState('project')
   const [kernelStats, setKernelStats] = useState<KernelStats | null>(null)
   const [kernelStatus, setKernelStatus] = useState<StatusType>('loading')
-  const [runtimeStatus, setRuntimeStatus] = useState<StatusType>('loading')
   const [startTime] = useState(Date.now())
   const [uptime, setUptime] = useState(0)
+
+  // Console / WasmRunner state
+  const [consoleLines, setConsoleLines] = useState<ConsoleLine[]>([])
+  const [wasmStatus, setWasmStatus] = useState<WasmRunnerStatus>('idle')
+  const lineIdRef = useRef(0)
+  const runnerRef = useRef<WasmRunner | null>(null)
 
   // Filesystem state
   const [fsStats, setFsStats] = useState<FilesystemStats | null>(null)
@@ -29,17 +56,69 @@ export default function OSMode() {
   const language = (window as any).LANGUAGE || 'unknown'
   const port = (window as any).PORT || '8420'
 
+  const runtimeStatus = wasmToRuntimeStatus(wasmStatus)
+
+  // --- Console helpers ---
+
+  const addLine = useCallback((stream: ConsoleLine['stream'], text: string) => {
+    const line: ConsoleLine = {
+      id: lineIdRef.current++,
+      stream,
+      text,
+      timestamp: Date.now(),
+    }
+    setConsoleLines(prev => [...prev, line])
+  }, [])
+
+  const clearConsole = useCallback(() => {
+    setConsoleLines([])
+  }, [])
+
+  // --- WasmRunner ---
+
+  const startWasmRunner = useCallback(() => {
+    if (runnerRef.current) {
+      runnerRef.current.stop()
+    }
+
+    addLine('system', 'Starting WASM runtime…')
+
+    const runner = new WasmRunner({
+      onStdout: text => addLine('stdout', text),
+      onStderr: text => addLine('stderr', text),
+      onStatusChange: status => {
+        setWasmStatus(status)
+        if (status === 'loading-runtime') addLine('system', 'Fetching runtime binary…')
+        if (status === 'loading-files') addLine('system', 'Fetching project files…')
+        if (status === 'populating-fs') addLine('system', 'Populating virtual filesystem…')
+        if (status === 'starting') addLine('system', 'Instantiating WASM module…')
+        if (status === 'running') addLine('system', 'Runtime started')
+      },
+      onError: error => addLine('stderr', `Error: ${error.message}`),
+      onExit: code => addLine('system', `Process exited with code ${code}`),
+    })
+
+    runnerRef.current = runner
+    runner.run()
+  }, [addLine])
+
+  const stopWasmRunner = useCallback(() => {
+    if (runnerRef.current) {
+      runnerRef.current.stop()
+      runnerRef.current = null
+      addLine('system', 'Runtime stopped')
+    }
+  }, [addLine])
+
+  // --- Kernel stats ---
+
   const fetchKernelStats = useCallback(async () => {
     try {
       const response = await fetch('/api/kernel/stats')
       const stats = await response.json()
       setKernelStats(stats)
       setKernelStatus('running')
-      if (stats.project_pid) {
-        setRuntimeStatus('running')
-      }
-    } catch (error) {
-      console.error('Failed to fetch kernel stats:', error)
+    } catch {
       setKernelStatus('error')
     }
   }, [])
@@ -49,14 +128,15 @@ export default function OSMode() {
     setUptime(seconds)
   }, [startTime])
 
-  // Filesystem functions
+  // --- Filesystem ---
+
   const fetchFsStats = useCallback(async () => {
     try {
       const response = await fetch('/api/fs/stats')
       const stats = await response.json()
       setFsStats(stats)
-    } catch (error) {
-      console.error('Failed to fetch filesystem stats:', error)
+    } catch {
+      // ignore
     }
   }, [])
 
@@ -67,8 +147,8 @@ export default function OSMode() {
       if (data.success) {
         setDirEntries(data.entries)
       }
-    } catch (error) {
-      console.error('Failed to list directory:', error)
+    } catch {
+      // ignore
     }
   }, [])
 
@@ -82,8 +162,7 @@ export default function OSMode() {
       } else {
         setFileContent('Binary file - cannot display')
       }
-    } catch (error) {
-      console.error('Failed to read file:', error)
+    } catch {
       setFileContent('Error reading file')
     }
   }, [])
@@ -99,14 +178,15 @@ export default function OSMode() {
       if (data.success) {
         setIsEditing(false)
       }
-    } catch (error) {
-      console.error('Failed to save file:', error)
+    } catch {
+      // ignore
     }
   }, [])
 
+  // --- Effects ---
+
   useEffect(() => {
     fetchKernelStats()
-    setRuntimeStatus('running')
 
     const statsInterval = setInterval(fetchKernelStats, 3000)
     const uptimeInterval = setInterval(updateUptime, 1000)
@@ -117,13 +197,14 @@ export default function OSMode() {
     }
   }, [fetchKernelStats, updateUptime])
 
-  // Fetch filesystem data when filesystem panel is active
   useEffect(() => {
     if (activePanel === 'filesystem') {
       fetchFsStats()
       fetchDirectory(currentPath)
     }
   }, [activePanel, currentPath, fetchFsStats, fetchDirectory])
+
+  // --- Filesystem handlers ---
 
   const handleNavigateUp = () => {
     const newPath = currentPath.split('/').slice(0, -1).join('/') || `/${projectName}`
@@ -157,6 +238,8 @@ export default function OSMode() {
     }
   }
 
+  // --- Render ---
+
   const renderPanel = () => {
     switch (activePanel) {
       case 'project':
@@ -180,26 +263,14 @@ export default function OSMode() {
 
       case 'console':
         return (
-          <div className="h-full flex flex-col">
-            <div className="border-b border-green-500/20 bg-black/20 backdrop-blur-lg p-6">
-              <h2 className="text-2xl font-bold mb-2 text-green-400">Development Console</h2>
-              <p className="text-white/80">Runtime logs and debugging information</p>
-            </div>
-            <div className="flex-1 p-6">
-              <div className="bg-black/50 backdrop-blur-lg border border-green-500/30 rounded-xl p-4 h-96 overflow-y-auto font-mono text-sm">
-                <div className="text-white/70">[OS] Kernel initialized</div>
-                <div className="text-white/70">[{language.toUpperCase()}] Runtime loading...</div>
-                {kernelStats?.project_pid && (
-                  <div className="text-green-400">
-                    [{language.toUpperCase()}] Runtime started successfully (PID:{' '}
-                    {kernelStats.project_pid})
-                  </div>
-                )}
-                <div className="text-green-400">[UI] OS Mode interface loaded</div>
-                <div className="text-white/70">Waiting for application logs...</div>
-              </div>
-            </div>
-          </div>
+          <ConsolePanel
+            lines={consoleLines}
+            wasmStatus={wasmStatus}
+            runtimeStatus={runtimeStatus}
+            onClear={clearConsole}
+            onRun={startWasmRunner}
+            onStop={stopWasmRunner}
+          />
         )
 
       case 'filesystem':
@@ -257,8 +328,7 @@ export default function OSMode() {
       </div>
 
       <div className="fixed bottom-4 right-4 text-xs text-white/50">
-        🌟 Running in <strong>wasmrun OS mode</strong> - A browser-based WebAssembly execution
-        environment
+        🌟 Running in <strong>wasmrun OS mode</strong> — browser-based WebAssembly execution
       </div>
     </div>
   )
