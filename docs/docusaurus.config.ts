@@ -6,11 +6,6 @@ const config: Config = {
   title: 'Wasmrun',
   tagline: 'WebAssembly Runtime',
   url: 'https://wasmrun.readthedocs.io',
-  // Use /en/{version}/ for production (ReadTheDocs), / for local development
-  // READTHEDOCS_VERSION is provided by ReadTheDocs:
-  //   - PR builds: PR number (e.g., "59")
-  //   - Main branch: "latest"
-  //   - Releases: version tag (e.g., "v0.1.0") or "stable"
   baseUrl: process.env.NODE_ENV === 'production'
     ? `/en/${process.env.READTHEDOCS_VERSION || 'latest'}/`
     : '/',
@@ -56,23 +51,42 @@ const config: Config = {
       items: [
         {
           type: 'docSidebar',
-          sidebarId: 'docs',
+          sidebarId: 'server',
           position: 'left',
-          label: 'Docs',
+          label: 'Server',
         },
         {
-          to: '/tutorials',
-          label: 'Tutorials',
+          type: 'docSidebar',
+          sidebarId: 'exec',
           position: 'left',
+          label: 'Exec',
         },
+        {
+          type: 'docSidebar',
+          sidebarId: 'os',
+          position: 'left',
+          label: 'OS',
+        },
+        {
+          type: 'docSidebar',
+          sidebarId: 'plugins',
+          position: 'left',
+          label: 'Plugins',
+        },
+        {
+          type: 'docSidebar',
+          sidebarId: 'contributing',
+          position: 'left',
+          label: 'Contributing',
+        },
+        // {
+        //   to: '/tutorials',
+        //   label: 'Tutorials',
+        //   position: 'left',
+        // },
         {
           to: '/community',
           label: 'Community',
-          position: 'left',
-        },
-        {
-          to: '/changelog',
-          label: 'Changelog',
           position: 'left',
         },
         {
@@ -97,12 +111,13 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Quick Links',
+          title: 'Docs',
           items: [
-            { label: 'Installation', to: '/docs/installation' },
-            { label: 'Quick Start', to: '/docs/quick-start' },
-            { label: 'Crates.io', href: 'https://crates.io/crates/wasmrun' },
-            { label: 'Changelog', to: '/changelog' },
+            { label: 'Server Mode', to: '/docs/server' },
+            { label: 'Exec Mode', to: '/docs/exec' },
+            { label: 'OS Mode', to: '/docs/os' },
+            { label: 'Plugins', to: '/docs/plugins' },
+            { label: 'Changelog', to: '/docs/contributing/changelog' },
           ],
         },
         {
@@ -116,7 +131,7 @@ const config: Config = {
         {
           title: 'Resources',
           items: [
-            { label: 'Tutorials (Soon)', to: '/tutorials' },
+            { label: 'Installation', to: '/docs/installation' },
             { label: 'docs.rs', href: 'https://docs.rs/wasmrun' },
             { label: 'lib.rs', href: 'https://lib.rs/wasmrun' },
             { label: 'crates.io', href: 'https://crates.io/crates/wasmrun' },

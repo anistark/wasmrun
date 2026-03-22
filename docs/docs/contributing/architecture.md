@@ -1,3 +1,8 @@
+---
+sidebar_position: 2
+title: Architecture
+---
+
 # Architecture
 
 Wasmrun is designed with a modular architecture that separates concerns clearly and enables extensibility through a powerful plugin system.
@@ -427,6 +432,6 @@ Platform-specific code is isolated in utility modules and uses conditional compi
 
 ## Next Steps
 
-- **[Creating Plugins](creating-plugins.md)**: Learn to develop your own plugins
-- **[Contributing](contributing.md)**: Contribute to Wasmrun development
+- **[Creating Plugins](../plugins/creating-plugins.md)**: Learn to develop your own plugins
+- **[Contributing](./how-to-contribute.md)**: Contribute to Wasmrun development
 - **[Debugging](debugging.md)**: Debug and troubleshoot Wasmrun

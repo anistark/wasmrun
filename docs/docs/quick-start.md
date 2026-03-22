@@ -269,14 +269,14 @@ Now that you've created your first WebAssembly project, here's what to explore n
 
 - **[Plugin System](./plugins/)** - Understand the plugin architecture
 - **[Live Reload](./server/live-reload.md)** - Development workflow optimization
-- **[Native Execution](./cli/exec.md)** - Run WASM without a browser
-- **[WASI Support](./integrations/wasi.md)** - System interface capabilities
+- **[Native Execution](./exec/usage/running.md)** - Run WASM without a browser
+- **[WASI Support](./exec/wasi.md)** - System interface capabilities
 - **[OS Mode](./os/)** - Multi-language browser environment
 
 ### Reference Documentation
 
-- **[CLI Reference](./cli/)** - Complete command-line documentation
-- **[Troubleshooting](./troubleshooting.md)** - Common issues and solutions
+- **[CLI Reference](./server/usage/run.md)** - Complete command-line documentation
+- **[Troubleshooting](./contributing/troubleshooting.md)** - Common issues and solutions
 
 ## Tips for Success
 
@@ -290,8 +290,8 @@ Now that you've created your first WebAssembly project, here's what to explore n
 
 If you run into issues:
 
-- Check the [Troubleshooting](./troubleshooting.md) guide
-- Review the [CLI Reference](./cli/) for command details
+- Check the [Troubleshooting](./contributing/troubleshooting.md) guide
+- Review the [CLI Reference](./server/usage/run.md) for command details
 - Visit [GitHub Issues](https://github.com/anistark/wasmrun/issues)
 - Join the [Discussions](https://github.com/anistark/wasmrun/discussions)
 

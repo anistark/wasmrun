@@ -1,3 +1,8 @@
+---
+sidebar_position: 3
+title: How to Contribute
+---
+
 # Contributing
 
 We welcome contributions to Wasmrun! This guide will help you get started with contributing code, documentation, plugins, and more.
@@ -443,6 +448,6 @@ Thank you for contributing to Wasmrun! Every contribution matters, whether it's 
 
 ## Next Steps
 
-- **[Creating Plugins](creating-plugins.md)**: Learn to create your own plugins
+- **[Creating Plugins](../plugins/creating-plugins.md)**: Learn to create your own plugins
 - **[Debugging](debugging.md)**: Debug your contributions effectively
 - **[Architecture](architecture.md)**: Understand the codebase structure

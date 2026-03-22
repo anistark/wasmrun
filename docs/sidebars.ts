@@ -5,60 +5,93 @@ const sidebars: SidebarsConfig = {
     'intro',
     'installation',
     'quick-start',
+  ],
 
+  server: [
     {
       type: 'category',
-      label: 'CLI Reference',
-      collapsed: true,
-      items: [
-        'cli/index',
-        'cli/run',
-        'cli/exec',
-        'cli/compile',
-        'cli/plugin',
-        'cli/verify',
-        'cli/inspect',
-        'cli/clean',
-        'cli/stop',
-        'cli/os',
-      ],
-    },
-
-    {
-      type: 'category',
-      label: 'Wasmrun Server',
+      label: 'Server Mode',
       collapsed: false,
+      link: { type: 'doc', id: 'server/index' },
       items: [
+        'server/features',
+        {
+          type: 'category',
+          label: 'Usage',
+          collapsed: false,
+          link: { type: 'doc', id: 'server/usage/index' },
+          items: [
+            'server/usage/run',
+            'server/usage/compile',
+            'server/usage/verify',
+            'server/usage/inspect',
+            'server/usage/stop',
+            'server/usage/clean',
+          ],
+        },
         'server/live-reload',
       ],
     },
+  ],
 
+  exec: [
     {
       type: 'category',
-      label: 'Wasmrun Web',
-      collapsed: true,
+      label: 'Exec Mode',
+      collapsed: false,
+      link: { type: 'doc', id: 'exec/index' },
       items: [
-        'web/index',
+        'exec/features',
+        {
+          type: 'category',
+          label: 'Usage',
+          collapsed: false,
+          link: { type: 'doc', id: 'exec/usage/index' },
+          items: [
+            'exec/usage/running',
+            'exec/usage/functions',
+            'exec/usage/arguments',
+          ],
+        },
+        'exec/wasi',
       ],
     },
+  ],
 
+  os: [
     {
       type: 'category',
-      label: 'Wasmrun OS',
+      label: 'OS Mode',
       collapsed: false,
+      link: { type: 'doc', id: 'os/index' },
       items: [
-        'os/index',
+        'os/features',
+        {
+          type: 'category',
+          label: 'Usage',
+          collapsed: false,
+          link: { type: 'doc', id: 'os/usage/index' },
+          items: [
+            'os/usage/running',
+            'os/usage/language',
+            'os/usage/server-options',
+          ],
+        },
         'os/network-isolation',
         'os/port-forwarding',
+        'os/public-tunneling',
       ],
     },
+  ],
 
+  plugins: [
     {
       type: 'category',
       label: 'Plugins',
       collapsed: false,
+      link: { type: 'doc', id: 'plugins/index' },
       items: [
-        'plugins/index',
+        'plugins/usage',
         {
           type: 'category',
           label: 'Languages',
@@ -71,31 +104,25 @@ const sidebars: SidebarsConfig = {
             'plugins/languages/assemblyscript',
           ],
         },
+        'plugins/creating-plugins',
       ],
     },
+  ],
 
+  contributing: [
     {
       type: 'category',
-      label: 'Integrations',
+      label: 'Contributing',
       collapsed: false,
+      link: { type: 'doc', id: 'contributing/index' },
       items: [
-        'integrations/wasi',
+        'contributing/architecture',
+        'contributing/how-to-contribute',
+        'contributing/debugging',
+        'contributing/troubleshooting',
+        'contributing/changelog',
       ],
     },
-
-    {
-      type: 'category',
-      label: 'Development',
-      collapsed: true,
-      items: [
-        'development/architecture',
-        'development/creating-plugins',
-        'development/contributing',
-        'development/debugging',
-      ],
-    },
-
-    'troubleshooting',
   ],
 };
 

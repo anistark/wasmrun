@@ -1,3 +1,8 @@
+---
+sidebar_position: 5
+title: Troubleshooting
+---
+
 # Troubleshooting
 
 Common issues and solutions when using Wasmrun.
@@ -615,5 +620,5 @@ See [Too Many Open Files](#too-many-open-files)
 
 - **[Installation](installation.md)**: Detailed installation instructions
 - **[Quick Start](quick-start.md)**: Get started quickly
-- **[CLI Reference](cli/)**: Command reference
-- **[Debugging](development/debugging.md)**: Advanced debugging techniques
+- **[Server Usage](../server/usage/run.md)**: Command reference
+- **[Debugging](./debugging.md)**: Advanced debugging techniques

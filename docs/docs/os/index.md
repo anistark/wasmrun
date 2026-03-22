@@ -1,373 +1,76 @@
 ---
-sidebar_position: 7
-title: OS Mode
-description: Browser-based multi-language execution environment
+sidebar_position: 1
+title: Overview
 ---
 
 # OS Mode
 
-OS Mode provides a browser-based execution environment for running multiple language runtimes (Node.js, Python, and more) with system-level capabilities and real-time logging.
+Wasmrun's OS mode (`wasmrun os`) provides a browser-based execution environment that runs projects inside a WASM virtual machine with a full development UI.
 
-## Overview
+## What It Does
 
-OS Mode enables:
-- **Browser-based execution** of Node.js and Python
-- **Real-time logs panel** for stdout/stderr monitoring
-- **Network isolation** for secure multi-process execution
-- **Port forwarding** for external service access
-- **Public tunneling** via bore.pub for internet exposure
-- **Live reload** for development
-- **Multiple runtimes** in parallel
+OS mode is a micro-kernel environment that:
 
-This feature uses WebContainers technology to run full runtimes in the browser.
-
-## Supported Languages
-
-### Node.js
-Full Node.js runtime with npm package support:
+1. **Detects** your project language (Node.js, Python, Rust, Go, C)
+2. **Fetches** the appropriate language runtime from [wasmhub](https://github.com/anistark/wasmhub) (QuickJS for JS, RustPython for Python)
+3. **Serves** a browser UI with panels for console, filesystem, kernel status, and logs
+4. **Boots** a WASM VM in the browser using `WebAssembly.instantiate()`
+5. **Runs** your project code inside the sandboxed VM with WASI syscalls
 
 ```sh
-# Run Node.js application
-wasmrun os ./node-app --language nodejs
-
-# With live reload
-wasmrun os ./node-app --language nodejs --watch
-
-# With port forwarding
-wasmrun os ./node-app --language nodejs --forward 8080:3000
+wasmrun os ./my-project
 ```
 
-**Supported:**
-- Express.js, Fastify, Koa servers
-- npm packages and dependencies
-- File system access
-- Network operations
-- Child processes
+## When to Use
 
-### Python
-Python runtime with pip package support:
+- Running Node.js or Python projects in a sandboxed WASM environment
+- Browser-based development with real-time logs and file browsing
+- Experimenting with multi-language runtime execution
+- Projects that need network isolation and port forwarding
+
+## Quick Example
 
 ```sh
-# Run Python application
-wasmrun os ./python-app --language python
+# Run a Node.js project
+wasmrun os ./my-express-app
 
-# Flask/FastAPI apps with forwarding
-wasmrun os ./api --language python --forward 8080:5000
+# Run with explicit language
+wasmrun os ./my-app --language python
+
+# Custom port with file watching
+wasmrun os ./my-project --port 3000 --watch
 ```
 
-**Supported:**
-- Flask, FastAPI, Django apps
-- pip packages
-- Standard library modules
-- File I/O
-- HTTP servers
+The UI opens at `http://localhost:8420` with panels for application output, console, filesystem browser, kernel status, and structured logs.
 
-## Real-Time Logs Panel
+## Architecture
 
-OS Mode includes a built-in real-time logs viewer:
-
-### Features
-- **Live stdout/stderr** streaming
-- **Colored output** for better readability
-- **Auto-scroll** to latest logs
-- **Search and filter** capabilities
-- **Log persistence** across refreshes
-- **Clear logs** button
-
-### Access
-
-The logs panel is automatically shown when running in OS mode:
-```sh
-wasmrun os ./app --language nodejs
-# Browser opens with split view:
-# - Top: Application output
-# - Bottom: Real-time logs panel
+```
+┌─ wasmrun server (Rust, on host) ──────────────────────┐
+│  • Detects language, serves browser UI                 │
+│  • Serves project files via /api/project/files         │
+│  • Fetches runtime .wasm from wasmhub (cached)         │
+│  • REST API for kernel stats, filesystem, logs         │
+└────────────────────────────────────────────────────────┘
+         │ HTTP
+         ▼
+┌─ Browser ──────────────────────────────────────────────┐
+│  ┌─ UI (Preact) ────────────────────────────────────┐  │
+│  │  Console, Filesystem, Kernel Status, Logs panels │  │
+│  └──────────────────────────────────────────────────┘  │
+│  ┌─ WASM VM ────────────────────────────────────────┐  │
+│  │  Language Runtime .wasm (QuickJS, RustPython)     │  │
+│  │  WASI Shim (JS) → virtual FS, stdout, args       │  │
+│  │  User code runs fully sandboxed                   │  │
+│  └──────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────┘
 ```
 
-### Log Categories
+## Security Model
 
-Logs are categorized by stream:
-- 🟦 **stdout**: Standard output (blue)
-- 🟥 **stderr**: Error output (red)
-- 🟨 **system**: Wasmrun system messages (yellow)
+User code never touches the host system:
 
-## Network Capabilities
-
-### Network Isolation
-
-Each OS mode process runs in an isolated network namespace:
-
-```sh
-# Process A
-wasmrun os ./app-a --language nodejs
-
-# Process B (different namespace, no conflicts)
-wasmrun os ./app-b --language nodejs
-```
-
-See [Network Isolation](./network-isolation.md) for details.
-
-### Port Forwarding
-
-Expose services to host/external networks:
-
-```sh
-# Forward host :8080 to process :3000
-wasmrun os ./node-server --language nodejs --forward 8080:3000
-```
-
-See [Port Forwarding](./port-forwarding.md) for details.
-
-### Public Tunneling
-
-Expose your local WASM applications to the internet using bore.pub:
-
-```sh
-# Start tunnel via API
-# POST /api/tunnel/start
-
-# Your app gets a public URL like:
-# http://bore.pub:12345
-```
-
-**Features:**
-- Public bore.pub server (default) or custom self-hosted servers
-- Automatic reconnection on disconnect
-- Connection status monitoring
-- Optional authentication for private servers
-
-See [Public Tunneling](./public-tunneling.md) for details.
-
-## Use Cases
-
-### Web Development
-
-```sh
-# Next.js development server
-wasmrun os ./nextjs-app --language nodejs --forward 3000:3000 --watch
-
-# Flask API development
-wasmrun os ./api --language python --forward 5000:5000 --watch
-```
-
-### API Development
-
-```sh
-# Express API with auto-reload
-wasmrun os ./express-api --language nodejs --watch --forward 8080:3000
-
-# FastAPI with uvicorn
-wasmrun os ./fastapi-app --language python --watch --forward 8000:8000
-```
-
-### Testing & Debugging
-
-```sh
-# Run with verbose logging
-wasmrun os ./app --language nodejs --verbose
-
-# Debug mode
-wasmrun os ./app --language python --debug
-```
-
-## CLI Options
-
-### Language Selection
-
-```sh
-# Explicitly specify language
-wasmrun os ./app --language nodejs
-wasmrun os ./app --language python
-
-# Auto-detect (looks for package.json, requirements.txt, etc.)
-wasmrun os ./app
-```
-
-### Port Configuration
-
-```sh
-# Custom server port (default: 8420)
-wasmrun os ./app --port 3000
-
-# Port forwarding
-wasmrun os ./app --forward 8080:3000
-```
-
-### Watch Mode
-
-```sh
-# Enable live reload
-wasmrun os ./app --watch --language nodejs
-```
-
-### Verbose Output
-
-```sh
-# Show detailed logs
-wasmrun os ./app --verbose
-```
-
-## Configuration
-
-### Project Configuration
-
-Create `.wasmrun.toml` in your project:
-
-```toml
-[os_mode]
-# Default language runtime
-language = "nodejs"
-
-# Server settings
-port = 8420
-
-# Port forwarding rules
-forwards = ["8080:3000"]
-
-# Enable live reload
-watch = true
-
-# Log settings
-[os_mode.logs]
-max_lines = 1000
-auto_scroll = true
-```
-
-### Environment Variables
-
-```sh
-# Set environment variables
-PORT=3000 wasmrun os ./app --language nodejs
-
-# Or in package.json scripts
-{
-  "scripts": {
-    "dev": "wasmrun os . --language nodejs --watch"
-  }
-}
-```
-
-## WebContainers Integration
-
-OS Mode uses WebContainers to provide full runtime environments in the browser:
-
-### How It Works
-
-1. **Boot Container**: Initializes virtual file system
-2. **Mount Files**: Mounts your project files
-3. **Install Dependencies**: Runs npm install / pip install
-4. **Start Process**: Executes your application
-5. **Stream Logs**: Captures and displays real-time output
-
-### Capabilities
-
-- Full Node.js/Python runtime
-- File system operations
-- Network access (with isolation)
-- Process spawning
-- Package installation
-
-### Limitations
-
-- Browser-only (requires modern browser)
-- Some native modules not supported
-- Performance depends on browser
-
-## Examples
-
-### Express Server
-
-```javascript
-// server.js
-const express = require('express');
-const app = express();
-
-app.get('/', (req, res) => {
-    res.send('Hello from OS Mode!');
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
-```
-
-```sh
-# Run in OS mode
-wasmrun os . --language nodejs --forward 8080:3000 --watch
-```
-
-### Flask API
-
-```python
-# app.py
-from flask import Flask, jsonify
-
-app = Flask(__name__)
-
-@app.route('/api/data')
-def get_data():
-    return jsonify({'message': 'Hello from Python OS Mode!'})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-```
-
-```sh
-# Run in OS mode
-wasmrun os . --language python --forward 8080:5000 --watch
-```
-
-## Comparison: OS Mode vs Native Execution
-
-| Feature | OS Mode | Native Execution |
-|---------|---------|------------------|
-| **Environment** | Browser | Terminal |
-| **Languages** | Node.js, Python | WASM-compiled languages |
-| **Runtime** | Full language runtime | WASM interpreter |
-| **Use Case** | Web development | CLI tools, libraries |
-| **Dependencies** | npm, pip supported | WASM-only |
-| **Network** | Full TCP/UDP | WASI sockets |
-| **Logs** | Real-time panel | Terminal output |
-
-## Troubleshooting
-
-### WebContainer Boot Failed
-
-```sh
-# Ensure modern browser (Chrome 88+, Firefox 89+)
-# Check browser console for errors
-# Try different browser
-```
-
-### Dependencies Install Failed
-
-```sh
-# Check package.json/requirements.txt syntax
-# Verify network connectivity
-# Check logs panel for error details
-```
-
-### Port Forwarding Not Working
-
-```sh
-# Verify process is listening on correct port
-# Check firewall settings
-# Ensure port is not already in use
-```
-
-### Live Reload Not Triggering
-
-```sh
-# Ensure --watch flag is set
-# Check file watcher is detecting changes
-# Use --verbose to see file change events
-```
-
-## See Also
-
-- [Network Isolation](./network-isolation.md) - Network namespace details
-- [Port Forwarding](./port-forwarding.md) - Port forwarding guide
-- [Public Tunneling](./public-tunneling.md) - Expose apps to the internet
-- [Live Reload](../server/live-reload.md) - Live reload details
-- [CLI os Command](../cli/os.md) - Full command reference
+- **WASM VM** is memory-isolated by the browser
+- **Filesystem** is virtual (in-memory, populated from server)
+- **Network** calls go through wasmnet with policy enforcement
+- **No access** to `window`, `document`, `fetch`, DOM, or host APIs

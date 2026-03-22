@@ -1,3 +1,8 @@
+---
+sidebar_position: 7
+title: Public Tunneling
+---
+
 # Public Tunneling
 
 Expose your local WASM applications to the internet using the Bore tunneling protocol.

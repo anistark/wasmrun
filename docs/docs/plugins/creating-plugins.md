@@ -1,3 +1,8 @@
+---
+sidebar_position: 10
+title: Creating Plugins
+---
+
 # Creating Plugins
 
 Wasmrun implements a powerful plugin architecture that enables seamless integration of different programming languages and compilation toolchains.
@@ -572,6 +577,6 @@ Study existing plugins:
 
 ## Next Steps
 
-- **[Contributing](contributing.md)**: Learn how to contribute your plugin
-- **[Debugging](debugging.md)**: Debug your plugin implementation
-- **[Architecture](architecture.md)**: Understand Wasmrun's architecture
+- **[Contributing](../contributing/how-to-contribute.md)**: Learn how to contribute your plugin
+- **[Debugging](../contributing/debugging.md)**: Debug your plugin implementation
+- **[Architecture](../contributing/architecture.md)**: Understand Wasmrun's architecture
