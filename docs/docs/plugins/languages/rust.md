@@ -420,7 +420,7 @@ wasmrun plugin install wasmrust
 
 ## Next Steps
 
-- Explore [WASI Support](../../integrations/wasi.md) for system interface capabilities
-- Learn about [Native Execution](../../cli/exec.md) in depth
+- Explore [WASI Support](../../../docs/exec/wasi.md) for system interface capabilities
+- Learn about [Native Execution](../../exec/usage/running.md) in depth
 - Check out [Live Reload](../../server/live-reload.md) for development workflow
-- Review the [CLI Reference](../../cli/) for all available commands
+- Review the [CLI Reference](../../server/usage/run.md) for all available commands

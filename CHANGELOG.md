@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2](https://github.com/anistark/wasmrun/releases/tag/v0.15.2) - 2026-03-22
+
 ### Added
 - **Console Output in UI**: Live stdout/stderr display from WASM execution
   - New `ConsolePanel` component (`ui/src/components/os/ConsolePanel.tsx`) — displays color-coded stdout (green), stderr (red), and system (blue) output with timestamps
@@ -38,6 +40,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Language name mapping for wasmhub (nodejs→quickjs, python→rustpython)
   - Cache integrity checks with automatic re-download on corruption
   - 16 new unit tests for cache roundtrip, integrity, language detection, and checksums
+
+- **Exec Agent Mode Implementation Plan**: Design document for AI agent sandbox using exec mode
+  - `EXEC_AGENT_IMPLEMENTATION.md` — full roadmap from v0.16 to v0.20
+  - REST API design for agent sessions, code execution, file operations, and tool schemas
+  - Gap analysis vs NVIDIA OpenShell with positioning as lightweight/secure/embeddable alternative
+  - Version-segregated task checklist (187 tasks across 5 releases)
+
+### Changed
+- **Documentation Restructure**: Reorganized docs from flat CLI-centric layout to mode-based sections
+  - New top-level sections: Server, Exec, OS, Plugins, Contributing
+  - Each section follows: Overview → Features → Usage (with per-command sub-pages) → deeper topics
+  - Server usage split into individual pages: run, compile, verify, inspect, stop, clean
+  - Exec usage split into: running WASM files, function calling, argument passing
+  - OS usage split into: running projects, language selection, server options
+  - Moved changelog into Contributing section
+  - Moved creating-plugins from Development to Plugins section
+  - Moved troubleshooting, architecture, debugging into Contributing section
+  - Removed empty Web section and flat CLI Reference section
+  - Updated all cross-references across 40+ files
+  - Tutorials hidden from navbar (route preserved)
 
 ### Dependencies
 - Added `base64` (0.22) for project file content encoding

@@ -1,7 +1,6 @@
 ---
 sidebar_position: 6
 title: Port Forwarding
-description: Forward ports from host to isolated WASM processes
 ---
 
 # Port Forwarding
@@ -292,5 +291,5 @@ curl http://localhost:3000/health
 
 - [Network Isolation](./network-isolation.md) - Network namespace details
 - [OS Mode](./) - Full OS mode documentation
-- [CLI os Command](../cli/os.md) - Command reference
+- [OS Mode Usage](./usage/running.md) - Command reference
 - Example: [Node.js Express API](https://github.com/anistark/wasmrun/tree/main/examples/nodejs-express-api) - Complete example

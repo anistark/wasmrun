@@ -1,5 +1,5 @@
 ---
-sidebar_position: 2
+sidebar_position: 4
 title: Live Reload
 description: Instant development feedback with file watching
 ---
@@ -201,6 +201,6 @@ wasmrun run ./my-project --watch --optimization debug
 
 ## See Also
 
-- [CLI run Command](../cli/run.md) - Full `run` command reference
+- [run command](./usage/run.md) - Full `run` command reference
 - [Quick Start](../quick-start.md) - Getting started guide
-- [Troubleshooting](../troubleshooting.md) - Common issues and solutions
+- [Troubleshooting](../contributing/troubleshooting.md) - Common issues and solutions

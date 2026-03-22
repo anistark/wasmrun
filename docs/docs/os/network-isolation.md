@@ -1,7 +1,6 @@
 ---
 sidebar_position: 5
 title: Network Isolation
-description: Per-process network namespace isolation for WASM processes
 ---
 
 # Network Isolation
@@ -263,5 +262,5 @@ wasmrun os ./app-b --forward 8081:8080
 
 - [OS Mode](./) - Full OS mode documentation
 - [Port Forwarding](./port-forwarding.md) - Exposing isolated services
-- [WASI Support](../integrations/wasi.md) - WASI socket APIs
-- [CLI os Command](../cli/os.md) - OS mode command reference
+- [WASI Support](../exec/wasi.md) - WASI socket APIs
+- [OS Mode Usage](./usage/running.md) - OS mode command reference

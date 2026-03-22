@@ -1,3 +1,8 @@
+---
+sidebar_position: 4
+title: Debugging
+---
+
 # Debugging
 
 Wasmrun includes a comprehensive debug mode that provides detailed logging to help with development and troubleshooting.
@@ -424,5 +429,5 @@ wasmrun run ./project
 ## Next Steps
 
 - **[Architecture](architecture.md)**: Understand the system architecture
-- **[Contributing](contributing.md)**: Contribute debug improvements
-- **[Troubleshooting](../troubleshooting.md)**: Common issues and solutions
+- **[Contributing](./how-to-contribute.md)**: Contribute debug improvements
+- **[Troubleshooting](./troubleshooting.md)**: Common issues and solutions
