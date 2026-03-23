@@ -20,9 +20,10 @@ A self-hosted WebAssembly interpreter written in Rust. No external runtime depen
 | **Comparison** | eq, ne, lt, gt, le, ge (all types, signed/unsigned) | ✅ Complete |
 | **Logic** | and, or, xor, shl, shr, rotl, rotr (i32/i64) | ✅ Complete |
 | **Memory** | load, store (all widths: 8/16/32/64, signed/unsigned), memory.size, memory.grow | ✅ Complete |
-| **Control flow** | block, loop, if/else, br, br_if, return, call, call_indirect, nop, unreachable | ✅ Complete |
+| **Control flow** | block, loop, if/else, br, br_if, br_table, return, call, call_indirect, select, nop, unreachable | ✅ Complete |
 | **Variables** | local.get/set/tee, global.get/set | ✅ Complete |
-| **Type conversions** | wrap, extend, trunc, convert, demote, promote, reinterpret | 🔧 In progress |
+| **Type conversions** | wrap, extend, trunc, convert, demote, promote, reinterpret | ✅ Complete |
+| **Data sections** | Active data segment initialization into linear memory | ✅ Complete |
 
 ### Linear Memory
 
