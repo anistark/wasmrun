@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Data Section Initialization**: WASM data segments are now loaded into linear memory during module initialization
+  - Active data segments evaluated via constant expressions (i32.const, i64.const offsets)
+  - Passive data segments correctly skipped (reserved for future memory.init support)
+  - Bounds checking with clear error messages for out-of-range segments
+  - 4 new unit tests for data segment loading, multiple segments, out-of-bounds, and passive segments
+
+- **Type Conversion Instructions**: All 21 WASM type conversion instructions now fully implemented
+  - Integer truncations: `i32.wrap_i64`, `i32.trunc_f32_s/u`, `i32.trunc_f64_s/u`, `i64.trunc_f32_s/u`, `i64.trunc_f64_s/u`
+  - Integer extensions: `i64.extend_i32_s`, `i64.extend_i32_u`
+  - Float conversions: `f32.convert_i32_s/u`, `f32.convert_i64_s/u`, `f64.convert_i32_s/u`, `f64.convert_i64_s/u`
+  - Float promotions/demotions: `f32.demote_f64`, `f64.promote_f32`
+  - Reinterpretations: `i32.reinterpret_f32`, `i64.reinterpret_f64`, `f32.reinterpret_i32`, `f64.reinterpret_i64`
+  - Proper NaN and overflow trap handling for truncation instructions
+  - `select` instruction (conditional ternary on stack)
+  - 11 new unit tests covering conversions, reinterpretations, NaN traps, and overflow
+
+- **br_table Instruction**: Switch/case dispatch via branch tables
+  - Pops index from stack, selects target label from table, branches to it
+  - Out-of-range index correctly falls through to default label
+  - 2 new unit tests for case selection and default fallback
+
+### Fixed
+- **Opcode Mapping**: Corrected WASM spec opcode assignments for f32/f64 instructions
+  - f32 unary ops (abs, neg, ceil, floor, trunc, nearest, sqrt) now at correct opcodes 0x8B–0x91
+  - f64 unary ops now at correct opcodes 0x99–0x9F
+  - f32/f64 copysign, min, max at correct positions
+  - Type conversion opcodes correctly mapped to 0xA7–0xBF
+  - i32.eqz/i64.eqz opcodes swapped to correct positions (0x45/0x50)
+- **Memory Instruction Decoding**: Load/store instructions now properly consume `memarg` immediates (alignment + offset) from bytecode
+- **call_indirect Decoding**: Now correctly consumes the table index byte after the type index
+- **Return Instruction**: `return` now properly exits function execution (previously continued to next instruction)
+- **Branch Target Resolution**: `br`, `br_if`, and `br_table` correctly skip past all nested block ends when branching to outer blocks
+
 ## [0.15.2](https://github.com/anistark/wasmrun/releases/tag/v0.15.2) - 2026-03-22
 
 ### Added

@@ -5,13 +5,10 @@ use super::module::{Module, ValueType};
 use super::values::Value;
 use std::io::Cursor;
 
-/// Result of instruction execution for control flow (unused but kept for future use)
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
+/// Result of instruction dispatch for control flow signaling
+#[derive(Debug, Clone, PartialEq)]
 enum ControlFlow {
-    /// Continue to next instruction
-    None,
-    /// Return from function
+    Continue,
     Return,
 }
 
@@ -346,8 +343,8 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
             Ok(Instruction::F64Const(f64::from_le_bytes(buf)))
         }
 
-        // i32/i64 test (eqz)
-        0x45 => Ok(Instruction::I64Eqz),
+        // i32 test
+        0x45 => Ok(Instruction::I32Eqz),
 
         // i32 comparison
         0x46 => Ok(Instruction::I32Eq),
@@ -360,7 +357,9 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0x4D => Ok(Instruction::I32LeU),
         0x4E => Ok(Instruction::I32GeS),
         0x4F => Ok(Instruction::I32GeU),
-        0x50 => Ok(Instruction::I32Eqz),
+
+        // i64 test
+        0x50 => Ok(Instruction::I64Eqz),
 
         // i64 comparison
         0x51 => Ok(Instruction::I64Eq),
@@ -434,62 +433,185 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0x89 => Ok(Instruction::I64Rotl),
         0x8A => Ok(Instruction::I64Rotr),
 
-        // f32 arithmetic operations
+        // f32 unary operations
+        0x8B => Ok(Instruction::F32Abs),
+        0x8C => Ok(Instruction::F32Neg),
+        0x8D => Ok(Instruction::F32Ceil),
+        0x8E => Ok(Instruction::F32Floor),
+        0x8F => Ok(Instruction::F32Trunc),
+        0x90 => Ok(Instruction::F32Nearest),
+        0x91 => Ok(Instruction::F32Sqrt),
+
+        // f32 binary operations
         0x92 => Ok(Instruction::F32Add),
         0x93 => Ok(Instruction::F32Sub),
         0x94 => Ok(Instruction::F32Mul),
         0x95 => Ok(Instruction::F32Div),
-        0x96 => Ok(Instruction::F32Sqrt),
-        0x97 => Ok(Instruction::F32Min),
-        0x98 => Ok(Instruction::F32Max),
-        0x99 => Ok(Instruction::F32Ceil),
-        0x9A => Ok(Instruction::F32Floor),
-        0x9B => Ok(Instruction::F32Trunc),
-        0x9C => Ok(Instruction::F32Nearest),
-        0x9D => Ok(Instruction::F32Abs),
-        0x9E => Ok(Instruction::F32Neg),
-        0x9F => Ok(Instruction::F32Copysign),
+        0x96 => Ok(Instruction::F32Min),
+        0x97 => Ok(Instruction::F32Max),
+        0x98 => Ok(Instruction::F32Copysign),
 
-        // f64 arithmetic operations
+        // f64 unary operations
+        0x99 => Ok(Instruction::F64Abs),
+        0x9A => Ok(Instruction::F64Neg),
+        0x9B => Ok(Instruction::F64Ceil),
+        0x9C => Ok(Instruction::F64Floor),
+        0x9D => Ok(Instruction::F64Trunc),
+        0x9E => Ok(Instruction::F64Nearest),
+        0x9F => Ok(Instruction::F64Sqrt),
+
+        // f64 binary operations
         0xA0 => Ok(Instruction::F64Add),
         0xA1 => Ok(Instruction::F64Sub),
         0xA2 => Ok(Instruction::F64Mul),
         0xA3 => Ok(Instruction::F64Div),
-        0xA4 => Ok(Instruction::F64Sqrt),
-        0xA5 => Ok(Instruction::F64Min),
-        0xA6 => Ok(Instruction::F64Max),
-        0xA7 => Ok(Instruction::F64Ceil),
-        0xA8 => Ok(Instruction::F64Floor),
-        0xA9 => Ok(Instruction::F64Trunc),
-        0xAA => Ok(Instruction::F64Nearest),
-        0xAB => Ok(Instruction::F64Abs),
-        0xAC => Ok(Instruction::F64Neg),
-        0xAD => Ok(Instruction::F64Copysign),
+        0xA4 => Ok(Instruction::F64Min),
+        0xA5 => Ok(Instruction::F64Max),
+        0xA6 => Ok(Instruction::F64Copysign),
 
-        // Memory
-        0x28 => Ok(Instruction::I32Load),
-        0x29 => Ok(Instruction::I64Load),
-        0x2A => Ok(Instruction::F32Load),
-        0x2B => Ok(Instruction::F64Load),
-        0x2C => Ok(Instruction::I32Load8S),
-        0x2D => Ok(Instruction::I32Load8U),
-        0x2E => Ok(Instruction::I32Load16S),
-        0x2F => Ok(Instruction::I32Load16U),
-        0x30 => Ok(Instruction::I64Load8S),
-        0x31 => Ok(Instruction::I64Load8U),
-        0x32 => Ok(Instruction::I64Load16S),
-        0x33 => Ok(Instruction::I64Load16U),
-        0x34 => Ok(Instruction::I64Load32S),
-        0x35 => Ok(Instruction::I64Load32U),
-        0x36 => Ok(Instruction::I32Store),
-        0x37 => Ok(Instruction::I64Store),
-        0x38 => Ok(Instruction::F32Store),
-        0x39 => Ok(Instruction::F64Store),
-        0x3A => Ok(Instruction::I32Store8),
-        0x3B => Ok(Instruction::I32Store16),
-        0x3C => Ok(Instruction::I64Store8),
-        0x3D => Ok(Instruction::I64Store16),
-        0x3E => Ok(Instruction::I64Store32),
+        // Type conversions
+        0xA7 => Ok(Instruction::I32WrapI64),
+        0xA8 => Ok(Instruction::I32TruncF32S),
+        0xA9 => Ok(Instruction::I32TruncF32U),
+        0xAA => Ok(Instruction::I32TruncF64S),
+        0xAB => Ok(Instruction::I32TruncF64U),
+        0xAC => Ok(Instruction::I64ExtendI32S),
+        0xAD => Ok(Instruction::I64ExtendI32U),
+        0xAE => Ok(Instruction::I64TruncF32S),
+        0xAF => Ok(Instruction::I64TruncF32U),
+        0xB0 => Ok(Instruction::I64TruncF64S),
+        0xB1 => Ok(Instruction::I64TruncF64U),
+        0xB2 => Ok(Instruction::F32ConvertI32S),
+        0xB3 => Ok(Instruction::F32ConvertI32U),
+        0xB4 => Ok(Instruction::F32ConvertI64S),
+        0xB5 => Ok(Instruction::F32ConvertI64U),
+        0xB6 => Ok(Instruction::F32DemoteF64),
+        0xB7 => Ok(Instruction::F64ConvertI32S),
+        0xB8 => Ok(Instruction::F64ConvertI32U),
+        0xB9 => Ok(Instruction::F64ConvertI64S),
+        0xBA => Ok(Instruction::F64ConvertI64U),
+        0xBB => Ok(Instruction::F64PromoteF32),
+        0xBC => Ok(Instruction::I32Reinterpret),
+        0xBD => Ok(Instruction::I64Reinterpret),
+        0xBE => Ok(Instruction::F32Reinterpret),
+        0xBF => Ok(Instruction::F64Reinterpret),
+
+        // Memory (each has memarg: align + offset)
+        0x28 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Load)
+        }
+        0x29 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load)
+        }
+        0x2A => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::F32Load)
+        }
+        0x2B => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::F64Load)
+        }
+        0x2C => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Load8S)
+        }
+        0x2D => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Load8U)
+        }
+        0x2E => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Load16S)
+        }
+        0x2F => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Load16U)
+        }
+        0x30 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load8S)
+        }
+        0x31 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load8U)
+        }
+        0x32 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load16S)
+        }
+        0x33 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load16U)
+        }
+        0x34 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load32S)
+        }
+        0x35 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load32U)
+        }
+        0x36 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Store)
+        }
+        0x37 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Store)
+        }
+        0x38 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::F32Store)
+        }
+        0x39 => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::F64Store)
+        }
+        0x3A => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Store8)
+        }
+        0x3B => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Store16)
+        }
+        0x3C => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Store8)
+        }
+        0x3D => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Store16)
+        }
+        0x3E => {
+            let _align = decode_u32_leb128(cursor)?;
+            let _offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Store32)
+        }
         0x3F => {
             // memory.size - reads memory index (0x00)
             let _mem_idx = read_u8(cursor)?;
@@ -541,7 +663,11 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         }
         0x0F => Ok(Instruction::Return),
         0x10 => Ok(Instruction::Call(decode_u32_leb128(cursor)?)),
-        0x11 => Ok(Instruction::CallIndirect(decode_u32_leb128(cursor)?)),
+        0x11 => {
+            let type_idx = decode_u32_leb128(cursor)?;
+            let _table_idx = read_u8(cursor)?; // table index (always 0x00 in WASM MVP)
+            Ok(Instruction::CallIndirect(type_idx))
+        }
         0x1A => Ok(Instruction::Drop),
         0x1B => Ok(Instruction::Select),
 
@@ -734,6 +860,20 @@ impl ExecutionContext {
     }
 }
 
+/// Evaluate a constant expression (used for data/element segment offsets and global init).
+/// Supports i32.const, i64.const, and global.get followed by end.
+fn evaluate_const_expr(expr: &[u8]) -> Result<usize, String> {
+    let mut cursor = Cursor::new(expr);
+    let instr = decode_instruction(&mut cursor)?;
+    match instr {
+        Instruction::I32Const(v) => Ok(v as u32 as usize),
+        Instruction::I64Const(v) => Ok(v as u64 as usize),
+        _ => Err(format!(
+            "Unsupported constant expression instruction: {instr:?}"
+        )),
+    }
+}
+
 /// WASM instruction executor
 pub struct Executor {
     context: ExecutionContext,
@@ -763,6 +903,27 @@ impl Executor {
                 _ => return Err(format!("Unsupported global type: {:?}", global.value_type)),
             };
             context.globals.push(default_val);
+        }
+
+        // Initialize memory from data segments
+        for segment in &module.data {
+            if segment.offset_expr.is_empty() {
+                // Passive data segment — skip (used by memory.init later)
+                continue;
+            }
+
+            let offset = evaluate_const_expr(&segment.offset_expr)?;
+            let end = offset + segment.data.len();
+            let mem_size = context.memory.size_bytes();
+
+            if end > mem_size {
+                return Err(format!(
+                    "Data segment out of bounds: offset={offset}, len={}, memory size={mem_size}",
+                    segment.data.len()
+                ));
+            }
+
+            context.memory.write_bytes(offset, &segment.data)?;
         }
 
         Ok(Executor { context, module })
@@ -851,13 +1012,14 @@ impl Executor {
     /// Execute bytecode starting from current position in cursor
     fn execute_bytecode(&mut self, cursor: &mut Cursor<&[u8]>) -> Result<(), String> {
         loop {
-            // Check if we've reached end of bytecode
             if cursor.position() >= cursor.get_ref().len() as u64 {
                 break;
             }
 
             let instr = decode_instruction(cursor)?;
-            self.dispatch_instruction(instr, cursor)?;
+            if self.dispatch_instruction(instr, cursor)? == ControlFlow::Return {
+                break;
+            }
         }
         Ok(())
     }
@@ -894,7 +1056,13 @@ impl Executor {
 
     /// Skip bytecode until we find the matching end instruction
     fn skip_to_end(&mut self, cursor: &mut Cursor<&[u8]>) -> Result<(), String> {
-        let mut depth = 0;
+        self.skip_n_ends(cursor, 1)
+    }
+
+    /// Skip past `n` unmatched end instructions in the bytecode
+    fn skip_n_ends(&mut self, cursor: &mut Cursor<&[u8]>, n: usize) -> Result<(), String> {
+        let mut depth: i32 = 0;
+        let mut ends_found: usize = 0;
 
         loop {
             if cursor.position() >= cursor.get_ref().len() as u64 {
@@ -908,14 +1076,44 @@ impl Executor {
                 }
                 Instruction::End => {
                     if depth == 0 {
-                        // Found matching end
-                        return Ok(());
+                        ends_found += 1;
+                        if ends_found >= n {
+                            return Ok(());
+                        }
+                    } else {
+                        depth -= 1;
                     }
-                    depth -= 1;
                 }
                 _ => {}
             }
         }
+    }
+
+    /// Execute a branch to the given label depth
+    fn do_branch(&mut self, label: u32, cursor: &mut Cursor<&[u8]>) -> Result<(), String> {
+        let label_idx = label as usize;
+        if label_idx >= self.context.block_stack.len() {
+            return Err(format!("br: invalid label {label}"));
+        }
+
+        let block_idx = self.context.block_stack.len() - 1 - label_idx;
+        let target_block = &self.context.block_stack[block_idx];
+
+        if target_block.is_loop {
+            cursor.set_position(target_block.start_pos as u64);
+            // Pop only the blocks above the loop (not the loop itself)
+            for _ in 0..label_idx {
+                self.context.pop_block()?;
+            }
+        } else {
+            // Pop all blocks up to and including the target
+            for _ in 0..=label_idx {
+                self.context.pop_block()?;
+            }
+            // Skip past the remaining nested end instructions in bytecode
+            self.skip_n_ends(cursor, label_idx + 1)?;
+        }
+        Ok(())
     }
 
     /// Call a function with arguments already on stack
@@ -1025,7 +1223,7 @@ impl Executor {
         &mut self,
         instr: Instruction,
         cursor: &mut Cursor<&[u8]>,
-    ) -> Result<(), String> {
+    ) -> Result<ControlFlow, String> {
         match instr {
             // Constants
             Instruction::I32Const(v) => self.context.push(Value::I32(v)),
@@ -1999,7 +2197,7 @@ impl Executor {
             // Control flow - basic ones first
             Instruction::Nop => {}
             Instruction::Unreachable => return Err("Unreachable instruction executed".to_string()),
-            Instruction::Return => return Ok(()),
+            Instruction::Return => return Ok(ControlFlow::Return),
             Instruction::End => {
                 // End of block/loop/if - pop the block frame
                 if let Ok(block) = self.context.pop_block() {
@@ -2322,30 +2520,9 @@ impl Executor {
                 // Else: we came from false condition, continue executing
             }
             Instruction::Br(label) => {
-                // Branch to label (0 = innermost block)
-                let label_idx = label as usize;
-                if label_idx >= self.context.block_stack.len() {
-                    return Err(format!("br: invalid label {label}"));
-                }
-
-                // Get the target block (counting from the end)
-                let block_idx = self.context.block_stack.len() - 1 - label_idx;
-                let target_block = &self.context.block_stack[block_idx];
-
-                if target_block.is_loop {
-                    // Branch to loop start - set cursor position
-                    cursor.set_position(target_block.start_pos as u64);
-                } else {
-                    // Branch to end of block - skip to matching end
-                    // We need to skip past this block and all inner blocks
-                    for _ in 0..=label_idx {
-                        self.context.pop_block()?;
-                    }
-                    self.skip_to_end(cursor)?;
-                }
+                self.do_branch(label, cursor)?;
             }
             Instruction::BrIf(label) => {
-                // Conditional branch
                 let cond = self.context.pop()?;
                 let cond_value = match cond {
                     Value::I32(v) => v,
@@ -2353,66 +2530,282 @@ impl Executor {
                 };
 
                 if cond_value != 0 {
-                    // Condition true - do the branch
-                    let label_idx = label as usize;
-                    if label_idx >= self.context.block_stack.len() {
-                        return Err(format!("br_if: invalid label {label}"));
-                    }
-
-                    // Get the target block
-                    let block_idx = self.context.block_stack.len() - 1 - label_idx;
-                    let target_block = &self.context.block_stack[block_idx];
-
-                    if target_block.is_loop {
-                        // Branch to loop start
-                        cursor.set_position(target_block.start_pos as u64);
-                    } else {
-                        // Branch to end of block
-                        for _ in 0..=label_idx {
-                            self.context.pop_block()?;
-                        }
-                        self.skip_to_end(cursor)?;
-                    }
+                    self.do_branch(label, cursor)?;
                 }
-                // Condition false - continue normally
             }
-            Instruction::BrTable(_, _) => {
-                // Branch table (switch)
-                return Err("br_table (branch table) requires bytecode position tracking not yet implemented".to_string());
+            Instruction::BrTable(targets, default) => {
+                let index = match self.context.pop()? {
+                    Value::I32(v) => v as u32,
+                    _ => return Err("br_table index must be i32".to_string()),
+                };
+
+                let label = if (index as usize) < targets.len() {
+                    targets[index as usize]
+                } else {
+                    default
+                };
+
+                self.do_branch(label, cursor)?;
             }
 
-            // Type conversions and other unimplemented
-            Instruction::I32WrapI64
-            | Instruction::I32TruncF32S
-            | Instruction::I32TruncF32U
-            | Instruction::I32TruncF64S
-            | Instruction::I32TruncF64U
-            | Instruction::I64ExtendI32S
-            | Instruction::I64ExtendI32U
-            | Instruction::I64TruncF32S
-            | Instruction::I64TruncF32U
-            | Instruction::I64TruncF64S
-            | Instruction::I64TruncF64U
-            | Instruction::F32ConvertI32S
-            | Instruction::F32ConvertI32U
-            | Instruction::F32ConvertI64S
-            | Instruction::F32ConvertI64U
-            | Instruction::F32DemoteF64
-            | Instruction::F64ConvertI32S
-            | Instruction::F64ConvertI32U
-            | Instruction::F64ConvertI64S
-            | Instruction::F64ConvertI64U
-            | Instruction::F64PromoteF32
-            | Instruction::I32Reinterpret
-            | Instruction::I64Reinterpret
-            | Instruction::F32Reinterpret
-            | Instruction::F64Reinterpret
-            | Instruction::Select => {
-                return Err(format!("Instruction not yet implemented: {instr:?}"));
+            // Type conversions
+            Instruction::I32WrapI64 => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I64(x) => self.context.push(Value::I32(x as i32)),
+                    _ => return Err("Type mismatch for i32.wrap_i64".to_string()),
+                }
+            }
+            Instruction::I32TruncF32S => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => {
+                        if x.is_nan() {
+                            return Err("Invalid conversion to integer: NaN".to_string());
+                        }
+                        if x >= (i32::MAX as f32 + 1.0) || x < (i32::MIN as f32) {
+                            return Err("Integer overflow in truncation".to_string());
+                        }
+                        self.context.push(Value::I32(x as i32));
+                    }
+                    _ => return Err("Type mismatch for i32.trunc_f32_s".to_string()),
+                }
+            }
+            Instruction::I32TruncF32U => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => {
+                        if x.is_nan() {
+                            return Err("Invalid conversion to integer: NaN".to_string());
+                        }
+                        if x >= (u32::MAX as f32 + 1.0) || x < 0.0 {
+                            return Err("Integer overflow in truncation".to_string());
+                        }
+                        self.context.push(Value::I32(x as u32 as i32));
+                    }
+                    _ => return Err("Type mismatch for i32.trunc_f32_u".to_string()),
+                }
+            }
+            Instruction::I32TruncF64S => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => {
+                        if x.is_nan() {
+                            return Err("Invalid conversion to integer: NaN".to_string());
+                        }
+                        if x >= (i32::MAX as f64 + 1.0) || x < (i32::MIN as f64) {
+                            return Err("Integer overflow in truncation".to_string());
+                        }
+                        self.context.push(Value::I32(x as i32));
+                    }
+                    _ => return Err("Type mismatch for i32.trunc_f64_s".to_string()),
+                }
+            }
+            Instruction::I32TruncF64U => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => {
+                        if x.is_nan() {
+                            return Err("Invalid conversion to integer: NaN".to_string());
+                        }
+                        if x >= (u32::MAX as f64 + 1.0) || x < 0.0 {
+                            return Err("Integer overflow in truncation".to_string());
+                        }
+                        self.context.push(Value::I32(x as u32 as i32));
+                    }
+                    _ => return Err("Type mismatch for i32.trunc_f64_u".to_string()),
+                }
+            }
+            Instruction::I64ExtendI32S => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => self.context.push(Value::I64(x as i64)),
+                    _ => return Err("Type mismatch for i64.extend_i32_s".to_string()),
+                }
+            }
+            Instruction::I64ExtendI32U => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => self.context.push(Value::I64(x as u32 as i64)),
+                    _ => return Err("Type mismatch for i64.extend_i32_u".to_string()),
+                }
+            }
+            Instruction::I64TruncF32S => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => {
+                        if x.is_nan() {
+                            return Err("Invalid conversion to integer: NaN".to_string());
+                        }
+                        if x >= (i64::MAX as f32) || x < (i64::MIN as f32) {
+                            return Err("Integer overflow in truncation".to_string());
+                        }
+                        self.context.push(Value::I64(x as i64));
+                    }
+                    _ => return Err("Type mismatch for i64.trunc_f32_s".to_string()),
+                }
+            }
+            Instruction::I64TruncF32U => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => {
+                        if x.is_nan() {
+                            return Err("Invalid conversion to integer: NaN".to_string());
+                        }
+                        if x >= (u64::MAX as f32) || x < 0.0 {
+                            return Err("Integer overflow in truncation".to_string());
+                        }
+                        self.context.push(Value::I64(x as u64 as i64));
+                    }
+                    _ => return Err("Type mismatch for i64.trunc_f32_u".to_string()),
+                }
+            }
+            Instruction::I64TruncF64S => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => {
+                        if x.is_nan() {
+                            return Err("Invalid conversion to integer: NaN".to_string());
+                        }
+                        if x >= (i64::MAX as f64) || x < (i64::MIN as f64) {
+                            return Err("Integer overflow in truncation".to_string());
+                        }
+                        self.context.push(Value::I64(x as i64));
+                    }
+                    _ => return Err("Type mismatch for i64.trunc_f64_s".to_string()),
+                }
+            }
+            Instruction::I64TruncF64U => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => {
+                        if x.is_nan() {
+                            return Err("Invalid conversion to integer: NaN".to_string());
+                        }
+                        if x >= (u64::MAX as f64) || x < 0.0 {
+                            return Err("Integer overflow in truncation".to_string());
+                        }
+                        self.context.push(Value::I64(x as u64 as i64));
+                    }
+                    _ => return Err("Type mismatch for i64.trunc_f64_u".to_string()),
+                }
+            }
+            Instruction::F32ConvertI32S => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => self.context.push(Value::F32(x as f32)),
+                    _ => return Err("Type mismatch for f32.convert_i32_s".to_string()),
+                }
+            }
+            Instruction::F32ConvertI32U => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => self.context.push(Value::F32(x as u32 as f32)),
+                    _ => return Err("Type mismatch for f32.convert_i32_u".to_string()),
+                }
+            }
+            Instruction::F32ConvertI64S => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I64(x) => self.context.push(Value::F32(x as f32)),
+                    _ => return Err("Type mismatch for f32.convert_i64_s".to_string()),
+                }
+            }
+            Instruction::F32ConvertI64U => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I64(x) => self.context.push(Value::F32(x as u64 as f32)),
+                    _ => return Err("Type mismatch for f32.convert_i64_u".to_string()),
+                }
+            }
+            Instruction::F32DemoteF64 => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => self.context.push(Value::F32(x as f32)),
+                    _ => return Err("Type mismatch for f32.demote_f64".to_string()),
+                }
+            }
+            Instruction::F64ConvertI32S => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => self.context.push(Value::F64(x as f64)),
+                    _ => return Err("Type mismatch for f64.convert_i32_s".to_string()),
+                }
+            }
+            Instruction::F64ConvertI32U => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => self.context.push(Value::F64(x as u32 as f64)),
+                    _ => return Err("Type mismatch for f64.convert_i32_u".to_string()),
+                }
+            }
+            Instruction::F64ConvertI64S => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I64(x) => self.context.push(Value::F64(x as f64)),
+                    _ => return Err("Type mismatch for f64.convert_i64_s".to_string()),
+                }
+            }
+            Instruction::F64ConvertI64U => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I64(x) => self.context.push(Value::F64(x as u64 as f64)),
+                    _ => return Err("Type mismatch for f64.convert_i64_u".to_string()),
+                }
+            }
+            Instruction::F64PromoteF32 => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => self.context.push(Value::F64(x as f64)),
+                    _ => return Err("Type mismatch for f64.promote_f32".to_string()),
+                }
+            }
+            Instruction::I32Reinterpret => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F32(x) => self.context.push(Value::I32(x.to_bits() as i32)),
+                    _ => return Err("Type mismatch for i32.reinterpret_f32".to_string()),
+                }
+            }
+            Instruction::I64Reinterpret => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::F64(x) => self.context.push(Value::I64(x.to_bits() as i64)),
+                    _ => return Err("Type mismatch for i64.reinterpret_f64".to_string()),
+                }
+            }
+            Instruction::F32Reinterpret => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I32(x) => {
+                        self.context.push(Value::F32(f32::from_bits(x as u32)));
+                    }
+                    _ => return Err("Type mismatch for f32.reinterpret_i32".to_string()),
+                }
+            }
+            Instruction::F64Reinterpret => {
+                let a = self.context.pop()?;
+                match a {
+                    Value::I64(x) => {
+                        self.context.push(Value::F64(f64::from_bits(x as u64)));
+                    }
+                    _ => return Err("Type mismatch for f64.reinterpret_i64".to_string()),
+                }
+            }
+            Instruction::Select => {
+                let cond = self.context.pop()?;
+                let val2 = self.context.pop()?;
+                let val1 = self.context.pop()?;
+                match cond {
+                    Value::I32(c) => {
+                        self.context.push(if c != 0 { val1 } else { val2 });
+                    }
+                    _ => return Err("Select condition must be i32".to_string()),
+                }
             }
         }
 
-        Ok(())
+        Ok(ControlFlow::Continue)
     }
 
     /// Get reference to execution context
@@ -3379,5 +3772,504 @@ mod tests {
         executor.context.memory.write_u16(300, 65535).unwrap();
         let val = executor.context.memory.read_u16(300).unwrap();
         assert_eq!(val, 65535);
+    }
+
+    // ===== v0.16.0 Tests: Data Section Initialization =====
+
+    #[test]
+    fn test_data_segment_string_constant() {
+        use crate::runtime::core::module::{DataSegment, MemoryType};
+
+        let module = Module {
+            version: 1,
+            types: vec![],
+            imports: vec![],
+            functions: vec![],
+            tables: vec![],
+            memory: Some(MemoryType {
+                initial: 1,
+                max: None,
+            }),
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![DataSegment {
+                offset_expr: vec![0x41, 0x10, 0x0B], // i32.const 16, end
+                data: b"Hello, WASM!".to_vec(),
+            }],
+        };
+
+        let executor = Executor::new(module).unwrap();
+        let bytes = executor.context.memory.read_bytes(16, 12).unwrap();
+        assert_eq!(&bytes, b"Hello, WASM!");
+    }
+
+    #[test]
+    fn test_data_segment_multiple() {
+        use crate::runtime::core::module::{DataSegment, MemoryType};
+
+        let module = Module {
+            version: 1,
+            types: vec![],
+            imports: vec![],
+            functions: vec![],
+            tables: vec![],
+            memory: Some(MemoryType {
+                initial: 1,
+                max: None,
+            }),
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![
+                DataSegment {
+                    offset_expr: vec![0x41, 0x00, 0x0B], // i32.const 0
+                    data: vec![0xDE, 0xAD],
+                },
+                DataSegment {
+                    offset_expr: vec![0x41, 0x10, 0x0B], // i32.const 16
+                    data: vec![0xBE, 0xEF],
+                },
+            ],
+        };
+
+        let executor = Executor::new(module).unwrap();
+        assert_eq!(executor.context.memory.read_u8(0).unwrap(), 0xDE);
+        assert_eq!(executor.context.memory.read_u8(1).unwrap(), 0xAD);
+        assert_eq!(executor.context.memory.read_u8(16).unwrap(), 0xBE);
+        assert_eq!(executor.context.memory.read_u8(17).unwrap(), 0xEF);
+    }
+
+    #[test]
+    fn test_data_segment_out_of_bounds() {
+        use crate::runtime::core::module::{DataSegment, MemoryType};
+
+        let module = Module {
+            version: 1,
+            types: vec![],
+            imports: vec![],
+            functions: vec![],
+            tables: vec![],
+            memory: Some(MemoryType {
+                initial: 1,
+                max: Some(1),
+            }),
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![DataSegment {
+                offset_expr: vec![0x41, 0xFF, 0xFF, 0x03, 0x0B], // i32.const 65535
+                data: vec![0x00, 0x01], // 2 bytes at offset 65535 overflows 1 page
+            }],
+        };
+
+        let result = Executor::new(module);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_data_segment_passive_skipped() {
+        use crate::runtime::core::module::{DataSegment, MemoryType};
+
+        let module = Module {
+            version: 1,
+            types: vec![],
+            imports: vec![],
+            functions: vec![],
+            tables: vec![],
+            memory: Some(MemoryType {
+                initial: 1,
+                max: None,
+            }),
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![DataSegment {
+                offset_expr: vec![], // passive segment (empty offset)
+                data: vec![0xFF; 100],
+            }],
+        };
+
+        let executor = Executor::new(module).unwrap();
+        assert_eq!(executor.context.memory.read_u8(0).unwrap(), 0x00);
+    }
+
+    // ===== v0.16.0 Tests: Type Conversion Instructions =====
+
+    #[test]
+    fn test_i32_wrap_i64() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::I64(0x1_0000_002A)); // wraps to 42
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0xA7, 0x0B]; // i32.wrap_i64, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        executor.execute_bytecode(&mut cursor).unwrap();
+        executor.context.pop_frame().unwrap();
+        assert_eq!(executor.context.pop().unwrap(), Value::I32(42));
+    }
+
+    #[test]
+    fn test_i64_extend_i32_s() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::I32(-1));
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0xAC, 0x0B]; // i64.extend_i32_s, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        executor.execute_bytecode(&mut cursor).unwrap();
+        executor.context.pop_frame().unwrap();
+        assert_eq!(executor.context.pop().unwrap(), Value::I64(-1));
+    }
+
+    #[test]
+    fn test_i64_extend_i32_u() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::I32(-1)); // 0xFFFFFFFF unsigned
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0xAD, 0x0B]; // i64.extend_i32_u, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        executor.execute_bytecode(&mut cursor).unwrap();
+        executor.context.pop_frame().unwrap();
+        assert_eq!(executor.context.pop().unwrap(), Value::I64(0xFFFF_FFFF_i64));
+    }
+
+    #[test]
+    fn test_f32_convert_i32_s() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::I32(-42));
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0xB2, 0x0B]; // f32.convert_i32_s, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        executor.execute_bytecode(&mut cursor).unwrap();
+        executor.context.pop_frame().unwrap();
+        assert_eq!(executor.context.pop().unwrap(), Value::F32(-42.0));
+    }
+
+    #[test]
+    fn test_f64_promote_f32() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::F32(1.5));
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0xBB, 0x0B]; // f64.promote_f32, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        executor.execute_bytecode(&mut cursor).unwrap();
+        executor.context.pop_frame().unwrap();
+        match executor.context.pop().unwrap() {
+            Value::F64(x) => assert!((x - 1.5).abs() < 0.001),
+            other => panic!("Expected F64, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_f32_demote_f64() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::F64(2.5));
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0xB6, 0x0B]; // f32.demote_f64, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        executor.execute_bytecode(&mut cursor).unwrap();
+        executor.context.pop_frame().unwrap();
+        match executor.context.pop().unwrap() {
+            Value::F32(x) => assert!((x - 2.5).abs() < 0.001),
+            other => panic!("Expected F32, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_i32_reinterpret_f32() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::F32(1.0));
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0xBC, 0x0B]; // i32.reinterpret_f32, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        executor.execute_bytecode(&mut cursor).unwrap();
+        executor.context.pop_frame().unwrap();
+        assert_eq!(
+            executor.context.pop().unwrap(),
+            Value::I32(0x3F80_0000_u32 as i32)
+        ); // IEEE 754 for 1.0
+    }
+
+    #[test]
+    fn test_f32_reinterpret_i32() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::I32(0x3F80_0000_u32 as i32));
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0xBE, 0x0B]; // f32.reinterpret_i32, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        executor.execute_bytecode(&mut cursor).unwrap();
+        executor.context.pop_frame().unwrap();
+        assert_eq!(executor.context.pop().unwrap(), Value::F32(1.0));
+    }
+
+    #[test]
+    fn test_i32_trunc_f64_s_nan() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::F64(f64::NAN));
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0xAA, 0x0B]; // i32.trunc_f64_s, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        let result = executor.execute_bytecode(&mut cursor);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("NaN"));
+    }
+
+    #[test]
+    fn test_i32_trunc_f32_u_overflow() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::F32(-1.0));
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0xA9, 0x0B]; // i32.trunc_f32_u, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        let result = executor.execute_bytecode(&mut cursor);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("overflow"));
+    }
+
+    #[test]
+    fn test_select_true() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::I32(10)); // val1
+        executor.context.push(Value::I32(20)); // val2
+        executor.context.push(Value::I32(1)); // cond (true)
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0x1B, 0x0B]; // select, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        executor.execute_bytecode(&mut cursor).unwrap();
+        executor.context.pop_frame().unwrap();
+        assert_eq!(executor.context.pop().unwrap(), Value::I32(10));
+    }
+
+    #[test]
+    fn test_select_false() {
+        let module = Module::new();
+        let mut executor = Executor::new(module).unwrap();
+        executor.context.push(Value::I32(10)); // val1
+        executor.context.push(Value::I32(20)); // val2
+        executor.context.push(Value::I32(0)); // cond (false)
+        let frame = Frame::new(0, vec![], 0);
+        executor.context.push_frame(frame);
+
+        let bytecode = vec![0x1B, 0x0B]; // select, end
+        let mut cursor = Cursor::new(bytecode.as_slice());
+        executor.execute_bytecode(&mut cursor).unwrap();
+        executor.context.pop_frame().unwrap();
+        assert_eq!(executor.context.pop().unwrap(), Value::I32(20));
+    }
+
+    // ===== v0.16.0 Tests: br_table =====
+
+    #[test]
+    fn test_br_table_case0() {
+        use crate::runtime::core::module::{Function, FunctionType};
+
+        // block $b0
+        //   block $b1
+        //     block $b2
+        //       local.get 0
+        //       br_table 0 1 2   ;; targets: [$b2, $b1, $b0], default=$b0
+        //     end $b2
+        //     i32.const 20
+        //     return
+        //   end $b1
+        //   i32.const 10
+        //   return
+        // end $b0
+        // i32.const 30
+        let code = vec![
+            0x02, 0x40, // block void
+            0x02, 0x40, // block void
+            0x02, 0x40, // block void
+            0x20, 0x00, // local.get 0
+            0x0E, 0x02, 0x00, 0x01, 0x02, // br_table [0, 1] default=2
+            0x0B, // end (innermost)
+            0x41, 0x14, // i32.const 20
+            0x0F, // return
+            0x0B, // end (middle)
+            0x41, 0x0A, // i32.const 10
+            0x0F, // return
+            0x0B, // end (outer)
+            0x41, 0x1E, // i32.const 30
+            0x0B, // end (function)
+        ];
+
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![ValueType::I32],
+                results: vec![ValueType::I32],
+            }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![],
+                code,
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+
+        let mut executor = Executor::new(module).unwrap();
+
+        // Case 0 → falls through innermost block → returns 20
+        let results = executor.execute_with_args(0, vec![Value::I32(0)]).unwrap();
+        assert_eq!(results[0], Value::I32(20));
+    }
+
+    #[test]
+    fn test_br_table_default() {
+        use crate::runtime::core::module::{Function, FunctionType};
+
+        let code = vec![
+            0x02, 0x40, // block void
+            0x02, 0x40, // block void
+            0x02, 0x40, // block void
+            0x20, 0x00, // local.get 0
+            0x0E, 0x02, 0x00, 0x01, 0x02, // br_table [0, 1] default=2
+            0x0B, // end (innermost)
+            0x41, 0x14, // i32.const 20
+            0x0F, // return
+            0x0B, // end (middle)
+            0x41, 0x0A, // i32.const 10
+            0x0F, // return
+            0x0B, // end (outer)
+            0x41, 0x1E, // i32.const 30
+            0x0B, // end (function)
+        ];
+
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![ValueType::I32],
+                results: vec![ValueType::I32],
+            }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![],
+                code,
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![],
+            exports: std::collections::HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+
+        let mut executor = Executor::new(module).unwrap();
+
+        // Out-of-range index (99) → uses default (label 2 → outer block) → returns 30
+        let results = executor.execute_with_args(0, vec![Value::I32(99)]).unwrap();
+        assert_eq!(results[0], Value::I32(30));
+    }
+
+    #[test]
+    fn test_evaluate_const_expr_i32() {
+        let expr = vec![0x41, 0x2A, 0x0B]; // i32.const 42, end
+        assert_eq!(evaluate_const_expr(&expr).unwrap(), 42);
+    }
+
+    #[test]
+    fn test_evaluate_const_expr_i64() {
+        let expr = vec![0x42, 0x80, 0x01, 0x0B]; // i64.const 128, end
+        assert_eq!(evaluate_const_expr(&expr).unwrap(), 128);
+    }
+
+    #[test]
+    fn test_decode_type_conversion_opcodes() {
+        let cases: Vec<(u8, &str)> = vec![
+            (0xA7, "I32WrapI64"),
+            (0xA8, "I32TruncF32S"),
+            (0xAC, "I64ExtendI32S"),
+            (0xAD, "I64ExtendI32U"),
+            (0xB2, "F32ConvertI32S"),
+            (0xB6, "F32DemoteF64"),
+            (0xB7, "F64ConvertI32S"),
+            (0xBB, "F64PromoteF32"),
+            (0xBC, "I32Reinterpret"),
+            (0xBD, "I64Reinterpret"),
+            (0xBE, "F32Reinterpret"),
+            (0xBF, "F64Reinterpret"),
+        ];
+        for (opcode, name) in cases {
+            let bytecode = vec![opcode];
+            let mut cursor = Cursor::new(bytecode.as_slice());
+            let instr = decode_instruction(&mut cursor);
+            assert!(
+                instr.is_ok(),
+                "Failed to decode opcode 0x{opcode:02X} ({name})"
+            );
+        }
+    }
+
+    #[test]
+    fn test_decode_f32_unary_opcodes() {
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0x8B].as_slice())).unwrap(),
+            Instruction::F32Abs
+        ));
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0x8C].as_slice())).unwrap(),
+            Instruction::F32Neg
+        ));
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0x91].as_slice())).unwrap(),
+            Instruction::F32Sqrt
+        ));
+    }
+
+    #[test]
+    fn test_decode_f64_unary_opcodes() {
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0x99].as_slice())).unwrap(),
+            Instruction::F64Abs
+        ));
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0x9F].as_slice())).unwrap(),
+            Instruction::F64Sqrt
+        ));
     }
 }
