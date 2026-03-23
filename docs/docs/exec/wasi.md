@@ -11,33 +11,40 @@ Wasmrun's exec mode provides WASI Preview 1 support, enabling WASM modules to in
 
 | Syscall | Description | Status |
 |---|---|---|
-| `fd_write` | Write to file descriptors (stdout, stderr) | ✅ |
-| `fd_read` | Read from file descriptors (stdin) | ✅ |
+| `fd_write` | Write to file descriptors (stdout, stderr) — reads iovecs from memory | ✅ |
+| `fd_read` | Read from file descriptors (stdin returns EOF) | ✅ |
 | `fd_close` | Close a file descriptor | ✅ |
-| `fd_seek` | Seek within a file | ✅ |
-| `args_get` | Retrieve command-line arguments | ✅ |
+| `fd_seek` | Seek within a file descriptor | ✅ |
+| `fd_fdstat_get` | File descriptor status (filetype, flags, rights) | ✅ |
+| `fd_prestat_get` | Preopened directory info (returns EBADF — no preopens yet) | ✅ Stub |
+| `fd_prestat_dir_name` | Preopened directory name | ✅ Stub |
+| `args_get` | Retrieve command-line arguments from memory | ✅ |
 | `args_sizes_get` | Get argument count and buffer sizes | ✅ |
-| `environ_get` | Retrieve environment variables | ✅ |
+| `environ_get` | Retrieve environment variables from memory | ✅ |
 | `environ_sizes_get` | Get environment variable count and sizes | ✅ |
-| `clock_time_get` | Get current time (realtime, monotonic) | ✅ |
+| `clock_time_get` | Get current time (realtime, monotonic) in nanoseconds | ✅ |
 | `random_get` | Fill buffer with random bytes | ✅ |
-| `proc_exit` | Exit with a status code | ✅ |
-| `fd_prestat_get` | Preopened directory info | 🔧 Planned |
-| `fd_prestat_dir_name` | Preopened directory name | 🔧 Planned |
+| `proc_exit` | Exit with a status code (terminates execution cleanly) | ✅ |
+| `poll_oneoff` | Poll for events (stub — returns ENOSYS) | ✅ Stub |
+| `sched_yield` | Yield execution (stub — returns success) | ✅ Stub |
 | `path_open` | Open a file by path | 🔧 Planned |
-| `fd_fdstat_get` | File descriptor status | 🔧 Planned |
+| `path_filestat_get` | Stat a path | 🔧 Planned |
+| `path_create_directory` | Create directory | 🔧 Planned |
+| `fd_readdir` | Read directory entries | 🔧 Planned |
 
 ## How It Works
 
-WASI syscalls are registered as host functions in the linker. When the WASM module calls an imported function from the `wasi_snapshot_preview1` namespace, the executor dispatches to the corresponding Rust implementation.
+WASI syscalls are registered as host functions in the linker under the `wasi_snapshot_preview1` module namespace. When the WASM module calls an imported function, the executor dispatches to the corresponding Rust implementation with access to linear memory.
 
 ```
 WASM module calls fd_write(fd=1, iovs, iovs_len, nwritten)
-    → executor detects imported function
+    → executor detects imported function (func_idx < import_count)
     → dispatches to host function via linker
-    → host reads iovec pointers from linear memory
-    → writes bytes to stdout
-    → writes bytes_written back to linear memory
+    → host reads iovec structs {buf_ptr, buf_len} from linear memory
+    → reads string bytes from memory at buf_ptr
+    → appends bytes to WasiEnv stdout buffer
+    → writes total bytes_written to nwritten pointer in memory
+    → returns errno (0 = success)
 ```
 
 ## Environment Setup
@@ -50,22 +57,43 @@ WasiEnv::new()
     .with_env("KEY".into(), "value".into())
 ```
 
-- **Arguments** — available via `args_get` / `args_sizes_get`
-- **Environment variables** — available via `environ_get` / `environ_sizes_get`
-- **Output capture** — stdout/stderr buffered in `WasiEnv` for programmatic access
+- **Arguments** — written to linear memory via `args_get` / `args_sizes_get`
+- **Environment variables** — written as `KEY=VALUE\0` strings via `environ_get` / `environ_sizes_get`
+- **Output capture** — stdout/stderr buffered in `WasiEnv` for programmatic access via `get_stdout()` / `get_stderr()`
+
+## Linker Integration
+
+The executor uses a `Linker` to resolve imported functions. The linker maps `(module, name)` pairs to host function implementations:
+
+```rust
+let wasi_env = Arc::new(Mutex::new(WasiEnv::new()));
+let linker = create_wasi_linker(wasi_env.clone());
+let mut executor = Executor::new_with_linker(module, linker)?;
+```
+
+Host functions receive `&mut LinearMemory` so they can read pointers and write results directly into the module's address space.
 
 ## Clock Support
 
-Two clock types are supported:
-
 | Clock ID | Constant | Description |
 |---|---|---|
-| `REALTIME` | 0 | Wall clock time (seconds since Unix epoch) |
+| `REALTIME` | 0 | Wall clock time (nanoseconds since Unix epoch) |
 | `MONOTONIC` | 1 | Monotonically increasing (for measuring intervals) |
+
+## Process Exit
+
+`proc_exit` terminates execution by raising a sentinel error that the executor catches. The exit code is extracted and returned to the caller:
+
+```rust
+match executor.execute_with_args(func_idx, args) {
+    Ok(_) => 0,
+    Err(e) => Executor::is_proc_exit(&e).unwrap_or(-1),
+}
+```
 
 ## Filesystem
 
-WASI filesystem integration is planned for v0.17.0. It will bridge the exec mode executor to wasmrun's existing `WasiFilesystem`, which provides:
+WASI filesystem integration is planned for v0.17.4. It will bridge the exec mode executor to wasmrun's existing `WasiFilesystem`, which provides:
 
 - Mount host directories into the WASM sandbox
 - Path traversal protection
