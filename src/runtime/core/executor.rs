@@ -1,9 +1,13 @@
 /// WASM instruction executor
 /// Handles execution context, stack, call frames, and instruction dispatch
+use super::linker::Linker;
 use super::memory::LinearMemory;
-use super::module::{Module, ValueType};
+use super::module::{ImportKind, Module, ValueType};
 use super::values::Value;
 use std::io::Cursor;
+
+/// Sentinel prefix for proc_exit errors so callers can extract the exit code.
+pub const WASI_PROC_EXIT_PREFIX: &str = "__wasi_proc_exit:";
 
 /// Result of instruction dispatch for control flow signaling
 #[derive(Debug, Clone, PartialEq)]
@@ -878,22 +882,41 @@ fn evaluate_const_expr(expr: &[u8]) -> Result<usize, String> {
 pub struct Executor {
     context: ExecutionContext,
     module: Module,
+    linker: Option<Linker>,
+    import_func_count: usize,
 }
 
 impl Executor {
-    /// Create new executor for module
+    /// Create new executor for module (no host function support).
     pub fn new(module: Module) -> Result<Self, String> {
-        // Get memory config from module
+        Self::build(module, None)
+    }
+
+    /// Create executor with a linker that provides host functions for imports.
+    pub fn new_with_linker(module: Module, linker: Linker) -> Result<Self, String> {
+        Self::build(module, Some(linker))
+    }
+
+    fn build(module: Module, linker: Option<Linker>) -> Result<Self, String> {
+        let import_func_count = module
+            .imports
+            .iter()
+            .filter(|i| matches!(i.kind, ImportKind::Function(_)))
+            .count();
+
+        // Memory config: check module section first, then imported memory
         let (initial, max) = if let Some(mem) = &module.memory {
             (mem.initial, mem.max)
         } else {
-            // Default: 1 page, no max
-            (1, None)
+            let imported_mem = module.imports.iter().find_map(|i| match &i.kind {
+                ImportKind::Memory(mem) => Some((mem.initial, mem.max)),
+                _ => None,
+            });
+            imported_mem.unwrap_or((1, None))
         };
 
         let mut context = ExecutionContext::new(initial, max)?;
 
-        // Initialize globals with default values for their types
         for global in &module.globals {
             let default_val = match global.value_type {
                 ValueType::I32 => Value::I32(0),
@@ -905,28 +928,28 @@ impl Executor {
             context.globals.push(default_val);
         }
 
-        // Initialize memory from data segments
         for segment in &module.data {
             if segment.offset_expr.is_empty() {
-                // Passive data segment — skip (used by memory.init later)
                 continue;
             }
-
             let offset = evaluate_const_expr(&segment.offset_expr)?;
             let end = offset + segment.data.len();
             let mem_size = context.memory.size_bytes();
-
             if end > mem_size {
                 return Err(format!(
                     "Data segment out of bounds: offset={offset}, len={}, memory size={mem_size}",
                     segment.data.len()
                 ));
             }
-
             context.memory.write_bytes(offset, &segment.data)?;
         }
 
-        Ok(Executor { context, module })
+        Ok(Executor {
+            context,
+            module,
+            linker,
+            import_func_count,
+        })
     }
 
     /// Execute a function by index and return its results
@@ -940,13 +963,18 @@ impl Executor {
         func_idx: u32,
         args: Vec<Value>,
     ) -> Result<Vec<Value>, String> {
+        // If func_idx refers to an import, dispatch through the linker
+        if (func_idx as usize) < self.import_func_count {
+            return self.call_host_function_with_args(func_idx, args);
+        }
+
+        let defined_idx = func_idx as usize - self.import_func_count;
+
         // Get function signature and code (clone to avoid borrow issues)
         let func = {
-            let func = self
-                .module
-                .functions
-                .get(func_idx as usize)
-                .ok_or_else(|| format!("Function index {func_idx} out of bounds"))?;
+            let func = self.module.functions.get(defined_idx).ok_or_else(|| {
+                format!("Function index {func_idx} out of bounds (defined index {defined_idx})")
+            })?;
 
             let func_type = self
                 .module
@@ -1118,12 +1146,16 @@ impl Executor {
 
     /// Call a function with arguments already on stack
     fn call_function(&mut self, func_idx: u32) -> Result<(), String> {
+        if (func_idx as usize) < self.import_func_count {
+            return self.call_host_function(func_idx);
+        }
+
+        let defined_idx = func_idx as usize - self.import_func_count;
+
         let (arg_count, num_results, code, local_types) = {
-            let func = self
-                .module
-                .functions
-                .get(func_idx as usize)
-                .ok_or_else(|| format!("Function index {func_idx} out of bounds"))?;
+            let func = self.module.functions.get(defined_idx).ok_or_else(|| {
+                format!("Function index {func_idx} out of bounds (defined index {defined_idx})")
+            })?;
 
             let func_type = self
                 .module
@@ -1184,38 +1216,136 @@ impl Executor {
         }
 
         let element_segment = &self.module.elements[0];
-        let func_idx = element_segment
+        let abs_func_idx = *element_segment
             .function_indices
             .get(table_idx as usize)
             .ok_or_else(|| format!("Table index {table_idx} out of bounds"))?;
 
-        let func = self
-            .module
-            .functions
-            .get(*func_idx as usize)
-            .ok_or_else(|| format!("Function index {func_idx} out of bounds"))?;
-
-        let func_type = self
-            .module
-            .types
-            .get(func.type_index as usize)
-            .ok_or_else(|| format!("Function type index {} out of bounds", func.type_index))?;
-
-        let expected_type = self
-            .module
-            .types
-            .get(type_idx as usize)
-            .ok_or_else(|| format!("Expected type index {type_idx} out of bounds"))?;
-
-        if func_type.params != expected_type.params || func_type.results != expected_type.results {
-            return Err(format!(
-                "Function signature mismatch: expected {:?}->{:?}, got {:?}->{:?}",
-                expected_type.params, expected_type.results, func_type.params, func_type.results
-            ));
+        // Resolve defined function index for type checking
+        if (abs_func_idx as usize) < self.import_func_count {
+            // Imported function via indirect call – look up type from import
+            let import = &self.module.imports[abs_func_idx as usize];
+            if let ImportKind::Function(import_type_idx) = &import.kind {
+                let func_type = self
+                    .module
+                    .types
+                    .get(*import_type_idx as usize)
+                    .ok_or_else(|| format!("Import type index {import_type_idx} out of bounds"))?;
+                let expected_type = self
+                    .module
+                    .types
+                    .get(type_idx as usize)
+                    .ok_or_else(|| format!("Expected type index {type_idx} out of bounds"))?;
+                if func_type.params != expected_type.params
+                    || func_type.results != expected_type.results
+                {
+                    return Err("Function signature mismatch in call_indirect".into());
+                }
+            }
+        } else {
+            let defined_idx = abs_func_idx as usize - self.import_func_count;
+            let func = self
+                .module
+                .functions
+                .get(defined_idx)
+                .ok_or_else(|| format!("Function index {abs_func_idx} out of bounds"))?;
+            let func_type = self
+                .module
+                .types
+                .get(func.type_index as usize)
+                .ok_or_else(|| format!("Function type index {} out of bounds", func.type_index))?;
+            let expected_type = self
+                .module
+                .types
+                .get(type_idx as usize)
+                .ok_or_else(|| format!("Expected type index {type_idx} out of bounds"))?;
+            if func_type.params != expected_type.params
+                || func_type.results != expected_type.results
+            {
+                return Err("Function signature mismatch in call_indirect".into());
+            }
         }
 
-        self.call_function(*func_idx)?;
+        self.call_function(abs_func_idx)?;
         Ok(())
+    }
+
+    /// Dispatch an imported function call through the linker.
+    /// Arguments are already on the operand stack.
+    fn call_host_function(&mut self, func_idx: u32) -> Result<(), String> {
+        let idx = func_idx as usize;
+        let import = self
+            .module
+            .imports
+            .get(idx)
+            .ok_or_else(|| format!("Import index {idx} out of bounds"))?;
+
+        let type_idx = match &import.kind {
+            ImportKind::Function(ti) => *ti,
+            _ => return Err(format!("Import {idx} is not a function")),
+        };
+
+        let (param_count, result_count) = {
+            let ft = self
+                .module
+                .types
+                .get(type_idx as usize)
+                .ok_or_else(|| format!("Type index {type_idx} out of bounds"))?;
+            (ft.params.len(), ft.results.len())
+        };
+
+        let module_name = self.module.imports[idx].module.clone();
+        let func_name = self.module.imports[idx].name.clone();
+
+        let args = self.context.pop_n(param_count)?;
+
+        let linker = self
+            .linker
+            .as_ref()
+            .ok_or_else(|| format!("No linker: cannot call import {module_name}::{func_name}"))?;
+        let host_fn = linker
+            .get_import(&module_name, &func_name)
+            .ok_or_else(|| format!("Unresolved import: {module_name}::{func_name}"))?;
+
+        let results = host_fn.call(args, &mut self.context.memory)?;
+
+        if results.len() != result_count {
+            return Err(format!(
+                "Host function {module_name}::{func_name} returned {} values, expected {result_count}",
+                results.len()
+            ));
+        }
+        for v in results {
+            self.context.push(v);
+        }
+        Ok(())
+    }
+
+    /// Dispatch an imported function call with explicit arguments (for execute_with_args).
+    fn call_host_function_with_args(
+        &mut self,
+        func_idx: u32,
+        args: Vec<Value>,
+    ) -> Result<Vec<Value>, String> {
+        let idx = func_idx as usize;
+        let import = self
+            .module
+            .imports
+            .get(idx)
+            .ok_or_else(|| format!("Import index {idx} out of bounds"))?;
+
+        let module_name = import.module.clone();
+        let func_name = import.name.clone();
+
+        let linker = self
+            .linker
+            .as_ref()
+            .ok_or_else(|| format!("No linker: cannot call import {module_name}::{func_name}"))?;
+        let host_fn = linker
+            .get_import(&module_name, &func_name)
+            .ok_or_else(|| format!("Unresolved import: {module_name}::{func_name}"))?;
+
+        host_fn.call(args, &mut self.context.memory)
     }
 
     /// Dispatch instruction to handler
@@ -2808,24 +2938,30 @@ impl Executor {
         Ok(ControlFlow::Continue)
     }
 
-    /// Get reference to execution context
     pub fn context(&self) -> &ExecutionContext {
         &self.context
     }
 
-    /// Get mutable reference to execution context
     pub fn context_mut(&mut self) -> &mut ExecutionContext {
         &mut self.context
     }
 
-    /// Get reference to module
     pub fn module(&self) -> &Module {
         &self.module
     }
 
-    /// Get mutable reference to module
     pub fn module_mut(&mut self) -> &mut Module {
         &mut self.module
+    }
+
+    pub fn import_func_count(&self) -> usize {
+        self.import_func_count
+    }
+
+    /// Check whether an error string represents a WASI proc_exit.
+    pub fn is_proc_exit(err: &str) -> Option<i32> {
+        err.strip_prefix(WASI_PROC_EXIT_PREFIX)
+            .and_then(|code| code.parse().ok())
     }
 }
 

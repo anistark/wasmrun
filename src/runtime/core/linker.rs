@@ -1,22 +1,19 @@
 /// WASM module linker for imports and exports
-use super::module::Module;
+///
+/// Host functions receive linear memory access so WASI syscalls can
+/// read pointers and write results back into the module's address space.
+use super::memory::LinearMemory;
 use super::values::Value;
 use std::collections::HashMap;
 
-/// Trait for host functions that can be imported into WASM modules
 pub trait HostFunction: Send + Sync {
-    /// Execute the host function with given arguments
-    /// Arguments are on the stack, results should be pushed to stack
-    fn call(&self, args: Vec<Value>) -> Result<Vec<Value>, String>;
-
-    /// Get the function signature (param count, result count)
+    fn call(&self, args: Vec<Value>, memory: &mut LinearMemory) -> Result<Vec<Value>, String>;
     fn signature(&self) -> (usize, usize);
 }
 
-/// Simple host function implementation for closures
 pub struct ClosureHostFunction<F>
 where
-    F: Fn(Vec<Value>) -> Result<Vec<Value>, String> + Send + Sync,
+    F: Fn(Vec<Value>, &mut LinearMemory) -> Result<Vec<Value>, String> + Send + Sync,
 {
     func: F,
     params: usize,
@@ -25,7 +22,7 @@ where
 
 impl<F> ClosureHostFunction<F>
 where
-    F: Fn(Vec<Value>) -> Result<Vec<Value>, String> + Send + Sync,
+    F: Fn(Vec<Value>, &mut LinearMemory) -> Result<Vec<Value>, String> + Send + Sync,
 {
     pub fn new(func: F, params: usize, results: usize) -> Self {
         ClosureHostFunction {
@@ -38,10 +35,10 @@ where
 
 impl<F> HostFunction for ClosureHostFunction<F>
 where
-    F: Fn(Vec<Value>) -> Result<Vec<Value>, String> + Send + Sync,
+    F: Fn(Vec<Value>, &mut LinearMemory) -> Result<Vec<Value>, String> + Send + Sync,
 {
-    fn call(&self, args: Vec<Value>) -> Result<Vec<Value>, String> {
-        (self.func)(args)
+    fn call(&self, args: Vec<Value>, memory: &mut LinearMemory) -> Result<Vec<Value>, String> {
+        (self.func)(args, memory)
     }
 
     fn signature(&self) -> (usize, usize) {
@@ -60,29 +57,21 @@ impl Linker {
         }
     }
 
-    /// Register a host function with the linker
-    pub fn register(&mut self, name: String, func: Box<dyn HostFunction>) {
-        self.host_functions.insert(name, func);
+    /// Register a host function keyed by `"module::name"`.
+    pub fn register(&mut self, module: &str, name: &str, func: Box<dyn HostFunction>) {
+        let key = format!("{module}::{name}");
+        self.host_functions.insert(key, func);
     }
 
-    /// Get a host function by name
-    pub fn get(&self, name: &str) -> Option<&dyn HostFunction> {
-        self.host_functions.get(name).map(|b| b.as_ref())
+    /// Look up a host function by WASM import module and name.
+    pub fn get_import(&self, module: &str, name: &str) -> Option<&dyn HostFunction> {
+        let key = format!("{module}::{name}");
+        self.host_functions.get(&key).map(|b| b.as_ref())
     }
 
-    /// Check if a function is registered
-    pub fn has(&self, name: &str) -> bool {
-        self.host_functions.contains_key(name)
-    }
-
-    pub fn link_imports(&self, _module: &mut Module) -> Result<(), String> {
-        // TODO: Implement import linking for WASI and other host functions
-        Ok(())
-    }
-
-    pub fn get_exported_function(&self, _name: &str) -> Result<(), String> {
-        // TODO: Implement export resolution
-        Err("Export resolution not yet implemented".to_string())
+    pub fn has_import(&self, module: &str, name: &str) -> bool {
+        let key = format!("{module}::{name}");
+        self.host_functions.contains_key(&key)
     }
 }
 
@@ -91,95 +80,96 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_host_function_trait() {
+    fn test_host_function_with_memory() {
+        let mut memory = LinearMemory::new(1, None).unwrap();
+        memory.write_i32(100, 42).unwrap();
+
         let func = ClosureHostFunction::new(
-            |args| {
-                if args.len() != 2 {
-                    return Err("Expected 2 args".to_string());
-                }
-                match (&args[0], &args[1]) {
-                    (Value::I32(a), Value::I32(b)) => Ok(vec![Value::I32(a + b)]),
-                    _ => Err("Type mismatch".to_string()),
-                }
+            |_args, mem: &mut LinearMemory| {
+                let val = mem.read_i32(100)?;
+                Ok(vec![Value::I32(val)])
             },
-            2,
-            1,
-        );
-
-        let result = func.call(vec![Value::I32(5), Value::I32(3)]).unwrap();
-        assert_eq!(result[0], Value::I32(8));
-
-        let sig = func.signature();
-        assert_eq!(sig, (2, 1));
-    }
-
-    #[test]
-    fn test_linker_register_get() {
-        let mut linker = Linker::new();
-
-        let func = Box::new(ClosureHostFunction::new(
-            |_args| Ok(vec![Value::I32(42)]),
             0,
             1,
-        ));
+        );
 
-        linker.register("test_func".to_string(), func);
-
-        assert!(linker.has("test_func"));
-        assert!(!linker.has("other_func"));
-
-        let retrieved = linker.get("test_func");
-        assert!(retrieved.is_some());
-
-        if let Some(f) = retrieved {
-            let result = f.call(vec![]).unwrap();
-            assert_eq!(result[0], Value::I32(42));
-        }
+        let result = func.call(vec![], &mut memory).unwrap();
+        assert_eq!(result[0], Value::I32(42));
     }
 
     #[test]
-    fn test_linker_multiple_functions() {
+    fn test_host_function_writes_memory() {
+        let mut memory = LinearMemory::new(1, None).unwrap();
+
+        let func = ClosureHostFunction::new(
+            |args, mem: &mut LinearMemory| {
+                if let Value::I32(addr) = args[0] {
+                    mem.write_i32(addr as usize, 0xDEAD)?;
+                }
+                Ok(vec![])
+            },
+            1,
+            0,
+        );
+
+        func.call(vec![Value::I32(200)], &mut memory).unwrap();
+        assert_eq!(memory.read_i32(200).unwrap(), 0xDEAD);
+    }
+
+    #[test]
+    fn test_linker_register_and_lookup() {
+        let mut linker = Linker::new();
+        let mut memory = LinearMemory::new(1, None).unwrap();
+
+        linker.register(
+            "env",
+            "add",
+            Box::new(ClosureHostFunction::new(
+                |args, _mem: &mut LinearMemory| match (&args[0], &args[1]) {
+                    (Value::I32(a), Value::I32(b)) => Ok(vec![Value::I32(a + b)]),
+                    _ => Err("type error".into()),
+                },
+                2,
+                1,
+            )),
+        );
+
+        assert!(linker.has_import("env", "add"));
+        assert!(!linker.has_import("env", "sub"));
+
+        let f = linker.get_import("env", "add").unwrap();
+        let r = f
+            .call(vec![Value::I32(3), Value::I32(4)], &mut memory)
+            .unwrap();
+        assert_eq!(r[0], Value::I32(7));
+    }
+
+    #[test]
+    fn test_linker_multiple_modules() {
         let mut linker = Linker::new();
 
         linker.register(
-            "add".to_string(),
+            "wasi_snapshot_preview1",
+            "fd_write",
             Box::new(ClosureHostFunction::new(
-                |args| match (&args[0], &args[1]) {
-                    (Value::I32(a), Value::I32(b)) => Ok(vec![Value::I32(a + b)]),
-                    _ => Err("Type error".to_string()),
-                },
-                2,
+                |_args, _mem: &mut LinearMemory| Ok(vec![Value::I32(0)]),
+                4,
                 1,
             )),
         );
 
         linker.register(
-            "multiply".to_string(),
+            "env",
+            "log",
             Box::new(ClosureHostFunction::new(
-                |args| match (&args[0], &args[1]) {
-                    (Value::I32(a), Value::I32(b)) => Ok(vec![Value::I32(a * b)]),
-                    _ => Err("Type error".to_string()),
-                },
-                2,
+                |_args, _mem: &mut LinearMemory| Ok(vec![]),
                 1,
+                0,
             )),
         );
 
-        assert_eq!(
-            linker
-                .get("add")
-                .unwrap()
-                .call(vec![Value::I32(10), Value::I32(5)])
-                .unwrap()[0],
-            Value::I32(15)
-        );
-        assert_eq!(
-            linker
-                .get("multiply")
-                .unwrap()
-                .call(vec![Value::I32(10), Value::I32(5)])
-                .unwrap()[0],
-            Value::I32(50)
-        );
+        assert!(linker.has_import("wasi_snapshot_preview1", "fd_write"));
+        assert!(linker.has_import("env", "log"));
+        assert!(!linker.has_import("wasi_snapshot_preview1", "log"));
     }
 }

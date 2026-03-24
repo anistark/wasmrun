@@ -1,57 +1,65 @@
-//! WASI (WebAssembly System Interface) integration for native runtime
+//! WASI (WebAssembly System Interface) integration
 //!
-//! This module provides WASI syscall implementations that can be imported into WASM modules
+//! Registers memory-bridged host functions so the executor can dispatch
+//! WASI imports through the linker.
 
 pub mod syscalls;
 
+use crate::runtime::core::executor::WASI_PROC_EXIT_PREFIX;
 use crate::runtime::core::linker::{ClosureHostFunction, Linker};
 use crate::runtime::core::values::Value;
 use std::sync::{Arc, Mutex};
 
-/// WASI environment containing syscall state
-#[allow(dead_code)]
 pub struct WasiEnv {
     args: Vec<String>,
     env_vars: Vec<(String, String)>,
-    stdout: Arc<Mutex<Vec<u8>>>,
-    stderr: Arc<Mutex<Vec<u8>>>,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
 }
 
 impl WasiEnv {
-    /// Create a new WASI environment
     pub fn new() -> Self {
         WasiEnv {
             args: Vec::new(),
             env_vars: Vec::new(),
-            stdout: Arc::new(Mutex::new(Vec::new())),
-            stderr: Arc::new(Mutex::new(Vec::new())),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
         }
     }
 
-    /// Set command-line arguments
-    #[allow(dead_code)]
     pub fn with_args(mut self, args: Vec<String>) -> Self {
         self.args = args;
         self
     }
 
-    /// Add an environment variable
     #[allow(dead_code)]
     pub fn with_env(mut self, key: String, value: String) -> Self {
         self.env_vars.push((key, value));
         self
     }
 
-    /// Get stdout content
-    #[allow(dead_code)]
-    pub fn get_stdout(&self) -> Vec<u8> {
-        self.stdout.lock().unwrap().clone()
+    pub fn args(&self) -> &[String] {
+        &self.args
     }
 
-    /// Get stderr content
-    #[allow(dead_code)]
+    pub fn env_vars(&self) -> &[(String, String)] {
+        &self.env_vars
+    }
+
+    pub fn get_stdout(&self) -> Vec<u8> {
+        self.stdout.clone()
+    }
+
     pub fn get_stderr(&self) -> Vec<u8> {
-        self.stderr.lock().unwrap().clone()
+        self.stderr.clone()
+    }
+
+    pub fn stdout_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.stdout
+    }
+
+    pub fn stderr_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.stderr
     }
 }
 
@@ -61,162 +69,271 @@ impl Default for WasiEnv {
     }
 }
 
-/// Create a WASI linker with all syscalls registered
-#[allow(dead_code)]
-pub fn create_wasi_linker(_env: Arc<Mutex<WasiEnv>>) -> Linker {
+const WASI_MODULE: &str = "wasi_snapshot_preview1";
+
+/// Build a [`Linker`] with all supported WASI syscalls registered.
+pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
     let mut linker = Linker::new();
 
-    // Register proc_exit syscall (1 arg: exit code, 0 returns)
+    // ── fd_write ──────────────────────────────────────────────
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "fd_write",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let fd = i32_arg(&args, 0)? as u32;
+                    let iovs_ptr = i32_arg(&args, 1)? as u32;
+                    let iovs_len = i32_arg(&args, 2)? as u32;
+                    let nwritten_ptr = i32_arg(&args, 3)? as u32;
+                    let errno = syscalls::fd_write(fd, iovs_ptr, iovs_len, nwritten_ptr, mem, &env);
+                    Ok(vec![Value::I32(errno)])
+                },
+                4,
+                1,
+            )),
+        );
+    }
+
+    // ── fd_read ───────────────────────────────────────────────
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "fd_read",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let fd = i32_arg(&args, 0)? as u32;
+                    let iovs_ptr = i32_arg(&args, 1)? as u32;
+                    let iovs_len = i32_arg(&args, 2)? as u32;
+                    let nread_ptr = i32_arg(&args, 3)? as u32;
+                    let errno = syscalls::fd_read(fd, iovs_ptr, iovs_len, nread_ptr, mem, &env);
+                    Ok(vec![Value::I32(errno)])
+                },
+                4,
+                1,
+            )),
+        );
+    }
+
+    // ── fd_close ──────────────────────────────────────────────
     linker.register(
-        "proc_exit".to_string(),
+        WASI_MODULE,
+        "fd_close",
         Box::new(ClosureHostFunction::new(
-            |args| {
-                if args.is_empty() {
-                    return Ok(vec![]);
-                }
-                match &args[0] {
-                    Value::I32(_code) => {
-                        // In a real implementation, this would exit the process
-                        // For now, we just return success
-                        Ok(vec![])
-                    }
-                    _ => Err("proc_exit expects i32 exit code".to_string()),
-                }
+            |args, _mem| {
+                let fd = i32_arg(&args, 0)? as u32;
+                Ok(vec![Value::I32(syscalls::fd_close(fd))])
             },
             1,
-            0,
+            1,
         )),
     );
 
-    // Register fd_write syscall (4 args: fd, iov_ptr, iov_count, nwritten_ptr; 1 return: errno)
+    // ── fd_seek ───────────────────────────────────────────────
     linker.register(
-        "fd_write".to_string(),
+        WASI_MODULE,
+        "fd_seek",
         Box::new(ClosureHostFunction::new(
-            |args| {
-                if args.len() < 4 {
-                    return Ok(vec![Value::I32(syscalls::WASI_EINVAL)]);
-                }
-                let fd = match &args[0] {
-                    Value::I32(v) => *v as u32,
-                    _ => return Ok(vec![Value::I32(syscalls::WASI_EBADF)]),
-                };
-                Ok(vec![Value::I32(
-                    syscalls::fd_write(fd, 0, 0, 0).unwrap_or(syscalls::WASI_EIO),
-                )])
+            |args, mem| {
+                let fd = i32_arg(&args, 0)? as u32;
+                let offset = i64_arg(&args, 1)?;
+                let whence = i32_arg(&args, 2)? as u32;
+                let newoffset_ptr = i32_arg(&args, 3)? as u32;
+                let errno = syscalls::fd_seek(fd, offset, whence, newoffset_ptr, mem);
+                Ok(vec![Value::I32(errno)])
             },
             4,
             1,
         )),
     );
 
-    // Register fd_read syscall (4 args: fd, iov_ptr, iov_count, nread_ptr; 1 return: errno)
+    // ── fd_fdstat_get ─────────────────────────────────────────
     linker.register(
-        "fd_read".to_string(),
+        WASI_MODULE,
+        "fd_fdstat_get",
         Box::new(ClosureHostFunction::new(
-            |args| {
-                if args.len() < 4 {
-                    return Ok(vec![Value::I32(syscalls::WASI_EINVAL)]);
-                }
-                let fd = match &args[0] {
-                    Value::I32(v) => *v as u32,
-                    _ => return Ok(vec![Value::I32(syscalls::WASI_EBADF)]),
-                };
-                Ok(vec![Value::I32(
-                    syscalls::fd_read(fd, 0, 0, 0).unwrap_or(syscalls::WASI_EIO),
-                )])
-            },
-            4,
-            1,
-        )),
-    );
-
-    // Register environ_sizes_get syscall (2 args: count_ptr, buf_size_ptr; 1 return: errno)
-    linker.register(
-        "environ_sizes_get".to_string(),
-        Box::new(ClosureHostFunction::new(
-            |_args| {
-                Ok(vec![Value::I32(
-                    syscalls::environ_sizes_get(0, 0).unwrap_or(syscalls::WASI_EIO),
-                )])
+            |args, mem| {
+                let fd = i32_arg(&args, 0)? as u32;
+                let stat_ptr = i32_arg(&args, 1)? as u32;
+                Ok(vec![Value::I32(syscalls::fd_fdstat_get(fd, stat_ptr, mem))])
             },
             2,
             1,
         )),
     );
 
-    // Register environ_get syscall (2 args: environ_ptr, buf_size; 1 return: errno)
+    // ── fd_prestat_get ────────────────────────────────────────
     linker.register(
-        "environ_get".to_string(),
+        WASI_MODULE,
+        "fd_prestat_get",
         Box::new(ClosureHostFunction::new(
-            |_args| {
-                Ok(vec![Value::I32(
-                    syscalls::environ_get(0, 0).unwrap_or(syscalls::WASI_EIO),
-                )])
+            |args, _mem| {
+                let fd = i32_arg(&args, 0)? as u32;
+                Ok(vec![Value::I32(syscalls::fd_prestat_get(fd))])
             },
             2,
             1,
         )),
     );
 
-    // Register args_sizes_get syscall (2 args: count_ptr, buf_size_ptr; 1 return: errno)
+    // ── fd_prestat_dir_name ───────────────────────────────────
     linker.register(
-        "args_sizes_get".to_string(),
+        WASI_MODULE,
+        "fd_prestat_dir_name",
         Box::new(ClosureHostFunction::new(
-            |_args| {
-                Ok(vec![Value::I32(
-                    syscalls::args_sizes_get(0, 0).unwrap_or(syscalls::WASI_EIO),
-                )])
-            },
-            2,
-            1,
-        )),
-    );
-
-    // Register args_get syscall (2 args: argv_ptr, buf_size; 1 return: errno)
-    linker.register(
-        "args_get".to_string(),
-        Box::new(ClosureHostFunction::new(
-            |_args| {
-                Ok(vec![Value::I32(
-                    syscalls::args_get(0, 0).unwrap_or(syscalls::WASI_EIO),
-                )])
-            },
-            2,
-            1,
-        )),
-    );
-
-    // Register clock_time_get syscall (3 args: clock_id, precision, time_ptr; 1 return: errno)
-    linker.register(
-        "clock_time_get".to_string(),
-        Box::new(ClosureHostFunction::new(
-            |args| {
-                if args.len() < 3 {
-                    return Ok(vec![Value::I32(syscalls::WASI_EINVAL)]);
-                }
-                let clock_id = match &args[0] {
-                    Value::I32(v) => *v as u32,
-                    _ => return Ok(vec![Value::I32(syscalls::WASI_EINVAL)]),
-                };
-                Ok(vec![Value::I32(
-                    syscalls::clock_time_get(clock_id, 0, 0).unwrap_or(syscalls::WASI_EIO),
-                )])
+            |args, _mem| {
+                let fd = i32_arg(&args, 0)? as u32;
+                Ok(vec![Value::I32(syscalls::fd_prestat_dir_name(fd))])
             },
             3,
             1,
         )),
     );
 
-    // Register random_get syscall (2 args: buf_ptr, buf_len; 1 return: errno)
+    // ── args_sizes_get ────────────────────────────────────────
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "args_sizes_get",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let count_ptr = i32_arg(&args, 0)? as u32;
+                    let buf_size_ptr = i32_arg(&args, 1)? as u32;
+                    let errno = syscalls::args_sizes_get(count_ptr, buf_size_ptr, mem, &env);
+                    Ok(vec![Value::I32(errno)])
+                },
+                2,
+                1,
+            )),
+        );
+    }
+
+    // ── args_get ──────────────────────────────────────────────
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "args_get",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let argv_ptr = i32_arg(&args, 0)? as u32;
+                    let argv_buf_ptr = i32_arg(&args, 1)? as u32;
+                    let errno = syscalls::args_get(argv_ptr, argv_buf_ptr, mem, &env);
+                    Ok(vec![Value::I32(errno)])
+                },
+                2,
+                1,
+            )),
+        );
+    }
+
+    // ── environ_sizes_get ─────────────────────────────────────
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "environ_sizes_get",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let count_ptr = i32_arg(&args, 0)? as u32;
+                    let buf_size_ptr = i32_arg(&args, 1)? as u32;
+                    let errno = syscalls::environ_sizes_get(count_ptr, buf_size_ptr, mem, &env);
+                    Ok(vec![Value::I32(errno)])
+                },
+                2,
+                1,
+            )),
+        );
+    }
+
+    // ── environ_get ───────────────────────────────────────────
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "environ_get",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let environ_ptr = i32_arg(&args, 0)? as u32;
+                    let environ_buf_ptr = i32_arg(&args, 1)? as u32;
+                    let errno = syscalls::environ_get(environ_ptr, environ_buf_ptr, mem, &env);
+                    Ok(vec![Value::I32(errno)])
+                },
+                2,
+                1,
+            )),
+        );
+    }
+
+    // ── clock_time_get ────────────────────────────────────────
     linker.register(
-        "random_get".to_string(),
+        WASI_MODULE,
+        "clock_time_get",
         Box::new(ClosureHostFunction::new(
-            |_args| {
-                Ok(vec![Value::I32(
-                    syscalls::random_get(0, 0).unwrap_or(syscalls::WASI_EIO),
-                )])
+            |args, mem| {
+                let clock_id = i32_arg(&args, 0)? as u32;
+                let precision = i64_arg(&args, 1)?;
+                let time_ptr = i32_arg(&args, 2)? as u32;
+                let errno = syscalls::clock_time_get(clock_id, precision, time_ptr, mem);
+                Ok(vec![Value::I32(errno)])
+            },
+            3,
+            1,
+        )),
+    );
+
+    // ── random_get ────────────────────────────────────────────
+    linker.register(
+        WASI_MODULE,
+        "random_get",
+        Box::new(ClosureHostFunction::new(
+            |args, mem| {
+                let buf_ptr = i32_arg(&args, 0)? as u32;
+                let buf_len = i32_arg(&args, 1)? as u32;
+                Ok(vec![Value::I32(syscalls::random_get(
+                    buf_ptr, buf_len, mem,
+                ))])
             },
             2,
+            1,
+        )),
+    );
+
+    // ── proc_exit ─────────────────────────────────────────────
+    linker.register(
+        WASI_MODULE,
+        "proc_exit",
+        Box::new(ClosureHostFunction::new(
+            |args, _mem| {
+                let code = i32_arg(&args, 0)?;
+                Err(format!("{WASI_PROC_EXIT_PREFIX}{code}"))
+            },
+            1,
+            0,
+        )),
+    );
+
+    // ── poll_oneoff (stub) ────────────────────────────────────
+    linker.register(
+        WASI_MODULE,
+        "poll_oneoff",
+        Box::new(ClosureHostFunction::new(
+            |_args, _mem| Ok(vec![Value::I32(syscalls::WASI_ENOSYS)]),
+            4,
+            1,
+        )),
+    );
+
+    // ── sched_yield (stub) ────────────────────────────────────
+    linker.register(
+        WASI_MODULE,
+        "sched_yield",
+        Box::new(ClosureHostFunction::new(
+            |_args, _mem| Ok(vec![Value::I32(syscalls::WASI_ESUCCESS)]),
+            0,
             1,
         )),
     );
@@ -224,64 +341,119 @@ pub fn create_wasi_linker(_env: Arc<Mutex<WasiEnv>>) -> Linker {
     linker
 }
 
+fn i32_arg(args: &[Value], idx: usize) -> Result<i32, String> {
+    match args.get(idx) {
+        Some(Value::I32(v)) => Ok(*v),
+        Some(other) => Err(format!("Expected i32 at arg {idx}, got {other:?}")),
+        None => Err(format!("Missing arg {idx}")),
+    }
+}
+
+fn i64_arg(args: &[Value], idx: usize) -> Result<i64, String> {
+    match args.get(idx) {
+        Some(Value::I64(v)) => Ok(*v),
+        // Many WASI calls pass i32 where i64 is expected
+        Some(Value::I32(v)) => Ok(*v as i64),
+        Some(other) => Err(format!("Expected i64 at arg {idx}, got {other:?}")),
+        None => Err(format!("Missing arg {idx}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::core::memory::LinearMemory;
 
     #[test]
-    fn test_wasi_env_creation() {
-        let env = WasiEnv::new();
-        assert_eq!(env.args.len(), 0);
-        assert_eq!(env.env_vars.len(), 0);
-    }
-
-    #[test]
-    fn test_wasi_env_with_args() {
-        let env = WasiEnv::new()
-            .with_args(vec!["prog".to_string(), "arg1".to_string()])
-            .with_env("VAR".to_string(), "value".to_string());
-
-        assert_eq!(env.args.len(), 2);
-        assert_eq!(env.env_vars.len(), 1);
-    }
-
-    #[test]
-    fn test_wasi_linker_creation() {
+    fn test_wasi_linker_has_all_syscalls() {
         let env = Arc::new(Mutex::new(WasiEnv::new()));
         let linker = create_wasi_linker(env);
 
-        assert!(linker.has("proc_exit"));
-        assert!(linker.has("fd_write"));
-        assert!(linker.has("fd_read"));
-        assert!(linker.has("environ_get"));
-        assert!(linker.has("environ_sizes_get"));
-        assert!(linker.has("args_get"));
-        assert!(linker.has("args_sizes_get"));
-        assert!(linker.has("clock_time_get"));
-        assert!(linker.has("random_get"));
+        let expected = [
+            "fd_write",
+            "fd_read",
+            "fd_close",
+            "fd_seek",
+            "fd_fdstat_get",
+            "fd_prestat_get",
+            "fd_prestat_dir_name",
+            "args_sizes_get",
+            "args_get",
+            "environ_sizes_get",
+            "environ_get",
+            "clock_time_get",
+            "random_get",
+            "proc_exit",
+            "poll_oneoff",
+            "sched_yield",
+        ];
+
+        for name in &expected {
+            assert!(
+                linker.has_import(WASI_MODULE, name),
+                "Missing syscall: {name}"
+            );
+        }
     }
 
     #[test]
-    fn test_wasi_env_get_stdout() {
-        let env = WasiEnv::new();
-        let stdout = env.get_stdout();
-        assert!(stdout.is_empty());
+    fn test_fd_write_via_linker() {
+        let env = Arc::new(Mutex::new(WasiEnv::new()));
+        let linker = create_wasi_linker(env.clone());
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        // Set up "Hi" at offset 100, iovec at 0
+        mem.write_bytes(100, b"Hi").unwrap();
+        mem.write_i32(0, 100).unwrap(); // buf_ptr
+        mem.write_i32(4, 2).unwrap(); // buf_len
+
+        let host_fn = linker.get_import(WASI_MODULE, "fd_write").unwrap();
+        let result = host_fn
+            .call(
+                vec![
+                    Value::I32(1),  // fd = stdout
+                    Value::I32(0),  // iovs
+                    Value::I32(1),  // iovs_len
+                    Value::I32(16), // nwritten
+                ],
+                &mut mem,
+            )
+            .unwrap();
+
+        assert_eq!(result[0], Value::I32(0)); // ESUCCESS
+        assert_eq!(mem.read_i32(16).unwrap(), 2);
+        assert_eq!(env.lock().unwrap().get_stdout(), b"Hi");
     }
 
     #[test]
-    fn test_wasi_env_get_stderr() {
-        let env = WasiEnv::new();
-        let stderr = env.get_stderr();
-        assert!(stderr.is_empty());
+    fn test_proc_exit_via_linker() {
+        let env = Arc::new(Mutex::new(WasiEnv::new()));
+        let linker = create_wasi_linker(env);
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        let host_fn = linker.get_import(WASI_MODULE, "proc_exit").unwrap();
+        let result = host_fn.call(vec![Value::I32(42)], &mut mem);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.starts_with(WASI_PROC_EXIT_PREFIX));
+        let code: i32 = err
+            .strip_prefix(WASI_PROC_EXIT_PREFIX)
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(code, 42);
     }
 
     #[test]
-    fn test_wasi_env_with_multiple_env_vars() {
+    fn test_wasi_env_builder() {
         let env = WasiEnv::new()
-            .with_env("VAR1".to_string(), "value1".to_string())
-            .with_env("VAR2".to_string(), "value2".to_string())
-            .with_env("VAR3".to_string(), "value3".to_string());
+            .with_args(vec!["prog".into(), "a".into()])
+            .with_env("K".into(), "V".into());
 
-        assert_eq!(env.env_vars.len(), 3);
+        assert_eq!(env.args(), &["prog", "a"]);
+        assert_eq!(env.env_vars(), &[("K".into(), "V".into())]);
+        assert!(env.get_stdout().is_empty());
+        assert!(env.get_stderr().is_empty());
     }
 }

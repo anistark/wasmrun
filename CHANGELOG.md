@@ -8,11 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Linker-Executor Integration**: Host functions can now read/write WASM linear memory
+  - `HostFunction::call()` receives `&mut LinearMemory` for direct memory access
+  - `Executor` accepts an optional `Linker` via `new_with_linker()`
+  - Imported function calls (`Call` instruction) dispatch through the linker when `func_idx < import_count`
+  - Defined function index adjusted by import count throughout executor (fixes incorrect indexing with imports)
+  - Imported memory specifications respected during executor initialization
+  - `call_indirect` correctly handles both imported and defined function targets
+
+- **WASI Memory-Bridged Syscalls**: WASI syscalls now read/write the module's linear memory
+  - `fd_write`: reads iovec structs from memory, captures bytes to `WasiEnv` stdout/stderr buffers
+  - `fd_read`: writes data into memory iovecs (returns EOF for non-interactive stdin)
+  - `fd_close`: closes file descriptors
+  - `fd_seek`: seek on file descriptors (returns 0 for character devices)
+  - `fd_fdstat_get`: writes 24-byte fdstat struct to memory (filetype, flags, rights)
+  - `fd_prestat_get` / `fd_prestat_dir_name`: returns EBADF (no preopened directories yet)
+  - `args_sizes_get` / `args_get`: writes real argument data from `WasiEnv` to memory
+  - `environ_sizes_get` / `environ_get`: writes real environment variables to memory
+  - `clock_time_get`: writes nanosecond timestamp to memory
+  - `random_get`: fills memory buffer with pseudo-random bytes
+  - `proc_exit`: signals clean process termination with exit code propagation
+  - `poll_oneoff`: stub returning ENOSYS
+  - `sched_yield`: stub returning success
+  - All syscalls registered under `wasi_snapshot_preview1` module namespace
+  - End-to-end: hand-built WASM module prints "Hello, World!\n" via fd_write with captured output
+
 - **Data Section Initialization**: WASM data segments are now loaded into linear memory during module initialization
   - Active data segments evaluated via constant expressions (i32.const, i64.const offsets)
   - Passive data segments correctly skipped (reserved for future memory.init support)
   - Bounds checking with clear error messages for out-of-range segments
-  - 4 new unit tests for data segment loading, multiple segments, out-of-bounds, and passive segments
 
 - **Type Conversion Instructions**: All 21 WASM type conversion instructions now fully implemented
   - Integer truncations: `i32.wrap_i64`, `i32.trunc_f32_s/u`, `i32.trunc_f64_s/u`, `i64.trunc_f32_s/u`, `i64.trunc_f64_s/u`
@@ -22,12 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Reinterpretations: `i32.reinterpret_f32`, `i64.reinterpret_f64`, `f32.reinterpret_i32`, `f64.reinterpret_i64`
   - Proper NaN and overflow trap handling for truncation instructions
   - `select` instruction (conditional ternary on stack)
-  - 11 new unit tests covering conversions, reinterpretations, NaN traps, and overflow
 
 - **br_table Instruction**: Switch/case dispatch via branch tables
   - Pops index from stack, selects target label from table, branches to it
   - Out-of-range index correctly falls through to default label
-  - 2 new unit tests for case selection and default fallback
 
 ### Fixed
 - **Opcode Mapping**: Corrected WASM spec opcode assignments for f32/f64 instructions
