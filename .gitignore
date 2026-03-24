@@ -21,6 +21,4 @@ ui/node_modules
 ui/dist
 
 # Custom files
-NOTES.md
-*_IMPLEMENTATION.md
-ROADMAP.md
+plan/
