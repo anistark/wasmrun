@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WASI Filesystem Syscalls**: Full filesystem I/O through WASI Preview 1 interface
+  - `fd_prestat_get` / `fd_prestat_dir_name`: preopened directory discovery with real guest paths
+  - `path_open`: open/create files and directories with O_CREAT, O_DIRECTORY, O_EXCL, O_TRUNC flags
+  - `path_filestat_get` / `fd_filestat_get`: stat files and directories (64-byte filestat struct)
+  - `path_create_directory`: create directories via WASI
+  - `path_unlink_file`: delete files via WASI
+  - `path_remove_directory`: remove empty directories
+  - `path_rename`: rename files and directories
+  - `fd_readdir`: read directory entries with dirent structs and cookie-based pagination
+  - `fd_write` to file descriptors: write data to opened files at tracked offsets
+  - `fd_read` from file descriptors: read file contents via iovec structs with offset tracking
+  - `fd_seek`: seek on file descriptors with SET/CUR/END whence
+  - `fd_close`: close file descriptors with fd table cleanup
+  - `fd_fdstat_get`: returns correct filetype for files, directories, and character devices
+  - Per-session fd table with stdin/stdout/stderr + preopened directories
+  - `WasiEnv::with_preopen()`: configure preopened directories for sandboxed filesystem access
+  - Path traversal prevention via canonicalization checks
+  - All filesystem syscalls registered in linker under `wasi_snapshot_preview1`
+
+### Changed
+- `WasiEnv` now manages an fd table tracking open files, preopened directories, and file offsets
+- `fd_close`, `fd_seek`, `fd_fdstat_get` now operate through the fd table (support file fds, not just stdio)
+- `fd_prestat_get` upgraded from stub (EBADF) to real preopened directory support
+- `fd_prestat_dir_name` upgraded from stub to writing actual guest path names to memory
+
 - **Linker-Executor Integration**: Host functions can now read/write WASM linear memory
   - `HostFunction::call()` receives `&mut LinearMemory` for direct memory access
   - `Executor` accepts an optional `Linker` via `new_with_linker()`

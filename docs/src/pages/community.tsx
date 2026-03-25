@@ -21,6 +21,9 @@ type Talk = {
 
 const maintainerUsernames = ['anistark', 'farhaanbukhsh'];
 
+// Bot accounts to exclude from the contributors list
+const excludedUsernames = ['dependabot[bot]', 'dependabot'];
+
 const maintainerRoles: Record<string, string> = {
   anistark: 'Core Maintainer',
   farhaanbukhsh: 'Core Maintainer',
@@ -152,7 +155,9 @@ export default function Community(): ReactNode {
   }, []);
 
   const maintainers = allContributors.filter(c => maintainerUsernames.includes(c.login));
-  const contributors = allContributors.filter(c => !maintainerUsernames.includes(c.login));
+  const contributors = allContributors.filter(
+    c => !maintainerUsernames.includes(c.login) && !excludedUsernames.includes(c.login),
+  );
 
   return (
     <Layout
