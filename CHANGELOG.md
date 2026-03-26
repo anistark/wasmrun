@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Agent Session Management**: Foundation for AI agent sandbox mode
+  - `Session` struct: isolated WASM sandbox with per-session WASI environment, filesystem, and output buffers
+  - `SessionManager`: thread-safe session lifecycle management (create, get, destroy, list)
+  - Session ID generation via xorshift64-based random hex strings (32-char)
+  - Per-session isolated temp directory with WASI preopen at `/`
+  - Configurable idle timeout with automatic expiry detection
+  - Background cleanup thread for expired session removal
+  - Max concurrent sessions enforcement
+  - `SessionConfig`: configurable timeout, max sessions, cleanup interval
+  - `WasiEnv::add_env()`, `clear_stdout()`, `clear_stderr()` for session-level control
 - **WASI Filesystem Syscalls**: Full filesystem I/O through WASI Preview 1 interface
   - `fd_prestat_get` / `fd_prestat_dir_name`: preopened directory discovery with real guest paths
   - `path_open`: open/create files and directories with O_CREAT, O_DIRECTORY, O_EXCL, O_TRUNC flags
