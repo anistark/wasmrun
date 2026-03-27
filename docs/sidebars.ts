@@ -54,6 +54,18 @@ const sidebars: SidebarsConfig = {
           ],
         },
         'exec/wasi',
+        {
+          type: 'category',
+          label: 'Agent API',
+          collapsed: true,
+          link: { type: 'doc', id: 'exec/agent' },
+          items: [
+            'exec/usage/agent-sessions',
+            'exec/usage/agent-exec',
+            'exec/usage/agent-files',
+            'exec/usage/agent-environment',
+          ],
+        },
       ],
     },
   ],

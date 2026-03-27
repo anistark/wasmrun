@@ -270,6 +270,53 @@ pub enum Commands {
         allow_cors: bool,
     },
 
+    /// Start the agent sandbox API server for AI agents
+    Agent {
+        /// Server port (default: 8430)
+        #[arg(
+            short = 'P',
+            long,
+            default_value_t = 8430,
+            value_parser = clap::value_parser!(u16).range(1..=65535),
+            help = "Agent API server port"
+        )]
+        port: u16,
+
+        /// Default session timeout in seconds (default: 300)
+        #[arg(
+            short = 't',
+            long,
+            default_value_t = 300,
+            help = "Default idle timeout per session (seconds)"
+        )]
+        timeout: u64,
+
+        /// Maximum concurrent sessions (default: 100)
+        #[arg(
+            short = 'm',
+            long,
+            default_value_t = 100,
+            help = "Maximum number of concurrent sandbox sessions"
+        )]
+        max_sessions: usize,
+
+        /// Memory limit per session in MB (default: 256)
+        #[arg(
+            long,
+            default_value_t = 256,
+            help = "Maximum linear memory per session (MB)"
+        )]
+        max_memory: u32,
+
+        /// Allow wildcard CORS (Access-Control-Allow-Origin: *)
+        #[arg(long, help = "Allow cross-origin requests from any domain")]
+        allow_cors: bool,
+
+        /// Enable verbose request logging
+        #[arg(short = 'v', long, help = "Log all incoming requests")]
+        verbose: bool,
+    },
+
     /// Plugin management commands
     #[command(subcommand)]
     Plugin(PluginSubcommands),
@@ -505,6 +552,7 @@ impl CommandArgs for Commands {
             //     name.clone()
             //         .unwrap_or_else(|| "my-wasmrun-project".to_string())
             // }),
+            Commands::Agent { .. } => "./".to_string(),
             Commands::Plugin(_) => "./".to_string(),
             Commands::Stop => "./".to_string(),
         }

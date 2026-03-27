@@ -7,13 +7,15 @@ fn main() {
     println!("cargo:rerun-if-changed=ui/package.json");
     println!("cargo:rerun-if-changed=ui/vite.config.ts");
 
+    let templates_dir = Path::new("templates");
+
     if env::var("SKIP_UI_BUILD").is_ok() {
         eprintln!("Skipping UI build (SKIP_UI_BUILD set)");
+        ensure_stub_templates(templates_dir);
         return;
     }
 
     let ui_dir = Path::new("ui");
-    let templates_dir = Path::new("templates");
     let ui_package_json = ui_dir.join("package.json");
 
     // Skip UI build if templates already exist and UI source is not available
@@ -26,7 +28,8 @@ fn main() {
             eprintln!("UI source not found but templates exist, skipping UI build");
             return;
         } else {
-            eprintln!("UI source not found, skipping UI build");
+            eprintln!("UI source not found, creating stub templates");
+            ensure_stub_templates(templates_dir);
             return;
         }
     }
@@ -224,6 +227,49 @@ fn fix_html_references(html_path: &Path) {
         }
 
         let _ = fs::write(html_path, updated);
+    }
+}
+
+/// Create minimal stub template files so `include_str!`/`include_bytes!` in
+/// source code compile even when the real UI build is skipped.
+fn ensure_stub_templates(templates_dir: &Path) {
+    use std::fs;
+
+    let stubs = [
+        ("app/index.html", "<!-- stub -->"),
+        ("app/scripts.js", "// stub"),
+        ("app/style.css", "/* stub */"),
+        ("console/index.html", "<!-- stub -->"),
+        ("console/scripts.js", "// stub"),
+        ("console/style.css", "/* stub */"),
+        ("os/index.html", "<!-- stub -->"),
+        ("os/os.js", "// stub"),
+        ("os/index.css", "/* stub */"),
+        ("os/logging.js", "// stub"),
+        ("os/logs.html", "<!-- stub -->"),
+    ];
+
+    for (path, content) in &stubs {
+        let full = templates_dir.join(path);
+        if !full.exists() {
+            if let Some(parent) = full.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let _ = fs::write(&full, content);
+        }
+    }
+
+    // Stub binary assets
+    let assets = ["assets/logo.png", "assets/logo-text.png"];
+    for path in &assets {
+        let full = templates_dir.join(path);
+        if !full.exists() {
+            if let Some(parent) = full.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            // Minimal 1x1 transparent PNG
+            let _ = fs::write(&full, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        }
     }
 }
 

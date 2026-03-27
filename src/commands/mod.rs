@@ -1,3 +1,4 @@
+mod agent;
 mod clean;
 mod compile;
 mod exec;
@@ -10,6 +11,7 @@ mod run;
 mod stop;
 mod verify;
 
+pub use agent::handle_agent_command;
 pub use clean::handle_clean_command;
 pub use compile::handle_compile_command;
 pub use exec::handle_exec_command;

@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Agent Tool Schemas for LLM Agents**: Function-calling definitions for AI agent integration
+  - `GET /api/v1/tools` — returns tool definitions for LLM function calling
+  - `?format=openai` (default) — OpenAI function-calling format
+  - `?format=anthropic` — Anthropic tool-use format
+  - Tools: `create_session`, `execute_code`, `write_file`, `read_file`, `list_files`, `destroy_session`
+  - Schemas include descriptions, parameter types, required fields
+- **Agent CLI enhancements**:
+  - `--max-memory` flag: per-session linear memory limit in MB (default: 256)
+  - Startup banner with full endpoint listing
+  - Graceful shutdown on Ctrl+C with session cleanup
+- **Agent REST API Server**: HTTP server for AI agent sandbox management
+  - `wasmrun agent` CLI command to start the agent API server
+  - `POST /api/v1/sessions` — create isolated sandbox sessions
+  - `GET /api/v1/sessions/:id` — get session status (state, uptime, timeout)
+  - `DELETE /api/v1/sessions/:id` — destroy session and clean up resources
+  - `POST /api/v1/sessions/:id/exec` — execute WASM in session with structured output capture
+    - Accepts `wasm_path`, `function`, `args`, `timeout`, `env` parameters
+    - Returns `stdout`, `stderr`, `exit_code`, `duration_ms`
+    - Thread-based timeout enforcement per execution
+  - `POST /api/v1/sessions/:id/files` — write files to session filesystem
+  - `GET /api/v1/sessions/:id/files?path=...` — read file content
+  - `GET /api/v1/sessions/:id/files?path=...&list=true` — list directory entries
+  - `DELETE /api/v1/sessions/:id/files?path=...` — delete files or directories
+  - `POST /api/v1/sessions/:id/env` — set environment variables
+  - `GET /api/v1/sessions/:id/env` — get current environment variables
+  - CORS headers (configurable via `--allow-cors`)
+  - JSON error responses with consistent format and HTTP status codes
+  - Path traversal prevention on all file operations
+  - `execute_wasm_bytes_with_env()` — exec mode API for running WASM with an existing WasiEnv
+  - `WasiEnv::set_args()` — set WASM program arguments on existing environment
+  - CLI flags: `--port`, `--timeout`, `--max-sessions`, `--allow-cors`, `--verbose`
 - **Agent Session Management**: Foundation for AI agent sandbox mode
   - `Session` struct: isolated WASM sandbox with per-session WASI environment, filesystem, and output buffers
   - `SessionManager`: thread-safe session lifecycle management (create, get, destroy, list)

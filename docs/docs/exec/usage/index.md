@@ -33,3 +33,5 @@ wasmrun exec ./module.wasm --call add 5 3
 | [Running WASM Files](./running.md) | Basic execution, entry points, output |
 | [Function Calling](./functions.md) | Call specific exported functions with `--call` |
 | [Argument Passing](./arguments.md) | Pass arguments to WASM programs |
+
+For HTTP-based access (AI agents, automation), see [Agent API](../agent.md).

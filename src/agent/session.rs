@@ -17,7 +17,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 ///
 /// Uses system time nanos + counter for entropy, mixed via xorshift64.
 /// Not cryptographically secure — sufficient for session identifiers.
-#[allow(dead_code)] // TODO: Used by Session::new, consumed by agent API (0.18.2)
 fn generate_session_id() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -42,7 +41,6 @@ fn generate_session_id() -> String {
     hex_encode(&bytes)
 }
 
-#[allow(dead_code)] // TODO: Used by generate_session_id
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -51,7 +49,6 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 /// Current lifecycle state of a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // TODO: Consumed by agent API (0.18.2)
 pub enum SessionState {
     /// Session is active and accepting commands.
     Active,
@@ -65,7 +62,6 @@ pub enum SessionState {
 ///
 /// Each session owns a temporary directory on the host filesystem,
 /// a WASI environment with independent I/O buffers, and timeout tracking.
-#[allow(dead_code)] // TODO: Consumed by agent API (0.18.2)
 pub struct Session {
     /// Unique session identifier (32-char hex string).
     id: String,
@@ -85,7 +81,6 @@ pub struct Session {
     owns_work_dir: bool,
 }
 
-#[allow(dead_code)] // TODO: Consumed by agent API (0.18.2)
 impl Session {
     /// Create a new session with an isolated temp directory.
     ///
@@ -199,6 +194,7 @@ impl Session {
     }
 
     /// Get captured stdout from the session's WASI environment.
+    #[allow(dead_code)] // TODO: Used by agent tools/shell
     pub fn get_stdout(&self) -> Vec<u8> {
         self.wasi_env
             .lock()
@@ -207,6 +203,7 @@ impl Session {
     }
 
     /// Get captured stderr from the session's WASI environment.
+    #[allow(dead_code)] // TODO: Used by agent tools/shell
     pub fn get_stderr(&self) -> Vec<u8> {
         self.wasi_env
             .lock()
@@ -215,6 +212,7 @@ impl Session {
     }
 
     /// Clear captured stdout/stderr buffers (e.g., between exec calls).
+    #[allow(dead_code)] // TODO: Used by agent tools/shell
     pub fn clear_output(&self) {
         if let Ok(mut env) = self.wasi_env.lock() {
             env.clear_stdout();
@@ -240,7 +238,6 @@ impl Drop for Session {
 
 /// Configuration for the SessionManager.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // TODO: Consumed by agent API (0.18.2)
 pub struct SessionConfig {
     /// Default idle timeout for new sessions.
     pub default_timeout: Duration,
@@ -264,7 +261,6 @@ impl Default for SessionConfig {
 ///
 /// Thread-safe: all operations are behind a RwLock.
 /// Optionally runs a background cleanup thread for expired sessions.
-#[allow(dead_code)] // TODO: Consumed by agent API (0.18.2)
 pub struct SessionManager {
     sessions: RwLock<HashMap<String, Session>>,
     config: SessionConfig,
@@ -272,7 +268,6 @@ pub struct SessionManager {
     cleanup_stop: Arc<Mutex<bool>>,
 }
 
-#[allow(dead_code)] // TODO: Consumed by agent API (0.18.2)
 impl SessionManager {
     /// Create a new SessionManager with default configuration.
     pub fn new() -> Self {
@@ -347,6 +342,7 @@ impl SessionManager {
     }
 
     /// List all active (non-expired) session IDs.
+    #[allow(dead_code)] // TODO: Used by agent list sessions endpoint
     pub fn list_sessions(&self) -> Result<Vec<SessionInfo>, SessionError> {
         let sessions = self.sessions.read().map_err(|_| SessionError::LockError)?;
         Ok(sessions
@@ -382,6 +378,7 @@ impl SessionManager {
     }
 
     /// Get the number of active (non-expired) sessions.
+    #[allow(dead_code)] // TODO: Used by agent metrics
     pub fn active_count(&self) -> usize {
         self.sessions
             .read()
@@ -390,6 +387,7 @@ impl SessionManager {
     }
 
     /// Get the total number of sessions (including expired ones not yet cleaned up).
+    #[allow(dead_code)] // TODO: Used by agent metrics
     pub fn total_count(&self) -> usize {
         self.sessions.read().map(|s| s.len()).unwrap_or(0)
     }
@@ -431,6 +429,7 @@ impl SessionManager {
     }
 
     /// Get session configuration.
+    #[allow(dead_code)] // TODO: Used by agent status endpoint
     pub fn config(&self) -> &SessionConfig {
         &self.config
     }
@@ -446,7 +445,7 @@ impl Default for SessionManager {
 
 /// Summary information about a session (safe to serialize/return via API).
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // TODO: Consumed by agent API (0.18.2)
+#[allow(dead_code)] // TODO: Used by agent list sessions endpoint
 pub struct SessionInfo {
     pub id: String,
     pub state: SessionState,
@@ -459,7 +458,6 @@ pub struct SessionInfo {
 
 /// Errors specific to session management.
 #[derive(Debug)]
-#[allow(dead_code)] // TODO: Consumed by agent API (0.18.2)
 pub enum SessionError {
     /// Session not found.
     NotFound { id: String },
