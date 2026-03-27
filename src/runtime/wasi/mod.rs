@@ -147,6 +147,29 @@ impl WasiEnv {
         &mut self.stderr
     }
 
+    /// Add an environment variable (appends to existing list).
+    #[allow(dead_code)] // TODO: Used by agent session management (0.18.1)
+    pub fn add_env(&mut self, key: String, value: String) {
+        // Update existing or append
+        if let Some(entry) = self.env_vars.iter_mut().find(|(k, _)| k == &key) {
+            entry.1 = value;
+        } else {
+            self.env_vars.push((key, value));
+        }
+    }
+
+    /// Clear captured stdout buffer.
+    #[allow(dead_code)] // TODO: Used by agent session management (0.18.1)
+    pub fn clear_stdout(&mut self) {
+        self.stdout.clear();
+    }
+
+    /// Clear captured stderr buffer.
+    #[allow(dead_code)] // TODO: Used by agent session management (0.18.1)
+    pub fn clear_stderr(&mut self) {
+        self.stderr.clear();
+    }
+
     pub fn get_fd(&self, fd: u32) -> Option<&FdEntry> {
         self.fd_table.get(&fd)
     }
