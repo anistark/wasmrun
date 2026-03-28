@@ -114,6 +114,77 @@ pub fn execute_wasm_bytes_with_args(
     }
 }
 
+/// Execute WASM bytes using an existing WasiEnv (for agent session reuse).
+///
+/// Unlike `execute_wasm_bytes_with_args`, this does not print captured output —
+/// the caller reads stdout/stderr from the WasiEnv after execution.
+pub fn execute_wasm_bytes_with_env(
+    wasm_bytes: &[u8],
+    wasi_env: Arc<Mutex<WasiEnv>>,
+    function: Option<String>,
+    args: Vec<String>,
+    max_memory_pages: Option<u32>,
+) -> Result<i32> {
+    let mut module = Module::parse(wasm_bytes)
+        .map_err(|e| WasmrunError::from(format!("Failed to parse WASM module: {e}")))?;
+
+    if let Some(cap) = max_memory_pages {
+        if let Some(ref mut mem) = module.memory {
+            match mem.max {
+                Some(m) if m > cap => mem.max = Some(cap),
+                None => mem.max = Some(cap),
+                _ => {}
+            }
+        }
+    }
+
+    if let Ok(mut env) = wasi_env.lock() {
+        env.set_args(args.clone());
+    }
+
+    let wasi_linker = create_wasi_linker(wasi_env);
+
+    let mut executor = Executor::new_with_linker(module, wasi_linker)
+        .map_err(|e| WasmrunError::from(format!("Failed to initialize executor: {e}")))?;
+
+    let func_idx = if let Some(func_name) = function {
+        find_export_function(executor.module(), &func_name)
+            .map(|(_, idx)| idx)
+            .ok_or_else(|| {
+                WasmrunError::from(format!(
+                    "Exported function '{func_name}' not found in WASM module"
+                ))
+            })?
+    } else {
+        let start_func = executor.module().start;
+        if let Some(func_idx) = start_func {
+            func_idx
+        } else if let Some((_, func_idx)) = find_export_function(executor.module(), "main") {
+            func_idx
+        } else if let Some((_, func_idx)) = find_export_function(executor.module(), "_start") {
+            func_idx
+        } else {
+            return Err(WasmrunError::from(
+                "No entry point found (checked: start section, main, _start)".to_string(),
+            ));
+        }
+    };
+
+    let wasm_args = convert_string_args_to_values(&args);
+
+    match execute_function(&mut executor, func_idx, wasm_args) {
+        Ok(()) => Ok(0),
+        Err(e) => {
+            let err_str = e.to_string();
+            if let Some(code) = Executor::is_proc_exit(&err_str) {
+                Ok(code)
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 fn convert_string_args_to_values(args: &[String]) -> Vec<Value> {
     args.iter()
         .map(|arg| {

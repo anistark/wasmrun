@@ -175,6 +175,31 @@ fn main() {
             })
         }
 
+        Some(Commands::Agent {
+            port,
+            timeout,
+            max_sessions,
+            max_memory,
+            allow_cors,
+            verbose,
+        }) => {
+            debug_println!(
+                "Processing agent command: port={}, timeout={}, max_sessions={}, max_memory={}MB",
+                port,
+                timeout,
+                max_sessions,
+                max_memory
+            );
+            commands::handle_agent_command(
+                *port,
+                *timeout,
+                *max_sessions,
+                *max_memory,
+                *allow_cors,
+                *verbose,
+            )
+        }
+
         Some(Commands::Plugin(plugin_cmd)) => {
             commands::run_plugin_command(plugin_cmd).map_err(|e| match e {
                 WasmrunError::Command(_) | WasmrunError::Path { .. } => e,

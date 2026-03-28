@@ -98,13 +98,12 @@ impl WasiEnv {
         self
     }
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Used by agent session builder
     pub fn with_env(mut self, key: String, value: String) -> Self {
         self.env_vars.push((key, value));
         self
     }
 
-    #[allow(dead_code)]
     pub fn with_preopen(mut self, guest_path: &str, host_path: impl AsRef<Path>) -> Self {
         let host = host_path.as_ref().to_path_buf();
         let fd = self.next_fd;
@@ -121,6 +120,10 @@ impl WasiEnv {
         );
         self.preopens.push((guest_path.to_string(), host));
         self
+    }
+
+    pub fn set_args(&mut self, args: Vec<String>) {
+        self.args = args;
     }
 
     pub fn args(&self) -> &[String] {
@@ -148,7 +151,6 @@ impl WasiEnv {
     }
 
     /// Add an environment variable (appends to existing list).
-    #[allow(dead_code)] // TODO: Used by agent session management (0.18.1)
     pub fn add_env(&mut self, key: String, value: String) {
         // Update existing or append
         if let Some(entry) = self.env_vars.iter_mut().find(|(k, _)| k == &key) {
@@ -159,13 +161,11 @@ impl WasiEnv {
     }
 
     /// Clear captured stdout buffer.
-    #[allow(dead_code)] // TODO: Used by agent session management (0.18.1)
     pub fn clear_stdout(&mut self) {
         self.stdout.clear();
     }
 
     /// Clear captured stderr buffer.
-    #[allow(dead_code)] // TODO: Used by agent session management (0.18.1)
     pub fn clear_stderr(&mut self) {
         self.stderr.clear();
     }
