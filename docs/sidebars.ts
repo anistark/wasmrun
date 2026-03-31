@@ -136,6 +136,21 @@ const sidebars: SidebarsConfig = {
       ],
     },
   ],
+
+  wasmhub: [
+    {
+      type: 'category',
+      label: 'WasmHub',
+      collapsed: false,
+      link: { type: 'doc', id: 'wasmhub/index' },
+      items: [
+        'wasmhub/getting-started',
+        'wasmhub/cli',
+        'wasmhub/library',
+        'wasmhub/runtimes',
+      ],
+    },
+  ],
 };
 
 export default sidebars;

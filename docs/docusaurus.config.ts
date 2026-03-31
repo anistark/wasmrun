@@ -84,6 +84,18 @@ const config: Config = {
           position: 'left',
           label: 'Contributing',
         },
+        {
+          type: 'dropdown',
+          label: 'Related',
+          position: 'left',
+          items: [
+            {
+              type: 'docSidebar',
+              sidebarId: 'wasmhub',
+              label: 'WasmHub',
+            },
+          ],
+        },
         // {
         //   to: '/tutorials',
         //   label: 'Tutorials',
@@ -122,6 +134,7 @@ const config: Config = {
             { label: 'Exec Mode', to: '/docs/exec' },
             { label: 'OS Mode', to: '/docs/os' },
             { label: 'Plugins', to: '/docs/plugins' },
+            { label: 'WasmHub', to: '/docs/wasmhub' },
             { label: 'Changelog', to: '/docs/contributing/changelog' },
           ],
         },
