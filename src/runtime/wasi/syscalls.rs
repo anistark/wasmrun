@@ -910,6 +910,30 @@ pub fn clock_time_get(
     WASI_ESUCCESS
 }
 
+/// fd_fdstat_set_flags: set file descriptor flags (WASI Preview 1).
+/// Most WASM runtimes ignore this silently; return success.
+pub fn fd_fdstat_set_flags(_fd: u32, _flags: u16) -> i32 {
+    WASI_ESUCCESS
+}
+
+/// path_filestat_set_times: set file timestamps. Return ENOSYS since we
+/// don't have a mutable host FS. Callers treat ENOSYS as non-fatal.
+pub fn path_filestat_set_times() -> i32 {
+    WASI_ENOSYS
+}
+
+/// path_readlink: read a symbolic link target into buf. Return ENOSYS.
+pub fn path_readlink(buf_used_ptr: u32, memory: &mut LinearMemory) -> i32 {
+    // Write 0 bytes used so callers don't read garbage
+    let _ = memory.write_i32(buf_used_ptr as usize, 0);
+    WASI_ENOSYS
+}
+
+/// path_symlink: create a symbolic link. Return ENOSYS.
+pub fn path_symlink() -> i32 {
+    WASI_ENOSYS
+}
+
 pub fn random_get(buf_ptr: u32, buf_len: u32, memory: &mut LinearMemory) -> i32 {
     let seed = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_nanos() as u64,

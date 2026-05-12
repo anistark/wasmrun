@@ -167,32 +167,46 @@ pub enum Instruction {
     F32Reinterpret,
     F64Reinterpret,
 
-    // Memory
-    I32Load,
-    I64Load,
-    F32Load,
-    F64Load,
-    I32Load8S,
-    I32Load8U,
-    I32Load16S,
-    I32Load16U,
-    I64Load8S,
-    I64Load8U,
-    I64Load16S,
-    I64Load16U,
-    I64Load32S,
-    I64Load32U,
-    I32Store,
-    I64Store,
-    F32Store,
-    F64Store,
-    I32Store8,
-    I32Store16,
-    I64Store8,
-    I64Store16,
-    I64Store32,
+    // Memory — each carries the offset immediate from the instruction encoding.
+    // Effective address = stack_addr + offset.
+    I32Load(u32),
+    I64Load(u32),
+    F32Load(u32),
+    F64Load(u32),
+    I32Load8S(u32),
+    I32Load8U(u32),
+    I32Load16S(u32),
+    I32Load16U(u32),
+    I64Load8S(u32),
+    I64Load8U(u32),
+    I64Load16S(u32),
+    I64Load16U(u32),
+    I64Load32S(u32),
+    I64Load32U(u32),
+    I32Store(u32),
+    I64Store(u32),
+    F32Store(u32),
+    F64Store(u32),
+    I32Store8(u32),
+    I32Store16(u32),
+    I64Store8(u32),
+    I64Store16(u32),
+    I64Store32(u32),
     MemorySize,
     MemoryGrow,
+
+    // Sign-extension operators (WASM sign-extension proposal)
+    I32Extend8S,
+    I32Extend16S,
+    I64Extend8S,
+    I64Extend16S,
+    I64Extend32S,
+
+    // Bulk-memory (0xFC prefix) — WASM bulk-memory extension
+    MemoryCopy,
+    MemoryFill,
+    MemoryInit(u32), // data segment index
+    DataDrop(u32),   // data segment index
 
     // Local/Global
     LocalGet(u32),
@@ -257,9 +271,11 @@ fn decode_i32_leb128(cursor: &mut Cursor<&[u8]>) -> Result<i32, String> {
         result |= ((byte & 0x7f) as i32) << shift;
 
         if (byte & 0x80) == 0 {
-            // Sign extend if necessary
-            if shift < 31 && (byte & 0x40) != 0 {
-                result |= -(1 << (shift + 7));
+            // Sign extend if the sign bit in the final LEB128 byte is set and
+            // shift+7 is still within the i32 range. At shift=28, the 5th byte
+            // already contributes bit 31 directly, so no extension is needed.
+            if shift + 7 < 32 && (byte & 0x40) != 0 {
+                result |= (-1i32) << (shift + 7);
             }
             return Ok(result);
         }
@@ -307,9 +323,10 @@ fn decode_i64_leb128(cursor: &mut Cursor<&[u8]>) -> Result<i64, String> {
         result |= ((byte & 0x7f) as i64) << shift;
 
         if (byte & 0x80) == 0 {
-            // Sign extend if necessary
-            if shift < 63 && (byte & 0x40) != 0 {
-                result |= -(1i64 << (shift + 7));
+            // Sign extend if the sign bit in the final LEB128 byte is set and
+            // shift+7 is still within the i64 range.
+            if shift + 7 < 64 && (byte & 0x40) != 0 {
+                result |= (-1i64) << (shift + 7);
             }
             return Ok(result);
         }
@@ -501,120 +518,121 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0xBF => Ok(Instruction::F64Reinterpret),
 
         // Memory (each has memarg: align + offset)
+        // offset is an immediate added to the stack address: effective_addr = stack_val + offset
         0x28 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I32Load)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Load(offset))
         }
         0x29 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Load)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load(offset))
         }
         0x2A => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::F32Load)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::F32Load(offset))
         }
         0x2B => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::F64Load)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::F64Load(offset))
         }
         0x2C => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I32Load8S)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Load8S(offset))
         }
         0x2D => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I32Load8U)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Load8U(offset))
         }
         0x2E => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I32Load16S)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Load16S(offset))
         }
         0x2F => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I32Load16U)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Load16U(offset))
         }
         0x30 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Load8S)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load8S(offset))
         }
         0x31 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Load8U)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load8U(offset))
         }
         0x32 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Load16S)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load16S(offset))
         }
         0x33 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Load16U)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load16U(offset))
         }
         0x34 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Load32S)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load32S(offset))
         }
         0x35 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Load32U)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Load32U(offset))
         }
         0x36 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I32Store)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Store(offset))
         }
         0x37 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Store)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Store(offset))
         }
         0x38 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::F32Store)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::F32Store(offset))
         }
         0x39 => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::F64Store)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::F64Store(offset))
         }
         0x3A => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I32Store8)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Store8(offset))
         }
         0x3B => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I32Store16)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I32Store16(offset))
         }
         0x3C => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Store8)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Store8(offset))
         }
         0x3D => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Store16)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Store16(offset))
         }
         0x3E => {
             let _align = decode_u32_leb128(cursor)?;
-            let _offset = decode_u32_leb128(cursor)?;
-            Ok(Instruction::I64Store32)
+            let offset = decode_u32_leb128(cursor)?;
+            Ok(Instruction::I64Store32(offset))
         }
         0x3F => {
             // memory.size - reads memory index (0x00)
@@ -675,6 +693,43 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0x1A => Ok(Instruction::Drop),
         0x1B => Ok(Instruction::Select),
 
+        // Sign-extension operators (WASM sign-extension proposal)
+        0xC0 => Ok(Instruction::I32Extend8S),
+        0xC1 => Ok(Instruction::I32Extend16S),
+        0xC2 => Ok(Instruction::I64Extend8S),
+        0xC3 => Ok(Instruction::I64Extend16S),
+        0xC4 => Ok(Instruction::I64Extend32S),
+
+        // Bulk-memory prefix byte (WASM bulk-memory extension)
+        0xFC => {
+            let op = decode_u32_leb128(cursor)?;
+            match op {
+                8 => {
+                    // memory.init: seg_idx mem_idx(0x00)
+                    let seg_idx = decode_u32_leb128(cursor)?;
+                    let _mem_idx = read_u8(cursor)?;
+                    Ok(Instruction::MemoryInit(seg_idx))
+                }
+                9 => {
+                    // data.drop: seg_idx
+                    let seg_idx = decode_u32_leb128(cursor)?;
+                    Ok(Instruction::DataDrop(seg_idx))
+                }
+                10 => {
+                    // memory.copy: dst_mem(0x00) src_mem(0x00)
+                    let _dst = read_u8(cursor)?;
+                    let _src = read_u8(cursor)?;
+                    Ok(Instruction::MemoryCopy)
+                }
+                11 => {
+                    // memory.fill: mem_idx(0x00)
+                    let _mem_idx = read_u8(cursor)?;
+                    Ok(Instruction::MemoryFill)
+                }
+                _ => Err(format!("Unknown 0xFC sub-opcode: {op}")),
+            }
+        }
+
         _ => Err(format!("Unknown instruction: 0x{byte:02X}")),
     }
 }
@@ -707,6 +762,9 @@ pub struct Frame {
     pub return_addr: usize,
     /// Number of return values expected
     pub num_returns: usize,
+    /// Operand stack depth at function entry (after popping args).
+    /// Used by `return` to restore the stack to the correct depth.
+    pub base_stack_depth: usize,
 }
 
 impl Frame {
@@ -716,6 +774,7 @@ impl Frame {
             locals,
             return_addr: 0,
             num_returns,
+            base_stack_depth: 0,
         }
     }
 
@@ -777,9 +836,10 @@ impl ExecutionContext {
 
     /// Pop a value from operand stack
     pub fn pop(&mut self) -> Result<Value, String> {
-        self.operand_stack
-            .pop()
-            .ok_or_else(|| "Operand stack underflow".to_string())
+        self.operand_stack.pop().ok_or_else(|| {
+            let call_stack: Vec<u32> = self.call_stack.iter().map(|f| f.func_idx).collect();
+            format!("Operand stack underflow (call_stack={call_stack:?})")
+        })
     }
 
     /// Peek top value without removing it
@@ -864,17 +924,39 @@ impl ExecutionContext {
     }
 }
 
-/// Evaluate a constant expression (used for data/element segment offsets and global init).
-/// Supports i32.const, i64.const, and global.get followed by end.
-fn evaluate_const_expr(expr: &[u8]) -> Result<usize, String> {
+/// Evaluate a constant expression as a Value (used for global initialization).
+/// Handles i32.const, i64.const, f32.const, f64.const, and global.get.
+fn evaluate_const_expr_value(expr: &[u8], already_init: &[Value]) -> Result<Value, String> {
+    if expr.is_empty() {
+        return Ok(Value::I32(0));
+    }
     let mut cursor = Cursor::new(expr);
     let instr = decode_instruction(&mut cursor)?;
     match instr {
-        Instruction::I32Const(v) => Ok(v as u32 as usize),
-        Instruction::I64Const(v) => Ok(v as u64 as usize),
+        Instruction::I32Const(v) => Ok(Value::I32(v)),
+        Instruction::I64Const(v) => Ok(Value::I64(v)),
+        Instruction::F32Const(v) => Ok(Value::F32(v)),
+        Instruction::F64Const(v) => Ok(Value::F64(v)),
+        Instruction::GlobalGet(idx) => {
+            // global.get in an init_expr refers to an already-initialized global
+            already_init
+                .get(idx as usize)
+                .copied()
+                .ok_or_else(|| format!("global.get {idx} out of bounds in const expr"))
+        }
         _ => Err(format!(
             "Unsupported constant expression instruction: {instr:?}"
         )),
+    }
+}
+
+/// Evaluate a constant expression as an address offset (used for data/element segment offsets).
+/// Supports i32.const and i64.const followed by end.
+fn evaluate_const_expr(expr: &[u8]) -> Result<usize, String> {
+    match evaluate_const_expr_value(expr, &[])? {
+        Value::I32(v) => Ok(v as u32 as usize),
+        Value::I64(v) => Ok(v as u64 as usize),
+        other => Err(format!("Expected i32/i64 in const expr, got {other:?}")),
     }
 }
 
@@ -884,6 +966,9 @@ pub struct Executor {
     module: Module,
     linker: Option<Linker>,
     import_func_count: usize,
+    /// Flat function table initialized from element segments.
+    /// Index = table slot, value = absolute function index (or None if unset).
+    table: Vec<Option<u32>>,
 }
 
 impl Executor {
@@ -918,14 +1003,19 @@ impl Executor {
         let mut context = ExecutionContext::new(initial, max)?;
 
         for global in &module.globals {
-            let default_val = match global.value_type {
-                ValueType::I32 => Value::I32(0),
-                ValueType::I64 => Value::I64(0),
-                ValueType::F32 => Value::F32(0.0),
-                ValueType::F64 => Value::F64(0.0),
-                _ => return Err(format!("Unsupported global type: {:?}", global.value_type)),
+            let init_val = if global.init_expr.is_empty() {
+                match global.value_type {
+                    ValueType::I32 => Value::I32(0),
+                    ValueType::I64 => Value::I64(0),
+                    ValueType::F32 => Value::F32(0.0),
+                    ValueType::F64 => Value::F64(0.0),
+                    _ => return Err(format!("Unsupported global type: {:?}", global.value_type)),
+                }
+            } else {
+                evaluate_const_expr_value(&global.init_expr, &context.globals)
+                    .map_err(|e| format!("Global init expr error: {e}"))?
             };
-            context.globals.push(default_val);
+            context.globals.push(init_val);
         }
 
         for segment in &module.data {
@@ -944,11 +1034,31 @@ impl Executor {
             context.memory.write_bytes(offset, &segment.data)?;
         }
 
+        // Build a flat function table from active element segments.
+        // Each active segment has an offset (where in the table it starts) and a list of
+        // function indices. We compute table[offset + i] = function_indices[i].
+        let mut table: Vec<Option<u32>> = Vec::new();
+        for seg in &module.elements {
+            if seg.offset_expr.is_empty() {
+                // Passive element segment — skip (filled lazily via table.init)
+                continue;
+            }
+            let offset = evaluate_const_expr(&seg.offset_expr)?;
+            let end = offset + seg.function_indices.len();
+            if end > table.len() {
+                table.resize(end, None);
+            }
+            for (i, &func_idx) in seg.function_indices.iter().enumerate() {
+                table[offset + i] = Some(func_idx);
+            }
+        }
+
         Ok(Executor {
             context,
             module,
             linker,
             import_func_count,
+            table,
         })
     }
 
@@ -1017,12 +1127,21 @@ impl Executor {
         let (locals, num_returns, code) = func;
 
         // Create call frame
-        let frame = Frame::new(func_idx, locals, num_returns);
+        let mut frame = Frame::new(func_idx, locals, num_returns);
+        frame.base_stack_depth = self.context.operand_stack.len();
         self.context.push_frame(frame);
+
+        let block_depth_before = self.context.block_stack.len();
+        // WASM spec: every function body is implicitly wrapped in a block.
+        // Push it so the function-terminating 0x0b End byte pops this frame
+        // rather than accidentally popping the caller's block frames.
+        self.context.push_block(None, false, 0, 0, false);
 
         // Execute bytecode
         let mut cursor = Cursor::new(code.as_slice());
-        self.execute_bytecode(&mut cursor)?;
+        let result = self.execute_bytecode(&mut cursor);
+        self.context.block_stack.truncate(block_depth_before);
+        result?;
 
         // Pop frame and collect return values
         let _frame = self.context.pop_frame()?;
@@ -1052,8 +1171,9 @@ impl Executor {
         Ok(())
     }
 
-    /// Skip bytecode until we find the matching else or end instruction
-    fn skip_to_else_or_end(&mut self, cursor: &mut Cursor<&[u8]>) -> Result<(), String> {
+    /// Skip bytecode until we find the matching else or end instruction.
+    /// Returns true if we stopped at an `else`, false if we stopped at an `end`.
+    fn skip_to_else_or_end(&mut self, cursor: &mut Cursor<&[u8]>) -> Result<bool, String> {
         let mut depth = 0;
 
         loop {
@@ -1067,13 +1187,13 @@ impl Executor {
                     depth += 1;
                 }
                 Instruction::Else if depth == 0 => {
-                    // Found matching else
-                    return Ok(());
+                    // Found matching else — cursor is now after `else`
+                    return Ok(true);
                 }
                 Instruction::End => {
                     if depth == 0 {
-                        // Found matching end (no else branch)
-                        return Ok(());
+                        // Found matching end (no else branch) — cursor is now after `end`
+                        return Ok(false);
                     }
                     depth -= 1;
                 }
@@ -1121,13 +1241,40 @@ impl Executor {
     fn do_branch(&mut self, label: u32, cursor: &mut Cursor<&[u8]>) -> Result<(), String> {
         let label_idx = label as usize;
         if label_idx >= self.context.block_stack.len() {
-            return Err(format!("br: invalid label {label}"));
+            let depth = self.context.block_stack.len();
+            let call_stack: Vec<u32> = self.context.call_stack.iter().map(|f| f.func_idx).collect();
+            return Err(format!("br: invalid label {label} (block_stack depth={depth}, call_stack={call_stack:?})"));
         }
 
         let block_idx = self.context.block_stack.len() - 1 - label_idx;
         let target_block = &self.context.block_stack[block_idx];
 
-        if target_block.is_loop {
+        // Arity: number of values to preserve on the stack.
+        // For loops: 0 (we're restarting, no result passed through br)
+        // For blocks/if: 0 if void, 1 if value type
+        let arity: usize = if target_block.is_loop {
+            0
+        } else {
+            if target_block.block_type.is_some() { 1 } else { 0 }
+        };
+        let is_loop = target_block.is_loop;
+
+        // Restore operand stack: keep only the top `arity` values, truncate to target stack_depth
+        let target_depth = target_block.stack_depth;
+        let result_values: Vec<Value> = if arity > 0 && self.context.operand_stack.len() > target_depth {
+            let cur_len = self.context.operand_stack.len();
+            self.context.operand_stack.drain(cur_len - arity..).collect()
+        } else {
+            Vec::new()
+        };
+        if self.context.operand_stack.len() > target_depth {
+            self.context.operand_stack.truncate(target_depth);
+        }
+        for v in result_values {
+            self.context.operand_stack.push(v);
+        }
+
+        if is_loop {
             cursor.set_position(target_block.start_pos as u64);
             // Pop only the blocks above the loop (not the loop itself)
             for _ in 0..label_idx {
@@ -1141,6 +1288,7 @@ impl Executor {
             // Skip past the remaining nested end instructions in bytecode
             self.skip_n_ends(cursor, label_idx + 1)?;
         }
+
         Ok(())
     }
 
@@ -1173,6 +1321,9 @@ impl Executor {
 
         // Pop arguments from operand stack
         let args = self.context.pop_n(arg_count)?;
+        // Record stack depth AFTER popping args — this is the frame's baseline.
+        // `return` uses this to restore the operand stack before leaving.
+        let base_stack_depth = self.context.operand_stack.len();
 
         // Initialize locals: parameters + local variables
         let mut locals = args;
@@ -1192,12 +1343,46 @@ impl Executor {
         }
 
         // Create call frame and push it
-        let frame = Frame::new(func_idx, locals, num_results);
+        let mut frame = Frame::new(func_idx, locals, num_results);
+        frame.base_stack_depth = base_stack_depth;
         self.context.push_frame(frame);
+
+        // Snapshot block stack depth so we can restore it on return.
+        // A `return` inside a block breaks out of execute_bytecode without
+        // popping the intra-function blocks, which would corrupt the caller's
+        // block stack.
+        let block_depth_before = self.context.block_stack.len();
+        // WASM spec: every function body is implicitly wrapped in a block.
+        // Push it so the function-terminating 0x0b End byte pops this frame
+        // rather than accidentally popping the caller's block frames.
+        self.context.push_block(None, false, 0, 0, false);
 
         // Execute function bytecode
         let mut cursor = Cursor::new(code.as_slice());
-        self.execute_bytecode(&mut cursor)?;
+        let result = self.execute_bytecode(&mut cursor);
+
+        // Restore block stack to the depth it had before this call.
+        self.context.block_stack.truncate(block_depth_before);
+
+        result?;
+
+        // Ensure the operand stack is exactly base_stack_depth + num_results.
+        // Normally the function body leaves the right values, but after a `return`
+        // or branch cleanup we enforce correctness here.
+        let cur = self.context.operand_stack.len();
+        let expected = base_stack_depth + num_results;
+        if cur > expected {
+            let results: Vec<Value> = if num_results > 0 {
+                let start = cur.saturating_sub(num_results);
+                self.context.operand_stack.drain(start..).collect()
+            } else {
+                Vec::new()
+            };
+            self.context.operand_stack.truncate(base_stack_depth);
+            for v in results {
+                self.context.operand_stack.push(v);
+            }
+        }
 
         // Pop frame
         self.context.pop_frame()?;
@@ -1207,19 +1392,11 @@ impl Executor {
 
     /// Call a function indirectly via table lookup
     fn call_function_indirect(&mut self, table_idx: u32, type_idx: u32) -> Result<(), String> {
-        if self.module.tables.is_empty() {
-            return Err("No tables defined in module".to_string());
-        }
-
-        if self.module.elements.is_empty() {
-            return Err("No element segments in module".to_string());
-        }
-
-        let element_segment = &self.module.elements[0];
-        let abs_func_idx = *element_segment
-            .function_indices
+        let abs_func_idx = self
+            .table
             .get(table_idx as usize)
-            .ok_or_else(|| format!("Table index {table_idx} out of bounds"))?;
+            .and_then(|&v| v)
+            .ok_or_else(|| format!("Table index {table_idx} is null or out of bounds"))?;
 
         // Resolve defined function index for type checking
         if (abs_func_idx as usize) < self.import_func_count {
@@ -2327,16 +2504,33 @@ impl Executor {
             // Control flow - basic ones first
             Instruction::Nop => {}
             Instruction::Unreachable => return Err("Unreachable instruction executed".to_string()),
-            Instruction::Return => return Ok(ControlFlow::Return),
-            Instruction::End => {
-                // End of block/loop/if - pop the block frame
-                if let Ok(block) = self.context.pop_block() {
-                    // If block has a result type, the result value should be on stack
-                    // Nothing to do here - value stays on stack
-                    if block.block_type.is_some() {
-                        // Result value is already on the operand stack
+            Instruction::Return => {
+                // Clean up the operand stack to exactly base_stack_depth + num_returns.
+                // In a valid WASM module the compiler guarantees this, but explicit cleanup
+                // prevents accumulated garbage from corrupted branch handling.
+                if let Ok(frame) = self.context.current_frame() {
+                    let num_returns = frame.num_returns;
+                    let base = frame.base_stack_depth;
+                    let cur = self.context.operand_stack.len();
+                    let expected = base + num_returns;
+                    if cur > expected {
+                        // Extra values: save the top num_returns, truncate, push back
+                        let results: Vec<Value> = if num_returns > 0 {
+                            let start = cur.saturating_sub(num_returns);
+                            self.context.operand_stack.drain(start..).collect()
+                        } else {
+                            Vec::new()
+                        };
+                        self.context.operand_stack.truncate(base);
+                        for v in results {
+                            self.context.operand_stack.push(v);
+                        }
                     }
                 }
+                return Ok(ControlFlow::Return);
+            }
+            Instruction::End => {
+                self.context.pop_block().ok();
             }
             Instruction::Drop => {
                 self.context.pop()?;
@@ -2377,216 +2571,216 @@ impl Executor {
                 *global = val;
             }
 
-            // Memory load operations
-            Instruction::I32Load => {
+            // Memory load operations — effective address = stack_val + offset
+            Instruction::I32Load(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i32(addr)?;
                 self.context.push(Value::I32(val));
             }
-            Instruction::I64Load => {
+            Instruction::I64Load(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i64(addr)?;
                 self.context.push(Value::I64(val));
             }
-            Instruction::F32Load => {
+            Instruction::F32Load(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_f32(addr)?;
                 self.context.push(Value::F32(val));
             }
-            Instruction::F64Load => {
+            Instruction::F64Load(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_f64(addr)?;
                 self.context.push(Value::F64(val));
             }
-            Instruction::I32Load8S => {
+            Instruction::I32Load8S(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i8(addr)? as i32;
                 self.context.push(Value::I32(val));
             }
-            Instruction::I32Load8U => {
+            Instruction::I32Load8U(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = (self.context.memory.read_u8(addr)? as u32) as i32;
                 self.context.push(Value::I32(val));
             }
-            Instruction::I32Load16S => {
+            Instruction::I32Load16S(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i16(addr)? as i32;
                 self.context.push(Value::I32(val));
             }
-            Instruction::I32Load16U => {
+            Instruction::I32Load16U(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = (self.context.memory.read_u16(addr)? as u32) as i32;
                 self.context.push(Value::I32(val));
             }
-            Instruction::I64Load8S => {
+            Instruction::I64Load8S(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i8(addr)? as i64;
                 self.context.push(Value::I64(val));
             }
-            Instruction::I64Load8U => {
+            Instruction::I64Load8U(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_u8(addr)? as i64;
                 self.context.push(Value::I64(val));
             }
-            Instruction::I64Load16S => {
+            Instruction::I64Load16S(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i16(addr)? as i64;
                 self.context.push(Value::I64(val));
             }
-            Instruction::I64Load16U => {
+            Instruction::I64Load16U(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_u16(addr)? as i64;
                 self.context.push(Value::I64(val));
             }
-            Instruction::I64Load32S => {
+            Instruction::I64Load32S(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i32(addr)? as i64;
                 self.context.push(Value::I64(val));
             }
-            Instruction::I64Load32U => {
+            Instruction::I64Load32U(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = (self.context.memory.read_i32(addr)? as u32) as i64;
                 self.context.push(Value::I64(val));
             }
 
-            // Memory store operations
-            Instruction::I32Store => {
+            // Memory store operations — effective address = stack_val + offset
+            Instruction::I32Store(offset) => {
                 let val = match self.context.pop()? {
                     Value::I32(v) => v,
                     _ => return Err("Value must be i32".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_i32(addr, val)?;
             }
-            Instruction::I64Store => {
+            Instruction::I64Store(offset) => {
                 let val = match self.context.pop()? {
                     Value::I64(v) => v,
                     _ => return Err("Value must be i64".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_i64(addr, val)?;
             }
-            Instruction::F32Store => {
+            Instruction::F32Store(offset) => {
                 let val = match self.context.pop()? {
                     Value::F32(v) => v,
                     _ => return Err("Value must be f32".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_f32(addr, val)?;
             }
-            Instruction::F64Store => {
+            Instruction::F64Store(offset) => {
                 let val = match self.context.pop()? {
                     Value::F64(v) => v,
                     _ => return Err("Value must be f64".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_f64(addr, val)?;
             }
-            Instruction::I32Store8 => {
+            Instruction::I32Store8(offset) => {
                 let val = match self.context.pop()? {
                     Value::I32(v) => v as u8,
                     _ => return Err("Value must be i32".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_u8(addr, val)?;
             }
-            Instruction::I32Store16 => {
+            Instruction::I32Store16(offset) => {
                 let val = match self.context.pop()? {
                     Value::I32(v) => v as u16,
                     _ => return Err("Value must be i32".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_u16(addr, val)?;
             }
-            Instruction::I64Store8 => {
+            Instruction::I64Store8(offset) => {
                 let val = match self.context.pop()? {
                     Value::I64(v) => v as u8,
                     _ => return Err("Value must be i64".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_u8(addr, val)?;
             }
-            Instruction::I64Store16 => {
+            Instruction::I64Store16(offset) => {
                 let val = match self.context.pop()? {
                     Value::I64(v) => v as u16,
                     _ => return Err("Value must be i64".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_u16(addr, val)?;
             }
-            Instruction::I64Store32 => {
+            Instruction::I64Store32(offset) => {
                 let val = match self.context.pop()? {
                     Value::I64(v) => v as u32 as i32,
                     _ => return Err("Value must be i64".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => a as u32 as usize,
+                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_i32(addr, val)?;
@@ -2606,19 +2800,94 @@ impl Executor {
                 };
                 let old_pages = self.context.memory.pages();
                 match self.context.memory.grow(delta) {
-                    Ok(_) => self.context.push(Value::I32(old_pages as i32)),
-                    Err(_) => self.context.push(Value::I32(-1)), // Failure indicated by -1
+                    Ok(_) => {
+                        self.context.push(Value::I32(old_pages as i32));
+                    }
+                    Err(_) => {
+                        self.context.push(Value::I32(-1));
+                    }
                 }
             }
 
+            // Bulk-memory: memory.fill — memset equivalent
+            // Stack: [dest: i32, val: i32, len: i32]
+            Instruction::MemoryFill => {
+                let len = match self.context.pop()? {
+                    Value::I32(n) => n as usize,
+                    _ => return Err("memory.fill len must be i32".to_string()),
+                };
+                let val = match self.context.pop()? {
+                    Value::I32(v) => (v & 0xFF) as u8,
+                    _ => return Err("memory.fill val must be i32".to_string()),
+                };
+                let dest = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("memory.fill dest must be i32".to_string()),
+                };
+                for i in 0..len {
+                    self.context.memory.write_u8(dest + i, val)?;
+                }
+            }
+
+            // Bulk-memory: memory.copy — memmove equivalent
+            // Stack: [dst: i32, src: i32, len: i32]
+            Instruction::MemoryCopy => {
+                let len = match self.context.pop()? {
+                    Value::I32(n) => n as usize,
+                    _ => return Err("memory.copy len must be i32".to_string()),
+                };
+                let src = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("memory.copy src must be i32".to_string()),
+                };
+                let dst = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("memory.copy dst must be i32".to_string()),
+                };
+                let bytes = self.context.memory.read_bytes(src, len)?;
+                self.context.memory.write_bytes(dst, &bytes)?;
+            }
+
+            // Bulk-memory: memory.init — copy data segment into memory
+            // Stack: [dst: i32, src_offset: i32, len: i32]
+            Instruction::MemoryInit(seg_idx) => {
+                let len = match self.context.pop()? {
+                    Value::I32(n) => n as usize,
+                    _ => return Err("memory.init len must be i32".to_string()),
+                };
+                let src_off = match self.context.pop()? {
+                    Value::I32(a) => a as usize,
+                    _ => return Err("memory.init src_offset must be i32".to_string()),
+                };
+                let dst = match self.context.pop()? {
+                    Value::I32(a) => a as u32 as usize,
+                    _ => return Err("memory.init dst must be i32".to_string()),
+                };
+                let seg = self
+                    .module
+                    .data
+                    .get(seg_idx as usize)
+                    .ok_or_else(|| format!("memory.init: data segment {seg_idx} out of bounds"))?;
+                let src_end = src_off + len;
+                if src_end > seg.data.len() {
+                    return Err(format!(
+                        "memory.init: src range {src_off}..{src_end} out of segment bounds ({})",
+                        seg.data.len()
+                    ));
+                }
+                let bytes = seg.data[src_off..src_end].to_vec();
+                self.context.memory.write_bytes(dst, &bytes)?;
+            }
+
+            // Bulk-memory: data.drop — discard a data segment (no-op for us)
+            Instruction::DataDrop(_seg_idx) => {}
+
             // Control flow - proper implementation
             Instruction::Block(block_type) => {
-                // Push block frame with current position
                 let pos = cursor.position() as usize;
                 self.context.push_block(block_type, false, pos, 0, false);
             }
             Instruction::Loop(block_type) => {
-                // Push loop frame with current position (for backward branching)
                 let pos = cursor.position() as usize;
                 self.context.push_block(block_type, true, pos, 0, false);
             }
@@ -2631,23 +2900,27 @@ impl Executor {
                 };
 
                 if cond_value != 0 {
-                    // Condition is true - execute then-branch
+                    // Condition is true — push frame, execute then-branch.
+                    // If there's no else, the End instruction will pop this frame.
+                    // If there IS an else, the Else handler will skip to end and pop this frame.
                     self.context.push_block(block_type, false, 0, 0, true);
                 } else {
-                    // Condition is false - skip to else or end
-                    self.context.push_block(block_type, false, 0, 0, false);
-                    self.skip_to_else_or_end(cursor)?;
+                    // Condition is false — scan forward to find else or end.
+                    let found_else = self.skip_to_else_or_end(cursor)?;
+                    if found_else {
+                        // Cursor is now after `else`; push frame for the else-body.
+                        // The End at the close of this if will pop this frame.
+                        self.context.push_block(block_type, false, 0, 0, false);
+                    }
+                    // If found_else is false, `end` was already consumed — don't push a frame.
                 }
             }
             Instruction::Else => {
-                // We're hitting else, which means we executed the then-branch
-                // Skip to the matching end
-                let block = self.context.current_block()?;
-                if block.is_then_branch {
-                    // We came from the then-branch, skip to end
-                    self.skip_to_end(cursor)?;
-                }
-                // Else: we came from false condition, continue executing
+                // We just finished the then-branch. Skip to the matching `end`
+                // (which would otherwise be processed by the End handler, but we
+                // consume it here so we must also pop the block frame ourselves).
+                self.skip_to_end(cursor)?;
+                self.context.pop_block()?;
             }
             Instruction::Br(label) => {
                 self.do_branch(label, cursor)?;
@@ -2922,6 +3195,44 @@ impl Executor {
                     _ => return Err("Type mismatch for f64.reinterpret_i64".to_string()),
                 }
             }
+
+            // Sign-extension operators
+            Instruction::I32Extend8S => {
+                let a = match self.context.pop()? {
+                    Value::I32(v) => v as i8 as i32,
+                    _ => return Err("i32.extend8_s: expected i32".to_string()),
+                };
+                self.context.push(Value::I32(a));
+            }
+            Instruction::I32Extend16S => {
+                let a = match self.context.pop()? {
+                    Value::I32(v) => v as i16 as i32,
+                    _ => return Err("i32.extend16_s: expected i32".to_string()),
+                };
+                self.context.push(Value::I32(a));
+            }
+            Instruction::I64Extend8S => {
+                let a = match self.context.pop()? {
+                    Value::I64(v) => v as i8 as i64,
+                    _ => return Err("i64.extend8_s: expected i64".to_string()),
+                };
+                self.context.push(Value::I64(a));
+            }
+            Instruction::I64Extend16S => {
+                let a = match self.context.pop()? {
+                    Value::I64(v) => v as i16 as i64,
+                    _ => return Err("i64.extend16_s: expected i64".to_string()),
+                };
+                self.context.push(Value::I64(a));
+            }
+            Instruction::I64Extend32S => {
+                let a = match self.context.pop()? {
+                    Value::I64(v) => v as i32 as i64,
+                    _ => return Err("i64.extend32_s: expected i64".to_string()),
+                };
+                self.context.push(Value::I64(a));
+            }
+
             Instruction::Select => {
                 let cond = self.context.pop()?;
                 let val2 = self.context.pop()?;

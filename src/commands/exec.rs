@@ -38,8 +38,12 @@ fn execute_wasm_with_args(wasm_path: &str, call: Option<String>, args: Vec<Strin
     }
     println!("🏃 Executing natively (interpreter mode)");
 
-    native_executor::execute_wasm_file_with_args(wasm_path, call, args)?;
-    println!("✅ Execution completed");
+    let exit_code = native_executor::execute_wasm_file_with_args(wasm_path, call, args)?;
+    if exit_code != 0 {
+        println!("✅ Execution completed (exit code: {exit_code})");
+    } else {
+        println!("✅ Execution completed");
+    }
 
     Ok(())
 }

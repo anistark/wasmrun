@@ -593,6 +593,7 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                 move |args, mem| {
                     let count_ptr = i32_arg(&args, 0)? as u32;
                     let buf_size_ptr = i32_arg(&args, 1)? as u32;
+                    eprintln!("[wasmrun] args_sizes_get(count_ptr={count_ptr}, buf_size_ptr={buf_size_ptr})");
                     let errno = syscalls::args_sizes_get(count_ptr, buf_size_ptr, mem, &env);
                     Ok(vec![Value::I32(errno)])
                 },
@@ -612,6 +613,7 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                 move |args, mem| {
                     let argv_ptr = i32_arg(&args, 0)? as u32;
                     let argv_buf_ptr = i32_arg(&args, 1)? as u32;
+                    eprintln!("[wasmrun] args_get(argv_ptr={argv_ptr}, argv_buf_ptr={argv_buf_ptr})");
                     let errno = syscalls::args_get(argv_ptr, argv_buf_ptr, mem, &env);
                     Ok(vec![Value::I32(errno)])
                 },
@@ -631,6 +633,7 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                 move |args, mem| {
                     let count_ptr = i32_arg(&args, 0)? as u32;
                     let buf_size_ptr = i32_arg(&args, 1)? as u32;
+                    eprintln!("[wasmrun] environ_sizes_get");
                     let errno = syscalls::environ_sizes_get(count_ptr, buf_size_ptr, mem, &env);
                     Ok(vec![Value::I32(errno)])
                 },
@@ -650,6 +653,7 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                 move |args, mem| {
                     let environ_ptr = i32_arg(&args, 0)? as u32;
                     let environ_buf_ptr = i32_arg(&args, 1)? as u32;
+                    eprintln!("[wasmrun] environ_get");
                     let errno = syscalls::environ_get(environ_ptr, environ_buf_ptr, mem, &env);
                     Ok(vec![Value::I32(errno)])
                 },
@@ -668,6 +672,7 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                 let clock_id = i32_arg(&args, 0)? as u32;
                 let precision = i64_arg(&args, 1)?;
                 let time_ptr = i32_arg(&args, 2)? as u32;
+                eprintln!("[wasmrun] clock_time_get(clock_id={clock_id})");
                 let errno = syscalls::clock_time_get(clock_id, precision, time_ptr, mem);
                 Ok(vec![Value::I32(errno)])
             },
@@ -700,10 +705,63 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
         Box::new(ClosureHostFunction::new(
             |args, _mem| {
                 let code = i32_arg(&args, 0)?;
+                eprintln!("[wasmrun] proc_exit({code})");
                 Err(format!("{WASI_PROC_EXIT_PREFIX}{code}"))
             },
             1,
             0,
+        )),
+    );
+
+    // fd_fdstat_set_flags
+    linker.register(
+        WASI_MODULE,
+        "fd_fdstat_set_flags",
+        Box::new(ClosureHostFunction::new(
+            |args, _mem| {
+                let fd = i32_arg(&args, 0)? as u32;
+                let flags = i32_arg(&args, 1)? as u16;
+                Ok(vec![Value::I32(syscalls::fd_fdstat_set_flags(fd, flags))])
+            },
+            2,
+            1,
+        )),
+    );
+
+    // path_filestat_set_times (stub — return ENOSYS)
+    linker.register(
+        WASI_MODULE,
+        "path_filestat_set_times",
+        Box::new(ClosureHostFunction::new(
+            |_args, _mem| Ok(vec![Value::I32(syscalls::path_filestat_set_times())]),
+            6,
+            1,
+        )),
+    );
+
+    // path_readlink (stub — return ENOSYS, write 0 to buf_used)
+    linker.register(
+        WASI_MODULE,
+        "path_readlink",
+        Box::new(ClosureHostFunction::new(
+            |args, mem| {
+                // args: fd, flags, path_ptr, path_len, buf_ptr, buf_len, buf_used_ptr
+                let buf_used_ptr = i32_arg(&args, 6)? as u32;
+                Ok(vec![Value::I32(syscalls::path_readlink(buf_used_ptr, mem))])
+            },
+            7,
+            1,
+        )),
+    );
+
+    // path_symlink (stub — return ENOSYS)
+    linker.register(
+        WASI_MODULE,
+        "path_symlink",
+        Box::new(ClosureHostFunction::new(
+            |_args, _mem| Ok(vec![Value::I32(syscalls::path_symlink())]),
+            5,
+            1,
         )),
     );
 

@@ -2,7 +2,7 @@
 use super::executor::{Executor, WASI_PROC_EXIT_PREFIX};
 use super::module::Module;
 use super::values::Value;
-use crate::error::{Result, WasmrunError};
+use crate::error::{CommandError, Result, WasmrunError};
 use crate::runtime::wasi::{create_wasi_linker, WasiEnv};
 use std::fs;
 use std::path::Path;
@@ -31,7 +31,12 @@ pub fn execute_wasm_file_with_args(
     }
     let wasm_bytes = fs::read(wasm_path)
         .map_err(|e| WasmrunError::from(format!("Failed to read WASM file '{wasm_path}': {e}")))?;
-    execute_wasm_bytes_with_args(&wasm_bytes, function, args)
+    // Prepend wasm_path as argv[0] per WASI/POSIX convention.
+    // The bare args from the CLI don't include a program name, but WASI programs
+    // (e.g. QuickJS) index into argv[1] for their first real argument.
+    let mut wasi_args = vec![wasm_path.to_string()];
+    wasi_args.extend(args.iter().cloned());
+    execute_wasm_bytes_with_args(&wasm_bytes, function, wasi_args)
 }
 
 pub fn execute_wasm_bytes(wasm_bytes: &[u8]) -> Result<i32> {
@@ -93,8 +98,7 @@ pub fn execute_wasm_bytes_with_args(
             Ok(0)
         }
         Err(e) => {
-            let err_str = e.to_string();
-            if let Some(code) = Executor::is_proc_exit(&err_str) {
+            if let Some(code) = extract_proc_exit(&e) {
                 // Print captured output even on proc_exit
                 if let Ok(env) = wasi_env.lock() {
                     let out = env.get_stdout();
@@ -175,14 +179,26 @@ pub fn execute_wasm_bytes_with_env(
     match execute_function(&mut executor, func_idx, wasm_args) {
         Ok(()) => Ok(0),
         Err(e) => {
-            let err_str = e.to_string();
-            if let Some(code) = Executor::is_proc_exit(&err_str) {
+            if let Some(code) = extract_proc_exit(&e) {
                 Ok(code)
             } else {
                 Err(e)
             }
         }
     }
+}
+
+/// Extract a proc_exit code from a WasmrunError.
+///
+/// `From<String> for WasmrunError` in cli.rs wraps raw strings as
+/// `Command(InvalidArguments { message })`, so `e.to_string()` prepends
+/// "Invalid command arguments: " and `Executor::is_proc_exit` misses it.
+/// This helper checks the inner message directly.
+fn extract_proc_exit(e: &WasmrunError) -> Option<i32> {
+    if let WasmrunError::Command(CommandError::InvalidArguments { message }) = e {
+        return Executor::is_proc_exit(message);
+    }
+    Executor::is_proc_exit(&e.to_string())
 }
 
 fn convert_string_args_to_values(args: &[String]) -> Vec<Value> {
