@@ -102,6 +102,8 @@ pub fn fd_write(
                 }
             }
             WASI_STDERR_FD => {
+                // Pass stderr through immediately so error messages are visible
+                eprint!("{}", String::from_utf8_lossy(&bytes));
                 if let Ok(mut e) = env.lock() {
                     e.stderr_mut().extend_from_slice(&bytes);
                 }
