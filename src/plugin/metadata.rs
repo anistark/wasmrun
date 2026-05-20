@@ -257,6 +257,16 @@ impl PluginMetadata {
                 vec!["go.mod".to_string(), "main.go".to_string()],
                 vec!["tinygo".to_string()],
             ),
+            name if name == "waspy" || name.contains("python") => (
+                vec!["py".to_string()],
+                vec![
+                    "main.py".to_string(),
+                    "__main__.py".to_string(),
+                    "requirements.txt".to_string(),
+                    "pyproject.toml".to_string(),
+                ],
+                vec![],
+            ),
             name if name.contains("zig") => (
                 vec!["zig".to_string()],
                 vec!["build.zig".to_string(), "src/main.zig".to_string()],

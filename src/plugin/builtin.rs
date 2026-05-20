@@ -2,7 +2,10 @@
 
 use crate::compiler::builder::WasmBuilder;
 use crate::error::Result;
+use crate::plugin::languages::asc_plugin::AscPlugin;
 use crate::plugin::languages::c_plugin::CPlugin;
+use crate::plugin::languages::go_plugin::GoPlugin;
+use crate::plugin::languages::rust_plugin::RustPlugin;
 use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
 use std::sync::Arc;
 
@@ -157,10 +160,10 @@ impl WasmBuilder for BuiltinBuilderWrapper {
 
 /// Load all built-in plugins into a vector
 pub fn load_all_builtin_plugins(plugins: &mut Vec<Box<dyn Plugin>>) -> Result<()> {
-    // C plugin
-    let c_plugin = Arc::new(CPlugin::new());
-    plugins.push(Box::new(BuiltinPlugin::new(c_plugin)));
-
+    plugins.push(Box::new(BuiltinPlugin::new(Arc::new(CPlugin::new()))));
+    plugins.push(Box::new(BuiltinPlugin::new(Arc::new(AscPlugin::new()))));
+    plugins.push(Box::new(BuiltinPlugin::new(Arc::new(GoPlugin::new()))));
+    plugins.push(Box::new(BuiltinPlugin::new(Arc::new(RustPlugin::new()))));
     Ok(())
 }
 
@@ -173,7 +176,7 @@ pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
 /// Check if a plugin name is a built-in plugin
 #[allow(dead_code)] // TODO: Future plugin validation
 pub fn is_builtin_plugin(name: &str) -> bool {
-    matches!(name, "c")
+    matches!(name, "c" | "asc" | "go" | "rust")
 }
 
 /// Get specific built-in plugin info by name
@@ -210,8 +213,10 @@ mod tests {
 
         let plugin_names: Vec<&str> = plugins.iter().map(|p| p.info().name.as_str()).collect();
 
-        // Check that we have the expected builtin plugins
         assert!(plugin_names.contains(&"c"));
+        assert!(plugin_names.contains(&"asc"));
+        assert!(plugin_names.contains(&"go"));
+        assert!(plugin_names.contains(&"rust"));
     }
 
     #[test]
@@ -317,10 +322,10 @@ mod tests {
     #[test]
     fn test_is_builtin_plugin() {
         assert!(is_builtin_plugin("c"));
+        assert!(is_builtin_plugin("asc"));
+        assert!(is_builtin_plugin("go"));
+        assert!(is_builtin_plugin("rust"));
 
-        assert!(!is_builtin_plugin("asc"));
-        assert!(!is_builtin_plugin("rust"));
-        assert!(!is_builtin_plugin("go"));
         assert!(!is_builtin_plugin("python"));
         assert!(!is_builtin_plugin("nonexistent"));
         assert!(!is_builtin_plugin(""));
