@@ -74,7 +74,10 @@ mod tests {
         assert_eq!(err.status_code(), 400);
         let msg = err.to_string();
         assert!(msg.contains("python"), "expected 'python' in: {msg}");
-        assert!(msg.contains("javascript"), "expected 'javascript' in: {msg}");
+        assert!(
+            msg.contains("javascript"),
+            "expected 'javascript' in: {msg}"
+        );
     }
 
     #[test]

@@ -477,7 +477,11 @@ mod tests {
 
         let env = Arc::new(Mutex::new(WasiEnv::new()));
         let result = execute_wasm_bytes_with_env(&wasm, env, None, vec![], None);
-        assert_eq!(result.unwrap(), 42, "proc_exit(42) must surface as exit code 42");
+        assert_eq!(
+            result.unwrap(),
+            42,
+            "proc_exit(42) must surface as exit code 42"
+        );
     }
 
     /// Test that proc_exit(0) also works (not treated as an error)
@@ -511,7 +515,11 @@ mod tests {
 
         let env = Arc::new(Mutex::new(WasiEnv::new()));
         let result = execute_wasm_bytes_with_env(&wasm, env, None, vec![], None);
-        assert_eq!(result.unwrap(), 0, "proc_exit(0) must surface as exit code 0");
+        assert_eq!(
+            result.unwrap(),
+            0,
+            "proc_exit(0) must surface as exit code 0"
+        );
     }
 
     /// Test that host function reads/writes match imported function dispatch

@@ -335,9 +335,7 @@ impl AgentServer {
                 })
                 .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
         } else {
-            return Err(ApiError::BadRequest(
-                "Missing wasm_path or source".into(),
-            ));
+            return Err(ApiError::BadRequest("Missing wasm_path or source".into()));
         }
 
         let duration_ms;
@@ -934,10 +932,7 @@ mod tests {
 
         // Python is not supported yet — should fail immediately without network I/O
         let err = server
-            .handle_exec(
-                &id,
-                r#"{"source": "print('hello')", "language": "python"}"#,
-            )
+            .handle_exec(&id, r#"{"source": "print('hello')", "language": "python"}"#)
             .unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("python"));
@@ -956,7 +951,10 @@ mod tests {
         // The exec thread may return an Internal error if the runtime is unavailable, which
         // surfaces as ExecResponse.error — not an ApiError from handle_exec itself.
         let result = server.handle_exec(&id, r#"{"source": "1+1"}"#);
-        assert!(result.is_ok(), "default language should not return ApiError");
+        assert!(
+            result.is_ok(),
+            "default language should not return ApiError"
+        );
 
         server.session_manager.destroy_all().unwrap();
     }

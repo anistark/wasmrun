@@ -1243,7 +1243,9 @@ impl Executor {
         if label_idx >= self.context.block_stack.len() {
             let depth = self.context.block_stack.len();
             let call_stack: Vec<u32> = self.context.call_stack.iter().map(|f| f.func_idx).collect();
-            return Err(format!("br: invalid label {label} (block_stack depth={depth}, call_stack={call_stack:?})"));
+            return Err(format!(
+                "br: invalid label {label} (block_stack depth={depth}, call_stack={call_stack:?})"
+            ));
         }
 
         let block_idx = self.context.block_stack.len() - 1 - label_idx;
@@ -1255,18 +1257,26 @@ impl Executor {
         let arity: usize = if target_block.is_loop {
             0
         } else {
-            if target_block.block_type.is_some() { 1 } else { 0 }
+            if target_block.block_type.is_some() {
+                1
+            } else {
+                0
+            }
         };
         let is_loop = target_block.is_loop;
 
         // Restore operand stack: keep only the top `arity` values, truncate to target stack_depth
         let target_depth = target_block.stack_depth;
-        let result_values: Vec<Value> = if arity > 0 && self.context.operand_stack.len() > target_depth {
-            let cur_len = self.context.operand_stack.len();
-            self.context.operand_stack.drain(cur_len - arity..).collect()
-        } else {
-            Vec::new()
-        };
+        let result_values: Vec<Value> =
+            if arity > 0 && self.context.operand_stack.len() > target_depth {
+                let cur_len = self.context.operand_stack.len();
+                self.context
+                    .operand_stack
+                    .drain(cur_len - arity..)
+                    .collect()
+            } else {
+                Vec::new()
+            };
         if self.context.operand_stack.len() > target_depth {
             self.context.operand_stack.truncate(target_depth);
         }
@@ -2863,11 +2873,10 @@ impl Executor {
                     Value::I32(a) => a as u32 as usize,
                     _ => return Err("memory.init dst must be i32".to_string()),
                 };
-                let seg = self
-                    .module
-                    .data
-                    .get(seg_idx as usize)
-                    .ok_or_else(|| format!("memory.init: data segment {seg_idx} out of bounds"))?;
+                let seg =
+                    self.module.data.get(seg_idx as usize).ok_or_else(|| {
+                        format!("memory.init: data segment {seg_idx} out of bounds")
+                    })?;
                 let src_end = src_off + len;
                 if src_end > seg.data.len() {
                     return Err(format!(
