@@ -99,9 +99,7 @@ impl WasmBuilder for RustPlugin {
             missing.push("cargo (install from https://rustup.rs)".to_string());
         }
         if !CommandExecutor::is_tool_installed("wasm-bindgen") {
-            missing.push(
-                "wasm-bindgen (install with: cargo install wasm-bindgen-cli)".to_string(),
-            );
+            missing.push("wasm-bindgen (install with: cargo install wasm-bindgen-cli)".to_string());
         }
         missing
     }
@@ -146,12 +144,7 @@ impl WasmBuilder for RustPlugin {
             println!("🔨 Building Rust project for wasm32-unknown-unknown...");
         }
 
-        let cargo_args = [
-            "build",
-            "--release",
-            "--target",
-            "wasm32-unknown-unknown",
-        ];
+        let cargo_args = ["build", "--release", "--target", "wasm32-unknown-unknown"];
 
         let build_output = CommandExecutor::execute_command(
             "cargo",
@@ -170,7 +163,8 @@ impl WasmBuilder for RustPlugin {
             });
         }
 
-        let pkg_name = Self::read_package_name(&config.project_path).unwrap_or_else(|| "output".to_string());
+        let pkg_name =
+            Self::read_package_name(&config.project_path).unwrap_or_else(|| "output".to_string());
         let wasm_file = Path::new(&config.project_path)
             .join("target")
             .join("wasm32-unknown-unknown")

@@ -29,10 +29,7 @@ impl AscPlugin {
                 live_reload: false,
                 optimization: true,
                 custom_targets: vec!["wasm".to_string(), "web".to_string()],
-                supported_languages: Some(vec![
-                    "assemblyscript".to_string(),
-                    "asc".to_string(),
-                ]),
+                supported_languages: Some(vec!["assemblyscript".to_string(), "asc".to_string()]),
             },
         };
 
@@ -61,12 +58,7 @@ impl AscPlugin {
             return None;
         }
 
-        let candidates = [
-            "optimized.wasm",
-            "release.wasm",
-            "output.wasm",
-            "main.wasm",
-        ];
+        let candidates = ["optimized.wasm", "release.wasm", "output.wasm", "main.wasm"];
         for candidate in &candidates {
             let p = build_dir.join(candidate);
             if p.exists() {
@@ -119,7 +111,10 @@ impl WasmBuilder for AscPlugin {
         let mut missing = Vec::new();
         if !CommandExecutor::is_tool_installed("asc") && !CommandExecutor::is_tool_installed("npx")
         {
-            missing.push("asc (AssemblyScript compiler — install with: npm install -g assemblyscript)".to_string());
+            missing.push(
+                "asc (AssemblyScript compiler — install with: npm install -g assemblyscript)"
+                    .to_string(),
+            );
         }
         missing
     }

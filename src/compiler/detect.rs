@@ -73,7 +73,9 @@ pub fn detect_project_language(project_path: &str) -> ProjectLanguage {
 
     if let Ok(package_json) = fs::read_to_string(path.join("package.json")) {
         if package_json.contains("assemblyscript") || package_json.contains("\"asc\"") {
-            debug_println!("Found assemblyscript in package.json - detected AssemblyScript project");
+            debug_println!(
+                "Found assemblyscript in package.json - detected AssemblyScript project"
+            );
             return ProjectLanguage::Asc;
         }
     }
@@ -178,9 +180,7 @@ pub fn get_recommended_tools(language: &ProjectLanguage, os: &OperatingSystem) -
             vec!["asc".to_string()]
         }
         (ProjectLanguage::Python, _) => {
-            vec![
-                "External Python plugin (install with: wasmrun plugin install waspy)".to_string(),
-            ]
+            vec!["External Python plugin (install with: wasmrun plugin install waspy)".to_string()]
         }
         (ProjectLanguage::Unknown, _) => Vec::new(),
     };
