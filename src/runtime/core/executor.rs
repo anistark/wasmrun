@@ -1256,12 +1256,10 @@ impl Executor {
         // For blocks/if: 0 if void, 1 if value type
         let arity: usize = if target_block.is_loop {
             0
+        } else if target_block.block_type.is_some() {
+            1
         } else {
-            if target_block.block_type.is_some() {
-                1
-            } else {
-                0
-            }
+            0
         };
         let is_loop = target_block.is_loop;
 

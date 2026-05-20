@@ -122,11 +122,7 @@ pub fn display_functions(module: &Module) {
 
     // Calculate code statistics
     let total_code_size: usize = module.functions.iter().map(|f| f.code.len()).sum();
-    let avg_size = if function_count > 0 {
-        total_code_size / function_count
-    } else {
-        0
-    };
+    let avg_size = total_code_size.checked_div(function_count).unwrap_or(0);
 
     let max_size = module
         .functions

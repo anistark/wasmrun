@@ -18,8 +18,7 @@ pub fn resolve_runtime(language: &str) -> std::result::Result<&'static str, ApiE
     match wasmhub_language(language) {
         "nodejs" => Ok("nodejs"),
         _ => Err(ApiError::BadRequest(format!(
-            "Unsupported language: '{}'. Supported languages: javascript, js, nodejs",
-            language
+            "Unsupported language: '{language}'. Supported languages: javascript, js, nodejs",
         ))),
     }
 }
