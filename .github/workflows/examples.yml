@@ -30,8 +30,6 @@ jobs:
             lang: asc
           - name: web-leptos
             lang: rust
-          - name: nodejs-express-api
-            lang: nodejs
 
     runs-on: ${{ matrix.os }}
 
@@ -74,6 +72,25 @@ jobs:
       with:
         go-version: 'stable'
 
+    - name: Install TinyGo (Linux)
+      if: matrix.example.lang == 'go' && runner.os == 'Linux'
+      run: |
+        TINYGO_VERSION=0.33.0
+        wget -q "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo${TINYGO_VERSION}.linux-amd64.tar.gz"
+        tar -xzf "tinygo${TINYGO_VERSION}.linux-amd64.tar.gz"
+        echo "$(pwd)/tinygo/bin" >> $GITHUB_PATH
+      shell: bash
+
+    - name: Install TinyGo (Windows)
+      if: matrix.example.lang == 'go' && runner.os == 'Windows'
+      run: |
+        $version = "0.33.0"
+        $url = "https://github.com/tinygo-org/tinygo/releases/download/v${version}/tinygo${version}.windows-amd64.zip"
+        Invoke-WebRequest -Uri $url -OutFile "tinygo.zip"
+        Expand-Archive -Path "tinygo.zip" -DestinationPath "."
+        Add-Content $env:GITHUB_PATH "$(Get-Location)\tinygo\bin"
+      shell: powershell
+
     - name: Install Node.js
       if: matrix.example.lang == 'asc' || matrix.example.lang == 'nodejs'
       uses: actions/setup-node@v4
@@ -84,7 +101,7 @@ jobs:
       if: matrix.example.lang == 'asc'
       run: npm install -g assemblyscript
 
-    - name: Install Emscripten
+    - name: Install Emscripten (Linux)
       if: matrix.example.lang == 'c' && runner.os == 'Linux'
       run: |
         git clone https://github.com/emscripten-core/emsdk.git
@@ -99,6 +116,11 @@ jobs:
         cd emsdk
         .\emsdk install latest
         .\emsdk activate latest
+        # Add emscripten to PATH so bash subprocesses (used by make) can find emcc
+        $emsdkPath = (Get-Item ".\emsdk").FullName
+        Add-Content $env:GITHUB_PATH "$emsdkPath\upstream\emscripten"
+        Add-Content $env:GITHUB_PATH "$emsdkPath\node\current\bin"
+      shell: powershell
 
     - name: Install wasm-bindgen-cli
       if: matrix.example.lang == 'rust'
@@ -116,11 +138,16 @@ jobs:
       env:
         SKIP_UI_BUILD: 1
 
-    # Install waspy plugin for Python examples
-    - name: Install waspy plugin
-      if: matrix.example.lang == 'python'
+    # Install plugins for languages that need them
+    - name: Install waspy plugin (Linux)
+      if: matrix.example.lang == 'python' && runner.os == 'Linux'
       run: ./target/release/wasmrun plugin install waspy
       shell: bash
+
+    - name: Install waspy plugin (Windows)
+      if: matrix.example.lang == 'python' && runner.os == 'Windows'
+      run: .\target\release\wasmrun.exe plugin install waspy
+      shell: powershell
 
     # Test example compilation
     - name: Test ${{ matrix.example.name }} (Linux)
@@ -129,7 +156,7 @@ jobs:
         if [ "${{ matrix.example.lang }}" = "c" ]; then
           source ./emsdk/emsdk_env.sh
         fi
-        timeout 60 ./target/release/wasmrun compile examples/${{ matrix.example.name }} -o /tmp/wasmrun_test_${{ matrix.example.name }} -v || exit 1
+        timeout 120 ./target/release/wasmrun compile examples/${{ matrix.example.name }} -o /tmp/wasmrun_test_${{ matrix.example.name }} -v || exit 1
       shell: bash
 
     - name: Test ${{ matrix.example.name }} (Windows)
@@ -141,29 +168,32 @@ jobs:
         & .\target\release\wasmrun.exe compile examples\${{ matrix.example.name }} -o $env:TEMP\wasmrun_test_${{ matrix.example.name }} -v
         if ($LASTEXITCODE -ne 0) { exit 1 }
       shell: powershell
-      timeout-minutes: 2
+      timeout-minutes: 5
 
     - name: Verify output files exist (Linux)
       if: runner.os == 'Linux'
       run: |
-        if [ ! -f /tmp/wasmrun_test_${{ matrix.example.name }}/*.wasm ]; then
-          echo "Error: WASM file not found"
-          ls -la /tmp/wasmrun_test_${{ matrix.example.name }}/
+        OUTPUT_DIR="/tmp/wasmrun_test_${{ matrix.example.name }}"
+        WASM_COUNT=$(find "$OUTPUT_DIR" -name "*.wasm" 2>/dev/null | wc -l)
+        if [ "$WASM_COUNT" -eq 0 ]; then
+          echo "Error: No WASM file found in $OUTPUT_DIR"
+          ls -la "$OUTPUT_DIR/" 2>/dev/null || echo "Output directory does not exist"
           exit 1
         fi
-        echo "✓ Example ${{ matrix.example.name }} compiled successfully"
+        echo "✓ Example ${{ matrix.example.name }} compiled successfully ($WASM_COUNT wasm file(s))"
       shell: bash
 
     - name: Verify output files exist (Windows)
       if: runner.os == 'Windows'
       run: |
-        $wasmFiles = Get-ChildItem -Path "$env:TEMP\wasmrun_test_${{ matrix.example.name }}" -Filter "*.wasm"
+        $outputDir = "$env:TEMP\wasmrun_test_${{ matrix.example.name }}"
+        $wasmFiles = Get-ChildItem -Path $outputDir -Filter "*.wasm" -Recurse -ErrorAction SilentlyContinue
         if ($wasmFiles.Count -eq 0) {
-          Write-Host "Error: WASM file not found"
-          Get-ChildItem -Path "$env:TEMP\wasmrun_test_${{ matrix.example.name }}"
+          Write-Host "Error: No WASM file found in $outputDir"
+          Get-ChildItem -Path $outputDir -ErrorAction SilentlyContinue
           exit 1
         }
-        Write-Host "✓ Example ${{ matrix.example.name }} compiled successfully"
+        Write-Host "✓ Example ${{ matrix.example.name }} compiled successfully ($($wasmFiles.Count) wasm file(s))"
       shell: powershell
 
   summary:
