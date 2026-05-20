@@ -1,6 +1,6 @@
 [package]
 name = "wasmrun"
-version = "0.16.0"
+version = "0.19.0"
 edition = "2021"
 description = "A WebAssembly Runtime"
 license = "MIT"

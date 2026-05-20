@@ -1,6 +1,7 @@
 //! Agent mode: REST API server for AI agent sandbox management.
 
 use crate::agent::api::*;
+use crate::agent::executor;
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::tools;
 use crate::error::{Result, WasmrunError};
@@ -15,6 +16,9 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 const API_PREFIX: &str = "/api/v1";
 const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 30;
+// Language runtimes (e.g. QuickJS compiled to WASM) generate deep call chains that
+// overflow the default 8 MB thread stack when run through the WASM interpreter.
+const EXEC_THREAD_STACK_BYTES: usize = 64 * 1024 * 1024;
 
 pub struct AgentConfig {
     pub port: u16,
@@ -263,19 +267,10 @@ impl AgentServer {
         let req: ExecRequest =
             serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
-        let wasm_path = req
-            .wasm_path
-            .as_deref()
-            .ok_or_else(|| ApiError::BadRequest("Missing wasm_path".into()))?;
-
         let (wasi_env, work_dir) = self
             .session_manager
             .get_session(id, |s| (s.wasi_env(), s.work_dir().to_path_buf()))
             .map_err(map_session_err)?;
-
-        let resolved = resolve_session_path(&work_dir, wasm_path)?;
-        let wasm_bytes = std::fs::read(&resolved)
-            .map_err(|e| ApiError::NotFound(format!("{}: {e}", resolved.display())))?;
 
         // Prepare environment
         {
@@ -294,18 +289,56 @@ impl AgentServer {
         let timeout_secs = req.timeout.unwrap_or(DEFAULT_EXEC_TIMEOUT_SECS);
         let timeout = Duration::from_secs(timeout_secs);
         let start = Instant::now();
-
+        let max_pages = Some(self.config.max_memory_mb * 16);
         let exec_env = wasi_env.clone();
-        let function = req.function.clone();
-        let args = req.args.clone();
-        let max_pages = Some(self.config.max_memory_mb * 16); // 1 page = 64KB
 
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let result =
-                execute_wasm_bytes_with_env(&wasm_bytes, exec_env, function, args, max_pages);
-            let _ = tx.send(result);
-        });
+        let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<i32, ApiError>>();
+
+        if let Some(source) = req.source {
+            // Source execution: write code to session FS and run via language runtime
+            let lang = req.language.unwrap_or_else(|| "javascript".into());
+            // Validate language before spawning so callers get a 400 immediately
+            executor::resolve_runtime(&lang)?;
+            let work_dir_clone = work_dir.clone();
+            std::thread::Builder::new()
+                .stack_size(EXEC_THREAD_STACK_BYTES)
+                .spawn(move || {
+                    let result = executor::execute_source(
+                        &source,
+                        &lang,
+                        exec_env,
+                        &work_dir_clone,
+                        max_pages,
+                    );
+                    let _ = tx.send(result);
+                })
+                .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
+        } else if let Some(wasm_path) = req.wasm_path.as_deref() {
+            // WASM file execution: load from session filesystem and run directly
+            let resolved = resolve_session_path(&work_dir, wasm_path)?;
+            let wasm_bytes = std::fs::read(&resolved)
+                .map_err(|e| ApiError::NotFound(format!("{}: {e}", resolved.display())))?;
+            let function = req.function.clone();
+            let args = req.args.clone();
+            std::thread::Builder::new()
+                .stack_size(EXEC_THREAD_STACK_BYTES)
+                .spawn(move || {
+                    let result = execute_wasm_bytes_with_env(
+                        &wasm_bytes,
+                        exec_env,
+                        function,
+                        args,
+                        max_pages,
+                    )
+                    .map_err(|e| ApiError::Internal(e.to_string()));
+                    let _ = tx.send(result);
+                })
+                .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
+        } else {
+            return Err(ApiError::BadRequest(
+                "Missing wasm_path or source".into(),
+            ));
+        }
 
         let duration_ms;
         let exec_result = match rx.recv_timeout(timeout) {
@@ -883,12 +916,47 @@ mod tests {
     }
 
     #[test]
-    fn test_exec_missing_wasm_path() {
+    fn test_exec_missing_wasm_path_and_source() {
         let server = test_server();
         let id = server.handle_create_session().unwrap().session_id;
 
         let err = server.handle_exec(&id, r#"{}"#).unwrap_err();
         assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("wasm_path") || err.to_string().contains("source"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_source_unsupported_language() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // Python is not supported yet — should fail immediately without network I/O
+        let err = server
+            .handle_exec(
+                &id,
+                r#"{"source": "print('hello')", "language": "python"}"#,
+            )
+            .unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("python"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_source_defaults_to_javascript() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // Omitting "language" with "source" present should not produce a BadRequest
+        // (it defaults to javascript). We can't verify full execution without the runtime,
+        // but we verify the request parses and reaches the execution stage (not a 400).
+        // The exec thread may return an Internal error if the runtime is unavailable, which
+        // surfaces as ExecResponse.error — not an ApiError from handle_exec itself.
+        let result = server.handle_exec(&id, r#"{"source": "1+1"}"#);
+        assert!(result.is_ok(), "default language should not return ApiError");
 
         server.session_manager.destroy_all().unwrap();
     }

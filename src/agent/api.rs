@@ -7,7 +7,12 @@ use std::collections::HashMap;
 
 #[derive(Deserialize)]
 pub struct ExecRequest {
+    /// Path to a pre-compiled .wasm file (relative to session root).
     pub wasm_path: Option<String>,
+    /// Source code to execute via a language runtime (alternative to wasm_path).
+    pub source: Option<String>,
+    /// Language for source execution: "javascript", "js", or "nodejs".
+    pub language: Option<String>,
     pub function: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,

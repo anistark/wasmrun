@@ -45,7 +45,7 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
             r#type: "function",
             function: OpenAiFunction {
                 name: "execute_code",
-                description: "Execute a WASM file inside a sandbox session. Returns stdout, stderr, exit code, and duration.",
+                description: "Execute JavaScript source code or a pre-compiled WASM file inside a sandbox session. Provide either 'source'+'language' for source execution, or 'wasm_path' for WASM execution. Returns stdout, stderr, exit code, and duration.",
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -53,18 +53,27 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                             "type": "string",
                             "description": "The session ID returned by create_session"
                         },
+                        "source": {
+                            "type": "string",
+                            "description": "Source code to execute (use with 'language'). Alternative to wasm_path."
+                        },
+                        "language": {
+                            "type": "string",
+                            "enum": ["javascript", "js", "nodejs"],
+                            "description": "Language for source execution (required when 'source' is provided)"
+                        },
                         "wasm_path": {
                             "type": "string",
-                            "description": "Path to the .wasm file relative to the session root"
+                            "description": "Path to a pre-compiled .wasm file relative to the session root. Alternative to source."
                         },
                         "function": {
                             "type": "string",
-                            "description": "Exported function to call (defaults to _start or main)"
+                            "description": "Exported WASM function to call (defaults to _start or main; only used with wasm_path)"
                         },
                         "args": {
                             "type": "array",
                             "items": { "type": "string" },
-                            "description": "Arguments passed to the WASM program"
+                            "description": "Arguments passed to the WASM program (only used with wasm_path)"
                         },
                         "timeout": {
                             "type": "integer",
@@ -76,7 +85,7 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                             "description": "Environment variables to set before execution"
                         }
                     },
-                    "required": ["session_id", "wasm_path"],
+                    "required": ["session_id"],
                     "additionalProperties": false
                 }),
             },
@@ -224,7 +233,24 @@ mod tests {
         let required = exec.function.parameters["required"].as_array().unwrap();
         let req_strs: Vec<&str> = required.iter().map(|v| v.as_str().unwrap()).collect();
         assert!(req_strs.contains(&"session_id"));
-        assert!(req_strs.contains(&"wasm_path"));
+        // wasm_path and source are now both optional (either may be provided)
+        assert!(!req_strs.contains(&"wasm_path"));
+        assert!(!req_strs.contains(&"source"));
+    }
+
+    #[test]
+    fn test_execute_code_has_source_and_language_params() {
+        let tools = openai_tools();
+        let exec = tools
+            .iter()
+            .find(|t| t.function.name == "execute_code")
+            .unwrap();
+        let props = &exec.function.parameters["properties"];
+        assert!(props["source"].is_object());
+        assert!(props["language"].is_object());
+        assert!(props["wasm_path"].is_object());
+        // language should have an enum constraint
+        assert!(props["language"]["enum"].is_array());
     }
 
     #[test]

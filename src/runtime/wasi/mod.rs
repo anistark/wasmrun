@@ -593,7 +593,6 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                 move |args, mem| {
                     let count_ptr = i32_arg(&args, 0)? as u32;
                     let buf_size_ptr = i32_arg(&args, 1)? as u32;
-                    eprintln!("[wasmrun] args_sizes_get(count_ptr={count_ptr}, buf_size_ptr={buf_size_ptr})");
                     let errno = syscalls::args_sizes_get(count_ptr, buf_size_ptr, mem, &env);
                     Ok(vec![Value::I32(errno)])
                 },
@@ -613,7 +612,6 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                 move |args, mem| {
                     let argv_ptr = i32_arg(&args, 0)? as u32;
                     let argv_buf_ptr = i32_arg(&args, 1)? as u32;
-                    eprintln!("[wasmrun] args_get(argv_ptr={argv_ptr}, argv_buf_ptr={argv_buf_ptr})");
                     let errno = syscalls::args_get(argv_ptr, argv_buf_ptr, mem, &env);
                     Ok(vec![Value::I32(errno)])
                 },
@@ -633,7 +631,6 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                 move |args, mem| {
                     let count_ptr = i32_arg(&args, 0)? as u32;
                     let buf_size_ptr = i32_arg(&args, 1)? as u32;
-                    eprintln!("[wasmrun] environ_sizes_get");
                     let errno = syscalls::environ_sizes_get(count_ptr, buf_size_ptr, mem, &env);
                     Ok(vec![Value::I32(errno)])
                 },
@@ -653,7 +650,6 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                 move |args, mem| {
                     let environ_ptr = i32_arg(&args, 0)? as u32;
                     let environ_buf_ptr = i32_arg(&args, 1)? as u32;
-                    eprintln!("[wasmrun] environ_get");
                     let errno = syscalls::environ_get(environ_ptr, environ_buf_ptr, mem, &env);
                     Ok(vec![Value::I32(errno)])
                 },
@@ -672,7 +668,6 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                 let clock_id = i32_arg(&args, 0)? as u32;
                 let precision = i64_arg(&args, 1)?;
                 let time_ptr = i32_arg(&args, 2)? as u32;
-                eprintln!("[wasmrun] clock_time_get(clock_id={clock_id})");
                 let errno = syscalls::clock_time_get(clock_id, precision, time_ptr, mem);
                 Ok(vec![Value::I32(errno)])
             },
@@ -705,7 +700,6 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
         Box::new(ClosureHostFunction::new(
             |args, _mem| {
                 let code = i32_arg(&args, 0)?;
-                eprintln!("[wasmrun] proc_exit({code})");
                 Err(format!("{WASI_PROC_EXIT_PREFIX}{code}"))
             },
             1,

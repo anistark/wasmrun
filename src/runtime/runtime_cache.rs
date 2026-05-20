@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-const WASMHUB_BASE_URL: &str = "https://github.com/anistark/wasmhub/releases/latest/download";
+const WASMHUB_BASE_URL: &str = "https://github.com/anistark/wasmhub/releases/download/v0.2.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WasmhubManifest {
@@ -320,10 +320,9 @@ pub fn language_for_project(project_path: &str) -> Result<String> {
 }
 
 /// Maps project language names to wasmhub runtime identifiers.
-/// wasmhub may use different names (e.g., "nodejs" projects use "quickjs" runtime).
 pub fn wasmhub_language(language: &str) -> &str {
     match language {
-        "nodejs" | "javascript" | "js" => "quickjs",
+        "nodejs" | "javascript" | "js" => "nodejs",
         "python" => "rustpython",
         other => other,
     }
@@ -359,9 +358,9 @@ mod tests {
 
     #[test]
     fn test_wasmhub_language_mapping() {
-        assert_eq!(wasmhub_language("nodejs"), "quickjs");
-        assert_eq!(wasmhub_language("javascript"), "quickjs");
-        assert_eq!(wasmhub_language("js"), "quickjs");
+        assert_eq!(wasmhub_language("nodejs"), "nodejs");
+        assert_eq!(wasmhub_language("javascript"), "nodejs");
+        assert_eq!(wasmhub_language("js"), "nodejs");
         assert_eq!(wasmhub_language("python"), "rustpython");
         assert_eq!(wasmhub_language("rust"), "rust");
         assert_eq!(wasmhub_language("go"), "go");
