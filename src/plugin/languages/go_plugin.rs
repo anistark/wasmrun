@@ -64,7 +64,7 @@ impl GoPlugin {
                 if line.starts_with("module ") {
                     let module = line.trim_start_matches("module ").trim();
                     // Use just the last path segment as the name
-                    return module.split('/').last().unwrap_or(module).to_string();
+                    return module.split('/').next_back().unwrap_or(module).to_string();
                 }
             }
         }

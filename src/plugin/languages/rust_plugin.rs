@@ -46,7 +46,7 @@ impl RustPlugin {
         for line in content.lines() {
             let line = line.trim();
             if line.starts_with("name") && line.contains('=') {
-                if let Some(val) = line.splitn(2, '=').nth(1) {
+                if let Some(val) = line.split_once('=').map(|x| x.1) {
                     let name = val.trim().trim_matches('"').trim_matches('\'').to_string();
                     if !name.is_empty() {
                         return Some(name.replace('-', "_"));
