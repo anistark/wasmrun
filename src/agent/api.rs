@@ -11,6 +11,12 @@ pub struct ExecRequest {
     pub wasm_path: Option<String>,
     /// Source code to execute via a language runtime (alternative to wasm_path).
     pub source: Option<String>,
+    /// Multi-file project: map of filename → file content. Use with `entry`.
+    /// Files are written to the session root before execution and visible
+    /// to the runtime (e.g. for `require()` of sibling files).
+    pub files: Option<HashMap<String, String>>,
+    /// Entry filename for a multi-file project (must be a key in `files`).
+    pub entry: Option<String>,
     /// Language for source execution: "javascript", "js", or "nodejs".
     pub language: Option<String>,
     pub function: Option<String>,
