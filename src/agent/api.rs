@@ -19,6 +19,11 @@ pub struct ExecRequest {
     pub entry: Option<String>,
     /// Language for source execution: "javascript", "js", or "nodejs".
     pub language: Option<String>,
+    /// Shell command line to execute via the built-in shell emulator.
+    /// Supports pipes (`|`), redirection (`>`, `>>`, `<`), and sequencing
+    /// (`&&`, `;`) with built-ins for common file/env operations.
+    /// Takes precedence over `files`/`source`/`wasm_path` when present.
+    pub command: Option<String>,
     pub function: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,

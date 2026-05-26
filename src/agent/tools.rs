@@ -45,7 +45,7 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
             r#type: "function",
             function: OpenAiFunction {
                 name: "execute_code",
-                description: "Execute JavaScript source code or a pre-compiled WASM file inside a sandbox session. Provide one of: 'source'+'language' (single snippet), 'files'+'entry'+'language' (multi-file project with relative require() support), or 'wasm_path' (pre-compiled WASM). Returns stdout, stderr, exit code, and duration.",
+                description: "Execute code inside a sandbox session. Provide one of: 'command' (shell-style command line with pipes, redirection, and built-ins like echo/cat/ls/pwd/cd/mkdir/rm/cp/mv/env/export), 'source'+'language' (single snippet), 'files'+'entry'+'language' (multi-file project with relative require() support), or 'wasm_path' (pre-compiled WASM). Returns stdout, stderr, exit code, and duration.",
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -56,6 +56,10 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                         "source": {
                             "type": "string",
                             "description": "Source code to execute (use with 'language'). Alternative to wasm_path or files."
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "Shell command line to run via the built-in shell emulator (e.g. \"echo hello > out.txt && cat out.txt\"). Supports pipes, redirection, and &&/;. No language runtime needed."
                         },
                         "files": {
                             "type": "object",

@@ -33,7 +33,7 @@ The agent API manages **sessions** — each session is an isolated exec mode san
 - **Output buffers** — stdout/stderr captured per execution
 - **Timeout** — auto-cleanup after idle expiry
 
-When you call the exec endpoint, the server loads the WASM file from the session's filesystem, runs it through the same interpreter used by `wasmrun exec`, and returns the captured output as JSON.
+The exec endpoint accepts four input modes — a shell command line, a JavaScript source snippet, a multi-file JS project, or a pre-compiled `.wasm` file — and returns captured stdout/stderr/exit code as JSON. JavaScript runs through a wasmhub-hosted language runtime; WASM modules run through the same interpreter used by `wasmrun exec`. Shell commands are handled by an in-process built-in shell with no subprocess or host shell access.
 
 ```
 ┌─ wasmrun agent ─────────────────────────────────────────┐
@@ -66,12 +66,22 @@ wasmrun agent --port 8430
 curl -X POST http://localhost:8430/api/v1/sessions
 # → {"session_id": "a1b2c3...", "created_at": "..."}
 
-# Upload a WASM file
+# Run a shell command in the session
+curl -X POST http://localhost:8430/api/v1/sessions/a1b2c3.../exec \
+  -H "Content-Type: application/json" \
+  -d '{"command": "echo hello > out.txt && cat out.txt"}'
+# → {"stdout": "hello\n", "stderr": "", "exit_code": 0, ...}
+
+# Or run JavaScript inline
+curl -X POST http://localhost:8430/api/v1/sessions/a1b2c3.../exec \
+  -H "Content-Type: application/json" \
+  -d '{"source": "console.log(1+1)", "language": "javascript"}'
+# → {"stdout": "2\n", "exit_code": 0, ...}
+
+# Or run a pre-compiled WASM file
 curl -X POST http://localhost:8430/api/v1/sessions/a1b2c3.../files \
   -H "Content-Type: application/json" \
   -d '{"path": "hello.wasm", "content": "..."}'
-
-# Execute it
 curl -X POST http://localhost:8430/api/v1/sessions/a1b2c3.../exec \
   -H "Content-Type: application/json" \
   -d '{"wasm_path": "hello.wasm"}'
@@ -80,6 +90,8 @@ curl -X POST http://localhost:8430/api/v1/sessions/a1b2c3.../exec \
 # Clean up
 curl -X DELETE http://localhost:8430/api/v1/sessions/a1b2c3...
 ```
+
+See the [Agent Execution](./usage/agent-exec.md) reference for all four input modes (shell `command`, JS `source`, multi-file `files`+`entry`, `wasm_path`).
 
 ## Tool Schemas for LLM Agents
 
