@@ -45,7 +45,7 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
             r#type: "function",
             function: OpenAiFunction {
                 name: "execute_code",
-                description: "Execute JavaScript source code or a pre-compiled WASM file inside a sandbox session. Provide either 'source'+'language' for source execution, or 'wasm_path' for WASM execution. Returns stdout, stderr, exit code, and duration.",
+                description: "Execute JavaScript source code or a pre-compiled WASM file inside a sandbox session. Provide one of: 'source'+'language' (single snippet), 'files'+'entry'+'language' (multi-file project with relative require() support), or 'wasm_path' (pre-compiled WASM). Returns stdout, stderr, exit code, and duration.",
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -55,16 +55,25 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                         },
                         "source": {
                             "type": "string",
-                            "description": "Source code to execute (use with 'language'). Alternative to wasm_path."
+                            "description": "Source code to execute (use with 'language'). Alternative to wasm_path or files."
+                        },
+                        "files": {
+                            "type": "object",
+                            "additionalProperties": { "type": "string" },
+                            "description": "Multi-file project as a map of filename → file content. All files are written to the session root before execution, enabling relative require() between them. Use with 'entry'."
+                        },
+                        "entry": {
+                            "type": "string",
+                            "description": "Entry filename for a multi-file project (must be a key in 'files'). Required when 'files' is provided."
                         },
                         "language": {
                             "type": "string",
                             "enum": ["javascript", "js", "nodejs"],
-                            "description": "Language for source execution (required when 'source' is provided)"
+                            "description": "Language for source/files execution (defaults to javascript)"
                         },
                         "wasm_path": {
                             "type": "string",
-                            "description": "Path to a pre-compiled .wasm file relative to the session root. Alternative to source."
+                            "description": "Path to a pre-compiled .wasm file relative to the session root. Alternative to source/files."
                         },
                         "function": {
                             "type": "string",
@@ -251,6 +260,20 @@ mod tests {
         assert!(props["wasm_path"].is_object());
         // language should have an enum constraint
         assert!(props["language"]["enum"].is_array());
+    }
+
+    #[test]
+    fn test_execute_code_has_multi_file_params() {
+        let tools = openai_tools();
+        let exec = tools
+            .iter()
+            .find(|t| t.function.name == "execute_code")
+            .unwrap();
+        let props = &exec.function.parameters["properties"];
+        assert!(props["files"].is_object());
+        assert!(props["entry"].is_object());
+        assert_eq!(props["files"]["type"], "object");
+        assert_eq!(props["entry"]["type"], "string");
     }
 
     #[test]

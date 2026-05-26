@@ -22,3 +22,5 @@ ui/dist
 
 # Custom files
 plan/
+.claude
+.pi

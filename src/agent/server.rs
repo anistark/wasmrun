@@ -294,7 +294,35 @@ impl AgentServer {
 
         let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<i32, ApiError>>();
 
-        if let Some(source) = req.source {
+        if let Some(files) = req.files {
+            // Multi-file source project: write all files and run entry through runtime
+            let lang = req.language.unwrap_or_else(|| "javascript".into());
+            executor::resolve_runtime(&lang)?;
+            let entry = req
+                .entry
+                .clone()
+                .ok_or_else(|| ApiError::BadRequest("'entry' is required with 'files'".into()))?;
+            if !files.contains_key(&entry) {
+                return Err(ApiError::BadRequest(format!(
+                    "Entry '{entry}' not found in 'files' map"
+                )));
+            }
+            let work_dir_clone = work_dir.clone();
+            std::thread::Builder::new()
+                .stack_size(EXEC_THREAD_STACK_BYTES)
+                .spawn(move || {
+                    let result = executor::execute_source_project(
+                        &files,
+                        &entry,
+                        &lang,
+                        exec_env,
+                        &work_dir_clone,
+                        max_pages,
+                    );
+                    let _ = tx.send(result);
+                })
+                .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
+        } else if let Some(source) = req.source {
             // Source execution: write code to session FS and run via language runtime
             let lang = req.language.unwrap_or_else(|| "javascript".into());
             // Validate language before spawning so callers get a 400 immediately
@@ -335,7 +363,9 @@ impl AgentServer {
                 })
                 .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
         } else {
-            return Err(ApiError::BadRequest("Missing wasm_path or source".into()));
+            return Err(ApiError::BadRequest(
+                "Missing wasm_path, source, or files".into(),
+            ));
         }
 
         let duration_ms;
@@ -936,6 +966,104 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("python"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_files_without_entry_returns_400() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{"files": {"main.js": "console.log(1)"}}"#;
+        let err = server.handle_exec(&id, body).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("entry"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_files_with_unknown_entry_returns_400() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{"files": {"main.js": "x"}, "entry": "missing.js"}"#;
+        let err = server.handle_exec(&id, body).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("missing.js"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_files_with_unsupported_language_returns_400() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{"files": {"a.py": "print(1)"}, "entry": "a.py", "language": "python"}"#;
+        let err = server.handle_exec(&id, body).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("python"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: fetches the nodejs runtime from wasmhub and verifies
+    /// that all files in a multi-file project are written to the session FS and
+    /// the entry file executes. Sibling files are visible in the session
+    /// directory; whether they can be loaded depends on the runtime's module
+    /// system (the QuickJS-based nodejs runtime currently lacks `require`).
+    ///
+    /// Ignored by default so the test suite stays offline-friendly. Run with:
+    ///   cargo test --release --bin wasmrun multi_file_js_project_integration -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn test_multi_file_js_project_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "files": {
+                "main.js": "console.log('main-ran');",
+                "extra.js": "// sibling file, just present"
+            },
+            "entry": "main.js",
+            "timeout": 60
+        }"#;
+        let resp = server.handle_exec(&id, body).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        assert!(
+            resp.stdout.contains("main-ran"),
+            "stdout did not contain expected output: {:?}",
+            resp.stdout
+        );
+
+        // Verify the sibling file was actually written to the session FS
+        let extra = server.handle_read_file(&id, "extra.js").unwrap();
+        assert!(extra.content.contains("sibling file"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_files_routes_to_project_execution() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // With valid files+entry, request should reach the execution stage and
+        // return Ok (any runtime fetch failure surfaces as ExecResponse.error,
+        // not an ApiError from handle_exec itself).
+        let body = r#"{"files": {"main.js": "console.log('ok')"}, "entry": "main.js"}"#;
+        let result = server.handle_exec(&id, body);
+        assert!(
+            result.is_ok(),
+            "valid files+entry should not return ApiError, got: {result:?}"
+        );
 
         server.session_manager.destroy_all().unwrap();
     }
