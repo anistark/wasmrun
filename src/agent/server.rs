@@ -3,6 +3,7 @@
 use crate::agent::api::*;
 use crate::agent::executor;
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
+use crate::agent::shell;
 use crate::agent::tools;
 use crate::error::{Result, WasmrunError};
 use crate::runtime::core::native_executor::execute_wasm_bytes_with_env;
@@ -294,7 +295,19 @@ impl AgentServer {
 
         let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<i32, ApiError>>();
 
-        if let Some(files) = req.files {
+        if let Some(command) = req.command {
+            // Built-in shell emulation: parse and run the command line
+            // against the session's filesystem. No WASM module is loaded.
+            let work_dir_clone = work_dir.clone();
+            std::thread::Builder::new()
+                .stack_size(EXEC_THREAD_STACK_BYTES)
+                .spawn(move || {
+                    let result = shell::run_command(&command, &work_dir_clone, exec_env)
+                        .map_err(|e| ApiError::BadRequest(e.to_string()));
+                    let _ = tx.send(result);
+                })
+                .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
+        } else if let Some(files) = req.files {
             // Multi-file source project: write all files and run entry through runtime
             let lang = req.language.unwrap_or_else(|| "javascript".into());
             executor::resolve_runtime(&lang)?;
@@ -364,7 +377,7 @@ impl AgentServer {
                 .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
         } else {
             return Err(ApiError::BadRequest(
-                "Missing wasm_path, source, or files".into(),
+                "Missing command, wasm_path, source, or files".into(),
             ));
         }
 
@@ -1083,6 +1096,94 @@ mod tests {
             result.is_ok(),
             "default language should not return ApiError"
         );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    // ── Shell command exec ────────────────────────────────────────
+
+    #[test]
+    fn test_exec_command_echo() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let resp = server
+            .handle_exec(&id, r#"{"command": "echo hello"}"#)
+            .unwrap();
+        assert_eq!(resp.exit_code, 0);
+        assert_eq!(resp.stdout, "hello\n");
+        assert!(resp.error.is_none());
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_command_redirect_then_cat() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let resp = server
+            .handle_exec(
+                &id,
+                r#"{"command": "echo persisted > log.txt && cat log.txt"}"#,
+            )
+            .unwrap();
+        assert_eq!(resp.exit_code, 0);
+        assert_eq!(resp.stdout, "persisted\n");
+
+        // Verify the file is actually in the session work_dir
+        let content = server.handle_read_file(&id, "log.txt").unwrap();
+        assert_eq!(content.content, "persisted\n");
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_command_takes_precedence_over_wasm_path() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // wasm_path points at a nonexistent file but command should win.
+        let resp = server
+            .handle_exec(
+                &id,
+                r#"{"command": "echo first", "wasm_path": "nope.wasm"}"#,
+            )
+            .unwrap();
+        assert_eq!(resp.exit_code, 0);
+        assert_eq!(resp.stdout, "first\n");
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_command_export_persists_in_session() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // Export via shell, then verify it shows up through the env endpoint.
+        server
+            .handle_exec(&id, r#"{"command": "export GREETING=hi"}"#)
+            .unwrap();
+
+        let env = server.handle_get_env(&id).unwrap();
+        assert_eq!(env.env.get("GREETING").map(|s| s.as_str()), Some("hi"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_command_parse_error_returns_400() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // Unclosed quote → parse error → BadRequest
+        let resp = server
+            .handle_exec(&id, r#"{"command": "echo \"oops"}"#)
+            .unwrap();
+        // Parse error is surfaced via ExecResponse.error from the exec thread.
+        assert_eq!(resp.exit_code, -1);
+        assert!(resp.error.is_some());
 
         server.session_manager.destroy_all().unwrap();
     }

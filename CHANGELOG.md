@@ -8,6 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Shell Emulation in Agent Exec API**: built-in shell commands for familiar terminal patterns inside sandbox sessions
+  - `POST /api/v1/sessions/:id/exec` accepts a new `command` field with a shell-style command line
+  - Built-ins: `echo`, `cat`, `ls`, `pwd`, `cd`, `mkdir` (`-p`), `rm` (`-r`/`-rf`), `cp`, `mv`, `env`, `export`
+  - Pipes (`|`), redirection (`>`, `>>`, `<`), and sequencing (`&&` short-circuit, `;`)
+  - Single and double quoted strings
+  - `command` takes precedence over `files`/`source`/`wasm_path` when present
+  - `export KEY=value` writes through to the session's `WasiEnv`, so exported variables persist across `command`/`exec` calls and are visible to subsequent WASM executions
+  - CWD scoped to a single shell invocation (each `command` request starts at `/`); `cd` mutates the in-invocation CWD so chains like `cd sub && pwd` work
+  - All shell file operations resolved through the session work_dir with path-traversal prevention
+  - All in-process built-ins — no subprocess execution, no access to the host shell or native binaries
+  - `execute_code` tool schema documents the `command` field for LLM agents
+- **Multi-file JavaScript Project Execution**: agents can upload and run an entire JS project in a single exec request
+  - `POST /api/v1/sessions/:id/exec` accepts `files` (map of filename → content) and `entry` (entry filename)
+  - All files written to the session work_dir (with intermediate directories created) before execution
+  - Filename validation rejects empty names, absolute paths, and `..` traversal
+  - Dispatch order in `handle_exec`: `command` → `files` → `source` → `wasm_path`; language/entry validation runs synchronously so callers get HTTP 400 immediately
+  - Sibling files visible to the runtime via the preopened WASI directory (`require()` of siblings depends on runtime-side support — the wasmhub `nodejs` runtime v0.2.0 does not yet implement CommonJS `require()`)
+  - `execute_code` tool schema documents `files`/`entry` for LLM agents
+- **JavaScript Source Execution in Agent Exec API**: run JS without precompiling to WASM
+  - `POST /api/v1/sessions/:id/exec` accepts `source` + `language` as an alternative to `wasm_path`
+  - Supported language aliases: `javascript`, `js`, `nodejs` — all map to the wasmhub nodejs runtime
+  - Unsupported languages (e.g. `python`) return HTTP 400 with a clear message, before any thread spawn or network I/O
+  - Runtime fetched from wasmhub via `runtime_cache` and cached after first download
+  - Source written to `_run_.js` in the session work_dir and executed with the runtime
+  - `source` without `language` defaults to JavaScript
+
+### Changed
+- Exec threads (both source and WASM execution paths) now run with a 64 MB stack via `std::thread::Builder::stack_size` — language runtimes like QuickJS generate deep call chains that overflow the default 8 MB stack
+- wasmhub runtime renamed `quickjs` → `nodejs`; manifest URL pinned to v0.2.0
+- Removed six WASI debug `eprintln!` calls that leaked to host stderr
+
+## [0.19.0](https://github.com/anistark/wasmrun/releases/tag/v0.19.0) - 2026-05-20
+
+### Added
 - **Agent Tool Schemas for LLM Agents**: Function-calling definitions for AI agent integration
   - `GET /api/v1/tools` — returns tool definitions for LLM function calling
   - `?format=openai` (default) — OpenAI function-calling format

@@ -3,38 +3,34 @@ sidebar_position: 6
 title: Agent Execution
 ---
 
-# Agent WASM Execution
+# Agent Execution
 
-Execute a `.wasm` file within a session's sandbox.
+Run code inside a session's sandbox. The exec endpoint accepts four mutually exclusive input modes:
 
-## Execute WASM
+| Mode | Request field(s) | Use when |
+|------|------------------|----------|
+| Shell command | `command` | You want a familiar terminal-style one-liner over the session FS |
+| JavaScript source | `source` + `language` | You have a single JS snippet to evaluate |
+| Multi-file JS project | `files` + `entry` (+ `language`) | You have several source files that need to live on disk together |
+| Pre-compiled WASM | `wasm_path` (+ `function`, `args`) | You already have a `.wasm` file in the session FS |
+
+If more than one is provided, dispatch follows that priority order (`command` → `files` → `source` → `wasm_path`).
 
 ```
 POST /api/v1/sessions/:id/exec
 ```
 
-**Request body:**
-```json
-{
-  "wasm_path": "hello.wasm",
-  "function": "_start",
-  "args": ["arg1", "arg2"],
-  "timeout": 30,
-  "env": {
-    "MY_VAR": "value"
-  }
-}
-```
+## Common Fields
+
+These apply to every mode:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `wasm_path` | yes | — | Path to `.wasm` file relative to session root |
-| `function` | no | auto-detect | Exported function to call (defaults to `_start`, `main`, or start section) |
-| `args` | no | `[]` | Arguments passed to the WASM program |
 | `timeout` | no | `30` | Execution timeout in seconds |
 | `env` | no | `{}` | Environment variables to set before execution |
 
-**Response** (200):
+## Common Response
+
 ```json
 {
   "stdout": "Hello, World!\n",
@@ -56,6 +52,117 @@ If execution fails (parse error, trap, etc.), the response still returns 200 wit
 }
 ```
 
+Output buffers are cleared between calls — each response contains only the output of that invocation.
+
+---
+
+## Shell Command
+
+Run a built-in shell command line against the session filesystem. No language runtime, no WASM module, no subprocess.
+
+```json
+{
+  "command": "echo hello > out.txt && cat out.txt"
+}
+```
+
+**Supported built-ins:** `echo`, `cat`, `ls`, `pwd`, `cd`, `mkdir` (`-p`), `rm` (`-r`/`-rf`), `cp`, `mv`, `env`, `export`.
+
+**Operators:** pipes (`|`), redirection (`>`, `>>`, `<`), sequencing (`&&` short-circuit on failure, `;` always continue), single and double quoted strings.
+
+**Scope:**
+- CWD starts at `/` for every request. `cd` mutates the in-invocation CWD, so chains like `cd sub && pwd && ls` work, but the CWD is not carried across requests.
+- `export KEY=value` writes through to the session's environment, so the variable is visible to subsequent `command`/`source`/`files`/`wasm_path` executions in the same session.
+- Path traversal that escapes the session root is rejected.
+
+Unknown commands return exit code `127` with `command not found` on stderr — there is no fallback to the host shell.
+
+**Example:**
+```sh
+curl -X POST .../exec -H "Content-Type: application/json" -d '{
+  "command": "mkdir -p logs && echo started > logs/run.log && ls logs"
+}'
+# → {"stdout": "run.log\n", "stderr": "", "exit_code": 0, ...}
+```
+
+---
+
+## JavaScript Source
+
+Evaluate a single source string with the wasmhub JavaScript runtime. The runtime is fetched once and cached.
+
+```json
+{
+  "source": "console.log(1 + 1)",
+  "language": "javascript"
+}
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `source` | yes | — | Source code to execute |
+| `language` | no | `javascript` | One of `javascript`, `js`, `nodejs` |
+
+Unsupported languages return HTTP `400` with a clear message before any thread is spawned.
+
+**Example:**
+```sh
+curl -X POST .../exec -H "Content-Type: application/json" -d '{
+  "source": "console.log(1+1)",
+  "language": "javascript"
+}'
+# → {"stdout": "2\n", "exit_code": 0, ...}
+```
+
+---
+
+## Multi-file JavaScript Project
+
+Upload an entire project in one request. All files are written to the session root (creating intermediate directories) and the entry file is run.
+
+```json
+{
+  "files": {
+    "main.js": "console.log('hi');",
+    "lib/util.js": "exports.greet = n => 'hi ' + n;"
+  },
+  "entry": "main.js",
+  "language": "javascript"
+}
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `files` | yes | — | Map of filename → file content. Filenames must be relative and free of `..` |
+| `entry` | yes | — | Entry filename; must be a key in `files` |
+| `language` | no | `javascript` | One of `javascript`, `js`, `nodejs` |
+
+Validation (missing entry, unknown language, absolute/traversal paths) runs synchronously and returns HTTP `400` immediately.
+
+Sibling files are visible to the runtime via the preopened WASI directory, but loading them from JS requires runtime-side support. The wasmhub `nodejs` runtime (v0.2.0) does not yet implement CommonJS `require()` — files can be uploaded today and will become loadable once the runtime ships that.
+
+---
+
+## Pre-compiled WASM
+
+Execute a `.wasm` file already present in the session filesystem.
+
+```json
+{
+  "wasm_path": "hello.wasm",
+  "function": "_start",
+  "args": ["arg1", "arg2"]
+}
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `wasm_path` | yes | — | Path to `.wasm` file relative to session root |
+| `function` | no | auto-detect | Exported function to call (defaults to `_start`, `main`, or start section) |
+| `args` | no | `[]` | Arguments passed to the WASM program |
+
+---
+
 ## Timeout
 
 If execution exceeds the timeout, the response includes:
@@ -70,27 +177,13 @@ If execution exceeds the timeout, the response includes:
 }
 ```
 
-## Multiple Executions
-
-A session supports multiple sequential executions. Output buffers are cleared between each call — you always get only the output from the current execution.
-
-```sh
-# First exec
-curl -X POST .../exec -d '{"wasm_path": "a.wasm"}'
-# → {"stdout": "output from a", ...}
-
-# Second exec (does NOT include output from a)
-curl -X POST .../exec -d '{"wasm_path": "b.wasm"}'
-# → {"stdout": "output from b", ...}
-```
-
 ## Workflow
 
-A typical agent workflow:
+A typical agent loop:
 
-1. Create session
-2. Write `.wasm` file via file upload endpoint
-3. Execute it via `/exec`
-4. Read the structured response
-5. Optionally run more executions
-6. Destroy session when done
+1. Create a session.
+2. Either upload files explicitly (file endpoints) or pass them inline via `files`/`source`/`command`.
+3. Execute via `/exec`.
+4. Read the structured response.
+5. Optionally run more executions in the same session — the filesystem and exported env vars persist.
+6. Destroy the session when done.
