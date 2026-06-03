@@ -4,7 +4,8 @@
 //! Currently supports JavaScript via QuickJS.
 
 use crate::agent::api::ApiError;
-use crate::runtime::core::native_executor::execute_wasm_bytes_with_env;
+use crate::agent::limits::{dir_size, ResourceLimits};
+use crate::runtime::core::native_executor::{execute_wasm_bytes_with_env, ExecLimits};
 use crate::runtime::runtime_cache::{wasmhub_language, RuntimeCache};
 use crate::runtime::wasi::WasiEnv;
 use std::collections::HashMap;
@@ -34,12 +35,16 @@ pub fn execute_source(
     language: &str,
     wasi_env: Arc<Mutex<WasiEnv>>,
     work_dir: &Path,
-    max_memory_pages: Option<u32>,
+    limits: &ResourceLimits,
 ) -> std::result::Result<i32, ApiError> {
     let runtime_name = resolve_runtime(language)?;
 
-    std::fs::write(work_dir.join(JS_SCRIPT_NAME), source)
-        .map_err(|e| ApiError::Internal(format!("Failed to write script: {e}")))?;
+    write_checked(
+        &work_dir.join(JS_SCRIPT_NAME),
+        source.as_bytes(),
+        limits,
+        work_dir,
+    )?;
 
     let wasm_bytes = fetch_runtime_bytes(runtime_name)?;
 
@@ -49,7 +54,7 @@ pub fn execute_source(
         "run".to_string(),
         JS_SCRIPT_NAME.to_string(),
     ];
-    execute_wasm_bytes_with_env(&wasm_bytes, wasi_env, None, args, max_memory_pages)
+    execute_wasm_bytes_with_env(&wasm_bytes, wasi_env, None, args, exec_limits(limits))
         .map_err(|e| ApiError::Internal(e.to_string()))
 }
 
@@ -65,7 +70,7 @@ pub fn execute_source_project(
     language: &str,
     wasi_env: Arc<Mutex<WasiEnv>>,
     work_dir: &Path,
-    max_memory_pages: Option<u32>,
+    limits: &ResourceLimits,
 ) -> std::result::Result<i32, ApiError> {
     let runtime_name = resolve_runtime(language)?;
 
@@ -83,13 +88,12 @@ pub fn execute_source_project(
     }
 
     for (rel_path, content) in files {
-        let resolved = work_dir.join(rel_path);
-        if let Some(parent) = resolved.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| ApiError::Internal(format!("Failed to create dir: {e}")))?;
-        }
-        std::fs::write(&resolved, content)
-            .map_err(|e| ApiError::Internal(format!("Failed to write {rel_path}: {e}")))?;
+        write_checked(
+            &work_dir.join(rel_path),
+            content.as_bytes(),
+            limits,
+            work_dir,
+        )?;
     }
 
     let args = vec![
@@ -102,9 +106,39 @@ pub fn execute_source_project(
         wasi_env,
         None,
         args,
-        max_memory_pages,
+        exec_limits(limits),
     )
     .map_err(|e| ApiError::Internal(e.to_string()))
+}
+
+/// Build executor-level limits (memory + fuel) from the session's full limits.
+fn exec_limits(limits: &ResourceLimits) -> ExecLimits {
+    ExecLimits {
+        max_memory_pages: limits.max_memory_pages,
+        max_fuel: limits.max_fuel,
+    }
+}
+
+/// Write `content` to `resolved`, first enforcing the per-file size and total
+/// disk-usage caps against the session's current footprint at `work_dir`.
+fn write_checked(
+    resolved: &Path,
+    content: &[u8],
+    limits: &ResourceLimits,
+    work_dir: &Path,
+) -> std::result::Result<(), ApiError> {
+    let existing_len = std::fs::metadata(resolved).map(|m| m.len()).unwrap_or(0);
+    let current_disk = dir_size(work_dir);
+    limits
+        .check_write(content.len() as u64, existing_len, current_disk)
+        .map_err(ApiError::BadRequest)?;
+    if let Some(parent) = resolved.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ApiError::Internal(format!("Failed to create dir: {e}")))?;
+    }
+    std::fs::write(resolved, content)
+        .map_err(|e| ApiError::Internal(format!("Failed to write file: {e}")))?;
+    Ok(())
 }
 
 fn fetch_runtime_bytes(runtime_name: &str) -> std::result::Result<Vec<u8>, ApiError> {
@@ -213,8 +247,15 @@ mod tests {
     fn test_execute_source_project_rejects_empty_files() {
         let env = Arc::new(Mutex::new(WasiEnv::new()));
         let tmp = std::env::temp_dir();
-        let err = execute_source_project(&HashMap::new(), "main.js", "javascript", env, &tmp, None)
-            .unwrap_err();
+        let err = execute_source_project(
+            &HashMap::new(),
+            "main.js",
+            "javascript",
+            env,
+            &tmp,
+            &ResourceLimits::default(),
+        )
+        .unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("empty"));
     }
@@ -225,8 +266,15 @@ mod tests {
         let tmp = std::env::temp_dir();
         let mut files = HashMap::new();
         files.insert("a.js".to_string(), "1".to_string());
-        let err =
-            execute_source_project(&files, "main.js", "javascript", env, &tmp, None).unwrap_err();
+        let err = execute_source_project(
+            &files,
+            "main.js",
+            "javascript",
+            env,
+            &tmp,
+            &ResourceLimits::default(),
+        )
+        .unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("Entry"));
     }
@@ -237,7 +285,15 @@ mod tests {
         let tmp = std::env::temp_dir();
         let mut files = HashMap::new();
         files.insert("main.py".to_string(), "print(1)".to_string());
-        let err = execute_source_project(&files, "main.py", "python", env, &tmp, None).unwrap_err();
+        let err = execute_source_project(
+            &files,
+            "main.py",
+            "python",
+            env,
+            &tmp,
+            &ResourceLimits::default(),
+        )
+        .unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("python"));
     }
@@ -260,8 +316,15 @@ mod tests {
         files.insert("main.js".to_string(), "console.log(1)".to_string());
         files.insert("../evil.js".to_string(), "pwned".to_string());
 
-        let err =
-            execute_source_project(&files, "main.js", "javascript", env, &tmp, None).unwrap_err();
+        let err = execute_source_project(
+            &files,
+            "main.js",
+            "javascript",
+            env,
+            &tmp,
+            &ResourceLimits::default(),
+        )
+        .unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("traversal"));
 

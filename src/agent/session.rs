@@ -5,6 +5,7 @@
 //! - WasiEnv (independent stdout/stderr buffers, args, env vars)
 //! - Timeout tracking (auto-cleanup on idle expiry)
 
+use crate::agent::limits::ResourceLimits;
 use crate::runtime::wasi::WasiEnv;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -79,6 +80,8 @@ pub struct Session {
     work_dir: PathBuf,
     /// Whether we own the work_dir and should delete it on drop.
     owns_work_dir: bool,
+    /// Resource ceilings applied to executions in this session.
+    limits: ResourceLimits,
 }
 
 impl Session {
@@ -86,7 +89,8 @@ impl Session {
     ///
     /// The temp directory is preopened at `/` in the WASI environment,
     /// giving the sandboxed code access to a clean, isolated filesystem.
-    pub fn new(timeout: Duration) -> Result<Self, SessionError> {
+    /// `limits` configure the session's WASI output/file-size caps.
+    pub fn new(timeout: Duration, limits: ResourceLimits) -> Result<Self, SessionError> {
         let id = generate_session_id();
         let work_dir = std::env::temp_dir().join(format!("wasmrun-session-{id}"));
 
@@ -94,7 +98,7 @@ impl Session {
             message: format!("Failed to create session directory: {e}"),
         })?;
 
-        let wasi_env = WasiEnv::new().with_preopen("/", &work_dir);
+        let wasi_env = Self::build_wasi_env(&work_dir, &limits);
 
         Ok(Session {
             id,
@@ -105,19 +109,39 @@ impl Session {
             wasi_env: Arc::new(Mutex::new(wasi_env)),
             work_dir,
             owns_work_dir: true,
+            limits,
         })
+    }
+
+    /// Build a WASI environment for the session, preopened at `/` and
+    /// configured with the session's output and per-file size caps.
+    fn build_wasi_env(work_dir: &Path, limits: &ResourceLimits) -> WasiEnv {
+        let mut wasi_env = WasiEnv::new().with_preopen("/", work_dir);
+        wasi_env.set_max_output_bytes(limits.max_output_bytes);
+        wasi_env.set_max_file_size(limits.max_file_size);
+        wasi_env
     }
 
     /// Create a session with a specific work directory (for testing).
     #[cfg(test)]
     fn with_work_dir(timeout: Duration, work_dir: PathBuf) -> Result<Self, SessionError> {
+        Self::with_work_dir_and_limits(timeout, work_dir, ResourceLimits::default())
+    }
+
+    /// Create a session with a specific work directory and limits (for testing).
+    #[cfg(test)]
+    fn with_work_dir_and_limits(
+        timeout: Duration,
+        work_dir: PathBuf,
+        limits: ResourceLimits,
+    ) -> Result<Self, SessionError> {
         let id = generate_session_id();
 
         std::fs::create_dir_all(&work_dir).map_err(|e| SessionError::IoError {
             message: format!("Failed to create session directory: {e}"),
         })?;
 
-        let wasi_env = WasiEnv::new().with_preopen("/", &work_dir);
+        let wasi_env = Self::build_wasi_env(&work_dir, &limits);
 
         Ok(Session {
             id,
@@ -128,6 +152,7 @@ impl Session {
             wasi_env: Arc::new(Mutex::new(wasi_env)),
             work_dir,
             owns_work_dir: false, // test manages cleanup
+            limits,
         })
     }
 
@@ -159,6 +184,11 @@ impl Session {
     /// Path to the session's isolated working directory.
     pub fn work_dir(&self) -> &Path {
         &self.work_dir
+    }
+
+    /// Resource ceilings applied to executions in this session.
+    pub fn limits(&self) -> &ResourceLimits {
+        &self.limits
     }
 
     /// Get a clone of the WASI environment Arc for use with the executor.
@@ -245,6 +275,8 @@ pub struct SessionConfig {
     pub max_sessions: usize,
     /// How often the cleanup thread checks for expired sessions.
     pub cleanup_interval: Duration,
+    /// Default resource ceilings applied to each new session.
+    pub limits: ResourceLimits,
 }
 
 impl Default for SessionConfig {
@@ -253,6 +285,7 @@ impl Default for SessionConfig {
             default_timeout: Duration::from_secs(300), // 5 minutes
             max_sessions: 100,
             cleanup_interval: Duration::from_secs(30),
+            limits: ResourceLimits::default(),
         }
     }
 }
@@ -283,17 +316,30 @@ impl SessionManager {
         }
     }
 
-    /// Create a new session with the default timeout.
+    /// Create a new session with the default timeout and default limits.
     ///
     /// Returns the session ID on success.
+    #[allow(dead_code)] // Used by tests; HTTP path uses create_session_with_limits.
     pub fn create_session(&self) -> Result<String, SessionError> {
-        self.create_session_with_timeout(self.config.default_timeout)
+        self.create_session_with_limits(self.config.default_timeout, self.config.limits.clone())
     }
 
-    /// Create a new session with a custom timeout.
+    /// Create a new session with a custom timeout and the default limits.
     ///
     /// Returns the session ID on success.
+    #[allow(dead_code)] // Used by tests; HTTP path uses create_session_with_limits.
     pub fn create_session_with_timeout(&self, timeout: Duration) -> Result<String, SessionError> {
+        self.create_session_with_limits(timeout, self.config.limits.clone())
+    }
+
+    /// Create a new session with a custom timeout and resource limits.
+    ///
+    /// Returns the session ID on success.
+    pub fn create_session_with_limits(
+        &self,
+        timeout: Duration,
+        limits: ResourceLimits,
+    ) -> Result<String, SessionError> {
         let mut sessions = self.sessions.write().map_err(|_| SessionError::LockError)?;
 
         // Enforce max sessions limit (after removing expired ones)
@@ -304,7 +350,7 @@ impl SessionManager {
             });
         }
 
-        let session = Session::new(timeout)?;
+        let session = Session::new(timeout, limits)?;
         let id = session.id().to_string();
         sessions.insert(id.clone(), session);
         Ok(id)
@@ -498,6 +544,7 @@ mod tests {
             default_timeout: Duration::from_secs(60),
             max_sessions: 10,
             cleanup_interval: Duration::from_millis(100),
+            limits: ResourceLimits::default(),
         }
     }
 
@@ -540,10 +587,7 @@ mod tests {
         // Write to s1's stdout, s2 should be unaffected
         {
             let env1 = s1.wasi_env();
-            env1.lock()
-                .unwrap()
-                .stdout_mut()
-                .extend_from_slice(b"hello from s1");
+            env1.lock().unwrap().write_stdout(b"hello from s1");
         }
 
         assert_eq!(s1.get_stdout(), b"hello from s1");
@@ -587,8 +631,8 @@ mod tests {
         {
             let env = session.wasi_env();
             let mut locked = env.lock().unwrap();
-            locked.stdout_mut().extend_from_slice(b"output");
-            locked.stderr_mut().extend_from_slice(b"error");
+            locked.write_stdout(b"output");
+            locked.write_stderr(b"error");
         }
 
         assert!(!session.get_stdout().is_empty());
@@ -983,6 +1027,7 @@ mod tests {
             default_timeout: Duration::from_millis(50),
             cleanup_interval: Duration::from_millis(50),
             max_sessions: 10,
+            limits: ResourceLimits::default(),
         };
         let manager = Arc::new(SessionManager::with_config(config));
 

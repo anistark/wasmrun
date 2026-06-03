@@ -9,6 +9,7 @@ use super::{FdKind, WasiEnv, WASI_STDERR_FD, WASI_STDIN_FD, WASI_STDOUT_FD};
 pub const WASI_ESUCCESS: i32 = 0;
 pub const WASI_EBADF: i32 = 8;
 pub const WASI_EEXIST: i32 = 20;
+pub const WASI_EFBIG: i32 = 27;
 pub const WASI_EINVAL: i32 = 28;
 pub const WASI_EIO: i32 = 29;
 pub const WASI_EISDIR: i32 = 31;
@@ -98,14 +99,14 @@ pub fn fd_write(
         match fd {
             WASI_STDOUT_FD => {
                 if let Ok(mut e) = env.lock() {
-                    e.stdout_mut().extend_from_slice(&bytes);
+                    e.write_stdout(&bytes);
                 }
             }
             WASI_STDERR_FD => {
                 // Pass stderr through immediately so error messages are visible
                 eprint!("{}", String::from_utf8_lossy(&bytes));
                 if let Ok(mut e) = env.lock() {
-                    e.stderr_mut().extend_from_slice(&bytes);
+                    e.write_stderr(&bytes);
                 }
             }
             _ => {
@@ -113,6 +114,7 @@ pub fn fd_write(
                     Ok(e) => e,
                     Err(_) => return WASI_EIO,
                 };
+                let max_file_size = e.max_file_size();
                 let (host_path, offset) = match e.get_fd(fd) {
                     Some(entry) if entry.kind == FdKind::File => {
                         (entry.host_path.clone(), entry.offset)
@@ -120,6 +122,15 @@ pub fn fd_write(
                     Some(_) => return WASI_EISDIR,
                     None => return WASI_EBADF,
                 };
+                // Enforce the per-file size cap: the file's resulting size is the
+                // larger of its current size and the end of this write.
+                if let Some(max) = max_file_size {
+                    let existing = std::fs::metadata(&host_path).map(|m| m.len()).unwrap_or(0);
+                    let projected = existing.max(offset + bytes.len() as u64);
+                    if projected > max {
+                        return WASI_EFBIG;
+                    }
+                }
                 match write_file_at(&host_path, offset, &bytes) {
                     Ok(n) => {
                         if let Some(fe) = e.get_fd_mut(fd) {
@@ -1300,5 +1311,33 @@ mod tests {
         assert_eq!(errno, WASI_ESUCCESS);
         assert_eq!(mem.read_i32(500).unwrap(), 5); // "56789"
         assert_eq!(&mem.read_bytes(400, 5).unwrap(), b"56789");
+    }
+
+    #[test]
+    fn test_fd_write_file_size_limit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        env.lock().unwrap().set_max_file_size(Some(4));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        // Open a file for writing
+        mem.write_bytes(100, b"big.txt").unwrap();
+        let errno = path_open(3, 100, 7, WASI_O_CREAT, 0, 200, &mut mem, &env);
+        assert_eq!(errno, WASI_ESUCCESS);
+        let fd = mem.read_i32(200).unwrap() as u32;
+
+        // A 5-byte write exceeds the 4-byte cap → EFBIG
+        mem.write_bytes(400, b"hello").unwrap();
+        mem.write_i32(0, 400).unwrap(); // iovec buf_ptr
+        mem.write_i32(4, 5).unwrap(); // iovec buf_len
+        let errno = fd_write(fd, 0, 1, 300, &mut mem, &env);
+        assert_eq!(errno, WASI_EFBIG);
+
+        // A 4-byte write is allowed
+        mem.write_bytes(400, b"okay").unwrap();
+        mem.write_i32(4, 4).unwrap();
+        let errno = fd_write(fd, 0, 1, 300, &mut mem, &env);
+        assert_eq!(errno, WASI_ESUCCESS);
+        assert_eq!(std::fs::read(tmp.path().join("big.txt")).unwrap(), b"okay");
     }
 }

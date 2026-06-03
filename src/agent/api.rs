@@ -1,9 +1,17 @@
 //! Agent mode: REST API request/response types.
 
+use crate::agent::limits::LimitsOverride;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // ── Requests ──────────────────────────────────────────────────────────
+
+/// Optional body for `POST /sessions`. Lets a caller override the server's
+/// default resource limits for the new session. Absent fields use defaults.
+#[derive(Deserialize, Default)]
+pub struct CreateSessionRequest {
+    pub limits: Option<LimitsOverride>,
+}
 
 #[derive(Deserialize)]
 pub struct ExecRequest {
@@ -60,6 +68,10 @@ pub struct ExecResponse {
     pub stderr: String,
     pub exit_code: i32,
     pub duration_ms: u64,
+    /// True when captured output was dropped because the output cap was hit.
+    /// Omitted from JSON when false to keep the common response shape clean.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub output_truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }

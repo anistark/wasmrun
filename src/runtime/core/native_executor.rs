@@ -8,6 +8,18 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+/// Resource ceilings applied to a single WASM execution.
+///
+/// Kept primitive (no dependency on the `agent` layer) so the core runtime
+/// stays self-contained. `None` fields mean "no cap" for that dimension.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExecLimits {
+    /// Cap on linear memory growth, in WASM pages (64 KiB each).
+    pub max_memory_pages: Option<u32>,
+    /// Instruction budget; execution aborts once exhausted.
+    pub max_fuel: Option<u64>,
+}
+
 pub fn execute_wasm_file(wasm_path: &str) -> Result<i32> {
     if !Path::new(wasm_path).exists() {
         return Err(WasmrunError::from(format!(
@@ -127,12 +139,12 @@ pub fn execute_wasm_bytes_with_env(
     wasi_env: Arc<Mutex<WasiEnv>>,
     function: Option<String>,
     args: Vec<String>,
-    max_memory_pages: Option<u32>,
+    limits: ExecLimits,
 ) -> Result<i32> {
     let mut module = Module::parse(wasm_bytes)
         .map_err(|e| WasmrunError::from(format!("Failed to parse WASM module: {e}")))?;
 
-    if let Some(cap) = max_memory_pages {
+    if let Some(cap) = limits.max_memory_pages {
         if let Some(ref mut mem) = module.memory {
             match mem.max {
                 Some(m) if m > cap => mem.max = Some(cap),
@@ -150,6 +162,7 @@ pub fn execute_wasm_bytes_with_env(
 
     let mut executor = Executor::new_with_linker(module, wasi_linker)
         .map_err(|e| WasmrunError::from(format!("Failed to initialize executor: {e}")))?;
+    executor.set_fuel(limits.max_fuel);
 
     let func_idx = if let Some(func_name) = function {
         find_export_function(executor.module(), &func_name)
@@ -181,6 +194,11 @@ pub fn execute_wasm_bytes_with_env(
         Err(e) => {
             if let Some(code) = extract_proc_exit(&e) {
                 Ok(code)
+            } else if Executor::is_fuel_exhausted(&e.to_string()) {
+                Err(WasmrunError::from(format!(
+                    "Execution exceeded the instruction limit (fuel) of {} instructions",
+                    limits.max_fuel.unwrap_or(0)
+                )))
             } else {
                 Err(e)
             }
@@ -476,7 +494,7 @@ mod tests {
         ];
 
         let env = Arc::new(Mutex::new(WasiEnv::new()));
-        let result = execute_wasm_bytes_with_env(&wasm, env, None, vec![], None);
+        let result = execute_wasm_bytes_with_env(&wasm, env, None, vec![], ExecLimits::default());
         assert_eq!(
             result.unwrap(),
             42,
@@ -514,7 +532,7 @@ mod tests {
         ];
 
         let env = Arc::new(Mutex::new(WasiEnv::new()));
-        let result = execute_wasm_bytes_with_env(&wasm, env, None, vec![], None);
+        let result = execute_wasm_bytes_with_env(&wasm, env, None, vec![], ExecLimits::default());
         assert_eq!(
             result.unwrap(),
             0,
