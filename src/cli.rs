@@ -300,13 +300,45 @@ pub enum Commands {
         )]
         max_sessions: usize,
 
-        /// Memory limit per session in MB (default: 256)
+        /// Memory limit per session in MB (default: 256, 0 = unlimited)
         #[arg(
             long,
             default_value_t = 256,
-            help = "Maximum linear memory per session (MB)"
+            help = "Maximum linear memory per session in MB (0 = unlimited)"
         )]
         max_memory: u32,
+
+        /// Instruction budget ("fuel") per execution (default: 0 = unlimited)
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Maximum WASM instructions per execution (0 = unlimited)"
+        )]
+        max_fuel: u64,
+
+        /// Captured output cap per execution in MB (default: 10, 0 = unlimited)
+        #[arg(
+            long,
+            default_value_t = 10,
+            help = "Maximum captured stdout+stderr per execution in MB (0 = unlimited)"
+        )]
+        max_output: u32,
+
+        /// Per-file write size cap in MB (default: 50, 0 = unlimited)
+        #[arg(
+            long,
+            default_value_t = 50,
+            help = "Maximum size of any single file in MB (0 = unlimited)"
+        )]
+        max_file_size: u32,
+
+        /// Total disk usage cap per session in MB (default: 100, 0 = unlimited)
+        #[arg(
+            long,
+            default_value_t = 100,
+            help = "Maximum total disk usage per session in MB (0 = unlimited)"
+        )]
+        max_disk: u32,
 
         /// Allow wildcard CORS (Access-Control-Allow-Origin: *)
         #[arg(long, help = "Allow cross-origin requests from any domain")]

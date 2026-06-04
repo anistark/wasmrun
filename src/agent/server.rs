@@ -2,11 +2,12 @@
 
 use crate::agent::api::*;
 use crate::agent::executor;
+use crate::agent::limits::{dir_size, ResourceLimits};
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::shell;
 use crate::agent::tools;
 use crate::error::{Result, WasmrunError};
-use crate::runtime::core::native_executor::execute_wasm_bytes_with_env;
+use crate::runtime::core::native_executor::{execute_wasm_bytes_with_env, ExecLimits};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Read;
@@ -26,7 +27,6 @@ pub struct AgentConfig {
     pub session_config: SessionConfig,
     pub allow_cors: bool,
     pub verbose: bool,
-    pub max_memory_mb: u32,
 }
 
 impl Default for AgentConfig {
@@ -36,7 +36,6 @@ impl Default for AgentConfig {
             session_config: SessionConfig::default(),
             allow_cors: false,
             verbose: false,
-            max_memory_mb: 256,
         }
     }
 }
@@ -97,7 +96,7 @@ impl AgentServer {
         let port = self.config.port;
         let max = self.config.session_config.max_sessions;
         let timeout = self.config.session_config.default_timeout.as_secs();
-        let mem = self.config.max_memory_mb;
+        let limits = &self.config.session_config.limits;
         let cors = if self.config.allow_cors {
             "open"
         } else {
@@ -107,7 +106,23 @@ impl AgentServer {
         println!("   Endpoint:        http://0.0.0.0:{port}{API_PREFIX}");
         println!("   Max sessions:    {max}");
         println!("   Session timeout: {timeout}s");
-        println!("   Memory limit:    {mem} MB / session");
+        println!(
+            "   Memory limit:    {}",
+            fmt_pages_mb(limits.max_memory_pages)
+        );
+        println!(
+            "   Fuel limit:      {}",
+            fmt_opt_u64(limits.max_fuel, "instructions")
+        );
+        println!(
+            "   Output limit:    {}",
+            fmt_bytes_mb(limits.max_output_bytes.map(|b| b as u64))
+        );
+        println!("   File size limit: {}", fmt_bytes_mb(limits.max_file_size));
+        println!(
+            "   Disk limit:      {}",
+            fmt_bytes_mb(limits.max_disk_bytes)
+        );
         println!("   CORS:            {cors}");
         println!();
         println!("   Endpoints:");
@@ -173,7 +188,8 @@ impl AgentServer {
                 self.respond_json(request, self.handle_get_tools(format))
             }
             (Method::Post, ["sessions"]) => {
-                self.respond_json(request, self.handle_create_session())
+                let body = read_body(request.as_reader())?;
+                self.respond_json(request, self.handle_create_session_with_body(&body))
             }
             (Method::Get, ["sessions", id]) => {
                 self.respond_json(request, self.handle_get_session(id))
@@ -221,10 +237,37 @@ impl AgentServer {
 
     // ── Session endpoints ─────────────────────────────────────────
 
+    #[allow(dead_code)] // Used by tests; the HTTP route uses the _with_body variant.
     pub fn handle_create_session(&self) -> std::result::Result<CreateSessionResponse, ApiError> {
+        self.create_session_with_limits(self.config.session_config.limits.clone())
+    }
+
+    /// Create a session, applying any per-session limit overrides supplied in
+    /// the (optional) request body on top of the server defaults.
+    pub fn handle_create_session_with_body(
+        &self,
+        body: &str,
+    ) -> std::result::Result<CreateSessionResponse, ApiError> {
+        let limits = if body.trim().is_empty() {
+            self.config.session_config.limits.clone()
+        } else {
+            let req: CreateSessionRequest =
+                serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+            match req.limits {
+                Some(ov) => self.config.session_config.limits.with_overrides(&ov),
+                None => self.config.session_config.limits.clone(),
+            }
+        };
+        self.create_session_with_limits(limits)
+    }
+
+    fn create_session_with_limits(
+        &self,
+        limits: ResourceLimits,
+    ) -> std::result::Result<CreateSessionResponse, ApiError> {
         let id = self
             .session_manager
-            .create_session()
+            .create_session_with_limits(self.config.session_config.default_timeout, limits)
             .map_err(map_session_err)?;
         Ok(CreateSessionResponse {
             session_id: id,
@@ -268,9 +311,11 @@ impl AgentServer {
         let req: ExecRequest =
             serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
-        let (wasi_env, work_dir) = self
+        let (wasi_env, work_dir, limits) = self
             .session_manager
-            .get_session(id, |s| (s.wasi_env(), s.work_dir().to_path_buf()))
+            .get_session(id, |s| {
+                (s.wasi_env(), s.work_dir().to_path_buf(), s.limits().clone())
+            })
             .map_err(map_session_err)?;
 
         // Prepare environment
@@ -290,7 +335,10 @@ impl AgentServer {
         let timeout_secs = req.timeout.unwrap_or(DEFAULT_EXEC_TIMEOUT_SECS);
         let timeout = Duration::from_secs(timeout_secs);
         let start = Instant::now();
-        let max_pages = Some(self.config.max_memory_mb * 16);
+        let exec_limits = ExecLimits {
+            max_memory_pages: limits.max_memory_pages,
+            max_fuel: limits.max_fuel,
+        };
         let exec_env = wasi_env.clone();
 
         let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<i32, ApiError>>();
@@ -321,6 +369,7 @@ impl AgentServer {
                 )));
             }
             let work_dir_clone = work_dir.clone();
+            let limits_clone = limits.clone();
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
@@ -330,7 +379,7 @@ impl AgentServer {
                         &lang,
                         exec_env,
                         &work_dir_clone,
-                        max_pages,
+                        &limits_clone,
                     );
                     let _ = tx.send(result);
                 })
@@ -341,6 +390,7 @@ impl AgentServer {
             // Validate language before spawning so callers get a 400 immediately
             executor::resolve_runtime(&lang)?;
             let work_dir_clone = work_dir.clone();
+            let limits_clone = limits.clone();
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
@@ -349,7 +399,7 @@ impl AgentServer {
                         &lang,
                         exec_env,
                         &work_dir_clone,
-                        max_pages,
+                        &limits_clone,
                     );
                     let _ = tx.send(result);
                 })
@@ -369,7 +419,7 @@ impl AgentServer {
                         exec_env,
                         function,
                         args,
-                        max_pages,
+                        exec_limits,
                     )
                     .map_err(|e| ApiError::Internal(e.to_string()));
                     let _ = tx.send(result);
@@ -394,6 +444,7 @@ impl AgentServer {
                     stderr: read_env_stderr(&wasi_env),
                     exit_code: -1,
                     duration_ms,
+                    output_truncated: read_env_truncated(&wasi_env),
                     error: Some(format!("Execution timed out after {timeout_secs}s")),
                 });
             }
@@ -404,6 +455,7 @@ impl AgentServer {
                     stderr: String::new(),
                     exit_code: -1,
                     duration_ms,
+                    output_truncated: false,
                     error: Some("Execution thread panicked".into()),
                 });
             }
@@ -415,6 +467,7 @@ impl AgentServer {
                 stderr: read_env_stderr(&wasi_env),
                 exit_code,
                 duration_ms,
+                output_truncated: read_env_truncated(&wasi_env),
                 error: None,
             }),
             Err(e) => Ok(ExecResponse {
@@ -422,6 +475,7 @@ impl AgentServer {
                 stderr: read_env_stderr(&wasi_env),
                 exit_code: -1,
                 duration_ms,
+                output_truncated: read_env_truncated(&wasi_env),
                 error: Some(e.to_string()),
             }),
         }
@@ -437,12 +491,19 @@ impl AgentServer {
         let req: WriteFileRequest =
             serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
-        let work_dir = self
+        let (work_dir, limits) = self
             .session_manager
-            .get_session(id, |s| s.work_dir().to_path_buf())
+            .get_session(id, |s| (s.work_dir().to_path_buf(), s.limits().clone()))
             .map_err(map_session_err)?;
 
         let resolved = resolve_session_path(&work_dir, &req.path)?;
+
+        // Enforce per-file size and total disk caps before writing.
+        let existing_len = std::fs::metadata(&resolved).map(|m| m.len()).unwrap_or(0);
+        limits
+            .check_write(req.content.len() as u64, existing_len, dir_size(&work_dir))
+            .map_err(ApiError::BadRequest)?;
+
         if let Some(parent) = resolved.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| ApiError::Internal(format!("mkdir: {e}")))?;
@@ -626,6 +687,30 @@ impl AgentServer {
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
+/// Format a memory page count as a human-readable MB string for the banner.
+fn fmt_pages_mb(pages: Option<u32>) -> String {
+    match pages {
+        Some(p) => format!("{} MB / session", (p as u64 * 65536) / (1024 * 1024)),
+        None => "unlimited".to_string(),
+    }
+}
+
+/// Format an optional byte cap as a human-readable MB string for the banner.
+fn fmt_bytes_mb(bytes: Option<u64>) -> String {
+    match bytes {
+        Some(b) => format!("{} MB / session", b / (1024 * 1024)),
+        None => "unlimited".to_string(),
+    }
+}
+
+/// Format an optional numeric limit with a unit label for the banner.
+fn fmt_opt_u64(val: Option<u64>, unit: &str) -> String {
+    match val {
+        Some(v) => format!("{v} {unit}"),
+        None => "unlimited".to_string(),
+    }
+}
+
 fn map_session_err(e: SessionError) -> ApiError {
     match e {
         SessionError::NotFound { id } => ApiError::SessionNotFound(id),
@@ -719,6 +804,12 @@ fn read_env_stderr(
         .unwrap_or_default()
 }
 
+fn read_env_truncated(
+    env: &std::sync::Arc<std::sync::Mutex<crate::runtime::wasi::WasiEnv>>,
+) -> bool {
+    env.lock().map(|e| e.output_truncated()).unwrap_or(false)
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -732,10 +823,10 @@ mod tests {
                 default_timeout: Duration::from_secs(60),
                 max_sessions: 10,
                 cleanup_interval: Duration::from_secs(300),
+                limits: crate::agent::limits::ResourceLimits::default(),
             },
             allow_cors: true,
             verbose: false,
-            max_memory_mb: 256,
         })
     }
 
@@ -1410,5 +1501,175 @@ mod tests {
         assert!(names.contains(&"read_file"));
         assert!(names.contains(&"list_files"));
         assert!(names.contains(&"destroy_session"));
+    }
+
+    // ── Resource limits ───────────────────────────────────────────
+
+    /// Hand-built WASM whose `_start` is an infinite `loop { br 0 }`.
+    fn infinite_loop_wasm() -> Vec<u8> {
+        #[rustfmt::skip]
+        let wasm: Vec<u8> = vec![
+            0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 1 type ()->()
+            0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+            // Function section: 1 func, type 0
+            0x03, 0x02, 0x01, 0x00,
+            // Export section: "_start" -> func 0
+            0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73, 0x74, 0x61, 0x72, 0x74, 0x00, 0x00,
+            // Code section: loop; br 0; end; end
+            0x0a, 0x09, 0x01, 0x07, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x0b,
+        ];
+        wasm
+    }
+
+    fn make_session_with_limits(server: &AgentServer, limits: ResourceLimits) -> String {
+        server
+            .session_manager
+            .create_session_with_limits(Duration::from_secs(60), limits)
+            .unwrap()
+    }
+
+    #[test]
+    fn test_create_session_with_limits_override() {
+        let server = test_server();
+        let body = r#"{"limits":{"max_fuel":500,"max_output_mb":0,"max_file_size_mb":1}}"#;
+        let id = server
+            .handle_create_session_with_body(body)
+            .unwrap()
+            .session_id;
+
+        let limits = server
+            .session_manager
+            .get_session(&id, |s| s.limits().clone())
+            .unwrap();
+        assert_eq!(limits.max_fuel, Some(500));
+        assert_eq!(limits.max_output_bytes, None); // 0 disables the cap
+        assert_eq!(limits.max_file_size, Some(1024 * 1024));
+        // Unspecified fields keep the server defaults.
+        assert_eq!(
+            limits.max_memory_pages,
+            server.config.session_config.limits.max_memory_pages
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_create_session_empty_body_uses_defaults() {
+        let server = test_server();
+        let id = server
+            .handle_create_session_with_body("")
+            .unwrap()
+            .session_id;
+        let limits = server
+            .session_manager
+            .get_session(&id, |s| s.limits().clone())
+            .unwrap();
+        assert_eq!(limits, server.config.session_config.limits);
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_create_session_invalid_limits_body_returns_400() {
+        let server = test_server();
+        let err = server
+            .handle_create_session_with_body(r#"{"limits": "not-an-object"}"#)
+            .unwrap_err();
+        assert_eq!(err.status_code(), 400);
+    }
+
+    #[test]
+    fn test_write_file_exceeds_file_size_limit() {
+        let server = test_server();
+        let limits = ResourceLimits {
+            max_file_size: Some(10),
+            max_disk_bytes: None,
+            ..ResourceLimits::default()
+        };
+        let id = make_session_with_limits(&server, limits);
+
+        let err = server
+            .handle_write_file(
+                &id,
+                r#"{"path": "big.txt", "content": "this is more than ten bytes"}"#,
+            )
+            .unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("File size limit"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_write_file_exceeds_disk_limit() {
+        let server = test_server();
+        let limits = ResourceLimits {
+            max_file_size: None,
+            max_disk_bytes: Some(10),
+            ..ResourceLimits::default()
+        };
+        let id = make_session_with_limits(&server, limits);
+
+        // First 5-byte file fits (5 <= 10).
+        server
+            .handle_write_file(&id, r#"{"path": "a.txt", "content": "12345"}"#)
+            .unwrap();
+        // Second 6-byte file pushes total to 11 > 10 → rejected.
+        let err = server
+            .handle_write_file(&id, r#"{"path": "b.txt", "content": "678901"}"#)
+            .unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("Disk usage limit"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_command_output_truncated() {
+        let server = test_server();
+        let limits = ResourceLimits {
+            max_output_bytes: Some(3),
+            ..ResourceLimits::default()
+        };
+        let id = make_session_with_limits(&server, limits);
+
+        // "echo hello" emits "hello\n" (6 bytes); capped to 3.
+        let resp = server
+            .handle_exec(&id, r#"{"command": "echo hello"}"#)
+            .unwrap();
+        assert_eq!(resp.stdout, "hel");
+        assert!(resp.output_truncated);
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_fuel_limit_aborts_runaway_wasm() {
+        let server = test_server();
+        let limits = ResourceLimits {
+            max_fuel: Some(50_000),
+            ..ResourceLimits::default()
+        };
+        let id = make_session_with_limits(&server, limits);
+
+        let work_dir = server
+            .session_manager
+            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .unwrap();
+        std::fs::write(work_dir.join("loop.wasm"), infinite_loop_wasm()).unwrap();
+
+        // With a fuel cap the runaway loop aborts well before the exec timeout.
+        let resp = server
+            .handle_exec(&id, r#"{"wasm_path": "loop.wasm", "timeout": 30}"#)
+            .unwrap();
+        assert_eq!(resp.exit_code, -1);
+        let err = resp.error.unwrap_or_default();
+        assert!(
+            err.contains("instruction limit") || err.contains("fuel"),
+            "expected fuel-limit error, got: {err}"
+        );
+        assert!(resp.duration_ms < 30_000);
+
+        server.session_manager.destroy_all().unwrap();
     }
 }

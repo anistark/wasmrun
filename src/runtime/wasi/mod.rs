@@ -46,6 +46,13 @@ pub struct WasiEnv {
     next_fd: u32,
     #[allow(dead_code)]
     preopens: Vec<(String, PathBuf)>,
+    /// Cap on combined stdout + stderr bytes captured. `None` = unlimited.
+    max_output_bytes: Option<usize>,
+    /// Set once captured output is dropped because the cap was reached.
+    output_truncated: bool,
+    /// Cap on the size of any single file written via WASI `fd_write`.
+    /// `None` = unlimited. Enforced in the syscall layer.
+    max_file_size: Option<u64>,
 }
 
 impl WasiEnv {
@@ -90,6 +97,9 @@ impl WasiEnv {
             fd_table,
             next_fd: WASI_FIRST_PREOPEN_FD,
             preopens: Vec::new(),
+            max_output_bytes: None,
+            output_truncated: false,
+            max_file_size: None,
         }
     }
 
@@ -142,12 +152,61 @@ impl WasiEnv {
         self.stderr.clone()
     }
 
-    pub fn stdout_mut(&mut self) -> &mut Vec<u8> {
-        &mut self.stdout
+    /// Configure the combined stdout + stderr capture cap (`None` = unlimited).
+    pub fn set_max_output_bytes(&mut self, max: Option<usize>) {
+        self.max_output_bytes = max;
     }
 
-    pub fn stderr_mut(&mut self) -> &mut Vec<u8> {
-        &mut self.stderr
+    /// Configure the per-file write size cap (`None` = unlimited).
+    pub fn set_max_file_size(&mut self, max: Option<u64>) {
+        self.max_file_size = max;
+    }
+
+    /// The per-file write size cap, if any.
+    pub fn max_file_size(&self) -> Option<u64> {
+        self.max_file_size
+    }
+
+    /// Whether captured output was dropped because the output cap was reached.
+    pub fn output_truncated(&self) -> bool {
+        self.output_truncated
+    }
+
+    /// Append `bytes` to the stdout buffer, honoring the output cap.
+    pub fn write_stdout(&mut self, bytes: &[u8]) {
+        self.append_capped(true, bytes);
+    }
+
+    /// Append `bytes` to the stderr buffer, honoring the output cap.
+    pub fn write_stderr(&mut self, bytes: &[u8]) {
+        self.append_capped(false, bytes);
+    }
+
+    /// Append to stdout or stderr, never letting the combined buffers exceed
+    /// `max_output_bytes`. Excess is dropped and `output_truncated` is set.
+    fn append_capped(&mut self, to_stdout: bool, bytes: &[u8]) {
+        let slice = match self.max_output_bytes {
+            Some(max) => {
+                let used = self.stdout.len() + self.stderr.len();
+                if used >= max {
+                    self.output_truncated = true;
+                    return;
+                }
+                let room = max - used;
+                if bytes.len() > room {
+                    self.output_truncated = true;
+                    &bytes[..room]
+                } else {
+                    bytes
+                }
+            }
+            None => bytes,
+        };
+        if to_stdout {
+            self.stdout.extend_from_slice(slice);
+        } else {
+            self.stderr.extend_from_slice(slice);
+        }
     }
 
     /// Add an environment variable (appends to existing list).
@@ -163,11 +222,13 @@ impl WasiEnv {
     /// Clear captured stdout buffer.
     pub fn clear_stdout(&mut self) {
         self.stdout.clear();
+        self.output_truncated = false;
     }
 
     /// Clear captured stderr buffer.
     pub fn clear_stderr(&mut self) {
         self.stderr.clear();
+        self.output_truncated = false;
     }
 
     pub fn get_fd(&self, fd: u32) -> Option<&FdEntry> {
@@ -946,6 +1007,46 @@ mod tests {
         let fd_entry = env.get_fd(WASI_FIRST_PREOPEN_FD).unwrap();
         assert_eq!(fd_entry.kind, FdKind::PreopenDir);
         assert_eq!(fd_entry.guest_path, "/sandbox");
+    }
+
+    #[test]
+    fn test_output_cap_truncates_stdout() {
+        let mut env = WasiEnv::new();
+        env.set_max_output_bytes(Some(5));
+        env.write_stdout(b"abc");
+        assert!(!env.output_truncated());
+        env.write_stdout(b"defgh"); // only "de" fits (5 total)
+        assert_eq!(env.get_stdout(), b"abcde");
+        assert!(env.output_truncated());
+    }
+
+    #[test]
+    fn test_output_cap_is_combined_across_streams() {
+        let mut env = WasiEnv::new();
+        env.set_max_output_bytes(Some(4));
+        env.write_stdout(b"ab");
+        env.write_stderr(b"cdef"); // only "cd" fits
+        assert_eq!(env.get_stdout(), b"ab");
+        assert_eq!(env.get_stderr(), b"cd");
+        assert!(env.output_truncated());
+    }
+
+    #[test]
+    fn test_output_cap_unlimited_by_default() {
+        let mut env = WasiEnv::new();
+        env.write_stdout(&vec![b'x'; 100_000]);
+        assert_eq!(env.get_stdout().len(), 100_000);
+        assert!(!env.output_truncated());
+    }
+
+    #[test]
+    fn test_clear_resets_truncation_flag() {
+        let mut env = WasiEnv::new();
+        env.set_max_output_bytes(Some(2));
+        env.write_stdout(b"toolong");
+        assert!(env.output_truncated());
+        env.clear_stdout();
+        assert!(!env.output_truncated());
     }
 
     #[test]

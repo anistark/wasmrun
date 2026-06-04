@@ -466,13 +466,13 @@ impl Shell {
 
     fn append_stdout_bytes(&self, bytes: &[u8]) {
         if let Ok(mut env) = self.wasi_env.lock() {
-            env.stdout_mut().extend_from_slice(bytes);
+            env.write_stdout(bytes);
         }
     }
 
     fn append_stderr_bytes(&self, bytes: &[u8]) {
         if let Ok(mut env) = self.wasi_env.lock() {
-            env.stderr_mut().extend_from_slice(bytes);
+            env.write_stderr(bytes);
         }
     }
 

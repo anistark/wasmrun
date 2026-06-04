@@ -9,6 +9,10 @@ use std::io::Cursor;
 /// Sentinel prefix for proc_exit errors so callers can extract the exit code.
 pub const WASI_PROC_EXIT_PREFIX: &str = "__wasi_proc_exit:";
 
+/// Sentinel error returned when an execution exhausts its instruction budget
+/// ("fuel"). Callers can detect this to surface a clear resource-limit error.
+pub const FUEL_EXHAUSTED_ERROR: &str = "__wasmrun_fuel_exhausted__";
+
 /// Result of instruction dispatch for control flow signaling
 #[derive(Debug, Clone, PartialEq)]
 enum ControlFlow {
@@ -969,6 +973,10 @@ pub struct Executor {
     /// Flat function table initialized from element segments.
     /// Index = table slot, value = absolute function index (or None if unset).
     table: Vec<Option<u32>>,
+    /// Remaining instruction budget ("fuel"). `None` = unlimited. When `Some`,
+    /// each dispatched instruction decrements it; reaching zero aborts
+    /// execution with `FUEL_EXHAUSTED_ERROR`.
+    fuel: Option<u64>,
 }
 
 impl Executor {
@@ -1059,7 +1067,21 @@ impl Executor {
             linker,
             import_func_count,
             table,
+            fuel: None,
         })
+    }
+
+    /// Set the instruction budget ("fuel") for subsequent executions.
+    ///
+    /// `Some(n)` aborts execution after `n` instructions with
+    /// `FUEL_EXHAUSTED_ERROR`; `None` (the default) runs without a fuel cap.
+    pub fn set_fuel(&mut self, fuel: Option<u64>) {
+        self.fuel = fuel;
+    }
+
+    /// Check whether an error string indicates fuel exhaustion.
+    pub fn is_fuel_exhausted(err: &str) -> bool {
+        err.contains(FUEL_EXHAUSTED_ERROR)
     }
 
     /// Execute a function by index and return its results
@@ -1161,6 +1183,17 @@ impl Executor {
         loop {
             if cursor.position() >= cursor.get_ref().len() as u64 {
                 break;
+            }
+
+            // Charge one unit of fuel per instruction. `fuel` is shared across
+            // nested calls (each runs its own execute_bytecode against the same
+            // executor), so this bounds total instructions across the whole call
+            // tree, not just the current function body.
+            if let Some(remaining) = self.fuel.as_mut() {
+                if *remaining == 0 {
+                    return Err(FUEL_EXHAUSTED_ERROR.to_string());
+                }
+                *remaining -= 1;
             }
 
             let instr = decode_instruction(cursor)?;
@@ -3285,7 +3318,75 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
+    use super::super::module::{Function, FunctionType};
     use super::*;
+    use std::collections::HashMap;
+
+    /// Build a module whose only function is an infinite `loop { br 0 }`.
+    fn infinite_loop_module() -> Module {
+        Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![],
+                results: vec![],
+            }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![],
+                // loop (empty type); br 0; end (loop); end (func)
+                code: vec![0x03, 0x40, 0x0c, 0x00, 0x0b, 0x0b],
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![],
+            exports: HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        }
+    }
+
+    #[test]
+    fn test_fuel_aborts_infinite_loop() {
+        let mut executor = Executor::new(infinite_loop_module()).unwrap();
+        executor.set_fuel(Some(1000));
+        let err = executor
+            .execute_with_args(0, vec![])
+            .expect_err("infinite loop should exhaust fuel");
+        assert!(
+            Executor::is_fuel_exhausted(&err),
+            "expected fuel-exhausted error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_no_fuel_cap_does_not_abort_finite_program() {
+        // A function that simply returns; with no fuel cap it completes.
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![],
+                results: vec![],
+            }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![],
+                code: vec![0x0b], // end
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![],
+            exports: HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+        let mut executor = Executor::new(module).unwrap();
+        executor.set_fuel(None);
+        assert!(executor.execute_with_args(0, vec![]).is_ok());
+    }
 
     #[test]
     fn test_frame_local_access() {

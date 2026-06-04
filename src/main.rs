@@ -180,21 +180,33 @@ fn main() {
             timeout,
             max_sessions,
             max_memory,
+            max_fuel,
+            max_output,
+            max_file_size,
+            max_disk,
             allow_cors,
             verbose,
         }) => {
             debug_println!(
-                "Processing agent command: port={}, timeout={}, max_sessions={}, max_memory={}MB",
+                "Processing agent command: port={}, timeout={}, max_sessions={}, max_memory={}MB, max_fuel={}, max_output={}MB, max_file_size={}MB, max_disk={}MB",
                 port,
                 timeout,
                 max_sessions,
-                max_memory
+                max_memory,
+                max_fuel,
+                max_output,
+                max_file_size,
+                max_disk
             );
             commands::handle_agent_command(
                 *port,
                 *timeout,
                 *max_sessions,
                 *max_memory,
+                *max_fuel,
+                *max_output,
+                *max_file_size,
+                *max_disk,
                 *allow_cors,
                 *verbose,
             )
