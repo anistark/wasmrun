@@ -10,6 +10,7 @@ use crate::runtime::runtime_cache::{wasmhub_language, RuntimeCache};
 use crate::runtime::wasi::WasiEnv;
 use std::collections::HashMap;
 use std::path::{Component, Path};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 const JS_SCRIPT_NAME: &str = "_run_.js";
@@ -36,6 +37,7 @@ pub fn execute_source(
     wasi_env: Arc<Mutex<WasiEnv>>,
     work_dir: &Path,
     limits: &ResourceLimits,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> std::result::Result<i32, ApiError> {
     let runtime_name = resolve_runtime(language)?;
 
@@ -54,8 +56,15 @@ pub fn execute_source(
         "run".to_string(),
         JS_SCRIPT_NAME.to_string(),
     ];
-    execute_wasm_bytes_with_env(&wasm_bytes, wasi_env, None, args, exec_limits(limits))
-        .map_err(|e| ApiError::Internal(e.to_string()))
+    execute_wasm_bytes_with_env(
+        &wasm_bytes,
+        wasi_env,
+        None,
+        args,
+        exec_limits(limits),
+        cancel,
+    )
+    .map_err(|e| ApiError::Internal(e.to_string()))
 }
 
 /// Execute a multi-file source project in a session sandbox.
@@ -71,6 +80,7 @@ pub fn execute_source_project(
     wasi_env: Arc<Mutex<WasiEnv>>,
     work_dir: &Path,
     limits: &ResourceLimits,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> std::result::Result<i32, ApiError> {
     let runtime_name = resolve_runtime(language)?;
 
@@ -107,6 +117,7 @@ pub fn execute_source_project(
         None,
         args,
         exec_limits(limits),
+        cancel,
     )
     .map_err(|e| ApiError::Internal(e.to_string()))
 }
@@ -254,6 +265,7 @@ mod tests {
             env,
             &tmp,
             &ResourceLimits::default(),
+            None,
         )
         .unwrap_err();
         assert_eq!(err.status_code(), 400);
@@ -273,6 +285,7 @@ mod tests {
             env,
             &tmp,
             &ResourceLimits::default(),
+            None,
         )
         .unwrap_err();
         assert_eq!(err.status_code(), 400);
@@ -292,6 +305,7 @@ mod tests {
             env,
             &tmp,
             &ResourceLimits::default(),
+            None,
         )
         .unwrap_err();
         assert_eq!(err.status_code(), 400);
@@ -323,6 +337,7 @@ mod tests {
             env,
             &tmp,
             &ResourceLimits::default(),
+            None,
         )
         .unwrap_err();
         assert_eq!(err.status_code(), 400);

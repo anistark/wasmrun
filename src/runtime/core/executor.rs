@@ -5,6 +5,8 @@ use super::memory::LinearMemory;
 use super::module::{ImportKind, Module, ValueType};
 use super::values::Value;
 use std::io::Cursor;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Sentinel prefix for proc_exit errors so callers can extract the exit code.
 pub const WASI_PROC_EXIT_PREFIX: &str = "__wasi_proc_exit:";
@@ -12,6 +14,11 @@ pub const WASI_PROC_EXIT_PREFIX: &str = "__wasi_proc_exit:";
 /// Sentinel error returned when an execution exhausts its instruction budget
 /// ("fuel"). Callers can detect this to surface a clear resource-limit error.
 pub const FUEL_EXHAUSTED_ERROR: &str = "__wasmrun_fuel_exhausted__";
+
+/// Sentinel error returned when an execution is cancelled via its cancel token
+/// (e.g. the agent server tripping it on wall-clock timeout). Callers detect
+/// this to distinguish a deliberate halt from a program error.
+pub const EXECUTION_CANCELLED_ERROR: &str = "__wasmrun_execution_cancelled__";
 
 /// Result of instruction dispatch for control flow signaling
 #[derive(Debug, Clone, PartialEq)]
@@ -977,6 +984,11 @@ pub struct Executor {
     /// each dispatched instruction decrements it; reaching zero aborts
     /// execution with `FUEL_EXHAUSTED_ERROR`.
     fuel: Option<u64>,
+    /// Cooperative cancellation flag. When set and flipped to `true`, the
+    /// instruction loop aborts with `EXECUTION_CANCELLED_ERROR` at the next
+    /// check. `None` = not cancellable. Shared (`Arc`) so an outside thread —
+    /// e.g. the agent server on wall-clock timeout — can trip it while we run.
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Executor {
@@ -1068,6 +1080,7 @@ impl Executor {
             import_func_count,
             table,
             fuel: None,
+            cancel: None,
         })
     }
 
@@ -1082,6 +1095,20 @@ impl Executor {
     /// Check whether an error string indicates fuel exhaustion.
     pub fn is_fuel_exhausted(err: &str) -> bool {
         err.contains(FUEL_EXHAUSTED_ERROR)
+    }
+
+    /// Install a cancellation token checked during execution.
+    ///
+    /// When the shared flag is flipped to `true`, the instruction loop aborts
+    /// with `EXECUTION_CANCELLED_ERROR` at the next check. `None` disables
+    /// cancellation (the default).
+    pub fn set_cancel_token(&mut self, token: Option<Arc<AtomicBool>>) {
+        self.cancel = token;
+    }
+
+    /// Check whether an error string indicates a cancelled execution.
+    pub fn is_cancelled(err: &str) -> bool {
+        err.contains(EXECUTION_CANCELLED_ERROR)
     }
 
     /// Execute a function by index and return its results
@@ -1194,6 +1221,16 @@ impl Executor {
                     return Err(FUEL_EXHAUSTED_ERROR.to_string());
                 }
                 *remaining -= 1;
+            }
+
+            // Cooperative cancellation: an outside thread (e.g. the agent
+            // server on wall-clock timeout) can trip this flag to halt a
+            // runaway execution that fuel alone wouldn't stop. The Relaxed
+            // atomic load is negligible next to instruction decode/dispatch.
+            if let Some(flag) = self.cancel.as_ref() {
+                if flag.load(Ordering::Relaxed) {
+                    return Err(EXECUTION_CANCELLED_ERROR.to_string());
+                }
             }
 
             let instr = decode_instruction(cursor)?;
@@ -3321,6 +3358,8 @@ mod tests {
     use super::super::module::{Function, FunctionType};
     use super::*;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     /// Build a module whose only function is an infinite `loop { br 0 }`.
     fn infinite_loop_module() -> Module {
@@ -3385,6 +3424,70 @@ mod tests {
         };
         let mut executor = Executor::new(module).unwrap();
         executor.set_fuel(None);
+        assert!(executor.execute_with_args(0, vec![]).is_ok());
+    }
+
+    #[test]
+    fn test_cancel_token_preset_aborts_infinite_loop() {
+        // A token already tripped before execution aborts at the first check —
+        // deterministic, no timing involved. Note: no fuel cap is set, proving
+        // cancellation halts a runaway loop that fuel alone would let run.
+        let mut executor = Executor::new(infinite_loop_module()).unwrap();
+        executor.set_cancel_token(Some(Arc::new(AtomicBool::new(true))));
+        let err = executor
+            .execute_with_args(0, vec![])
+            .expect_err("pre-cancelled run should error");
+        assert!(
+            Executor::is_cancelled(&err),
+            "expected cancellation error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_cancel_token_aborts_running_infinite_loop() {
+        // Trip the flag from a watcher thread while the loop runs on this
+        // thread (so the test never depends on Executor being Send).
+        let mut executor = Executor::new(infinite_loop_module()).unwrap();
+        let flag = Arc::new(AtomicBool::new(false));
+        executor.set_cancel_token(Some(flag.clone()));
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            flag.store(true, Ordering::Relaxed);
+        });
+        let err = executor
+            .execute_with_args(0, vec![])
+            .expect_err("cancelled run should error");
+        assert!(
+            Executor::is_cancelled(&err),
+            "expected cancellation error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_untripped_cancel_token_allows_completion() {
+        // An installed-but-untripped token must not affect a finite program.
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![],
+                results: vec![],
+            }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![],
+                code: vec![0x0b], // end
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![],
+            exports: HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+        let mut executor = Executor::new(module).unwrap();
+        executor.set_cancel_token(Some(Arc::new(AtomicBool::new(false))));
         assert!(executor.execute_with_args(0, vec![]).is_ok());
     }
 

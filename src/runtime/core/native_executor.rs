@@ -6,6 +6,7 @@ use crate::error::{CommandError, Result, WasmrunError};
 use crate::runtime::wasi::{create_wasi_linker, WasiEnv};
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 /// Resource ceilings applied to a single WASM execution.
@@ -140,6 +141,7 @@ pub fn execute_wasm_bytes_with_env(
     function: Option<String>,
     args: Vec<String>,
     limits: ExecLimits,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> Result<i32> {
     let mut module = Module::parse(wasm_bytes)
         .map_err(|e| WasmrunError::from(format!("Failed to parse WASM module: {e}")))?;
@@ -163,6 +165,7 @@ pub fn execute_wasm_bytes_with_env(
     let mut executor = Executor::new_with_linker(module, wasi_linker)
         .map_err(|e| WasmrunError::from(format!("Failed to initialize executor: {e}")))?;
     executor.set_fuel(limits.max_fuel);
+    executor.set_cancel_token(cancel);
 
     let func_idx = if let Some(func_name) = function {
         find_export_function(executor.module(), &func_name)
@@ -194,6 +197,10 @@ pub fn execute_wasm_bytes_with_env(
         Err(e) => {
             if let Some(code) = extract_proc_exit(&e) {
                 Ok(code)
+            } else if Executor::is_cancelled(&e.to_string()) {
+                Err(WasmrunError::from(
+                    "Execution cancelled (timed out)".to_string(),
+                ))
             } else if Executor::is_fuel_exhausted(&e.to_string()) {
                 Err(WasmrunError::from(format!(
                     "Execution exceeded the instruction limit (fuel) of {} instructions",
@@ -494,7 +501,8 @@ mod tests {
         ];
 
         let env = Arc::new(Mutex::new(WasiEnv::new()));
-        let result = execute_wasm_bytes_with_env(&wasm, env, None, vec![], ExecLimits::default());
+        let result =
+            execute_wasm_bytes_with_env(&wasm, env, None, vec![], ExecLimits::default(), None);
         assert_eq!(
             result.unwrap(),
             42,
@@ -532,7 +540,8 @@ mod tests {
         ];
 
         let env = Arc::new(Mutex::new(WasiEnv::new()));
-        let result = execute_wasm_bytes_with_env(&wasm, env, None, vec![], ExecLimits::default());
+        let result =
+            execute_wasm_bytes_with_env(&wasm, env, None, vec![], ExecLimits::default(), None);
         assert_eq!(
             result.unwrap(),
             0,

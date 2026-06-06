@@ -12,6 +12,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
@@ -342,6 +343,10 @@ impl AgentServer {
         let exec_env = wasi_env.clone();
 
         let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<i32, ApiError>>();
+        // Cooperative cancellation: the worker runs detached, so if the
+        // wall-clock timeout fires we trip this flag to make the (possibly
+        // unlimited-fuel) interpreter self-terminate instead of running on.
+        let cancel = Arc::new(AtomicBool::new(false));
 
         if let Some(command) = req.command {
             // Built-in shell emulation: parse and run the command line
@@ -370,6 +375,7 @@ impl AgentServer {
             }
             let work_dir_clone = work_dir.clone();
             let limits_clone = limits.clone();
+            let cancel_worker = cancel.clone();
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
@@ -380,6 +386,7 @@ impl AgentServer {
                         exec_env,
                         &work_dir_clone,
                         &limits_clone,
+                        Some(cancel_worker),
                     );
                     let _ = tx.send(result);
                 })
@@ -391,6 +398,7 @@ impl AgentServer {
             executor::resolve_runtime(&lang)?;
             let work_dir_clone = work_dir.clone();
             let limits_clone = limits.clone();
+            let cancel_worker = cancel.clone();
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
@@ -400,6 +408,7 @@ impl AgentServer {
                         exec_env,
                         &work_dir_clone,
                         &limits_clone,
+                        Some(cancel_worker),
                     );
                     let _ = tx.send(result);
                 })
@@ -411,6 +420,7 @@ impl AgentServer {
                 .map_err(|e| ApiError::NotFound(format!("{}: {e}", resolved.display())))?;
             let function = req.function.clone();
             let args = req.args.clone();
+            let cancel_worker = cancel.clone();
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
@@ -420,6 +430,7 @@ impl AgentServer {
                         function,
                         args,
                         exec_limits,
+                        Some(cancel_worker),
                     )
                     .map_err(|e| ApiError::Internal(e.to_string()));
                     let _ = tx.send(result);
@@ -438,6 +449,10 @@ impl AgentServer {
                 result
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // Trip the cancel flag so the detached worker stops executing
+                // instructions instead of running on past the timeout. (No-op
+                // for the shell path, which isn't a long-running interpreter.)
+                cancel.store(true, Ordering::Relaxed);
                 duration_ms = start.elapsed().as_millis() as u64;
                 return Ok(ExecResponse {
                     stdout: read_env_stdout(&wasi_env),
@@ -1669,6 +1684,47 @@ mod tests {
             "expected fuel-limit error, got: {err}"
         );
         assert!(resp.duration_ms < 30_000);
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_timeout_cancels_runaway_wasm_without_fuel() {
+        // No fuel cap → only the wall-clock timeout can stop the loop. The
+        // worker must self-terminate via the cancel flag, freeing the session
+        // so a follow-up exec still completes promptly.
+        let server = test_server();
+        let limits = ResourceLimits {
+            max_fuel: None,
+            ..ResourceLimits::default()
+        };
+        let id = make_session_with_limits(&server, limits);
+
+        let work_dir = server
+            .session_manager
+            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .unwrap();
+        std::fs::write(work_dir.join("loop.wasm"), infinite_loop_wasm()).unwrap();
+        std::fs::write(work_dir.join("hello.wasm"), hello_wasm()).unwrap();
+
+        let resp = server
+            .handle_exec(&id, r#"{"wasm_path": "loop.wasm", "timeout": 1}"#)
+            .unwrap();
+        assert_eq!(resp.exit_code, -1);
+        assert!(
+            resp.error.unwrap_or_default().contains("timed out"),
+            "expected a timeout error"
+        );
+        // ~1s timeout, well under any runaway ceiling.
+        assert!(resp.duration_ms < 5_000);
+
+        // The session is still usable: a normal exec runs and returns promptly,
+        // which it could not if the runaway worker were still pinning the core.
+        let ok = server
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm", "timeout": 10}"#)
+            .unwrap();
+        assert_eq!(ok.stdout, "Hello, World!\n");
+        assert_eq!(ok.exit_code, 0);
 
         server.session_manager.destroy_all().unwrap();
     }
