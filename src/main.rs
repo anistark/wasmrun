@@ -184,11 +184,13 @@ fn main() {
             max_output,
             max_file_size,
             max_disk,
+            max_body,
+            max_concurrent_exec,
             allow_cors,
             verbose,
         }) => {
             debug_println!(
-                "Processing agent command: port={}, timeout={}, max_sessions={}, max_memory={}MB, max_fuel={}, max_output={}MB, max_file_size={}MB, max_disk={}MB",
+                "Processing agent command: port={}, timeout={}, max_sessions={}, max_memory={}MB, max_fuel={}, max_output={}MB, max_file_size={}MB, max_disk={}MB, max_body={}MB, max_concurrent_exec={}",
                 port,
                 timeout,
                 max_sessions,
@@ -196,7 +198,9 @@ fn main() {
                 max_fuel,
                 max_output,
                 max_file_size,
-                max_disk
+                max_disk,
+                max_body,
+                max_concurrent_exec
             );
             commands::handle_agent_command(
                 *port,
@@ -207,6 +211,8 @@ fn main() {
                 *max_output,
                 *max_file_size,
                 *max_disk,
+                *max_body,
+                *max_concurrent_exec,
                 *allow_cors,
                 *verbose,
             )

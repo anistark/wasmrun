@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Request Body & Execution Concurrency Limits**: bound the server's memory and thread footprint regardless of client behavior
+  - `--max-body` flag (default 32 MB, `0` = unlimited): oversized request bodies are rejected with **413 Payload Too Large** before being fully buffered — the body is read via `Read::take(limit + 1)` and the `Content-Length` header is never trusted
+  - `--max-concurrent-exec` flag (default 100, `0` = unlimited): a global cap on in-flight exec workers across all sessions; saturation returns **429 Too Many Requests** before a fresh 64 MB-stack thread is spawned
+  - The concurrency permit is held for the duration of execution and released on worker completion (not when the HTTP response returns), so a timed-out-but-still-running worker keeps its slot until cancellation halts it
+  - Request body is now read once, up front, in the router so the body cap applies uniformly to every POST route
+  - New `ApiError` variants `PayloadTooLarge` (413) and `TooManyRequests` (429); both new limits are shown in the startup banner
+- **Per-Session Resource Limits**: configurable ceilings enforced at the layer that owns each resource
+  - `--max-fuel` (instruction budget per execution; default `0` = unlimited), `--max-output` (captured stdout+stderr, MB), `--max-file-size` (per-file write, MB), `--max-disk` (total session disk, MB) CLI flags — `0` disables any individual cap
+  - Per-session overrides via an optional `{"limits": {...}}` body on `POST /api/v1/sessions`, merged over the server defaults
+  - Fuel exhaustion aborts runaway / infinite-loop modules; captured output beyond the cap is truncated and flagged via `output_truncated` in the exec response; oversized or over-quota file writes are rejected (per-file via `EFBIG` at the WASI layer, disk total at the agent ingress)
+  - New `ResourceLimits` (`src/agent/limits.rs`) is the single source of truth, fed by both the CLI and per-session overrides
 - **Shell Emulation in Agent Exec API**: built-in shell commands for familiar terminal patterns inside sandbox sessions
   - `POST /api/v1/sessions/:id/exec` accepts a new `command` field with a shell-style command line
   - Built-ins: `echo`, `cat`, `ls`, `pwd`, `cd`, `mkdir` (`-p`), `rm` (`-r`/`-rf`), `cp`, `mv`, `env`, `export`
@@ -38,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exec threads (both source and WASM execution paths) now run with a 64 MB stack via `std::thread::Builder::stack_size` — language runtimes like QuickJS generate deep call chains that overflow the default 8 MB stack
 - wasmhub runtime renamed `quickjs` → `nodejs`; manifest URL pinned to v0.2.0
 - Removed six WASI debug `eprintln!` calls that leaked to host stderr
+
+### Fixed
+- **Runaway execution halted on timeout**: exec workers now observe a cooperative cancel flag (checked per-instruction, alongside the fuel decrement, in the interpreter's hot loop). When the wall-clock timeout fires, the handler trips the flag and the detached worker self-terminates at its next instruction — freeing its CPU, memory, and 64 MB stack. Previously a runaway / infinite-loop module under the default (unlimited-fuel) config kept pinning a core indefinitely after the client had already received its timeout response.
 
 ## [0.19.0](https://github.com/anistark/wasmrun/releases/tag/v0.19.0) - 2026-05-20
 

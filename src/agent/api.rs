@@ -120,6 +120,10 @@ pub enum ApiError {
     MaxSessions(usize),
     BadRequest(String),
     NotFound(String),
+    /// Request body exceeded the configured size cap. Carries the limit (bytes).
+    PayloadTooLarge(usize),
+    /// Too many concurrent executions in flight. Carries the configured cap.
+    TooManyRequests(usize),
     #[allow(dead_code)] // TODO: Used when exec timeout triggers API-level error
     Timeout,
     Internal(String),
@@ -130,8 +134,9 @@ impl ApiError {
         match self {
             ApiError::SessionNotFound(_) | ApiError::NotFound(_) => 404,
             ApiError::SessionExpired(_) => 410,
-            ApiError::MaxSessions(_) => 429,
+            ApiError::MaxSessions(_) | ApiError::TooManyRequests(_) => 429,
             ApiError::BadRequest(_) => 400,
+            ApiError::PayloadTooLarge(_) => 413,
             ApiError::Timeout => 408,
             ApiError::Internal(_) => 500,
         }
@@ -153,6 +158,12 @@ impl std::fmt::Display for ApiError {
             ApiError::MaxSessions(max) => write!(f, "Maximum sessions reached: {max}"),
             ApiError::BadRequest(msg) => write!(f, "Bad request: {msg}"),
             ApiError::NotFound(msg) => write!(f, "Not found: {msg}"),
+            ApiError::PayloadTooLarge(max) => {
+                write!(f, "Request body too large: exceeds {max} byte limit")
+            }
+            ApiError::TooManyRequests(max) => {
+                write!(f, "Too many concurrent executions: limit is {max}")
+            }
             ApiError::Timeout => write!(f, "Execution timed out"),
             ApiError::Internal(msg) => write!(f, "Internal error: {msg}"),
         }

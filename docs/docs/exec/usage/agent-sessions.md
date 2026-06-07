@@ -21,6 +21,24 @@ POST /api/v1/sessions
 }
 ```
 
+### Per-Session Limit Overrides
+
+The body is optional. To override the server's default [resource limits](../agent.md#starting-the-server) for this session only, pass a `limits` object — any omitted field keeps the server default, and `0` disables that cap:
+
+```json
+{
+  "limits": {
+    "max_memory_mb": 128,
+    "max_fuel": 5000000,
+    "max_output_mb": 5,
+    "max_file_size_mb": 10,
+    "max_disk_mb": 50
+  }
+}
+```
+
+Body size and exec concurrency are server-wide and cannot be overridden per session.
+
 ## Get Session Status
 
 ```
@@ -66,4 +84,5 @@ Destroys the session and cleans up its filesystem.
 |--------|------|
 | 404 | Session not found |
 | 410 | Session expired |
+| 413 | Request body exceeded the server's `--max-body` limit |
 | 429 | Maximum concurrent sessions reached |

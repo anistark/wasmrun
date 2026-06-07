@@ -340,6 +340,22 @@ pub enum Commands {
         )]
         max_disk: u32,
 
+        /// Maximum accepted request body size in MB (default: 32, 0 = unlimited)
+        #[arg(
+            long,
+            default_value_t = 32,
+            help = "Maximum accepted request body size in MB (0 = unlimited)"
+        )]
+        max_body: u32,
+
+        /// Maximum concurrent executions across all sessions (default: 100, 0 = unlimited)
+        #[arg(
+            long,
+            default_value_t = 100,
+            help = "Maximum concurrent executions across all sessions (0 = unlimited)"
+        )]
+        max_concurrent_exec: usize,
+
         /// Allow wildcard CORS (Access-Control-Allow-Origin: *)
         #[arg(long, help = "Allow cross-origin requests from any domain")]
         allow_cors: bool,

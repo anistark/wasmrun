@@ -12,7 +12,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
@@ -22,12 +22,22 @@ const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 30;
 // Language runtimes (e.g. QuickJS compiled to WASM) generate deep call chains that
 // overflow the default 8 MB thread stack when run through the WASM interpreter.
 const EXEC_THREAD_STACK_BYTES: usize = 64 * 1024 * 1024;
+/// Default request body cap (32 MB) when none is configured.
+const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
+/// Default ceiling on concurrent exec workers when none is configured.
+const DEFAULT_MAX_CONCURRENT_EXEC: usize = 100;
 
 pub struct AgentConfig {
     pub port: u16,
     pub session_config: SessionConfig,
     pub allow_cors: bool,
     pub verbose: bool,
+    /// Maximum accepted request body size in bytes. `None` = unlimited.
+    pub max_body_bytes: Option<usize>,
+    /// Maximum number of exec workers allowed to run concurrently across all
+    /// sessions. `0` = unlimited. Bounds thread / stack / memory footprint
+    /// independently of `max_sessions` (which only bounds session count).
+    pub max_concurrent_exec: usize,
 }
 
 impl Default for AgentConfig {
@@ -37,6 +47,69 @@ impl Default for AgentConfig {
             session_config: SessionConfig::default(),
             allow_cors: false,
             verbose: false,
+            max_body_bytes: Some(DEFAULT_MAX_BODY_BYTES),
+            max_concurrent_exec: DEFAULT_MAX_CONCURRENT_EXEC,
+        }
+    }
+}
+
+/// Non-blocking counting semaphore bounding concurrent exec workers.
+///
+/// `max == 0` means unlimited. [`try_acquire`](ExecSlots::try_acquire) never
+/// blocks: it either returns a permit or `None` (caller responds 429). A permit
+/// is released when its guard is dropped — and because the guard is moved into
+/// the exec worker thread, release happens on *worker completion*, not when the
+/// HTTP response returns. This keeps a slot held by a timed-out-but-still-running
+/// worker until cooperative cancellation actually stops it.
+struct ExecSlots {
+    in_flight: AtomicUsize,
+    max: usize,
+}
+
+impl ExecSlots {
+    fn new(max: usize) -> Arc<Self> {
+        Arc::new(Self {
+            in_flight: AtomicUsize::new(0),
+            max,
+        })
+    }
+
+    /// Try to take a slot. Returns `None` when saturated (caller → 429).
+    fn try_acquire(self: &Arc<Self>) -> Option<ExecPermit> {
+        if self.max == 0 {
+            return Some(ExecPermit { slots: None });
+        }
+        let mut cur = self.in_flight.load(Ordering::Acquire);
+        loop {
+            if cur >= self.max {
+                return None;
+            }
+            match self.in_flight.compare_exchange_weak(
+                cur,
+                cur + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(ExecPermit {
+                        slots: Some(self.clone()),
+                    })
+                }
+                Err(actual) => cur = actual,
+            }
+        }
+    }
+}
+
+/// RAII permit for a slot in [`ExecSlots`]. Releases the slot on drop.
+struct ExecPermit {
+    slots: Option<Arc<ExecSlots>>,
+}
+
+impl Drop for ExecPermit {
+    fn drop(&mut self) {
+        if let Some(slots) = &self.slots {
+            slots.in_flight.fetch_sub(1, Ordering::AcqRel);
         }
     }
 }
@@ -44,14 +117,17 @@ impl Default for AgentConfig {
 pub struct AgentServer {
     session_manager: Arc<SessionManager>,
     config: AgentConfig,
+    exec_slots: Arc<ExecSlots>,
 }
 
 impl AgentServer {
     pub fn new(config: AgentConfig) -> Self {
         let session_manager = Arc::new(SessionManager::with_config(config.session_config.clone()));
+        let exec_slots = ExecSlots::new(config.max_concurrent_exec);
         Self {
             session_manager,
             config,
+            exec_slots,
         }
     }
 
@@ -124,6 +200,14 @@ impl AgentServer {
             "   Disk limit:      {}",
             fmt_bytes_mb(limits.max_disk_bytes)
         );
+        println!(
+            "   Max body size:   {}",
+            fmt_bytes_mb(self.config.max_body_bytes.map(|b| b as u64))
+        );
+        println!(
+            "   Max concurrent:  {}",
+            fmt_count(self.config.max_concurrent_exec, "exec(s)")
+        );
         println!("   CORS:            {cors}");
         println!();
         println!("   Endpoints:");
@@ -182,6 +266,18 @@ impl AgentServer {
             .filter(|s| !s.is_empty())
             .collect();
 
+        // Read the request body once, up front, for methods that carry one.
+        // Oversize bodies are rejected (413) before they are fully buffered, so
+        // a large POST cannot OOM the process before a handler-level limit runs.
+        let body = if method == Method::Post {
+            match read_body(request.as_reader(), self.config.max_body_bytes) {
+                Ok(b) => b,
+                Err(e) => return self.respond_json(request, Err::<serde_json::Value, _>(e)),
+            }
+        } else {
+            String::new()
+        };
+
         let result = match (method, segments.as_slice()) {
             (Method::Get, ["tools"]) => {
                 let params = parse_query(&query);
@@ -189,7 +285,6 @@ impl AgentServer {
                 self.respond_json(request, self.handle_get_tools(format))
             }
             (Method::Post, ["sessions"]) => {
-                let body = read_body(request.as_reader())?;
                 self.respond_json(request, self.handle_create_session_with_body(&body))
             }
             (Method::Get, ["sessions", id]) => {
@@ -199,11 +294,9 @@ impl AgentServer {
                 self.respond_json(request, self.handle_delete_session(id))
             }
             (Method::Post, ["sessions", id, "exec"]) => {
-                let body = read_body(request.as_reader())?;
                 self.respond_json(request, self.handle_exec(id, &body))
             }
             (Method::Post, ["sessions", id, "files"]) => {
-                let body = read_body(request.as_reader())?;
                 self.respond_json(request, self.handle_write_file(id, &body))
             }
             (Method::Get, ["sessions", id, "files"]) => {
@@ -221,7 +314,6 @@ impl AgentServer {
                 self.respond_json(request, self.handle_delete_file(id, path))
             }
             (Method::Post, ["sessions", id, "env"]) => {
-                let body = read_body(request.as_reader())?;
                 self.respond_json(request, self.handle_set_env(id, &body))
             }
             (Method::Get, ["sessions", id, "env"]) => {
@@ -342,6 +434,16 @@ impl AgentServer {
         };
         let exec_env = wasi_env.clone();
 
+        // Bound concurrent exec workers globally. The permit is moved into the
+        // spawned worker so its slot is released on *worker completion* (not when
+        // this HTTP response returns) — a timed-out-but-still-running worker keeps
+        // its slot until cooperative cancellation actually stops it. On saturation
+        // reject with 429 before spawning a fresh 64 MB-stack thread.
+        let permit = self
+            .exec_slots
+            .try_acquire()
+            .ok_or(ApiError::TooManyRequests(self.config.max_concurrent_exec))?;
+
         let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<i32, ApiError>>();
         // Cooperative cancellation: the worker runs detached, so if the
         // wall-clock timeout fires we trip this flag to make the (possibly
@@ -355,8 +457,10 @@ impl AgentServer {
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
+                    let permit = permit; // held for the duration of execution
                     let result = shell::run_command(&command, &work_dir_clone, exec_env)
                         .map_err(|e| ApiError::BadRequest(e.to_string()));
+                    drop(permit); // free the slot once execution is done
                     let _ = tx.send(result);
                 })
                 .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
@@ -379,6 +483,7 @@ impl AgentServer {
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
+                    let permit = permit; // held for the duration of execution
                     let result = executor::execute_source_project(
                         &files,
                         &entry,
@@ -388,6 +493,7 @@ impl AgentServer {
                         &limits_clone,
                         Some(cancel_worker),
                     );
+                    drop(permit); // free the slot once execution is done
                     let _ = tx.send(result);
                 })
                 .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
@@ -402,6 +508,7 @@ impl AgentServer {
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
+                    let permit = permit; // held for the duration of execution
                     let result = executor::execute_source(
                         &source,
                         &lang,
@@ -410,6 +517,7 @@ impl AgentServer {
                         &limits_clone,
                         Some(cancel_worker),
                     );
+                    drop(permit); // free the slot once execution is done
                     let _ = tx.send(result);
                 })
                 .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
@@ -424,6 +532,7 @@ impl AgentServer {
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
+                    let permit = permit; // held for the duration of execution
                     let result = execute_wasm_bytes_with_env(
                         &wasm_bytes,
                         exec_env,
@@ -433,6 +542,7 @@ impl AgentServer {
                         Some(cancel_worker),
                     )
                     .map_err(|e| ApiError::Internal(e.to_string()));
+                    drop(permit); // free the slot once execution is done
                     let _ = tx.send(result);
                 })
                 .map_err(|e| ApiError::Internal(format!("Failed to spawn exec thread: {e}")))?;
@@ -718,6 +828,15 @@ fn fmt_bytes_mb(bytes: Option<u64>) -> String {
     }
 }
 
+/// Format a count cap for the banner, where `0` means unlimited.
+fn fmt_count(n: usize, unit: &str) -> String {
+    if n == 0 {
+        "unlimited".to_string()
+    } else {
+        format!("{n} {unit}")
+    }
+}
+
 /// Format an optional numeric limit with a unit label for the banner.
 fn fmt_opt_u64(val: Option<u64>, unit: &str) -> String {
     match val {
@@ -749,12 +868,33 @@ fn resolve_session_path(
     Ok(work_dir.join(cleaned))
 }
 
-fn read_body(reader: &mut dyn Read) -> Result<String> {
-    let mut body = String::new();
+/// Read the full request body as a UTF-8 string.
+///
+/// When `max_bytes` is set, reads at most `max_bytes + 1` bytes so an oversize
+/// body is detected (and rejected with 413) without buffering beyond the cap —
+/// the `Content-Length` header is never trusted. `None` reads the body in full.
+fn read_body(
+    reader: &mut dyn Read,
+    max_bytes: Option<usize>,
+) -> std::result::Result<String, ApiError> {
+    let Some(limit) = max_bytes else {
+        let mut body = String::new();
+        reader
+            .read_to_string(&mut body)
+            .map_err(|e| ApiError::BadRequest(format!("Failed to read request body: {e}")))?;
+        return Ok(body);
+    };
+
+    let mut buf = Vec::new();
     reader
-        .read_to_string(&mut body)
-        .map_err(|e| WasmrunError::from(format!("Failed to read request body: {e}")))?;
-    Ok(body)
+        .take(limit as u64 + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| ApiError::BadRequest(format!("Failed to read request body: {e}")))?;
+    if buf.len() > limit {
+        return Err(ApiError::PayloadTooLarge(limit));
+    }
+    String::from_utf8(buf)
+        .map_err(|e| ApiError::BadRequest(format!("Request body is not valid UTF-8: {e}")))
 }
 
 fn split_url(url: &str) -> (String, String) {
@@ -832,6 +972,10 @@ mod tests {
     use super::*;
 
     fn test_server() -> AgentServer {
+        test_server_with_concurrency(100)
+    }
+
+    fn test_server_with_concurrency(max_concurrent_exec: usize) -> AgentServer {
         AgentServer::new(AgentConfig {
             port: 0,
             session_config: SessionConfig {
@@ -842,6 +986,8 @@ mod tests {
             },
             allow_cors: true,
             verbose: false,
+            max_body_bytes: Some(32 * 1024 * 1024),
+            max_concurrent_exec,
         })
     }
 
@@ -1725,6 +1871,114 @@ mod tests {
             .unwrap();
         assert_eq!(ok.stdout, "Hello, World!\n");
         assert_eq!(ok.exit_code, 0);
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    // ── Request body size limit (0.20.3) ──────────────────────────
+
+    #[test]
+    fn test_read_body_within_limit() {
+        let mut cur = std::io::Cursor::new(&b"hello"[..]);
+        assert_eq!(read_body(&mut cur, Some(5)).unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_read_body_unlimited() {
+        let data = vec![b'x'; 1024];
+        let mut cur = std::io::Cursor::new(&data[..]);
+        assert_eq!(read_body(&mut cur, None).unwrap().len(), 1024);
+    }
+
+    #[test]
+    fn test_read_body_rejects_oversize_with_413() {
+        let mut cur = std::io::Cursor::new(&b"hello world"[..]);
+        let err = read_body(&mut cur, Some(5)).unwrap_err();
+        assert_eq!(err.status_code(), 413);
+        assert!(matches!(err, ApiError::PayloadTooLarge(5)));
+    }
+
+    #[test]
+    fn test_read_body_at_exact_limit_is_ok() {
+        // Exactly `limit` bytes must be accepted; only `> limit` is rejected.
+        let mut cur = std::io::Cursor::new(&b"12345"[..]);
+        assert_eq!(read_body(&mut cur, Some(5)).unwrap(), "12345");
+    }
+
+    // ── Exec concurrency cap (0.20.3) ─────────────────────────────
+
+    #[test]
+    fn test_exec_slots_saturation_and_release() {
+        let slots = ExecSlots::new(2);
+        let p1 = slots.try_acquire().unwrap();
+        let p2 = slots.try_acquire().unwrap();
+        // Saturated: third acquire fails.
+        assert!(slots.try_acquire().is_none());
+        // Releasing one frees a slot.
+        drop(p1);
+        let p3 = slots.try_acquire().unwrap();
+        drop(p2);
+        drop(p3);
+        // After all release, capacity is restored.
+        assert!(slots.try_acquire().is_some());
+    }
+
+    #[test]
+    fn test_exec_slots_unlimited() {
+        let slots = ExecSlots::new(0);
+        let permits: Vec<_> = (0..1000).map(|_| slots.try_acquire().unwrap()).collect();
+        assert_eq!(permits.len(), 1000);
+    }
+
+    #[test]
+    fn test_exec_returns_429_when_saturated() {
+        let server = test_server_with_concurrency(1);
+        let id = server.handle_create_session().unwrap().session_id;
+        let work_dir = server
+            .session_manager
+            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .unwrap();
+        std::fs::write(work_dir.join("hello.wasm"), hello_wasm()).unwrap();
+
+        // Hold the only slot to simulate a worker already in flight.
+        let held = server.exec_slots.try_acquire().unwrap();
+        let err = server
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+            .unwrap_err();
+        assert_eq!(err.status_code(), 429);
+        assert!(matches!(err, ApiError::TooManyRequests(1)));
+
+        // Releasing the slot lets the next exec through.
+        drop(held);
+        let ok = server
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+            .unwrap();
+        assert_eq!(ok.exit_code, 0);
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_permit_released_after_worker_completion() {
+        // With a single slot, several *sequential* execs must all succeed —
+        // proving each worker's permit is released when it completes (not
+        // leaked), or the second call would 429.
+        let server = test_server_with_concurrency(1);
+        let id = server.handle_create_session().unwrap().session_id;
+        let work_dir = server
+            .session_manager
+            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .unwrap();
+        std::fs::write(work_dir.join("hello.wasm"), hello_wasm()).unwrap();
+
+        for _ in 0..3 {
+            let ok = server
+                .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+                .unwrap();
+            assert_eq!(ok.exit_code, 0);
+        }
+        // The slot is free again after the loop.
+        assert!(server.exec_slots.try_acquire().is_some());
 
         server.session_manager.destroy_all().unwrap();
     }

@@ -177,6 +177,32 @@ If execution exceeds the timeout, the response includes:
 }
 ```
 
+Partial output captured before the timeout is still returned. The worker is then cooperatively cancelled so it stops executing and frees its resources, even under the default (unlimited) fuel budget.
+
+## Limits & Errors
+
+Execution is bounded by the per-session resource limits and server-wide ingress guards configured on [`wasmrun agent`](../agent.md#starting-the-server) (and overridable per session). These surface in two ways.
+
+**Within a 200 response** (the execution ran but hit a soft cap):
+
+| Field / value | Meaning |
+|---------------|---------|
+| `error` contains `"instruction limit"` | The execution exceeded `--max-fuel` and was aborted (`exit_code: -1`) |
+| `output_truncated: true` | Captured stdout+stderr hit `--max-output`; output in the response is truncated (the field is omitted when `false`) |
+| `error` contains `"File size limit"` / `"Disk usage limit"` | A file write from the sandbox exceeded `--max-file-size` or the session's `--max-disk` quota |
+
+**As an HTTP error status** (the request was rejected before or instead of running):
+
+| Status | When |
+|--------|------|
+| 400 | Bad request — no input mode given, unknown language, invalid `files`/`entry`, or path traversal |
+| 404 | Session not found |
+| 410 | Session expired |
+| 413 | Request body exceeded `--max-body` |
+| 429 | `--max-concurrent-exec` reached — too many executions already in flight; retry after backoff |
+
+A 429 is returned immediately (no thread is spawned). The exec slot it was waiting on is freed only when an in-flight execution actually completes, so a long-running or timed-out execution continues to hold its slot until it is cancelled.
+
 ## Workflow
 
 A typical agent loop:
