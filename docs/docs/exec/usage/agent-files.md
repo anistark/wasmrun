@@ -30,6 +30,8 @@ Parent directories are created automatically. Paths are relative to the session 
 }
 ```
 
+A write is rejected with **400 Bad Request** if it would exceed the session's `--max-file-size` (per file) or `--max-disk` (total) quota, and the whole request is rejected with **413 Payload Too Large** if the request body exceeds the server's `--max-body` limit. See [resource limits](../agent.md#starting-the-server).
+
 ## Read a File
 
 ```

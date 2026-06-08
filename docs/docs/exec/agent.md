@@ -19,8 +19,16 @@ wasmrun agent [OPTIONS]
 | `-t, --timeout` | `300` | Default session idle timeout (seconds) |
 | `-m, --max-sessions` | `100` | Maximum concurrent sessions |
 | `--max-memory` | `256` | Maximum linear memory per session (MB) |
+| `--max-fuel` | `0` | Instruction budget per execution (`0` = unlimited) |
+| `--max-output` | `10` | Captured stdout+stderr per execution (MB) |
+| `--max-file-size` | `50` | Maximum size of any single file write (MB) |
+| `--max-disk` | `100` | Maximum total disk usage per session (MB) |
+| `--max-body` | `32` | Maximum accepted request body size (MB) |
+| `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
 | `--allow-cors` | off | Enable wildcard CORS |
 | `-v, --verbose` | off | Log all incoming requests |
+
+For every size/count limit, `0` means **unlimited**. Memory, fuel, output, file-size, and disk caps are **per session** and can be overridden per session at creation (see [Sessions](./usage/agent-sessions.md)); body size and exec concurrency are **server-wide** ingress guards.
 
 All endpoints are under `http://<host>:<port>/api/v1/`.
 

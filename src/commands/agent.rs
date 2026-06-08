@@ -16,11 +16,16 @@ pub fn handle_agent_command(
     max_output: u32,
     max_file_size: u32,
     max_disk: u32,
+    max_body: u32,
+    max_concurrent_exec: usize,
     allow_cors: bool,
     verbose: bool,
 ) -> Result<()> {
     let limits =
         ResourceLimits::from_cli(max_memory, max_fuel, max_output, max_file_size, max_disk);
+
+    // 0 = unlimited, matching the resource-limit flag convention.
+    let max_body_bytes = (max_body != 0).then(|| max_body as usize * 1024 * 1024);
 
     let config = AgentConfig {
         port,
@@ -32,6 +37,8 @@ pub fn handle_agent_command(
         },
         allow_cors,
         verbose,
+        max_body_bytes,
+        max_concurrent_exec,
     };
 
     let server = AgentServer::new(config);
