@@ -82,7 +82,10 @@ Destroys the session and cleans up its filesystem.
 
 | Status | When |
 |--------|------|
-| 404 | Session not found |
+| 401 | Auth enabled (`--auth`) but the API key is missing, malformed, or unknown |
+| 404 | Session not found — or owned by another tenant (see below) |
 | 410 | Session expired |
 | 413 | Request body exceeded the server's `--max-body` limit |
 | 429 | Maximum concurrent sessions reached |
+
+When the server is started with [`--auth`](../agent.md#authentication), each session is owned by the tenant that created it. A request for a session owned by a different tenant returns **404** — identical to a nonexistent session — so existence isn't leaked across tenants.

@@ -363,6 +363,22 @@ pub enum Commands {
         /// Enable verbose request logging
         #[arg(short = 'v', long, help = "Log all incoming requests")]
         verbose: bool,
+
+        /// Path to a TOML auth config enabling API-key auth and tenant isolation
+        #[arg(
+            long = "auth",
+            value_name = "PATH",
+            help = "Enable API-key auth from a TOML config (omit = open mode)"
+        )]
+        auth_config: Option<String>,
+
+        /// Print the SHA-256 hash of an API key (for the auth config) and exit
+        #[arg(
+            long,
+            value_name = "KEY",
+            help = "Print sha256(KEY) for use in the auth config, then exit"
+        )]
+        hash_key: Option<String>,
     },
 
     /// Plugin management commands

@@ -5,6 +5,7 @@
 //! filesystem, environment, and output buffers.
 
 pub mod api;
+pub mod auth;
 pub mod executor;
 pub mod limits;
 pub mod server;

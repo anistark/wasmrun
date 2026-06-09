@@ -82,6 +82,10 @@ pub struct Session {
     owns_work_dir: bool,
     /// Resource ceilings applied to executions in this session.
     limits: ResourceLimits,
+    /// Tenant that owns this session (the authenticated caller at creation).
+    /// `None` in open mode (no auth config). Cross-tenant access is rejected
+    /// as `NotFound` to hide the session's existence.
+    owner: Option<String>,
 }
 
 impl Session {
@@ -90,7 +94,12 @@ impl Session {
     /// The temp directory is preopened at `/` in the WASI environment,
     /// giving the sandboxed code access to a clean, isolated filesystem.
     /// `limits` configure the session's WASI output/file-size caps.
-    pub fn new(timeout: Duration, limits: ResourceLimits) -> Result<Self, SessionError> {
+    /// `owner` is the authenticated tenant id (`None` in open mode).
+    pub fn new(
+        timeout: Duration,
+        limits: ResourceLimits,
+        owner: Option<String>,
+    ) -> Result<Self, SessionError> {
         let id = generate_session_id();
         let work_dir = std::env::temp_dir().join(format!("wasmrun-session-{id}"));
 
@@ -110,6 +119,7 @@ impl Session {
             work_dir,
             owns_work_dir: true,
             limits,
+            owner,
         })
     }
 
@@ -153,6 +163,7 @@ impl Session {
             work_dir,
             owns_work_dir: false, // test manages cleanup
             limits,
+            owner: None,
         })
     }
 
@@ -189,6 +200,11 @@ impl Session {
     /// Resource ceilings applied to executions in this session.
     pub fn limits(&self) -> &ResourceLimits {
         &self.limits
+    }
+
+    /// Tenant that owns this session, or `None` in open mode.
+    pub fn owner(&self) -> Option<&str> {
+        self.owner.as_deref()
     }
 
     /// Get a clone of the WASI environment Arc for use with the executor.
@@ -321,7 +337,11 @@ impl SessionManager {
     /// Returns the session ID on success.
     #[allow(dead_code)] // Used by tests; HTTP path uses create_session_with_limits.
     pub fn create_session(&self) -> Result<String, SessionError> {
-        self.create_session_with_limits(self.config.default_timeout, self.config.limits.clone())
+        self.create_session_with_limits(
+            self.config.default_timeout,
+            self.config.limits.clone(),
+            None,
+        )
     }
 
     /// Create a new session with a custom timeout and the default limits.
@@ -329,16 +349,18 @@ impl SessionManager {
     /// Returns the session ID on success.
     #[allow(dead_code)] // Used by tests; HTTP path uses create_session_with_limits.
     pub fn create_session_with_timeout(&self, timeout: Duration) -> Result<String, SessionError> {
-        self.create_session_with_limits(timeout, self.config.limits.clone())
+        self.create_session_with_limits(timeout, self.config.limits.clone(), None)
     }
 
-    /// Create a new session with a custom timeout and resource limits.
+    /// Create a new session with a custom timeout, resource limits, and owner.
     ///
+    /// `owner` is the authenticated tenant id, or `None` in open mode.
     /// Returns the session ID on success.
     pub fn create_session_with_limits(
         &self,
         timeout: Duration,
         limits: ResourceLimits,
+        owner: Option<String>,
     ) -> Result<String, SessionError> {
         let mut sessions = self.sessions.write().map_err(|_| SessionError::LockError)?;
 
@@ -350,22 +372,30 @@ impl SessionManager {
             });
         }
 
-        let session = Session::new(timeout, limits)?;
+        let session = Session::new(timeout, limits, owner)?;
         let id = session.id().to_string();
         sessions.insert(id.clone(), session);
         Ok(id)
     }
 
-    /// Get a session by ID. Returns an error if not found or expired.
+    /// Get a session by ID. Returns an error if not found, not owned by the
+    /// caller, or expired.
     ///
-    /// Touches the session (resets idle timeout).
-    pub fn get_session<F, R>(&self, id: &str, f: F) -> Result<R, SessionError>
+    /// `caller` is the authenticated tenant id (`None` in open mode). A session
+    /// whose owner does not match `caller` is reported as `NotFound` to hide its
+    /// existence from other tenants. One equality covers all cases: open mode
+    /// (`None == None`), same tenant (`Some(x) == Some(x)`), cross tenant
+    /// (`Some(x) != Some(y)` → `NotFound`).
+    ///
+    /// Touches the session (resets idle timeout) on success.
+    pub fn get_session<F, R>(&self, id: &str, caller: Option<&str>, f: F) -> Result<R, SessionError>
     where
         F: FnOnce(&Session) -> R,
     {
         let sessions = self.sessions.read().map_err(|_| SessionError::LockError)?;
         let session = sessions
             .get(id)
+            .filter(|s| s.owner() == caller)
             .ok_or_else(|| SessionError::NotFound { id: id.to_string() })?;
 
         if session.is_expired() {
@@ -378,13 +408,19 @@ impl SessionManager {
 
     /// Destroy a session by ID. Cleans up resources.
     ///
-    /// Returns Ok(()) if the session was found and destroyed.
-    pub fn destroy_session(&self, id: &str) -> Result<(), SessionError> {
+    /// `caller` is the authenticated tenant id (`None` in open mode); a session
+    /// owned by another tenant is reported as `NotFound`. Returns `Ok(())` if the
+    /// session was found, owned by the caller, and destroyed.
+    pub fn destroy_session(&self, id: &str, caller: Option<&str>) -> Result<(), SessionError> {
         let mut sessions = self.sessions.write().map_err(|_| SessionError::LockError)?;
-        sessions
-            .remove(id)
-            .map(|_| ()) // Session::drop handles cleanup
-            .ok_or_else(|| SessionError::NotFound { id: id.to_string() })
+        match sessions.get(id) {
+            Some(s) if s.owner() == caller => {
+                sessions.remove(id); // Session::drop handles cleanup
+                Ok(())
+            }
+            // Absent or owned by another tenant → NotFound (hides existence).
+            _ => Err(SessionError::NotFound { id: id.to_string() }),
+        }
     }
 
     /// List all active (non-expired) session IDs.
@@ -707,7 +743,7 @@ mod tests {
         assert_eq!(manager.total_count(), 1);
 
         // Cleanup
-        manager.destroy_session(&id).unwrap();
+        manager.destroy_session(&id, None).unwrap();
     }
 
     #[test]
@@ -727,7 +763,7 @@ mod tests {
 
         // Cleanup
         for id in &ids {
-            manager.destroy_session(id).unwrap();
+            manager.destroy_session(id, None).unwrap();
         }
     }
 
@@ -736,17 +772,17 @@ mod tests {
         let manager = SessionManager::with_config(test_config());
         let id = manager.create_session().unwrap();
 
-        let state = manager.get_session(&id, |s| s.state()).unwrap();
+        let state = manager.get_session(&id, None, |s| s.state()).unwrap();
         assert_eq!(state, SessionState::Active);
 
         // Cleanup
-        manager.destroy_session(&id).unwrap();
+        manager.destroy_session(&id, None).unwrap();
     }
 
     #[test]
     fn test_manager_get_nonexistent_session() {
         let manager = SessionManager::with_config(test_config());
-        let result = manager.get_session("nonexistent", |s| s.state());
+        let result = manager.get_session("nonexistent", None, |s| s.state());
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -761,14 +797,14 @@ mod tests {
         let id = manager.create_session().unwrap();
 
         assert_eq!(manager.active_count(), 1);
-        manager.destroy_session(&id).unwrap();
+        manager.destroy_session(&id, None).unwrap();
         assert_eq!(manager.active_count(), 0);
     }
 
     #[test]
     fn test_manager_destroy_nonexistent_session() {
         let manager = SessionManager::with_config(test_config());
-        let result = manager.destroy_session("nonexistent");
+        let result = manager.destroy_session("nonexistent", None);
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -802,7 +838,7 @@ mod tests {
 
         // Cleanup
         for id in &ids {
-            manager.destroy_session(id).unwrap();
+            manager.destroy_session(id, None).unwrap();
         }
     }
 
@@ -818,14 +854,14 @@ mod tests {
         let id2 = manager.create_session().unwrap();
         assert!(manager.create_session().is_err()); // at limit
 
-        manager.destroy_session(&id1).unwrap();
+        manager.destroy_session(&id1, None).unwrap();
         let id3 = manager.create_session().unwrap(); // should succeed now
 
         assert_eq!(manager.active_count(), 2);
 
         // Cleanup
-        manager.destroy_session(&id2).unwrap();
-        manager.destroy_session(&id3).unwrap();
+        manager.destroy_session(&id2, None).unwrap();
+        manager.destroy_session(&id3, None).unwrap();
     }
 
     // ── SessionManager listing ────────────────────────────────────
@@ -847,8 +883,8 @@ mod tests {
         assert!(list.iter().all(|i| i.state == SessionState::Active));
 
         // Cleanup
-        manager.destroy_session(&id1).unwrap();
-        manager.destroy_session(&id2).unwrap();
+        manager.destroy_session(&id1, None).unwrap();
+        manager.destroy_session(&id2, None).unwrap();
     }
 
     #[test]
@@ -914,7 +950,7 @@ mod tests {
         assert_eq!(manager.active_count(), 1);
 
         // The long-lived session is still there
-        let state = manager.get_session(&long_id, |s| s.state()).unwrap();
+        let state = manager.get_session(&long_id, None, |s| s.state()).unwrap();
         assert_eq!(state, SessionState::Active);
 
         // Cleanup
@@ -948,17 +984,17 @@ mod tests {
 
         // Wait 80ms, then access — should reset timeout
         std::thread::sleep(Duration::from_millis(80));
-        manager.get_session(&id, |_| {}).unwrap(); // touch
+        manager.get_session(&id, None, |_| {}).unwrap(); // touch
 
         // Wait another 80ms — total 160ms from creation, but only 80ms from last access
         std::thread::sleep(Duration::from_millis(80));
 
         // Should still be alive because get_session touched it
-        let result = manager.get_session(&id, |s| s.state());
+        let result = manager.get_session(&id, None, |s| s.state());
         assert!(result.is_ok());
 
         // Cleanup
-        manager.destroy_session(&id).unwrap();
+        manager.destroy_session(&id, None).unwrap();
     }
 
     #[test]
@@ -972,7 +1008,7 @@ mod tests {
 
         std::thread::sleep(Duration::from_millis(80));
 
-        let result = manager.get_session(&id, |s| s.state());
+        let result = manager.get_session(&id, None, |s| s.state());
         assert!(result.is_err());
         match result.unwrap_err() {
             SessionError::Expired { .. } => {}
@@ -1053,11 +1089,11 @@ mod tests {
         let id = manager.create_session().unwrap();
 
         let work_dir = manager
-            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
             .unwrap();
 
         assert!(work_dir.exists());
-        manager.destroy_session(&id).unwrap();
+        manager.destroy_session(&id, None).unwrap();
         assert!(!work_dir.exists());
     }
 
@@ -1089,12 +1125,12 @@ mod tests {
 
         // Set env on session 1
         manager
-            .get_session(&id1, |s| s.set_env("ONLY_S1", "yes"))
+            .get_session(&id1, None, |s| s.set_env("ONLY_S1", "yes"))
             .unwrap();
 
         // Session 2 should not have it
         let s2_vars = manager
-            .get_session(&id2, |s| {
+            .get_session(&id2, None, |s| {
                 let env = s.wasi_env();
                 let locked = env.lock().unwrap();
                 locked.env_vars().to_vec()
@@ -1105,7 +1141,7 @@ mod tests {
 
         // Session 1 should have it
         let s1_vars = manager
-            .get_session(&id1, |s| {
+            .get_session(&id1, None, |s| {
                 let env = s.wasi_env();
                 let locked = env.lock().unwrap();
                 locked.env_vars().to_vec()
@@ -1116,5 +1152,61 @@ mod tests {
 
         // Cleanup
         manager.destroy_all().unwrap();
+    }
+
+    // ── Tenant ownership ──────────────────────────────────────────
+
+    #[test]
+    fn test_owned_session_ownership_equality() {
+        let manager = SessionManager::with_config(test_config());
+        let id = manager
+            .create_session_with_limits(
+                Duration::from_secs(60),
+                ResourceLimits::default(),
+                Some("alice".to_string()),
+            )
+            .unwrap();
+
+        // Owner is recorded on the session.
+        let owner = manager
+            .get_session(&id, Some("alice"), |s| s.owner().map(str::to_string))
+            .unwrap();
+        assert_eq!(owner, Some("alice".to_string()));
+
+        // Cross tenant → NotFound (hides existence), not Expired.
+        assert!(matches!(
+            manager.get_session(&id, Some("bob"), |_| ()),
+            Err(SessionError::NotFound { .. })
+        ));
+        // Open-mode caller (None) against an owned session → NotFound.
+        assert!(matches!(
+            manager.get_session(&id, None, |_| ()),
+            Err(SessionError::NotFound { .. })
+        ));
+
+        // Cross-tenant destroy is a no-op reported as NotFound; session survives.
+        assert!(matches!(
+            manager.destroy_session(&id, Some("bob")),
+            Err(SessionError::NotFound { .. })
+        ));
+        assert!(manager.get_session(&id, Some("alice"), |_| ()).is_ok());
+
+        // Owner can destroy.
+        assert!(manager.destroy_session(&id, Some("alice")).is_ok());
+    }
+
+    #[test]
+    fn test_open_mode_session_has_no_owner() {
+        let manager = SessionManager::with_config(test_config());
+        let id = manager.create_session().unwrap(); // owner = None
+
+        // Open-mode caller matches.
+        assert!(manager.get_session(&id, None, |_| ()).is_ok());
+        // A tenant cannot touch an unowned (open-mode) session.
+        assert!(matches!(
+            manager.get_session(&id, Some("alice"), |_| ()),
+            Err(SessionError::NotFound { .. })
+        ));
+        manager.destroy_session(&id, None).unwrap();
     }
 }

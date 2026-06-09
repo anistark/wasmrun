@@ -196,7 +196,8 @@ Execution is bounded by the per-session resource limits and server-wide ingress 
 | Status | When |
 |--------|------|
 | 400 | Bad request — no input mode given, unknown language, invalid `files`/`entry`, or path traversal |
-| 404 | Session not found |
+| 401 | Auth enabled (`--auth`) but the API key is missing, malformed, or unknown |
+| 404 | Session not found — or owned by another tenant (cross-tenant access is hidden as 404) |
 | 410 | Session expired |
 | 413 | Request body exceeded `--max-body` |
 | 429 | `--max-concurrent-exec` reached — too many executions already in flight; retry after backoff |

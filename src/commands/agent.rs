@@ -1,9 +1,12 @@
 //! Agent mode: CLI command handler for `wasmrun agent`.
 
+use crate::agent::auth::{self, AuthConfig};
 use crate::agent::limits::ResourceLimits;
 use crate::agent::server::{AgentConfig, AgentServer};
 use crate::agent::session::SessionConfig;
 use crate::error::Result;
+use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[allow(clippy::too_many_arguments)]
@@ -20,7 +23,23 @@ pub fn handle_agent_command(
     max_concurrent_exec: usize,
     allow_cors: bool,
     verbose: bool,
+    auth_config: Option<&str>,
+    hash_key: Option<&str>,
 ) -> Result<()> {
+    // `--hash-key` is a standalone helper: print sha256(key) and exit without
+    // starting the server, so operators can populate the auth config.
+    if let Some(key) = hash_key {
+        println!("{}", auth::hash_key(key));
+        return Ok(());
+    }
+
+    // Load the auth config when requested. Abort startup on any error rather than
+    // silently running open when auth was asked for.
+    let auth = match auth_config {
+        Some(path) => Some(Arc::new(AuthConfig::load(Path::new(path))?)),
+        None => None,
+    };
+
     let limits =
         ResourceLimits::from_cli(max_memory, max_fuel, max_output, max_file_size, max_disk);
 
@@ -39,6 +58,7 @@ pub fn handle_agent_command(
         verbose,
         max_body_bytes,
         max_concurrent_exec,
+        auth,
     };
 
     let server = AgentServer::new(config);

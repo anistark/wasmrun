@@ -119,6 +119,8 @@ pub enum ApiError {
     SessionExpired(String),
     MaxSessions(usize),
     BadRequest(String),
+    /// Authentication required but missing/malformed/unknown API key.
+    Unauthorized(String),
     NotFound(String),
     /// Request body exceeded the configured size cap. Carries the limit (bytes).
     PayloadTooLarge(usize),
@@ -136,6 +138,7 @@ impl ApiError {
             ApiError::SessionExpired(_) => 410,
             ApiError::MaxSessions(_) | ApiError::TooManyRequests(_) => 429,
             ApiError::BadRequest(_) => 400,
+            ApiError::Unauthorized(_) => 401,
             ApiError::PayloadTooLarge(_) => 413,
             ApiError::Timeout => 408,
             ApiError::Internal(_) => 500,
@@ -157,6 +160,7 @@ impl std::fmt::Display for ApiError {
             ApiError::SessionExpired(id) => write!(f, "Session expired: {id}"),
             ApiError::MaxSessions(max) => write!(f, "Maximum sessions reached: {max}"),
             ApiError::BadRequest(msg) => write!(f, "Bad request: {msg}"),
+            ApiError::Unauthorized(msg) => write!(f, "Unauthorized: {msg}"),
             ApiError::NotFound(msg) => write!(f, "Not found: {msg}"),
             ApiError::PayloadTooLarge(max) => {
                 write!(f, "Request body too large: exceeds {max} byte limit")

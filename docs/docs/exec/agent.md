@@ -27,10 +27,70 @@ wasmrun agent [OPTIONS]
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
 | `--allow-cors` | off | Enable wildcard CORS |
 | `-v, --verbose` | off | Log all incoming requests |
+| `--auth <PATH>` | off | Path to a TOML auth config; enables API-key auth & tenant isolation (omit = open) |
+| `--hash-key <KEY>` | — | Print `sha256(KEY)` for the auth config and exit (does not start the server) |
 
 For every size/count limit, `0` means **unlimited**. Memory, fuel, output, file-size, and disk caps are **per session** and can be overridden per session at creation (see [Sessions](./usage/agent-sessions.md)); body size and exec concurrency are **server-wide** ingress guards.
 
 All endpoints are under `http://<host>:<port>/api/v1/`.
+
+## Authentication
+
+By default the server is **open** — any caller can create and access any session. Pass `--auth <path>` to require an API key on every request and isolate sessions per tenant. Without `--auth`, behavior is exactly as before (no header needed).
+
+```sh
+wasmrun agent --port 8430 --auth ./auth.toml
+# banner shows:  Auth:  enabled (2 tenants)
+```
+
+### Config file
+
+The auth config is a TOML file listing tenants. Keys are stored **hashed** (SHA-256, hex) — never in plaintext:
+
+```toml
+[[tenants]]
+id = "copilot"
+key_sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+
+[[tenants]]
+id = "ci"
+key_sha256 = "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"
+```
+
+Each `id` and `key_sha256` must be unique, and `key_sha256` must be 64 lowercase hex characters. Invalid or missing config **aborts startup** — the server never silently runs open when auth was requested. Restrict the file so other users can't read the hashes:
+
+```sh
+chmod 600 auth.toml
+```
+
+### Generating a key hash
+
+Generate a high-entropy random key, then hash it for the config:
+
+```sh
+KEY=$(openssl rand -hex 32)
+wasmrun agent --hash-key "$KEY"
+# → 4b4090ccee1e713c3d411b96a4226b90bd0f0deb34e02d19475a951316fd04ee
+```
+
+Put the hash in `key_sha256`, hand the raw `$KEY` to that tenant, and keep the raw key out of the config.
+
+### Making authenticated requests
+
+Send the raw key as a Bearer token on every `/api/v1/*` request (including `/tools`):
+
+```sh
+curl -X POST http://localhost:8430/api/v1/sessions \
+  -H "Authorization: Bearer $KEY"
+```
+
+A missing, malformed, or unknown key returns **401 Unauthorized**.
+
+### Tenant isolation
+
+Each session is owned by the tenant that created it. A tenant can only see and operate on its own sessions — any request targeting another tenant's session returns **404 Not Found**, identical to a nonexistent session so existence isn't leaked.
+
+> Per-tenant rate limiting is not yet implemented.
 
 ## How It Works
 
