@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Authentication & Tenant Isolation (opt-in)**: run one agent server shared by independent tenants who authenticate with API keys and cannot see each other's sessions
+  - `--auth <path>` enables API-key auth from a TOML config of `[[tenants]]` (`id` + `key_sha256`); without it the server stays fully **open**, exactly as before (back-compat — existing clients need no header)
+  - Keys are stored **SHA-256-hashed** (hex), never in plaintext; `--hash-key <KEY>` prints the hash and exits so operators can populate the config
+  - Every `/api/v1/*` request (including `/tools`) must present `Authorization: Bearer <key>`; missing, malformed, or unknown keys return **401 Unauthorized**. The presented key is hashed and matched by map lookup, sidestepping secret-timing attacks without a constant-time compare
+  - Sessions are **owned** by the tenant that created them; any cross-tenant access returns **404 Not Found** (identical to a nonexistent session, so existence isn't leaked), enforced centrally in the session manager
+  - The auth config is validated at startup (non-empty unique ids, unique 64-char-hex hashes); an invalid or missing config **aborts startup** rather than silently running open. The banner shows `Auth: enabled (N tenants)` or `disabled (open)`
+  - New `ApiError::Unauthorized` (401). Per-tenant rate limiting is deferred to a later release
 - **Request Body & Execution Concurrency Limits**: bound the server's memory and thread footprint regardless of client behavior
   - `--max-body` flag (default 32 MB, `0` = unlimited): oversized request bodies are rejected with **413 Payload Too Large** before being fully buffered — the body is read via `Read::take(limit + 1)` and the `Content-Length` header is never trusted
   - `--max-concurrent-exec` flag (default 100, `0` = unlimited): a global cap on in-flight exec workers across all sessions; saturation returns **429 Too Many Requests** before a fresh 64 MB-stack thread is spawned

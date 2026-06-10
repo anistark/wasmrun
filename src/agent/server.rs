@@ -1,6 +1,7 @@
 //! Agent mode: REST API server for AI agent sandbox management.
 
 use crate::agent::api::*;
+use crate::agent::auth::AuthConfig;
 use crate::agent::executor;
 use crate::agent::limits::{dir_size, ResourceLimits};
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
@@ -38,6 +39,10 @@ pub struct AgentConfig {
     /// sessions. `0` = unlimited. Bounds thread / stack / memory footprint
     /// independently of `max_sessions` (which only bounds session count).
     pub max_concurrent_exec: usize,
+    /// API-key authentication. `None` = open mode (no auth; back-compat). When
+    /// `Some`, every `/api/v1/*` request must present a valid `Bearer` key and
+    /// sessions are isolated per tenant.
+    pub auth: Option<Arc<AuthConfig>>,
 }
 
 impl Default for AgentConfig {
@@ -49,6 +54,7 @@ impl Default for AgentConfig {
             verbose: false,
             max_body_bytes: Some(DEFAULT_MAX_BODY_BYTES),
             max_concurrent_exec: DEFAULT_MAX_CONCURRENT_EXEC,
+            auth: None,
         }
     }
 }
@@ -208,6 +214,13 @@ impl AgentServer {
             "   Max concurrent:  {}",
             fmt_count(self.config.max_concurrent_exec, "exec(s)")
         );
+        match &self.config.auth {
+            Some(auth) => println!(
+                "   Auth:            enabled ({} tenants)",
+                auth.tenant_count()
+            ),
+            None => println!("   Auth:            disabled (open)"),
+        }
         println!("   CORS:            {cors}");
         println!();
         println!("   Endpoints:");
@@ -258,6 +271,26 @@ impl AgentServer {
             return self.respond_empty(request, 204);
         }
 
+        // Authentication gate. Resolved once here — after the OPTIONS
+        // short-circuit, before routing — so every handler receives an
+        // already-validated caller. `None` means open mode (no auth config);
+        // `Some(tenant)` is the authenticated tenant id. Auth applies to all
+        // `/api/v1/*` routes including `/tools` (simplest and most secure; it
+        // can be exempted later if a public tool catalog is wanted).
+        let tenant: Option<&str> = match &self.config.auth {
+            None => None,
+            Some(auth) => match bearer_token(&request).and_then(|key| auth.resolve(key)) {
+                Some(t) => Some(t),
+                None => {
+                    let err = ApiError::Unauthorized(
+                        "missing or invalid API key (expected 'Authorization: Bearer <key>')"
+                            .into(),
+                    );
+                    return self.respond_json(request, Err::<serde_json::Value, _>(err));
+                }
+            },
+        };
+
         let (path, query) = split_url(&url);
         let segments: Vec<&str> = path
             .trim_start_matches(API_PREFIX)
@@ -285,39 +318,39 @@ impl AgentServer {
                 self.respond_json(request, self.handle_get_tools(format))
             }
             (Method::Post, ["sessions"]) => {
-                self.respond_json(request, self.handle_create_session_with_body(&body))
+                self.respond_json(request, self.handle_create_session_with_body(&body, tenant))
             }
             (Method::Get, ["sessions", id]) => {
-                self.respond_json(request, self.handle_get_session(id))
+                self.respond_json(request, self.handle_get_session(id, tenant))
             }
             (Method::Delete, ["sessions", id]) => {
-                self.respond_json(request, self.handle_delete_session(id))
+                self.respond_json(request, self.handle_delete_session(id, tenant))
             }
             (Method::Post, ["sessions", id, "exec"]) => {
-                self.respond_json(request, self.handle_exec(id, &body))
+                self.respond_json(request, self.handle_exec(id, &body, tenant))
             }
             (Method::Post, ["sessions", id, "files"]) => {
-                self.respond_json(request, self.handle_write_file(id, &body))
+                self.respond_json(request, self.handle_write_file(id, &body, tenant))
             }
             (Method::Get, ["sessions", id, "files"]) => {
                 let params = parse_query(&query);
                 let path = params.get("path").map(|s| s.as_str()).unwrap_or("/");
                 if params.get("list").map(|v| v == "true").unwrap_or(false) {
-                    self.respond_json(request, self.handle_list_files(id, path))
+                    self.respond_json(request, self.handle_list_files(id, path, tenant))
                 } else {
-                    self.respond_json(request, self.handle_read_file(id, path))
+                    self.respond_json(request, self.handle_read_file(id, path, tenant))
                 }
             }
             (Method::Delete, ["sessions", id, "files"]) => {
                 let params = parse_query(&query);
                 let path = params.get("path").map(|s| s.as_str()).unwrap_or("");
-                self.respond_json(request, self.handle_delete_file(id, path))
+                self.respond_json(request, self.handle_delete_file(id, path, tenant))
             }
             (Method::Post, ["sessions", id, "env"]) => {
-                self.respond_json(request, self.handle_set_env(id, &body))
+                self.respond_json(request, self.handle_set_env(id, &body, tenant))
             }
             (Method::Get, ["sessions", id, "env"]) => {
-                self.respond_json(request, self.handle_get_env(id))
+                self.respond_json(request, self.handle_get_env(id, tenant))
             }
             _ => {
                 let err = ApiError::NotFound(format!("Unknown endpoint: {path}"));
@@ -332,14 +365,16 @@ impl AgentServer {
 
     #[allow(dead_code)] // Used by tests; the HTTP route uses the _with_body variant.
     pub fn handle_create_session(&self) -> std::result::Result<CreateSessionResponse, ApiError> {
-        self.create_session_with_limits(self.config.session_config.limits.clone())
+        self.create_session_with_limits(self.config.session_config.limits.clone(), None)
     }
 
     /// Create a session, applying any per-session limit overrides supplied in
-    /// the (optional) request body on top of the server defaults.
+    /// the (optional) request body on top of the server defaults. `caller` is the
+    /// authenticated tenant that will own the session (`None` in open mode).
     pub fn handle_create_session_with_body(
         &self,
         body: &str,
+        caller: Option<&str>,
     ) -> std::result::Result<CreateSessionResponse, ApiError> {
         let limits = if body.trim().is_empty() {
             self.config.session_config.limits.clone()
@@ -351,16 +386,21 @@ impl AgentServer {
                 None => self.config.session_config.limits.clone(),
             }
         };
-        self.create_session_with_limits(limits)
+        self.create_session_with_limits(limits, caller)
     }
 
     fn create_session_with_limits(
         &self,
         limits: ResourceLimits,
+        owner: Option<&str>,
     ) -> std::result::Result<CreateSessionResponse, ApiError> {
         let id = self
             .session_manager
-            .create_session_with_limits(self.config.session_config.default_timeout, limits)
+            .create_session_with_limits(
+                self.config.session_config.default_timeout,
+                limits,
+                owner.map(String::from),
+            )
             .map_err(map_session_err)?;
         Ok(CreateSessionResponse {
             session_id: id,
@@ -371,9 +411,10 @@ impl AgentServer {
     pub fn handle_get_session(
         &self,
         id: &str,
+        caller: Option<&str>,
     ) -> std::result::Result<SessionStatusResponse, ApiError> {
         self.session_manager
-            .get_session(id, |s| SessionStatusResponse {
+            .get_session(id, caller, |s| SessionStatusResponse {
                 session_id: s.id().to_string(),
                 state: match s.state() {
                     SessionState::Active => "active".into(),
@@ -389,9 +430,10 @@ impl AgentServer {
     pub fn handle_delete_session(
         &self,
         id: &str,
+        caller: Option<&str>,
     ) -> std::result::Result<MessageResponse, ApiError> {
         self.session_manager
-            .destroy_session(id)
+            .destroy_session(id, caller)
             .map_err(map_session_err)?;
         Ok(MessageResponse {
             message: format!("Session {id} destroyed"),
@@ -400,13 +442,18 @@ impl AgentServer {
 
     // ── Exec endpoint ─────────────────────────────────────────────
 
-    pub fn handle_exec(&self, id: &str, body: &str) -> std::result::Result<ExecResponse, ApiError> {
+    pub fn handle_exec(
+        &self,
+        id: &str,
+        body: &str,
+        caller: Option<&str>,
+    ) -> std::result::Result<ExecResponse, ApiError> {
         let req: ExecRequest =
             serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
         let (wasi_env, work_dir, limits) = self
             .session_manager
-            .get_session(id, |s| {
+            .get_session(id, caller, |s| {
                 (s.wasi_env(), s.work_dir().to_path_buf(), s.limits().clone())
             })
             .map_err(map_session_err)?;
@@ -612,13 +659,16 @@ impl AgentServer {
         &self,
         id: &str,
         body: &str,
+        caller: Option<&str>,
     ) -> std::result::Result<MessageResponse, ApiError> {
         let req: WriteFileRequest =
             serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
         let (work_dir, limits) = self
             .session_manager
-            .get_session(id, |s| (s.work_dir().to_path_buf(), s.limits().clone()))
+            .get_session(id, caller, |s| {
+                (s.work_dir().to_path_buf(), s.limits().clone())
+            })
             .map_err(map_session_err)?;
 
         let resolved = resolve_session_path(&work_dir, &req.path)?;
@@ -646,10 +696,11 @@ impl AgentServer {
         &self,
         id: &str,
         path: &str,
+        caller: Option<&str>,
     ) -> std::result::Result<ReadFileResponse, ApiError> {
         let work_dir = self
             .session_manager
-            .get_session(id, |s| s.work_dir().to_path_buf())
+            .get_session(id, caller, |s| s.work_dir().to_path_buf())
             .map_err(map_session_err)?;
 
         let resolved = resolve_session_path(&work_dir, path)?;
@@ -666,10 +717,11 @@ impl AgentServer {
         &self,
         id: &str,
         path: &str,
+        caller: Option<&str>,
     ) -> std::result::Result<ListFilesResponse, ApiError> {
         let work_dir = self
             .session_manager
-            .get_session(id, |s| s.work_dir().to_path_buf())
+            .get_session(id, caller, |s| s.work_dir().to_path_buf())
             .map_err(map_session_err)?;
 
         let resolved = resolve_session_path(&work_dir, path)?;
@@ -696,6 +748,7 @@ impl AgentServer {
         &self,
         id: &str,
         path: &str,
+        caller: Option<&str>,
     ) -> std::result::Result<MessageResponse, ApiError> {
         if path.is_empty() {
             return Err(ApiError::BadRequest("Missing path parameter".into()));
@@ -703,7 +756,7 @@ impl AgentServer {
 
         let work_dir = self
             .session_manager
-            .get_session(id, |s| s.work_dir().to_path_buf())
+            .get_session(id, caller, |s| s.work_dir().to_path_buf())
             .map_err(map_session_err)?;
 
         let resolved = resolve_session_path(&work_dir, path)?;
@@ -727,12 +780,13 @@ impl AgentServer {
         &self,
         id: &str,
         body: &str,
+        caller: Option<&str>,
     ) -> std::result::Result<MessageResponse, ApiError> {
         let vars: HashMap<String, String> =
             serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
         self.session_manager
-            .get_session(id, |s| {
+            .get_session(id, caller, |s| {
                 for (k, v) in &vars {
                     s.set_env(k, v);
                 }
@@ -744,10 +798,14 @@ impl AgentServer {
         })
     }
 
-    pub fn handle_get_env(&self, id: &str) -> std::result::Result<EnvVarsResponse, ApiError> {
+    pub fn handle_get_env(
+        &self,
+        id: &str,
+        caller: Option<&str>,
+    ) -> std::result::Result<EnvVarsResponse, ApiError> {
         let env = self
             .session_manager
-            .get_session(id, |s| {
+            .get_session(id, caller, |s| {
                 let wasi = s.wasi_env();
                 let locked = wasi.lock().unwrap();
                 locked
@@ -853,6 +911,24 @@ fn map_session_err(e: SessionError) -> ApiError {
         SessionError::IoError { message } => ApiError::Internal(message),
         SessionError::LockError => ApiError::Internal("Lock error".into()),
     }
+}
+
+/// Extract the bearer token from a request's `Authorization` header.
+///
+/// Returns `Some(token)` only for a well-formed `Authorization: Bearer <token>`
+/// with a non-empty token. The header name and the `Bearer` scheme are matched
+/// case-insensitively (per RFC 7235); the token itself is taken verbatim.
+fn bearer_token(request: &Request) -> Option<&str> {
+    let header = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Authorization"))?;
+    let (scheme, token) = header.value.as_str().split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("Bearer") {
+        return None;
+    }
+    let token = token.trim();
+    (!token.is_empty()).then_some(token)
 }
 
 fn resolve_session_path(
@@ -988,6 +1064,43 @@ mod tests {
             verbose: false,
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec,
+            auth: None,
+        })
+    }
+
+    /// Build an `AuthConfig` for the given `(key, tenant_id)` pairs by round-
+    /// tripping through a TOML file (exercises the real `load` path).
+    fn auth_config_for(tenants: &[(&str, &str)]) -> AuthConfig {
+        use crate::agent::auth::hash_key;
+        let toml = tenants
+            .iter()
+            .map(|(key, id)| {
+                format!(
+                    "[[tenants]]\nid = \"{id}\"\nkey_sha256 = \"{}\"\n",
+                    hash_key(key)
+                )
+            })
+            .collect::<String>();
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(&mut f, toml.as_bytes()).unwrap();
+        AuthConfig::load(f.path()).unwrap()
+    }
+
+    /// A server on `port` with auth enabled for the given `(key, tenant_id)` pairs.
+    fn auth_server(port: u16, tenants: &[(&str, &str)]) -> AgentServer {
+        AgentServer::new(AgentConfig {
+            port,
+            session_config: SessionConfig {
+                default_timeout: Duration::from_secs(60),
+                max_sessions: 10,
+                cleanup_interval: Duration::from_secs(300),
+                limits: crate::agent::limits::ResourceLimits::default(),
+            },
+            allow_cors: true,
+            verbose: false,
+            max_body_bytes: Some(32 * 1024 * 1024),
+            max_concurrent_exec: 100,
+            auth: Some(Arc::new(auth_config_for(tenants))),
         })
     }
 
@@ -1040,7 +1153,7 @@ mod tests {
     fn test_get_session() {
         let server = test_server();
         let id = server.handle_create_session().unwrap().session_id;
-        let resp = server.handle_get_session(&id).unwrap();
+        let resp = server.handle_get_session(&id, None).unwrap();
         assert_eq!(resp.session_id, id);
         assert_eq!(resp.state, "active");
         server.session_manager.destroy_all().unwrap();
@@ -1050,14 +1163,14 @@ mod tests {
     fn test_delete_session() {
         let server = test_server();
         let id = server.handle_create_session().unwrap().session_id;
-        server.handle_delete_session(&id).unwrap();
-        assert!(server.handle_get_session(&id).is_err());
+        server.handle_delete_session(&id, None).unwrap();
+        assert!(server.handle_get_session(&id, None).is_err());
     }
 
     #[test]
     fn test_session_not_found() {
         let server = test_server();
-        let err = server.handle_get_session("nonexistent").unwrap_err();
+        let err = server.handle_get_session("nonexistent", None).unwrap_err();
         assert_eq!(err.status_code(), 404);
     }
 
@@ -1069,10 +1182,14 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         server
-            .handle_write_file(&id, r#"{"path": "test.txt", "content": "hello agent"}"#)
+            .handle_write_file(
+                &id,
+                r#"{"path": "test.txt", "content": "hello agent"}"#,
+                None,
+            )
             .unwrap();
 
-        let resp = server.handle_read_file(&id, "test.txt").unwrap();
+        let resp = server.handle_read_file(&id, "test.txt", None).unwrap();
         assert_eq!(resp.content, "hello agent");
 
         server.session_manager.destroy_all().unwrap();
@@ -1084,10 +1201,16 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         server
-            .handle_write_file(&id, r#"{"path": "sub/dir/file.txt", "content": "nested"}"#)
+            .handle_write_file(
+                &id,
+                r#"{"path": "sub/dir/file.txt", "content": "nested"}"#,
+                None,
+            )
             .unwrap();
 
-        let resp = server.handle_read_file(&id, "sub/dir/file.txt").unwrap();
+        let resp = server
+            .handle_read_file(&id, "sub/dir/file.txt", None)
+            .unwrap();
         assert_eq!(resp.content, "nested");
 
         server.session_manager.destroy_all().unwrap();
@@ -1099,13 +1222,13 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         server
-            .handle_write_file(&id, r#"{"path": "a.txt", "content": "a"}"#)
+            .handle_write_file(&id, r#"{"path": "a.txt", "content": "a"}"#, None)
             .unwrap();
         server
-            .handle_write_file(&id, r#"{"path": "b.txt", "content": "bb"}"#)
+            .handle_write_file(&id, r#"{"path": "b.txt", "content": "bb"}"#, None)
             .unwrap();
 
-        let resp = server.handle_list_files(&id, "/").unwrap();
+        let resp = server.handle_list_files(&id, "/", None).unwrap();
         assert_eq!(resp.entries.len(), 2);
 
         let names: Vec<&str> = resp.entries.iter().map(|e| e.name.as_str()).collect();
@@ -1121,11 +1244,11 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         server
-            .handle_write_file(&id, r#"{"path": "del.txt", "content": "x"}"#)
+            .handle_write_file(&id, r#"{"path": "del.txt", "content": "x"}"#, None)
             .unwrap();
 
-        server.handle_delete_file(&id, "del.txt").unwrap();
-        assert!(server.handle_read_file(&id, "del.txt").is_err());
+        server.handle_delete_file(&id, "del.txt", None).unwrap();
+        assert!(server.handle_read_file(&id, "del.txt", None).is_err());
 
         server.session_manager.destroy_all().unwrap();
     }
@@ -1134,7 +1257,7 @@ mod tests {
     fn test_read_nonexistent_file() {
         let server = test_server();
         let id = server.handle_create_session().unwrap().session_id;
-        let err = server.handle_read_file(&id, "nope.txt").unwrap_err();
+        let err = server.handle_read_file(&id, "nope.txt", None).unwrap_err();
         assert_eq!(err.status_code(), 404);
         server.session_manager.destroy_all().unwrap();
     }
@@ -1144,7 +1267,7 @@ mod tests {
         let server = test_server();
         let id = server.handle_create_session().unwrap().session_id;
         let err = server
-            .handle_read_file(&id, "../../../etc/passwd")
+            .handle_read_file(&id, "../../../etc/passwd", None)
             .unwrap_err();
         assert_eq!(err.status_code(), 400);
         server.session_manager.destroy_all().unwrap();
@@ -1158,10 +1281,10 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         server
-            .handle_set_env(&id, r#"{"FOO": "bar", "BAZ": "qux"}"#)
+            .handle_set_env(&id, r#"{"FOO": "bar", "BAZ": "qux"}"#, None)
             .unwrap();
 
-        let resp = server.handle_get_env(&id).unwrap();
+        let resp = server.handle_get_env(&id, None).unwrap();
         assert_eq!(resp.env.get("FOO").unwrap(), "bar");
         assert_eq!(resp.env.get("BAZ").unwrap(), "qux");
 
@@ -1179,12 +1302,12 @@ mod tests {
         let wasm = hello_wasm();
         let work_dir = server
             .session_manager
-            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
             .unwrap();
         std::fs::write(work_dir.join("hello.wasm"), &wasm).unwrap();
 
         let resp = server
-            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#, None)
             .unwrap();
 
         assert_eq!(resp.stdout, "Hello, World!\n");
@@ -1201,7 +1324,7 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         let err = server
-            .handle_exec(&id, r#"{"wasm_path": "nope.wasm"}"#)
+            .handle_exec(&id, r#"{"wasm_path": "nope.wasm"}"#, None)
             .unwrap_err();
         assert_eq!(err.status_code(), 404);
 
@@ -1213,7 +1336,7 @@ mod tests {
         let server = test_server();
         let id = server.handle_create_session().unwrap().session_id;
 
-        let err = server.handle_exec(&id, r#"{}"#).unwrap_err();
+        let err = server.handle_exec(&id, r#"{}"#, None).unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("wasm_path") || err.to_string().contains("source"));
 
@@ -1227,7 +1350,11 @@ mod tests {
 
         // Python is not supported yet — should fail immediately without network I/O
         let err = server
-            .handle_exec(&id, r#"{"source": "print('hello')", "language": "python"}"#)
+            .handle_exec(
+                &id,
+                r#"{"source": "print('hello')", "language": "python"}"#,
+                None,
+            )
             .unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("python"));
@@ -1241,7 +1368,7 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         let body = r#"{"files": {"main.js": "console.log(1)"}}"#;
-        let err = server.handle_exec(&id, body).unwrap_err();
+        let err = server.handle_exec(&id, body, None).unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("entry"));
 
@@ -1254,7 +1381,7 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         let body = r#"{"files": {"main.js": "x"}, "entry": "missing.js"}"#;
-        let err = server.handle_exec(&id, body).unwrap_err();
+        let err = server.handle_exec(&id, body, None).unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("missing.js"));
 
@@ -1267,7 +1394,7 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         let body = r#"{"files": {"a.py": "print(1)"}, "entry": "a.py", "language": "python"}"#;
-        let err = server.handle_exec(&id, body).unwrap_err();
+        let err = server.handle_exec(&id, body, None).unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("python"));
 
@@ -1296,7 +1423,7 @@ mod tests {
             "entry": "main.js",
             "timeout": 60
         }"#;
-        let resp = server.handle_exec(&id, body).unwrap();
+        let resp = server.handle_exec(&id, body, None).unwrap();
         assert_eq!(
             resp.exit_code, 0,
             "exit_code != 0; stderr: {}; error: {:?}",
@@ -1309,7 +1436,7 @@ mod tests {
         );
 
         // Verify the sibling file was actually written to the session FS
-        let extra = server.handle_read_file(&id, "extra.js").unwrap();
+        let extra = server.handle_read_file(&id, "extra.js", None).unwrap();
         assert!(extra.content.contains("sibling file"));
 
         server.session_manager.destroy_all().unwrap();
@@ -1324,7 +1451,7 @@ mod tests {
         // return Ok (any runtime fetch failure surfaces as ExecResponse.error,
         // not an ApiError from handle_exec itself).
         let body = r#"{"files": {"main.js": "console.log('ok')"}, "entry": "main.js"}"#;
-        let result = server.handle_exec(&id, body);
+        let result = server.handle_exec(&id, body, None);
         assert!(
             result.is_ok(),
             "valid files+entry should not return ApiError, got: {result:?}"
@@ -1343,7 +1470,7 @@ mod tests {
         // but we verify the request parses and reaches the execution stage (not a 400).
         // The exec thread may return an Internal error if the runtime is unavailable, which
         // surfaces as ExecResponse.error — not an ApiError from handle_exec itself.
-        let result = server.handle_exec(&id, r#"{"source": "1+1"}"#);
+        let result = server.handle_exec(&id, r#"{"source": "1+1"}"#, None);
         assert!(
             result.is_ok(),
             "default language should not return ApiError"
@@ -1360,7 +1487,7 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         let resp = server
-            .handle_exec(&id, r#"{"command": "echo hello"}"#)
+            .handle_exec(&id, r#"{"command": "echo hello"}"#, None)
             .unwrap();
         assert_eq!(resp.exit_code, 0);
         assert_eq!(resp.stdout, "hello\n");
@@ -1378,13 +1505,14 @@ mod tests {
             .handle_exec(
                 &id,
                 r#"{"command": "echo persisted > log.txt && cat log.txt"}"#,
+                None,
             )
             .unwrap();
         assert_eq!(resp.exit_code, 0);
         assert_eq!(resp.stdout, "persisted\n");
 
         // Verify the file is actually in the session work_dir
-        let content = server.handle_read_file(&id, "log.txt").unwrap();
+        let content = server.handle_read_file(&id, "log.txt", None).unwrap();
         assert_eq!(content.content, "persisted\n");
 
         server.session_manager.destroy_all().unwrap();
@@ -1400,6 +1528,7 @@ mod tests {
             .handle_exec(
                 &id,
                 r#"{"command": "echo first", "wasm_path": "nope.wasm"}"#,
+                None,
             )
             .unwrap();
         assert_eq!(resp.exit_code, 0);
@@ -1415,10 +1544,10 @@ mod tests {
 
         // Export via shell, then verify it shows up through the env endpoint.
         server
-            .handle_exec(&id, r#"{"command": "export GREETING=hi"}"#)
+            .handle_exec(&id, r#"{"command": "export GREETING=hi"}"#, None)
             .unwrap();
 
-        let env = server.handle_get_env(&id).unwrap();
+        let env = server.handle_get_env(&id, None).unwrap();
         assert_eq!(env.env.get("GREETING").map(|s| s.as_str()), Some("hi"));
 
         server.session_manager.destroy_all().unwrap();
@@ -1431,7 +1560,7 @@ mod tests {
 
         // Unclosed quote → parse error → BadRequest
         let resp = server
-            .handle_exec(&id, r#"{"command": "echo \"oops"}"#)
+            .handle_exec(&id, r#"{"command": "echo \"oops"}"#, None)
             .unwrap();
         // Parse error is surfaced via ExecResponse.error from the exec thread.
         assert_eq!(resp.exit_code, -1);
@@ -1448,19 +1577,19 @@ mod tests {
         let wasm = hello_wasm();
         let work_dir = server
             .session_manager
-            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
             .unwrap();
         std::fs::write(work_dir.join("hello.wasm"), &wasm).unwrap();
 
         // First exec
         let resp1 = server
-            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#, None)
             .unwrap();
         assert_eq!(resp1.stdout, "Hello, World!\n");
 
         // Second exec should not accumulate
         let resp2 = server
-            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#, None)
             .unwrap();
         assert_eq!(resp2.stdout, "Hello, World!\n");
 
@@ -1477,43 +1606,45 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         // 2. Set env
-        server.handle_set_env(&id, r#"{"APP": "test"}"#).unwrap();
+        server
+            .handle_set_env(&id, r#"{"APP": "test"}"#, None)
+            .unwrap();
 
         // 3. Write WASM file
         let wasm = hello_wasm();
         let work_dir = server
             .session_manager
-            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
             .unwrap();
         std::fs::write(work_dir.join("hello.wasm"), &wasm).unwrap();
 
         // 4. Write a data file
         server
-            .handle_write_file(&id, r#"{"path": "data.txt", "content": "test data"}"#)
+            .handle_write_file(&id, r#"{"path": "data.txt", "content": "test data"}"#, None)
             .unwrap();
 
         // 5. List files
-        let files = server.handle_list_files(&id, "/").unwrap();
+        let files = server.handle_list_files(&id, "/", None).unwrap();
         assert!(files.entries.len() >= 2);
 
         // 6. Execute WASM
         let exec = server
-            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#, None)
             .unwrap();
         assert_eq!(exec.stdout, "Hello, World!\n");
         assert_eq!(exec.exit_code, 0);
 
         // 7. Read file back
-        let content = server.handle_read_file(&id, "data.txt").unwrap();
+        let content = server.handle_read_file(&id, "data.txt", None).unwrap();
         assert_eq!(content.content, "test data");
 
         // 8. Check env
-        let env = server.handle_get_env(&id).unwrap();
+        let env = server.handle_get_env(&id, None).unwrap();
         assert_eq!(env.env.get("APP").unwrap(), "test");
 
         // 9. Destroy
-        server.handle_delete_session(&id).unwrap();
-        assert!(server.handle_get_session(&id).is_err());
+        server.handle_delete_session(&id, None).unwrap();
+        assert!(server.handle_get_session(&id, None).is_err());
     }
 
     // ── Concurrent sessions ───────────────────────────────────────
@@ -1532,22 +1663,22 @@ mod tests {
 
                     // Each session writes its own file
                     let body = format!(r#"{{"path": "id.txt", "content": "session-{i}"}}"#);
-                    srv.handle_write_file(&id, &body).unwrap();
+                    srv.handle_write_file(&id, &body, None).unwrap();
 
                     // Write and exec WASM
                     let work_dir = srv
                         .session_manager
-                        .get_session(&id, |s| s.work_dir().to_path_buf())
+                        .get_session(&id, None, |s| s.work_dir().to_path_buf())
                         .unwrap();
                     std::fs::write(work_dir.join("hello.wasm"), &wasm).unwrap();
 
                     let exec = srv
-                        .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+                        .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#, None)
                         .unwrap();
                     assert_eq!(exec.stdout, "Hello, World!\n");
 
                     // Verify isolation
-                    let content = srv.handle_read_file(&id, "id.txt").unwrap();
+                    let content = srv.handle_read_file(&id, "id.txt", None).unwrap();
                     assert_eq!(content.content, format!("session-{i}"));
 
                     id
@@ -1686,7 +1817,7 @@ mod tests {
     fn make_session_with_limits(server: &AgentServer, limits: ResourceLimits) -> String {
         server
             .session_manager
-            .create_session_with_limits(Duration::from_secs(60), limits)
+            .create_session_with_limits(Duration::from_secs(60), limits, None)
             .unwrap()
     }
 
@@ -1695,13 +1826,13 @@ mod tests {
         let server = test_server();
         let body = r#"{"limits":{"max_fuel":500,"max_output_mb":0,"max_file_size_mb":1}}"#;
         let id = server
-            .handle_create_session_with_body(body)
+            .handle_create_session_with_body(body, None)
             .unwrap()
             .session_id;
 
         let limits = server
             .session_manager
-            .get_session(&id, |s| s.limits().clone())
+            .get_session(&id, None, |s| s.limits().clone())
             .unwrap();
         assert_eq!(limits.max_fuel, Some(500));
         assert_eq!(limits.max_output_bytes, None); // 0 disables the cap
@@ -1719,12 +1850,12 @@ mod tests {
     fn test_create_session_empty_body_uses_defaults() {
         let server = test_server();
         let id = server
-            .handle_create_session_with_body("")
+            .handle_create_session_with_body("", None)
             .unwrap()
             .session_id;
         let limits = server
             .session_manager
-            .get_session(&id, |s| s.limits().clone())
+            .get_session(&id, None, |s| s.limits().clone())
             .unwrap();
         assert_eq!(limits, server.config.session_config.limits);
         server.session_manager.destroy_all().unwrap();
@@ -1734,7 +1865,7 @@ mod tests {
     fn test_create_session_invalid_limits_body_returns_400() {
         let server = test_server();
         let err = server
-            .handle_create_session_with_body(r#"{"limits": "not-an-object"}"#)
+            .handle_create_session_with_body(r#"{"limits": "not-an-object"}"#, None)
             .unwrap_err();
         assert_eq!(err.status_code(), 400);
     }
@@ -1753,6 +1884,7 @@ mod tests {
             .handle_write_file(
                 &id,
                 r#"{"path": "big.txt", "content": "this is more than ten bytes"}"#,
+                None,
             )
             .unwrap_err();
         assert_eq!(err.status_code(), 400);
@@ -1773,11 +1905,11 @@ mod tests {
 
         // First 5-byte file fits (5 <= 10).
         server
-            .handle_write_file(&id, r#"{"path": "a.txt", "content": "12345"}"#)
+            .handle_write_file(&id, r#"{"path": "a.txt", "content": "12345"}"#, None)
             .unwrap();
         // Second 6-byte file pushes total to 11 > 10 → rejected.
         let err = server
-            .handle_write_file(&id, r#"{"path": "b.txt", "content": "678901"}"#)
+            .handle_write_file(&id, r#"{"path": "b.txt", "content": "678901"}"#, None)
             .unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("Disk usage limit"));
@@ -1796,7 +1928,7 @@ mod tests {
 
         // "echo hello" emits "hello\n" (6 bytes); capped to 3.
         let resp = server
-            .handle_exec(&id, r#"{"command": "echo hello"}"#)
+            .handle_exec(&id, r#"{"command": "echo hello"}"#, None)
             .unwrap();
         assert_eq!(resp.stdout, "hel");
         assert!(resp.output_truncated);
@@ -1815,13 +1947,13 @@ mod tests {
 
         let work_dir = server
             .session_manager
-            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
             .unwrap();
         std::fs::write(work_dir.join("loop.wasm"), infinite_loop_wasm()).unwrap();
 
         // With a fuel cap the runaway loop aborts well before the exec timeout.
         let resp = server
-            .handle_exec(&id, r#"{"wasm_path": "loop.wasm", "timeout": 30}"#)
+            .handle_exec(&id, r#"{"wasm_path": "loop.wasm", "timeout": 30}"#, None)
             .unwrap();
         assert_eq!(resp.exit_code, -1);
         let err = resp.error.unwrap_or_default();
@@ -1848,13 +1980,13 @@ mod tests {
 
         let work_dir = server
             .session_manager
-            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
             .unwrap();
         std::fs::write(work_dir.join("loop.wasm"), infinite_loop_wasm()).unwrap();
         std::fs::write(work_dir.join("hello.wasm"), hello_wasm()).unwrap();
 
         let resp = server
-            .handle_exec(&id, r#"{"wasm_path": "loop.wasm", "timeout": 1}"#)
+            .handle_exec(&id, r#"{"wasm_path": "loop.wasm", "timeout": 1}"#, None)
             .unwrap();
         assert_eq!(resp.exit_code, -1);
         assert!(
@@ -1867,7 +1999,7 @@ mod tests {
         // The session is still usable: a normal exec runs and returns promptly,
         // which it could not if the runaway worker were still pinning the core.
         let ok = server
-            .handle_exec(&id, r#"{"wasm_path": "hello.wasm", "timeout": 10}"#)
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm", "timeout": 10}"#, None)
             .unwrap();
         assert_eq!(ok.stdout, "Hello, World!\n");
         assert_eq!(ok.exit_code, 0);
@@ -1936,14 +2068,14 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
         let work_dir = server
             .session_manager
-            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
             .unwrap();
         std::fs::write(work_dir.join("hello.wasm"), hello_wasm()).unwrap();
 
         // Hold the only slot to simulate a worker already in flight.
         let held = server.exec_slots.try_acquire().unwrap();
         let err = server
-            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#, None)
             .unwrap_err();
         assert_eq!(err.status_code(), 429);
         assert!(matches!(err, ApiError::TooManyRequests(1)));
@@ -1951,7 +2083,7 @@ mod tests {
         // Releasing the slot lets the next exec through.
         drop(held);
         let ok = server
-            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#, None)
             .unwrap();
         assert_eq!(ok.exit_code, 0);
 
@@ -1967,13 +2099,13 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
         let work_dir = server
             .session_manager
-            .get_session(&id, |s| s.work_dir().to_path_buf())
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
             .unwrap();
         std::fs::write(work_dir.join("hello.wasm"), hello_wasm()).unwrap();
 
         for _ in 0..3 {
             let ok = server
-                .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#)
+                .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#, None)
                 .unwrap();
             assert_eq!(ok.exit_code, 0);
         }
@@ -1981,5 +2113,248 @@ mod tests {
         assert!(server.exec_slots.try_acquire().is_some());
 
         server.session_manager.destroy_all().unwrap();
+    }
+
+    // ── Authentication & tenant isolation ─────────────────────────
+
+    #[test]
+    fn test_disabled_auth_stamps_no_owner() {
+        // Open mode (no auth): sessions have no owner; the keyless path is
+        // unchanged. (The rest of the suite exercises this implicitly.)
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        let owner = server
+            .session_manager
+            .get_session(&id, None, |s| s.owner().map(str::to_string))
+            .unwrap();
+        assert_eq!(owner, None);
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_handler_tenant_isolation() {
+        let server = test_server();
+
+        // Tenant "alice" creates and populates a session.
+        let id = server
+            .handle_create_session_with_body("", Some("alice"))
+            .unwrap()
+            .session_id;
+        let owner = server
+            .session_manager
+            .get_session(&id, Some("alice"), |s| s.owner().map(str::to_string))
+            .unwrap();
+        assert_eq!(owner, Some("alice".to_string()));
+
+        server
+            .handle_write_file(&id, r#"{"path": "a.txt", "content": "hi"}"#, Some("alice"))
+            .unwrap();
+        assert!(server.handle_get_session(&id, Some("alice")).is_ok());
+        assert!(server.handle_read_file(&id, "a.txt", Some("alice")).is_ok());
+
+        // Tenant "bob" sees 404 on every operation against alice's session.
+        let bob = Some("bob");
+        assert_eq!(
+            server
+                .handle_get_session(&id, bob)
+                .unwrap_err()
+                .status_code(),
+            404
+        );
+        assert_eq!(
+            server
+                .handle_exec(&id, r#"{"command": "echo hi"}"#, bob)
+                .unwrap_err()
+                .status_code(),
+            404
+        );
+        assert_eq!(
+            server
+                .handle_read_file(&id, "a.txt", bob)
+                .unwrap_err()
+                .status_code(),
+            404
+        );
+        assert_eq!(
+            server
+                .handle_write_file(&id, r#"{"path": "x", "content": "y"}"#, bob)
+                .unwrap_err()
+                .status_code(),
+            404
+        );
+        assert_eq!(
+            server
+                .handle_list_files(&id, "/", bob)
+                .unwrap_err()
+                .status_code(),
+            404
+        );
+        assert_eq!(
+            server
+                .handle_delete_file(&id, "a.txt", bob)
+                .unwrap_err()
+                .status_code(),
+            404
+        );
+        assert_eq!(
+            server
+                .handle_set_env(&id, r#"{"K": "V"}"#, bob)
+                .unwrap_err()
+                .status_code(),
+            404
+        );
+        assert_eq!(
+            server.handle_get_env(&id, bob).unwrap_err().status_code(),
+            404
+        );
+        assert_eq!(
+            server
+                .handle_delete_session(&id, bob)
+                .unwrap_err()
+                .status_code(),
+            404
+        );
+
+        // Open-mode caller (None) is also blocked from an owned session.
+        assert_eq!(
+            server
+                .handle_get_session(&id, None)
+                .unwrap_err()
+                .status_code(),
+            404
+        );
+
+        // bob's failed delete did not destroy the session; alice still owns it.
+        assert!(server.handle_delete_session(&id, Some("alice")).is_ok());
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Status code of a ureq result, treating 4xx/5xx (returned as `Err`) and
+    /// 2xx alike so assertions can compare the numeric code.
+    fn http_status(r: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> u16 {
+        match r {
+            Ok(resp) => resp.status().as_u16(),
+            Err(ureq::Error::StatusCode(code)) => code,
+            Err(e) => panic!("transport error: {e}"),
+        }
+    }
+
+    #[test]
+    fn test_auth_gate_and_isolation_over_http() {
+        use std::io::Read;
+
+        // Grab a free port, then release it for the server to bind.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+
+        let server = auth_server(port, &[("key_a", "alice"), ("key_b", "bob")]);
+        std::thread::spawn(move || {
+            let _ = server.start();
+        });
+
+        let base = format!("http://127.0.0.1:{port}/api/v1");
+
+        // Wait until the listener is accepting (any HTTP response, incl. 401).
+        for _ in 0..100 {
+            match ureq::get(format!("{base}/tools")).call() {
+                Err(ureq::Error::Io(_)) => std::thread::sleep(Duration::from_millis(20)),
+                _ => break,
+            }
+        }
+
+        let sessions = format!("{base}/sessions");
+
+        // Missing header → 401.
+        assert_eq!(http_status(ureq::post(&sessions).send_empty()), 401);
+        // Wrong scheme → 401.
+        assert_eq!(
+            http_status(
+                ureq::post(&sessions)
+                    .header("Authorization", "Token key_a")
+                    .send_empty()
+            ),
+            401
+        );
+        // Unknown key → 401.
+        assert_eq!(
+            http_status(
+                ureq::post(&sessions)
+                    .header("Authorization", "Bearer nope")
+                    .send_empty()
+            ),
+            401
+        );
+        // /tools is gated too: no key → 401, valid key → 200.
+        assert_eq!(http_status(ureq::get(format!("{base}/tools")).call()), 401);
+        assert_eq!(
+            http_status(
+                ureq::get(format!("{base}/tools"))
+                    .header("Authorization", "Bearer key_a")
+                    .call()
+            ),
+            200
+        );
+
+        // Valid key → 200; capture the session id.
+        let mut resp = ureq::post(&sessions)
+            .header("Authorization", "Bearer key_a")
+            .send_empty()
+            .unwrap();
+        let mut body = String::new();
+        resp.body_mut()
+            .as_reader()
+            .read_to_string(&mut body)
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let id = v["session_id"].as_str().unwrap().to_string();
+
+        let one = format!("{base}/sessions/{id}");
+
+        // Owner (alice) → 200; other tenant (bob) → 404 across read/exec/delete.
+        assert_eq!(
+            http_status(
+                ureq::get(&one)
+                    .header("Authorization", "Bearer key_a")
+                    .call()
+            ),
+            200
+        );
+        assert_eq!(
+            http_status(
+                ureq::get(&one)
+                    .header("Authorization", "Bearer key_b")
+                    .call()
+            ),
+            404
+        );
+        assert_eq!(
+            http_status(
+                ureq::post(format!("{one}/exec"))
+                    .header("Authorization", "Bearer key_b")
+                    .send(r#"{"command": "echo hi"}"#)
+            ),
+            404
+        );
+        assert_eq!(
+            http_status(
+                ureq::delete(&one)
+                    .header("Authorization", "Bearer key_b")
+                    .call()
+            ),
+            404
+        );
+        // Owner can delete its own session.
+        assert_eq!(
+            http_status(
+                ureq::delete(&one)
+                    .header("Authorization", "Bearer key_a")
+                    .call()
+            ),
+            200
+        );
     }
 }

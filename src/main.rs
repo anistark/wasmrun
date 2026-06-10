@@ -188,6 +188,8 @@ fn main() {
             max_concurrent_exec,
             allow_cors,
             verbose,
+            auth_config,
+            hash_key,
         }) => {
             debug_println!(
                 "Processing agent command: port={}, timeout={}, max_sessions={}, max_memory={}MB, max_fuel={}, max_output={}MB, max_file_size={}MB, max_disk={}MB, max_body={}MB, max_concurrent_exec={}",
@@ -215,6 +217,8 @@ fn main() {
                 *max_concurrent_exec,
                 *allow_cors,
                 *verbose,
+                auth_config.as_deref(),
+                hash_key.as_deref(),
             )
         }
 

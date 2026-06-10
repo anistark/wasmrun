@@ -84,3 +84,7 @@ Deletes files or directories (recursive for directories).
 - Leading `/` is stripped (treated as session root)
 - Path traversal (`../`) is rejected with 400 Bad Request
 - Files are only accessible within the session's isolated directory
+
+## Authentication & Tenant Scoping
+
+When the server runs with [`--auth`](../agent.md#authentication), every file request must carry a valid `Authorization: Bearer <key>` header — a missing, malformed, or unknown key returns **401 Unauthorized**. File operations are scoped to the calling tenant's own sessions; targeting a session owned by another tenant returns **404 Not Found**, the same as a nonexistent session.
