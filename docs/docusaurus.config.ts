@@ -2,13 +2,20 @@ import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 import { themes as prismThemes } from 'prism-react-renderer';
 
+// ReadTheDocs serves the site under /<language>/<version>/ (e.g. /en/latest/)
+// and sets these env vars only inside its build environment. Everywhere else
+// — the local dev server and local production builds (`pnpm build && serve`) —
+// the site is served from the root, so baseUrl must stay '/'. Keying off
+// NODE_ENV is wrong because any production build sets it, including local ones.
+const isReadTheDocs = process.env.READTHEDOCS === 'True';
+const rtdLanguage = process.env.READTHEDOCS_LANGUAGE || 'en';
+const rtdVersion = process.env.READTHEDOCS_VERSION || 'latest';
+
 const config: Config = {
   title: 'Wasmrun',
   tagline: 'WebAssembly Runtime',
   url: 'https://wasmrun.readthedocs.io',
-  baseUrl: process.env.NODE_ENV === 'production'
-    ? `/en/${process.env.READTHEDOCS_VERSION || 'latest'}/`
-    : '/',
+  baseUrl: isReadTheDocs ? `/${rtdLanguage}/${rtdVersion}/` : '/',
 
   favicon: 'img/favicon.ico',
   organizationName: 'anistark',

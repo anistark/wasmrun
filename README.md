@@ -29,6 +29,12 @@
 cargo install wasmrun
 ```
 
+On Arch Linux, install from the [AUR](https://aur.archlinux.org/packages/wasmrun-bin) (community-maintained):
+
+```sh
+yay -S wasmrun-bin
+```
+
 For other installation methods (DEB, RPM, from source), see the [Installation Guide](https://wasmrun.readthedocs.io/en/latest/docs/installation).
 
 ### Basic Usage
