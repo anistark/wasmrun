@@ -469,9 +469,45 @@ impl SessionManager {
     }
 
     /// Get the total number of sessions (including expired ones not yet cleaned up).
-    #[allow(dead_code)] // TODO: Used by agent metrics
     pub fn total_count(&self) -> usize {
         self.sessions.read().map(|s| s.len()).unwrap_or(0)
+    }
+
+    /// Per-session resource report (id, disk footprint, configured memory cap)
+    /// for active sessions. Used by the JSON metrics breakdown.
+    ///
+    /// The work dirs are collected under the read lock and the (potentially
+    /// slow) filesystem walks run *after* the lock is released, so a metrics
+    /// scrape never blocks session creation/access while walking the FS.
+    pub fn session_reports(&self) -> Vec<SessionReport> {
+        let dirs: Vec<(String, std::path::PathBuf, Option<u32>)> = match self.sessions.read() {
+            Ok(sessions) => sessions
+                .values()
+                .filter(|s| !s.is_expired())
+                .map(|s| {
+                    (
+                        s.id().to_string(),
+                        s.work_dir().to_path_buf(),
+                        s.limits().max_memory_pages,
+                    )
+                })
+                .collect(),
+            Err(_) => return Vec::new(),
+        };
+        dirs.into_iter()
+            .map(|(id, dir, memory_cap_pages)| SessionReport {
+                id,
+                disk_bytes: crate::agent::limits::dir_size(&dir),
+                memory_cap_pages,
+            })
+            .collect()
+    }
+
+    /// Total on-disk footprint across active sessions, in bytes. Sums the
+    /// per-session reports; see [`session_reports`](Self::session_reports) for
+    /// the locking strategy.
+    pub fn total_disk_bytes(&self) -> u64 {
+        self.session_reports().iter().map(|r| r.disk_bytes).sum()
     }
 
     /// Start the background cleanup thread.
@@ -534,6 +570,15 @@ pub struct SessionInfo {
     pub created_at_elapsed: Duration,
     pub last_accessed_elapsed: Duration,
     pub timeout: Duration,
+}
+
+/// Per-session resource footprint, produced by
+/// [`SessionManager::session_reports`] for the metrics endpoint.
+#[derive(Debug, Clone)]
+pub struct SessionReport {
+    pub id: String,
+    pub disk_bytes: u64,
+    pub memory_cap_pages: Option<u32>,
 }
 
 // ── Errors ────────────────────────────────────────────────────────────

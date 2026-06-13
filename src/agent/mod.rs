@@ -8,6 +8,7 @@ pub mod api;
 pub mod auth;
 pub mod executor;
 pub mod limits;
+pub mod metrics;
 pub mod server;
 pub mod session;
 pub mod shell;

@@ -4,6 +4,7 @@ use crate::agent::api::*;
 use crate::agent::auth::AuthConfig;
 use crate::agent::executor;
 use crate::agent::limits::{dir_size, ResourceLimits};
+use crate::agent::metrics::{Gauges, Metrics, SessionResourceRow};
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::shell;
 use crate::agent::tools;
@@ -80,6 +81,12 @@ impl ExecSlots {
         })
     }
 
+    /// Current number of exec workers holding a slot. Read live for the
+    /// `exec_in_flight` metrics gauge.
+    fn in_flight(&self) -> u64 {
+        self.in_flight.load(Ordering::Acquire) as u64
+    }
+
     /// Try to take a slot. Returns `None` when saturated (caller → 429).
     fn try_acquire(self: &Arc<Self>) -> Option<ExecPermit> {
         if self.max == 0 {
@@ -124,6 +131,7 @@ pub struct AgentServer {
     session_manager: Arc<SessionManager>,
     config: AgentConfig,
     exec_slots: Arc<ExecSlots>,
+    metrics: Arc<Metrics>,
 }
 
 impl AgentServer {
@@ -134,6 +142,7 @@ impl AgentServer {
             session_manager,
             config,
             exec_slots,
+            metrics: Arc::new(Metrics::new()),
         }
     }
 
@@ -234,9 +243,13 @@ impl AgentServer {
         println!("     POST   /sessions/:id/env       set env vars");
         println!("     GET    /sessions/:id/env       get env vars");
         println!("     GET    /tools                  LLM tool schemas");
+        println!("     GET    /metrics                metrics (Prometheus | ?format=json)");
         println!();
     }
 
+    /// CORS headers shared by every response. The `Content-Type` is added
+    /// per-response by [`send`](Self::send) so the metrics endpoint can return
+    /// `text/plain` while everything else returns `application/json`.
     fn cors_headers(&self) -> Vec<Header> {
         let origin = if self.config.allow_cors {
             "*"
@@ -255,43 +268,58 @@ impl AgentServer {
                 &b"Content-Type, Authorization"[..],
             )
             .unwrap(),
-            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
         ]
     }
 
     fn handle_request(&self, mut request: Request) -> Result<()> {
         let method = request.method().clone();
         let url = request.url().to_string();
+        let (path, query) = split_url(&url);
+
+        // Per-request context for the structured access log + `X-Request-Id`.
+        // Built up front so even early returns (OPTIONS, 401, 413) are logged
+        // and carry the id header. `tenant` is filled in after auth resolves.
+        let mut log = ReqLog {
+            id: generate_request_id(),
+            method: method.as_str().to_string(),
+            path: path.clone(),
+            tenant: "-".to_string(),
+            start: Instant::now(),
+        };
 
         if self.config.verbose {
-            eprintln!("{method} {url}");
+            eprintln!("→ {method} {url} (id={})", log.id);
         }
 
         if method == Method::Options {
-            return self.respond_empty(request, 204);
+            return self.respond_empty(request, 204, &log);
         }
 
         // Authentication gate. Resolved once here — after the OPTIONS
         // short-circuit, before routing — so every handler receives an
         // already-validated caller. `None` means open mode (no auth config);
         // `Some(tenant)` is the authenticated tenant id. Auth applies to all
-        // `/api/v1/*` routes including `/tools` (simplest and most secure; it
-        // can be exempted later if a public tool catalog is wanted).
+        // `/api/v1/*` routes including `/tools` and `/metrics` (simplest and
+        // most secure; the metrics scrape is capped at global aggregates so a
+        // tenant key cannot read another tenant's per-session data).
         let tenant: Option<&str> = match &self.config.auth {
             None => None,
             Some(auth) => match bearer_token(&request).and_then(|key| auth.resolve(key)) {
-                Some(t) => Some(t),
+                Some(t) => {
+                    log.tenant = t.to_string();
+                    Some(t)
+                }
                 None => {
+                    self.metrics.record_rejected_unauthorized();
                     let err = ApiError::Unauthorized(
                         "missing or invalid API key (expected 'Authorization: Bearer <key>')"
                             .into(),
                     );
-                    return self.respond_json(request, Err::<serde_json::Value, _>(err));
+                    return self.respond_json(request, Err::<serde_json::Value, _>(err), &log);
                 }
             },
         };
 
-        let (path, query) = split_url(&url);
         let segments: Vec<&str> = path
             .trim_start_matches(API_PREFIX)
             .trim_matches('/')
@@ -305,60 +333,126 @@ impl AgentServer {
         let body = if method == Method::Post {
             match read_body(request.as_reader(), self.config.max_body_bytes) {
                 Ok(b) => b,
-                Err(e) => return self.respond_json(request, Err::<serde_json::Value, _>(e)),
+                Err(e) => {
+                    if matches!(e, ApiError::PayloadTooLarge(_)) {
+                        self.metrics.record_rejected_payload();
+                    }
+                    return self.respond_json(request, Err::<serde_json::Value, _>(e), &log);
+                }
             }
         } else {
             String::new()
         };
 
-        let result = match (method, segments.as_slice()) {
+        match (method, segments.as_slice()) {
             (Method::Get, ["tools"]) => {
                 let params = parse_query(&query);
                 let format = params.get("format").map(|s| s.as_str()).unwrap_or("openai");
-                self.respond_json(request, self.handle_get_tools(format))
+                self.respond_json(request, self.handle_get_tools(format), &log)
             }
-            (Method::Post, ["sessions"]) => {
-                self.respond_json(request, self.handle_create_session_with_body(&body, tenant))
+            (Method::Get, ["metrics"]) => {
+                let params = parse_query(&query);
+                // Prometheus text exposition is the scrape default; `?format=json`
+                // returns the same data as a flat JSON object.
+                match params.get("format").map(|s| s.as_str()) {
+                    Some("json") => {
+                        self.respond_json(request, Ok::<_, ApiError>(self.metrics_json()), &log)
+                    }
+                    _ => self.send(
+                        request,
+                        200,
+                        self.metrics_prometheus(),
+                        "text/plain; version=0.0.4; charset=utf-8",
+                        &log,
+                    ),
+                }
             }
+            (Method::Post, ["sessions"]) => self.respond_json(
+                request,
+                self.handle_create_session_with_body(&body, tenant),
+                &log,
+            ),
             (Method::Get, ["sessions", id]) => {
-                self.respond_json(request, self.handle_get_session(id, tenant))
+                self.respond_json(request, self.handle_get_session(id, tenant), &log)
             }
             (Method::Delete, ["sessions", id]) => {
-                self.respond_json(request, self.handle_delete_session(id, tenant))
+                self.respond_json(request, self.handle_delete_session(id, tenant), &log)
             }
             (Method::Post, ["sessions", id, "exec"]) => {
-                self.respond_json(request, self.handle_exec(id, &body, tenant))
+                self.respond_json(request, self.handle_exec(id, &body, tenant), &log)
             }
             (Method::Post, ["sessions", id, "files"]) => {
-                self.respond_json(request, self.handle_write_file(id, &body, tenant))
+                self.respond_json(request, self.handle_write_file(id, &body, tenant), &log)
             }
             (Method::Get, ["sessions", id, "files"]) => {
                 let params = parse_query(&query);
                 let path = params.get("path").map(|s| s.as_str()).unwrap_or("/");
                 if params.get("list").map(|v| v == "true").unwrap_or(false) {
-                    self.respond_json(request, self.handle_list_files(id, path, tenant))
+                    self.respond_json(request, self.handle_list_files(id, path, tenant), &log)
                 } else {
-                    self.respond_json(request, self.handle_read_file(id, path, tenant))
+                    self.respond_json(request, self.handle_read_file(id, path, tenant), &log)
                 }
             }
             (Method::Delete, ["sessions", id, "files"]) => {
                 let params = parse_query(&query);
                 let path = params.get("path").map(|s| s.as_str()).unwrap_or("");
-                self.respond_json(request, self.handle_delete_file(id, path, tenant))
+                self.respond_json(request, self.handle_delete_file(id, path, tenant), &log)
             }
             (Method::Post, ["sessions", id, "env"]) => {
-                self.respond_json(request, self.handle_set_env(id, &body, tenant))
+                self.respond_json(request, self.handle_set_env(id, &body, tenant), &log)
             }
             (Method::Get, ["sessions", id, "env"]) => {
-                self.respond_json(request, self.handle_get_env(id, tenant))
+                self.respond_json(request, self.handle_get_env(id, tenant), &log)
             }
             _ => {
                 let err = ApiError::NotFound(format!("Unknown endpoint: {path}"));
-                self.respond_json(request, Err::<serde_json::Value, _>(err))
+                self.respond_json(request, Err::<serde_json::Value, _>(err), &log)
             }
-        };
+        }
+    }
 
-        result
+    /// Sample the live gauge values at scrape time.
+    fn current_gauges(&self) -> Gauges {
+        Gauges {
+            sessions_active: self.session_manager.active_count() as u64,
+            sessions_total: self.session_manager.total_count() as u64,
+            exec_in_flight: self.exec_slots.in_flight(),
+            sessions_disk_bytes: self.session_manager.total_disk_bytes(),
+        }
+    }
+
+    fn metrics_prometheus(&self) -> String {
+        self.metrics.render_prometheus(&self.current_gauges())
+    }
+
+    fn metrics_json(&self) -> serde_json::Value {
+        // Compute per-session reports once and derive the disk gauge from them.
+        let reports = self.session_manager.session_reports();
+        let disk: u64 = reports.iter().map(|r| r.disk_bytes).sum();
+        let gauges = Gauges {
+            sessions_active: self.session_manager.active_count() as u64,
+            sessions_total: self.session_manager.total_count() as u64,
+            exec_in_flight: self.exec_slots.in_flight(),
+            sessions_disk_bytes: disk,
+        };
+        // Per-session rows are exposed only in open mode. In auth mode they
+        // would leak one tenant's footprint to another, so the scrape stays at
+        // global aggregates (0.20.5 Q2/Q3).
+        let per_session = if self.config.auth.is_none() {
+            Some(
+                reports
+                    .into_iter()
+                    .map(|r| SessionResourceRow {
+                        id: r.id,
+                        disk_bytes: r.disk_bytes,
+                        memory_cap_pages: r.memory_cap_pages,
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        };
+        self.metrics.render_json(&gauges, per_session)
     }
 
     // ── Session endpoints ─────────────────────────────────────────
@@ -402,6 +496,7 @@ impl AgentServer {
                 owner.map(String::from),
             )
             .map_err(map_session_err)?;
+        self.metrics.record_session_created();
         Ok(CreateSessionResponse {
             session_id: id,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -486,10 +581,13 @@ impl AgentServer {
         // this HTTP response returns) — a timed-out-but-still-running worker keeps
         // its slot until cooperative cancellation actually stops it. On saturation
         // reject with 429 before spawning a fresh 64 MB-stack thread.
-        let permit = self
-            .exec_slots
-            .try_acquire()
-            .ok_or(ApiError::TooManyRequests(self.config.max_concurrent_exec))?;
+        let permit = match self.exec_slots.try_acquire() {
+            Some(p) => p,
+            None => {
+                self.metrics.record_rejected_concurrency();
+                return Err(ApiError::TooManyRequests(self.config.max_concurrent_exec));
+            }
+        };
 
         let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<i32, ApiError>>();
         // Cooperative cancellation: the worker runs detached, so if the
@@ -611,17 +709,23 @@ impl AgentServer {
                 // for the shell path, which isn't a long-running interpreter.)
                 cancel.store(true, Ordering::Relaxed);
                 duration_ms = start.elapsed().as_millis() as u64;
+                let truncated = read_env_truncated(&wasi_env);
+                self.metrics.record_exec_timeout(duration_ms);
+                if truncated {
+                    self.metrics.record_output_truncated();
+                }
                 return Ok(ExecResponse {
                     stdout: read_env_stdout(&wasi_env),
                     stderr: read_env_stderr(&wasi_env),
                     exit_code: -1,
                     duration_ms,
-                    output_truncated: read_env_truncated(&wasi_env),
+                    output_truncated: truncated,
                     error: Some(format!("Execution timed out after {timeout_secs}s")),
                 });
             }
             Err(_) => {
                 duration_ms = start.elapsed().as_millis() as u64;
+                self.metrics.record_exec_error(duration_ms);
                 return Ok(ExecResponse {
                     stdout: String::new(),
                     stderr: String::new(),
@@ -633,23 +737,33 @@ impl AgentServer {
             }
         };
 
+        let truncated = read_env_truncated(&wasi_env);
+        if truncated {
+            self.metrics.record_output_truncated();
+        }
         match exec_result {
-            Ok(exit_code) => Ok(ExecResponse {
-                stdout: read_env_stdout(&wasi_env),
-                stderr: read_env_stderr(&wasi_env),
-                exit_code,
-                duration_ms,
-                output_truncated: read_env_truncated(&wasi_env),
-                error: None,
-            }),
-            Err(e) => Ok(ExecResponse {
-                stdout: read_env_stdout(&wasi_env),
-                stderr: read_env_stderr(&wasi_env),
-                exit_code: -1,
-                duration_ms,
-                output_truncated: read_env_truncated(&wasi_env),
-                error: Some(e.to_string()),
-            }),
+            Ok(exit_code) => {
+                self.metrics.record_exec_success(duration_ms);
+                Ok(ExecResponse {
+                    stdout: read_env_stdout(&wasi_env),
+                    stderr: read_env_stderr(&wasi_env),
+                    exit_code,
+                    duration_ms,
+                    output_truncated: truncated,
+                    error: None,
+                })
+            }
+            Err(e) => {
+                self.metrics.record_exec_error(duration_ms);
+                Ok(ExecResponse {
+                    stdout: read_env_stdout(&wasi_env),
+                    stderr: read_env_stderr(&wasi_env),
+                    exit_code: -1,
+                    duration_ms,
+                    output_truncated: truncated,
+                    error: Some(e.to_string()),
+                })
+            }
         }
     }
 
@@ -839,6 +953,7 @@ impl AgentServer {
         &self,
         request: Request,
         result: std::result::Result<T, ApiError>,
+        log: &ReqLog,
     ) -> Result<()> {
         let (status, body) = match result {
             Ok(data) => (200, serde_json::to_string(&data).unwrap_or_default()),
@@ -848,20 +963,35 @@ impl AgentServer {
                 (code, body)
             }
         };
+        self.send(request, status, body, "application/json", log)
+    }
+
+    fn respond_empty(&self, request: Request, status: u16, log: &ReqLog) -> Result<()> {
+        self.send(request, status, String::new(), "application/json", log)
+    }
+
+    /// Send a response with the given status/body/content-type, attaching CORS
+    /// and the `X-Request-Id` header, and emit the structured access-log line.
+    /// Every response in the server funnels through here so logging and the id
+    /// header are uniform across all routes and early returns.
+    fn send(
+        &self,
+        request: Request,
+        status: u16,
+        body: String,
+        content_type: &str,
+        log: &ReqLog,
+    ) -> Result<()> {
+        log.emit(status);
         let mut response = Response::from_string(body).with_status_code(StatusCode(status));
         for h in self.cors_headers() {
             response = response.with_header(h);
         }
-        request
-            .respond(response)
-            .map_err(|e| WasmrunError::from(format!("Response error: {e}")))
-    }
-
-    fn respond_empty(&self, request: Request, status: u16) -> Result<()> {
-        let mut response = Response::from_string("").with_status_code(StatusCode(status));
-        for h in self.cors_headers() {
-            response = response.with_header(h);
-        }
+        response = response.with_header(
+            Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap(),
+        );
+        response = response
+            .with_header(Header::from_bytes(&b"X-Request-Id"[..], log.id.as_bytes()).unwrap());
         request
             .respond(response)
             .map_err(|e| WasmrunError::from(format!("Response error: {e}")))
@@ -869,6 +999,60 @@ impl AgentServer {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
+
+/// Per-request context for the always-on structured access log and the
+/// `X-Request-Id` response header. One is built at the top of every request
+/// and carried through to whichever response path runs.
+struct ReqLog {
+    id: String,
+    method: String,
+    path: String,
+    /// Authenticated tenant id, or `"-"` in open mode / before auth resolves.
+    tenant: String,
+    start: Instant,
+}
+
+impl ReqLog {
+    /// Emit the one-line `key=value` access record to stderr (always on).
+    /// Greppable and dependency-free; `--verbose` adds the request-received
+    /// line separately at the top of `handle_request`.
+    fn emit(&self, status: u16) {
+        let dur_ms = self.start.elapsed().as_millis();
+        let ts = chrono::Utc::now().to_rfc3339();
+        eprintln!(
+            "ts={ts} id={id} method={method} path={path} status={status} dur_ms={dur_ms} tenant={tenant}",
+            id = self.id,
+            method = self.method,
+            path = self.path,
+            tenant = self.tenant,
+        );
+    }
+}
+
+/// Generate a short random hex request id (16 chars) for access logs and the
+/// `X-Request-Id` header. Mirrors the session-id generator's xorshift mixing;
+/// not cryptographically secure — only needs to be unique enough to correlate
+/// a log line with a response.
+fn generate_request_id() -> String {
+    use std::sync::atomic::AtomicU64;
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    let mut state = nanos ^ (count.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    let mut s = String::with_capacity(16);
+    for _ in 0..8 {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        s.push_str(&format!("{:02x}", state & 0xFF));
+    }
+    s
+}
 
 /// Format a memory page count as a human-readable MB string for the banner.
 fn fmt_pages_mb(pages: Option<u32>) -> String {
@@ -1084,6 +1268,24 @@ mod tests {
         let mut f = tempfile::NamedTempFile::new().unwrap();
         std::io::Write::write_all(&mut f, toml.as_bytes()).unwrap();
         AuthConfig::load(f.path()).unwrap()
+    }
+
+    /// An open-mode (no-auth) server bound to a specific `port`, for HTTP tests.
+    fn open_server(port: u16) -> AgentServer {
+        AgentServer::new(AgentConfig {
+            port,
+            session_config: SessionConfig {
+                default_timeout: Duration::from_secs(60),
+                max_sessions: 10,
+                cleanup_interval: Duration::from_secs(300),
+                limits: crate::agent::limits::ResourceLimits::default(),
+            },
+            allow_cors: true,
+            verbose: false,
+            max_body_bytes: Some(32 * 1024 * 1024),
+            max_concurrent_exec: 100,
+            auth: None,
+        })
     }
 
     /// A server on `port` with auth enabled for the given `(key, tenant_id)` pairs.
@@ -2355,6 +2557,238 @@ mod tests {
                     .call()
             ),
             200
+        );
+    }
+
+    // ── Observability / metrics (0.20.5) ──────────────────────────
+
+    #[test]
+    fn test_metrics_exec_success_recorded() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        let work_dir = server
+            .session_manager
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
+            .unwrap();
+        std::fs::write(work_dir.join("hello.wasm"), hello_wasm()).unwrap();
+
+        server
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#, None)
+            .unwrap();
+
+        let v = server.metrics_json();
+        assert_eq!(v["exec_total"]["success"], 1);
+        assert_eq!(v["exec_total"]["error"], 0);
+        assert_eq!(v["exec_total"]["timeout"], 0);
+        assert_eq!(v["exec_duration_ms_count"], 1);
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_metrics_session_created_and_active_gauge() {
+        let server = test_server();
+        let a = server.handle_create_session().unwrap().session_id;
+        let _b = server.handle_create_session().unwrap().session_id;
+
+        let v = server.metrics_json();
+        assert_eq!(v["sessions_created_total"], 2);
+        assert_eq!(v["sessions_active"], 2);
+
+        // Destroying one drops the active gauge but not the cumulative counter.
+        server.handle_delete_session(&a, None).unwrap();
+        let v = server.metrics_json();
+        assert_eq!(v["sessions_created_total"], 2);
+        assert_eq!(v["sessions_active"], 1);
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_metrics_concurrency_rejection_recorded() {
+        let server = test_server_with_concurrency(1);
+        let id = server.handle_create_session().unwrap().session_id;
+        let work_dir = server
+            .session_manager
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
+            .unwrap();
+        std::fs::write(work_dir.join("hello.wasm"), hello_wasm()).unwrap();
+
+        // Hold the only slot so the exec is rejected with 429.
+        let held = server.exec_slots.try_acquire().unwrap();
+        let err = server
+            .handle_exec(&id, r#"{"wasm_path": "hello.wasm"}"#, None)
+            .unwrap_err();
+        assert_eq!(err.status_code(), 429);
+        drop(held);
+
+        let v = server.metrics_json();
+        assert_eq!(v["exec_rejected_total"]["concurrency"], 1);
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_metrics_json_includes_per_session_in_open_mode() {
+        let server = test_server(); // open mode (auth = None)
+        let id = server.handle_create_session().unwrap().session_id;
+        server
+            .handle_write_file(&id, r#"{"path": "a.txt", "content": "hello"}"#, None)
+            .unwrap();
+
+        let v = server.metrics_json();
+        let sessions = v["sessions"].as_array().expect("per-session rows present");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["id"], id);
+        assert!(sessions[0]["disk_bytes"].as_u64().unwrap() >= 5); // "hello"
+                                                                   // Aggregate disk gauge reflects the written file too.
+        assert!(v["sessions_disk_bytes"].as_u64().unwrap() >= 5);
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_metrics_json_omits_per_session_in_auth_mode() {
+        // Per-session rows are withheld in auth mode (Q2: aggregates only).
+        let server = auth_server(0, &[("key_a", "alice")]);
+        let id = server
+            .handle_create_session_with_body("", Some("alice"))
+            .unwrap()
+            .session_id;
+        server
+            .handle_write_file(&id, r#"{"path": "a.txt", "content": "hi"}"#, Some("alice"))
+            .unwrap();
+
+        let v = server.metrics_json();
+        assert!(
+            v.get("sessions").is_none(),
+            "per-session rows must be hidden in auth mode"
+        );
+        // Global aggregates are still present.
+        assert_eq!(v["sessions_active"], 1);
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_metrics_prometheus_render_contains_families() {
+        let server = test_server();
+        let _ = server.handle_create_session().unwrap();
+        let text = server.metrics_prometheus();
+        assert!(text.contains("# TYPE wasmrun_agent_exec_total counter"));
+        assert!(text.contains("wasmrun_agent_sessions_created_total 1"));
+        assert!(text.contains("wasmrun_agent_sessions_active 1"));
+        assert!(text.contains("# TYPE wasmrun_agent_sessions_active gauge"));
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Spin up a real server on `port` and wait until it accepts connections.
+    fn wait_until_ready(port: u16) {
+        let probe = format!("http://127.0.0.1:{port}/api/v1/metrics");
+        for _ in 0..100 {
+            match ureq::get(&probe).call() {
+                Err(ureq::Error::Io(_)) => std::thread::sleep(Duration::from_millis(20)),
+                _ => break,
+            }
+        }
+    }
+
+    #[test]
+    fn test_metrics_over_http_open_mode() {
+        use std::io::Read;
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        std::thread::spawn(move || {
+            let _ = open_server(port).start();
+        });
+        wait_until_ready(port);
+
+        let metrics = format!("http://127.0.0.1:{port}/api/v1/metrics");
+
+        // Default: Prometheus text exposition + X-Request-Id header.
+        let resp = ureq::get(&metrics).call().unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let ctype = resp
+            .headers()
+            .get("Content-Type")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(ctype.starts_with("text/plain"), "got content-type {ctype}");
+        assert!(
+            resp.headers().get("X-Request-Id").is_some(),
+            "X-Request-Id header missing"
+        );
+        let mut resp = resp;
+        let mut body = String::new();
+        resp.body_mut()
+            .as_reader()
+            .read_to_string(&mut body)
+            .unwrap();
+        assert!(body.contains("wasmrun_agent_exec_total"));
+        assert!(body.contains("# HELP wasmrun_agent_sessions_active"));
+
+        // JSON variant parses and carries the same families.
+        let mut resp = ureq::get(format!("{metrics}?format=json")).call().unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let ctype = resp
+            .headers()
+            .get("Content-Type")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(ctype.starts_with("application/json"), "got {ctype}");
+        let mut body = String::new();
+        resp.body_mut()
+            .as_reader()
+            .read_to_string(&mut body)
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(v["exec_total"].is_object());
+        assert!(v["sessions_active"].is_u64());
+    }
+
+    #[test]
+    fn test_metrics_auth_gated_and_counts_unauthorized() {
+        use std::io::Read;
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        std::thread::spawn(move || {
+            let _ = auth_server(port, &[("key_a", "alice")]).start();
+        });
+
+        let base = format!("http://127.0.0.1:{port}/api/v1");
+        // Wait until accepting (a 401 counts as ready).
+        for _ in 0..100 {
+            match ureq::get(format!("{base}/metrics")).call() {
+                Err(ureq::Error::Io(_)) => std::thread::sleep(Duration::from_millis(20)),
+                _ => break,
+            }
+        }
+
+        // No key → 401 (this also bumps the unauthorized rejection counter).
+        assert_eq!(
+            http_status(ureq::get(format!("{base}/metrics")).call()),
+            401
+        );
+
+        // Valid key → 200 JSON; unauthorized counter recorded; no per-session rows.
+        let mut resp = ureq::get(format!("{base}/metrics?format=json"))
+            .header("Authorization", "Bearer key_a")
+            .call()
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let mut body = String::new();
+        resp.body_mut()
+            .as_reader()
+            .read_to_string(&mut body)
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert!(v["exec_rejected_total"]["unauthorized"].as_u64().unwrap() >= 1);
+        assert!(
+            v.get("sessions").is_none(),
+            "auth mode must not expose per-session rows"
         );
     }
 }

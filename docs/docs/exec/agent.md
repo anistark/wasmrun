@@ -26,7 +26,7 @@ wasmrun agent [OPTIONS]
 | `--max-body` | `32` | Maximum accepted request body size (MB) |
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
 | `--allow-cors` | off | Enable wildcard CORS |
-| `-v, --verbose` | off | Log all incoming requests |
+| `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted — see [Observability](./usage/agent-observability.md)) |
 | `--auth <PATH>` | off | Path to a TOML auth config; enables API-key auth & tenant isolation (omit = open) |
 | `--hash-key <KEY>` | — | Print `sha256(KEY)` for the auth config and exit (does not start the server) |
 
@@ -177,6 +177,17 @@ Available tools: `create_session`, `execute_code`, `write_file`, `read_file`, `l
 
 Each tool includes a description, parameter schema with types, and required fields — ready to pass to an LLM as function definitions.
 
+## Observability
+
+The server exposes runtime metrics at `GET /api/v1/metrics` (Prometheus text by default, JSON with `?format=json`) and writes a structured, request-id-tagged access-log line to stderr for every request. See [Observability](./usage/agent-observability.md) for the full metric set and log format.
+
+```sh
+curl http://localhost:8430/api/v1/metrics
+# wasmrun_agent_exec_total{result="success"} 12
+# wasmrun_agent_sessions_active 3
+# ...
+```
+
 ## API Reference
 
 See the usage sub-pages for full endpoint documentation:
@@ -185,3 +196,4 @@ See the usage sub-pages for full endpoint documentation:
 - [Execution](./usage/agent-exec.md) — run WASM with timeout and structured output
 - [File Operations](./usage/agent-files.md) — write, read, list, delete
 - [Environment Variables](./usage/agent-environment.md) — set and get per-session env
+- [Observability](./usage/agent-observability.md) — metrics endpoint and access log
