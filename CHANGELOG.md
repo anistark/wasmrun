@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Agent Observability**: runtime metrics and a structured access log so an operator can see health, load, and failures without a debugger
+  - `GET /api/v1/metrics` returns **Prometheus** text exposition by default (scrape-ready) or JSON with `?format=json`
+  - Counters: executions by result (`success`/`error`/`timeout`), execution duration sum + count (for an average), output-truncated count, sessions created, and requests rejected before doing work by reason (`concurrency` 429, `payload` 413, `unauthorized` 401)
+  - Live gauges sampled at scrape time (no mirrored state, no drift): active sessions, total sessions, in-flight execs, and total session disk footprint
+  - Every request emits a one-line `key=value` access log to stderr (`ts`/`id`/`method`/`path`/`status`/`dur_ms`/`tenant`) and carries an `X-Request-Id` response header for correlation; `--verbose` adds a request-received line
+  - When `--auth` is enabled, `/metrics` is gated like any endpoint and limited to **global aggregates** — per-session rows (disk + configured memory cap, JSON only) are exposed solely in open mode, so no tenant can infer another's footprint
+  - Dependency-free: hand-rolled `AtomicU64` registry and exposition text, no new metrics crate
 - **Authentication & Tenant Isolation (opt-in)**: run one agent server shared by independent tenants who authenticate with API keys and cannot see each other's sessions
   - `--auth <path>` enables API-key auth from a TOML config of `[[tenants]]` (`id` + `key_sha256`); without it the server stays fully **open**, exactly as before (back-compat — existing clients need no header)
   - Keys are stored **SHA-256-hashed** (hex), never in plaintext; `--hash-key <KEY>` prints the hash and exits so operators can populate the config
