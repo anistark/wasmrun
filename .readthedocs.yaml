@@ -7,10 +7,11 @@ build:
   commands:
     # Install pnpm
     - npm install -g pnpm@latest
-    # Install dependencies
-    - cd docs && pnpm install --frozen-lockfile
+    # Install dependencies. STRICT_DEP_BUILDS=false stops pnpm 11 from failing
+    # the build over ignored dependency build scripts (core-js postinstall).
+    - cd docs && PNPM_CONFIG_STRICT_DEP_BUILDS=false pnpm install --frozen-lockfile
     # Build Docusaurus site
-    - cd docs && pnpm run build
+    - cd docs && PNPM_CONFIG_STRICT_DEP_BUILDS=false pnpm run build
     # Move built files to _readthedocs/html for RTD
     - mkdir -p _readthedocs/html
     - cp -r docs/build/* _readthedocs/html/
