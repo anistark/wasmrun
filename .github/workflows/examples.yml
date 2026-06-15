@@ -14,7 +14,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # windows-latest is temporarily disabled: external/library plugins
+        # (e.g. waspy for python) can't be dynamically loaded on Windows yet,
+        # so plugin-based examples can't pass there. Tracked in #85.
+        # Re-add 'windows-latest' once dynamic loading works on Windows.
+        os: [ubuntu-latest]
         example:
           - name: rust-hello
             lang: rust
@@ -66,16 +70,19 @@ jobs:
           ${{ runner.os }}-target-examples-
 
     # Install language-specific dependencies
+    # TinyGo lags the Go release cycle, so pin Go to a version the pinned
+    # TinyGo below actually supports. 'stable' installs the newest Go (e.g.
+    # 1.26), which TinyGo rejects: "requires go version 1.19 through 1.23".
     - name: Install Go
       if: matrix.example.lang == 'go'
       uses: actions/setup-go@v5
       with:
-        go-version: 'stable'
+        go-version: '1.24'
 
     - name: Install TinyGo (Linux)
       if: matrix.example.lang == 'go' && runner.os == 'Linux'
       run: |
-        TINYGO_VERSION=0.33.0
+        TINYGO_VERSION=0.37.0
         wget -q "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo${TINYGO_VERSION}.linux-amd64.tar.gz"
         tar -xzf "tinygo${TINYGO_VERSION}.linux-amd64.tar.gz"
         echo "$(pwd)/tinygo/bin" >> $GITHUB_PATH
@@ -84,7 +91,7 @@ jobs:
     - name: Install TinyGo (Windows)
       if: matrix.example.lang == 'go' && runner.os == 'Windows'
       run: |
-        $version = "0.33.0"
+        $version = "0.37.0"
         $url = "https://github.com/tinygo-org/tinygo/releases/download/v${version}/tinygo${version}.windows-amd64.zip"
         Invoke-WebRequest -Uri $url -OutFile "tinygo.zip"
         Expand-Archive -Path "tinygo.zip" -DestinationPath "."

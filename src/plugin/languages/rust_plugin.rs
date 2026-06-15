@@ -186,6 +186,12 @@ impl WasmBuilder for RustPlugin {
                 println!("🔗 Running wasm-bindgen...");
             }
 
+            // Run wasm-bindgen from wasmrun's own working directory, not the
+            // project directory: both `wasm_file` and `config.output_dir` are
+            // relative to wasmrun's cwd (as are the .exists() checks above and
+            // below). Setting the cwd to `config.project_path` would re-prefix
+            // those paths with the project path, so wasm-bindgen would look for
+            // `<project>/<project>/target/...` and fail with "No such file".
             let bindgen_output = CommandExecutor::execute_command(
                 "wasm-bindgen",
                 &[
@@ -196,7 +202,7 @@ impl WasmBuilder for RustPlugin {
                     "--no-typescript",
                     wasm_file.to_str().unwrap_or_default(),
                 ],
-                &config.project_path,
+                ".",
                 config.verbose,
             )?;
 
