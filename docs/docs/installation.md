@@ -73,6 +73,34 @@ sudo yum install ./wasmrun-*.rpm
 - Rocky Linux 8+
 - AlmaLinux 8+
 
+### Arch Linux (AUR)
+
+For Arch Linux and Arch-based distributions, Wasmrun is available on the [AUR](https://aur.archlinux.org/packages/wasmrun-bin) as a community-maintained package that installs the prebuilt binary.
+
+Using an AUR helper such as [`yay`](https://github.com/Jguer/yay) or [`paru`](https://github.com/Morganamilo/paru):
+
+```sh
+yay -S wasmrun-bin
+# or
+paru -S wasmrun-bin
+```
+
+Or install manually with `makepkg`:
+
+```sh
+git clone https://aur.archlinux.org/wasmrun-bin.git
+cd wasmrun-bin
+makepkg -si
+```
+
+**Supported distributions:**
+- Arch Linux
+- Manjaro
+- EndeavourOS
+- Other Arch-based distributions
+
+**Note:** The AUR package is maintained by the community and may lag slightly behind the latest release.
+
 ## From Source
 
 Build and install Wasmrun from source for the latest development version or if prebuilt packages aren't available for your platform:
@@ -153,6 +181,14 @@ For DEB/RPM packages:
 1. Download the latest package from GitHub Releases
 2. Install it (will upgrade existing installation)
 
+For the AUR package, update with your AUR helper:
+
+```sh
+yay -S wasmrun-bin
+# or
+paru -S wasmrun-bin
+```
+
 ### From Source
 
 ```sh
@@ -226,6 +262,12 @@ sudo apt remove wasmrun
 sudo rpm -e wasmrun
 # or
 sudo dnf remove wasmrun
+```
+
+### Arch Linux (AUR)
+
+```sh
+sudo pacman -R wasmrun-bin
 ```
 
 ## Next Steps
