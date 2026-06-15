@@ -3,6 +3,25 @@ use crate::plugin::registry::PluginRegistry;
 use crate::utils::{PluginUtils, SystemUtils};
 use std::path::{Path, PathBuf};
 
+/// Candidate dynamic-library file names for a plugin, in platform-preferred order.
+///
+/// Rust cdylibs are `lib<name>.so` / `lib<name>.dylib` on Unix, but on Windows
+/// the MSVC and MinGW toolchains drop the `lib` prefix and emit `<name>.dll`.
+/// Checking only `lib<name>.dll` is why `plugin install` failed on Windows with
+/// "Dynamic library not found after build".
+fn dynamic_lib_candidates(plugin_name: &str) -> Vec<String> {
+    if cfg!(target_os = "windows") {
+        vec![
+            format!("{plugin_name}.dll"),
+            format!("lib{plugin_name}.dll"),
+        ]
+    } else if cfg!(target_os = "macos") {
+        vec![format!("lib{plugin_name}.dylib")]
+    } else {
+        vec![format!("lib{plugin_name}.so")]
+    }
+}
+
 pub struct PluginInstaller;
 
 #[derive(Debug, Clone)]
@@ -230,10 +249,8 @@ impl PluginInstaller {
                 return true;
             }
 
-            let lib_extensions = ["so", "dylib", "dll"];
-            for ext in &lib_extensions {
-                let lib_path = plugin_dir.join(format!("lib{plugin_name}.{ext}"));
-                if lib_path.exists() {
+            for candidate in dynamic_lib_candidates(plugin_name) {
+                if plugin_dir.join(&candidate).exists() {
                     return true;
                 }
             }
@@ -371,19 +388,13 @@ crate-type = ["cdylib", "rlib"]
             return Err(WasmrunError::from(format!("Build failed: {stderr}")));
         }
 
-        // Check if the .dylib/.so file was created
+        // Check that the dynamic library was produced (platform-specific name).
         let target_dir = plugin_dir.join("target").join("release");
-        let lib_extensions = if cfg!(target_os = "macos") {
-            vec!["dylib"]
-        } else if cfg!(target_os = "windows") {
-            vec!["dll"]
-        } else {
-            vec!["so"]
-        };
+        let candidates = dynamic_lib_candidates(plugin_name);
 
         let mut lib_found = false;
-        for ext in &lib_extensions {
-            let lib_path = target_dir.join(format!("lib{plugin_name}.{ext}"));
+        for candidate in &candidates {
+            let lib_path = target_dir.join(candidate);
             if lib_path.exists() {
                 println!("✅ Dynamic library built: {}", lib_path.display());
                 lib_found = true;
@@ -393,8 +404,8 @@ crate-type = ["cdylib", "rlib"]
 
         if !lib_found {
             return Err(WasmrunError::from(format!(
-                "Dynamic library not found after build. Expected lib{}.{{dylib,so,dll}} in {}",
-                plugin_name,
+                "Dynamic library not found after build. Expected one of [{}] in {}",
+                candidates.join(", "),
                 target_dir.display()
             )));
         }
