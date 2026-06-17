@@ -341,6 +341,7 @@ impl SessionManager {
             self.config.default_timeout,
             self.config.limits.clone(),
             None,
+            None,
         )
     }
 
@@ -349,27 +350,43 @@ impl SessionManager {
     /// Returns the session ID on success.
     #[allow(dead_code)] // Used by tests; HTTP path uses create_session_with_limits.
     pub fn create_session_with_timeout(&self, timeout: Duration) -> Result<String, SessionError> {
-        self.create_session_with_limits(timeout, self.config.limits.clone(), None)
+        self.create_session_with_limits(timeout, self.config.limits.clone(), None, None)
     }
 
     /// Create a new session with a custom timeout, resource limits, and owner.
     ///
     /// `owner` is the authenticated tenant id, or `None` in open mode.
+    /// `owner_session_cap` is the tenant's per-tenant session ceiling (auth mode
+    /// only; `None` = no per-tenant cap). It is enforced *in addition to* the
+    /// server-wide `max_sessions`, counting only the calling tenant's own
+    /// non-expired sessions.
     /// Returns the session ID on success.
     pub fn create_session_with_limits(
         &self,
         timeout: Duration,
         limits: ResourceLimits,
         owner: Option<String>,
+        owner_session_cap: Option<usize>,
     ) -> Result<String, SessionError> {
         let mut sessions = self.sessions.write().map_err(|_| SessionError::LockError)?;
 
-        // Enforce max sessions limit (after removing expired ones)
+        // Enforce server-wide max sessions limit (ignoring expired ones).
         let active_count = sessions.values().filter(|s| !s.is_expired()).count();
         if active_count >= self.config.max_sessions {
             return Err(SessionError::MaxSessionsReached {
                 max: self.config.max_sessions,
             });
+        }
+
+        // Enforce the calling tenant's own session ceiling.
+        if let (Some(cap), Some(tenant)) = (owner_session_cap, owner.as_deref()) {
+            let owned = sessions
+                .values()
+                .filter(|s| !s.is_expired() && s.owner() == Some(tenant))
+                .count();
+            if owned >= cap {
+                return Err(SessionError::TenantMaxSessionsReached { max: cap });
+            }
         }
 
         let session = Session::new(timeout, limits, owner)?;
@@ -590,8 +607,10 @@ pub enum SessionError {
     NotFound { id: String },
     /// Session has expired.
     Expired { id: String },
-    /// Maximum concurrent sessions reached.
+    /// Maximum concurrent sessions reached (server-wide).
     MaxSessionsReached { max: usize },
+    /// The calling tenant's per-tenant session cap is reached.
+    TenantMaxSessionsReached { max: usize },
     /// I/O error during session setup/cleanup.
     IoError { message: String },
     /// Internal lock poisoned.
@@ -605,6 +624,9 @@ impl std::fmt::Display for SessionError {
             SessionError::Expired { id } => write!(f, "Session expired: {id}"),
             SessionError::MaxSessionsReached { max } => {
                 write!(f, "Maximum concurrent sessions reached: {max}")
+            }
+            SessionError::TenantMaxSessionsReached { max } => {
+                write!(f, "Tenant session limit reached: {max}")
             }
             SessionError::IoError { message } => write!(f, "Session I/O error: {message}"),
             SessionError::LockError => write!(f, "Internal lock error"),
@@ -1209,6 +1231,7 @@ mod tests {
                 Duration::from_secs(60),
                 ResourceLimits::default(),
                 Some("alice".to_string()),
+                None,
             )
             .unwrap();
 
@@ -1253,5 +1276,55 @@ mod tests {
             Err(SessionError::NotFound { .. })
         ));
         manager.destroy_session(&id, None).unwrap();
+    }
+
+    #[test]
+    fn test_per_tenant_session_cap() {
+        let manager = SessionManager::with_config(test_config());
+        let timeout = Duration::from_secs(60);
+        let mk = |owner: &str, cap: Option<usize>| {
+            manager.create_session_with_limits(
+                timeout,
+                ResourceLimits::default(),
+                Some(owner.to_string()),
+                cap,
+            )
+        };
+
+        // alice is capped at 2 of her own sessions.
+        let a1 = mk("alice", Some(2)).unwrap();
+        let _a2 = mk("alice", Some(2)).unwrap();
+        assert!(matches!(
+            mk("alice", Some(2)),
+            Err(SessionError::TenantMaxSessionsReached { max: 2 })
+        ));
+
+        // bob's own sessions are counted separately — alice's cap doesn't touch him.
+        assert!(mk("bob", Some(2)).is_ok());
+        assert!(mk("bob", Some(2)).is_ok());
+
+        // Freeing one of alice's sessions lets her create again.
+        manager.destroy_session(&a1, Some("alice")).unwrap();
+        assert!(mk("alice", Some(2)).is_ok());
+
+        manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_no_per_tenant_cap_allows_many() {
+        let manager = SessionManager::with_config(test_config());
+        let timeout = Duration::from_secs(60);
+        // owner_session_cap = None ⇒ only the server-wide max_sessions applies.
+        for _ in 0..5 {
+            manager
+                .create_session_with_limits(
+                    timeout,
+                    ResourceLimits::default(),
+                    Some("alice".to_string()),
+                    None,
+                )
+                .unwrap();
+        }
+        manager.destroy_all().unwrap();
     }
 }

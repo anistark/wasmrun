@@ -32,6 +32,9 @@ pub struct Metrics {
     rejected_concurrency: AtomicU64,
     rejected_payload: AtomicU64,
     rejected_unauthorized: AtomicU64,
+    /// Requests/execs rejected by a per-tenant rate cap (session count,
+    /// concurrent exec, or requests/min).
+    rejected_rate: AtomicU64,
 }
 
 /// Point-in-time gauge values, sampled from live state at scrape time rather
@@ -95,6 +98,10 @@ impl Metrics {
         self.rejected_unauthorized.fetch_add(1, ORDER);
     }
 
+    pub fn record_rejected_rate(&self) {
+        self.rejected_rate.fetch_add(1, ORDER);
+    }
+
     /// Consistent-enough snapshot of all counters for rendering.
     fn snapshot(&self) -> Snapshot {
         Snapshot {
@@ -107,6 +114,7 @@ impl Metrics {
             rejected_concurrency: self.rejected_concurrency.load(ORDER),
             rejected_payload: self.rejected_payload.load(ORDER),
             rejected_unauthorized: self.rejected_unauthorized.load(ORDER),
+            rejected_rate: self.rejected_rate.load(ORDER),
         }
     }
 
@@ -167,6 +175,7 @@ impl Metrics {
                 (&[("reason", "concurrency")], s.rejected_concurrency),
                 (&[("reason", "payload")], s.rejected_payload),
                 (&[("reason", "unauthorized")], s.rejected_unauthorized),
+                (&[("reason", "rate")], s.rejected_rate),
             ],
         );
         metric(
@@ -224,6 +233,7 @@ impl Metrics {
                 "concurrency": s.rejected_concurrency,
                 "payload": s.rejected_payload,
                 "unauthorized": s.rejected_unauthorized,
+                "rate": s.rejected_rate,
             },
             "sessions_active": g.sessions_active,
             "sessions_total": g.sessions_total,
@@ -247,6 +257,7 @@ struct Snapshot {
     rejected_concurrency: u64,
     rejected_payload: u64,
     rejected_unauthorized: u64,
+    rejected_rate: u64,
 }
 
 /// Append one Prometheus metric family: `# HELP`, `# TYPE`, then one sample
@@ -314,6 +325,8 @@ mod tests {
         m.record_rejected_concurrency();
         m.record_rejected_payload();
         m.record_rejected_unauthorized();
+        m.record_rejected_rate();
+        m.record_rejected_rate();
 
         let s = m.snapshot();
         assert_eq!(s.exec_success, 2);
@@ -325,6 +338,14 @@ mod tests {
         assert_eq!(s.rejected_concurrency, 1);
         assert_eq!(s.rejected_payload, 1);
         assert_eq!(s.rejected_unauthorized, 1);
+        assert_eq!(s.rejected_rate, 2);
+
+        // The `rate` reason surfaces in both exposition formats.
+        let g = gauges();
+        assert!(m
+            .render_prometheus(&g)
+            .contains("wasmrun_agent_exec_rejected_total{reason=\"rate\"} 2"));
+        assert_eq!(m.render_json(&g, None)["exec_rejected_total"]["rate"], 2);
     }
 
     #[test]

@@ -126,6 +126,9 @@ pub enum ApiError {
     PayloadTooLarge(usize),
     /// Too many concurrent executions in flight. Carries the configured cap.
     TooManyRequests(usize),
+    /// A per-tenant rate limit was exceeded (session count, concurrent exec, or
+    /// requests/min). Carries a human-readable reason.
+    RateLimited(String),
     #[allow(dead_code)] // TODO: Used when exec timeout triggers API-level error
     Timeout,
     Internal(String),
@@ -136,7 +139,9 @@ impl ApiError {
         match self {
             ApiError::SessionNotFound(_) | ApiError::NotFound(_) => 404,
             ApiError::SessionExpired(_) => 410,
-            ApiError::MaxSessions(_) | ApiError::TooManyRequests(_) => 429,
+            ApiError::MaxSessions(_) | ApiError::TooManyRequests(_) | ApiError::RateLimited(_) => {
+                429
+            }
             ApiError::BadRequest(_) => 400,
             ApiError::Unauthorized(_) => 401,
             ApiError::PayloadTooLarge(_) => 413,
@@ -168,6 +173,7 @@ impl std::fmt::Display for ApiError {
             ApiError::TooManyRequests(max) => {
                 write!(f, "Too many concurrent executions: limit is {max}")
             }
+            ApiError::RateLimited(reason) => write!(f, "Rate limit exceeded: {reason}"),
             ApiError::Timeout => write!(f, "Execution timed out"),
             ApiError::Internal(msg) => write!(f, "Internal error: {msg}"),
         }
