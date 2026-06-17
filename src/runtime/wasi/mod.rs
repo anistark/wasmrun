@@ -53,6 +53,14 @@ pub struct WasiEnv {
     /// Cap on the size of any single file written via WASI `fd_write`.
     /// `None` = unlimited. Enforced in the syscall layer.
     max_file_size: Option<u64>,
+    /// Cap on the session's total on-disk usage (bytes). `None` = unlimited.
+    /// Enforced in the syscall layer against the running `disk_used` counter.
+    max_disk_bytes: Option<u64>,
+    /// Running estimate of the session work-dir's total file bytes, maintained
+    /// incrementally by the file syscalls (write adds, unlink/truncate subtract)
+    /// so the cap can be checked in O(1) without walking the tree each write.
+    /// Seeded from an actual directory scan at session start / before each exec.
+    disk_used: u64,
 }
 
 impl WasiEnv {
@@ -100,6 +108,8 @@ impl WasiEnv {
             max_output_bytes: None,
             output_truncated: false,
             max_file_size: None,
+            max_disk_bytes: None,
+            disk_used: 0,
         }
     }
 
@@ -165,6 +175,37 @@ impl WasiEnv {
     /// The per-file write size cap, if any.
     pub fn max_file_size(&self) -> Option<u64> {
         self.max_file_size
+    }
+
+    /// Configure the total-disk-usage cap (`None` = unlimited).
+    pub fn set_max_disk_bytes(&mut self, max: Option<u64>) {
+        self.max_disk_bytes = max;
+    }
+
+    /// The total-disk-usage cap, if any.
+    pub fn max_disk_bytes(&self) -> Option<u64> {
+        self.max_disk_bytes
+    }
+
+    /// Reset the running disk-usage counter to a measured value (e.g. from an
+    /// actual directory scan at session start or before an exec).
+    pub fn seed_disk_used(&mut self, bytes: u64) {
+        self.disk_used = bytes;
+    }
+
+    /// Current running disk-usage estimate (bytes).
+    pub fn disk_used(&self) -> u64 {
+        self.disk_used
+    }
+
+    /// Record `bytes` of growth against the running disk-usage counter.
+    pub fn add_disk_used(&mut self, bytes: u64) {
+        self.disk_used = self.disk_used.saturating_add(bytes);
+    }
+
+    /// Release `bytes` from the running disk-usage counter (file shrink/unlink).
+    pub fn sub_disk_used(&mut self, bytes: u64) {
+        self.disk_used = self.disk_used.saturating_sub(bytes);
     }
 
     /// Whether captured output was dropped because the output cap was reached.
@@ -1007,6 +1048,18 @@ mod tests {
         let fd_entry = env.get_fd(WASI_FIRST_PREOPEN_FD).unwrap();
         assert_eq!(fd_entry.kind, FdKind::PreopenDir);
         assert_eq!(fd_entry.guest_path, "/sandbox");
+    }
+
+    #[test]
+    fn test_disk_used_counter_saturates() {
+        let mut env = WasiEnv::new();
+        assert_eq!(env.disk_used(), 0);
+        env.seed_disk_used(5);
+        env.add_disk_used(10);
+        assert_eq!(env.disk_used(), 15);
+        // Subtracting past zero floors at zero rather than underflowing.
+        env.sub_disk_used(100);
+        assert_eq!(env.disk_used(), 0);
     }
 
     #[test]

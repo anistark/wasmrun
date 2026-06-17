@@ -129,6 +129,10 @@ impl Session {
         let mut wasi_env = WasiEnv::new().with_preopen("/", work_dir);
         wasi_env.set_max_output_bytes(limits.max_output_bytes);
         wasi_env.set_max_file_size(limits.max_file_size);
+        wasi_env.set_max_disk_bytes(limits.max_disk_bytes);
+        // Seed the running disk counter from the work dir's current footprint
+        // (≈0 for a fresh session, but correct if it was pre-populated).
+        wasi_env.seed_disk_used(crate::agent::limits::dir_size(work_dir));
         wasi_env
     }
 

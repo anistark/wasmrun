@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WASI-Layer Disk Accounting**: bound a session's total disk usage against writes made by sandboxed code itself
+  - `fd_write` now checks the session's total on-disk footprint against `--max-disk` (per-session `max_disk_mb`) and rejects an over-quota write with `EDQUOT`, in addition to the existing per-file `EFBIG` cap
+  - Enforced via a running per-session counter in the WASI environment (O(1) per write — no directory walk in tight write loops); `path_unlink_file` and truncating `path_open` return freed bytes to the quota
+  - The counter is seeded from the work-dir's real footprint at session start and re-seeded before each exec, so agent-side file writes between execs are reflected
+  - Previously, sandbox writes were bounded only indirectly (per-file size × fuel); agent-side writes already checked total disk and still do
 - **Live Auth-Config Reload**: pick up tenant/key/rate/limit changes without restarting the server
   - The `--auth` file is watched for modification; on change it is reloaded and the live config is hot-swapped atomically (each request reads a cheap snapshot, so a concurrent reload is invisible mid-request)
   - A malformed or invalid edit is **logged and ignored** — the previous config is kept, so a bad edit never crashes the server or silently drops auth

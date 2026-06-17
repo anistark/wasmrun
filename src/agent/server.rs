@@ -813,6 +813,12 @@ impl AgentServer {
                     env.add_env(k.clone(), v.clone());
                 }
             }
+            // Re-seed the disk counter from the work dir's actual footprint so
+            // agent-side file writes since the last exec are reflected. Within
+            // the exec the counter is then maintained incrementally (O(1)/write).
+            if env.max_disk_bytes().is_some() {
+                env.seed_disk_used(dir_size(&work_dir));
+            }
         }
 
         let timeout_secs = req.timeout.unwrap_or(DEFAULT_EXEC_TIMEOUT_SECS);

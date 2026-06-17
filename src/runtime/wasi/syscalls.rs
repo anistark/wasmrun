@@ -8,6 +8,7 @@ use super::{FdKind, WasiEnv, WASI_STDERR_FD, WASI_STDIN_FD, WASI_STDOUT_FD};
 
 pub const WASI_ESUCCESS: i32 = 0;
 pub const WASI_EBADF: i32 = 8;
+pub const WASI_EDQUOT: i32 = 19;
 pub const WASI_EEXIST: i32 = 20;
 pub const WASI_EFBIG: i32 = 27;
 pub const WASI_EINVAL: i32 = 28;
@@ -115,6 +116,7 @@ pub fn fd_write(
                     Err(_) => return WASI_EIO,
                 };
                 let max_file_size = e.max_file_size();
+                let max_disk = e.max_disk_bytes();
                 let (host_path, offset) = match e.get_fd(fd) {
                     Some(entry) if entry.kind == FdKind::File => {
                         (entry.host_path.clone(), entry.offset)
@@ -122,19 +124,32 @@ pub fn fd_write(
                     Some(_) => return WASI_EISDIR,
                     None => return WASI_EBADF,
                 };
-                // Enforce the per-file size cap: the file's resulting size is the
-                // larger of its current size and the end of this write.
-                if let Some(max) = max_file_size {
+                // Enforce the per-file and total-disk caps. The file's resulting
+                // size is the larger of its current size and the end of this
+                // write; the disk delta is just the growth beyond the old size.
+                let mut disk_delta: u64 = 0;
+                if max_file_size.is_some() || max_disk.is_some() {
                     let existing = std::fs::metadata(&host_path).map(|m| m.len()).unwrap_or(0);
                     let projected = existing.max(offset + bytes.len() as u64);
-                    if projected > max {
-                        return WASI_EFBIG;
+                    if let Some(max) = max_file_size {
+                        if projected > max {
+                            return WASI_EFBIG;
+                        }
+                    }
+                    disk_delta = projected.saturating_sub(existing);
+                    if let Some(max) = max_disk {
+                        if e.disk_used().saturating_add(disk_delta) > max {
+                            return WASI_EDQUOT;
+                        }
                     }
                 }
                 match write_file_at(&host_path, offset, &bytes) {
                     Ok(n) => {
                         if let Some(fe) = e.get_fd_mut(fd) {
                             fe.offset += n as u64;
+                        }
+                        if max_disk.is_some() {
+                            e.add_disk_used(disk_delta);
                         }
                     }
                     Err(_) => return WASI_EIO,
@@ -501,8 +516,15 @@ pub fn path_open(
         return WASI_ENOENT;
     }
 
-    if trunc && host_path.is_file() && std::fs::File::create(&host_path).is_err() {
-        return WASI_EIO;
+    if trunc && host_path.is_file() {
+        // Truncation empties the file, so its bytes are returned to the quota.
+        let freed = std::fs::metadata(&host_path).map(|m| m.len()).unwrap_or(0);
+        if std::fs::File::create(&host_path).is_err() {
+            return WASI_EIO;
+        }
+        if e.max_disk_bytes().is_some() {
+            e.sub_disk_used(freed);
+        }
     }
 
     let kind = if host_path.is_dir() {
@@ -598,7 +620,7 @@ pub fn path_unlink_file(
         Err(e) => return e,
     };
 
-    let e = match env.lock() {
+    let mut e = match env.lock() {
         Ok(e) => e,
         Err(_) => return WASI_EIO,
     };
@@ -615,8 +637,15 @@ pub fn path_unlink_file(
         return WASI_EISDIR;
     }
 
+    // Capture the size first so the freed bytes can be returned to the quota.
+    let freed = std::fs::metadata(&host_path).map(|m| m.len()).unwrap_or(0);
     match std::fs::remove_file(&host_path) {
-        Ok(_) => WASI_ESUCCESS,
+        Ok(_) => {
+            if e.max_disk_bytes().is_some() {
+                e.sub_disk_used(freed);
+            }
+            WASI_ESUCCESS
+        }
         Err(_) => WASI_EIO,
     }
 }
@@ -1339,5 +1368,115 @@ mod tests {
         let errno = fd_write(fd, 0, 1, 300, &mut mem, &env);
         assert_eq!(errno, WASI_ESUCCESS);
         assert_eq!(std::fs::read(tmp.path().join("big.txt")).unwrap(), b"okay");
+    }
+
+    /// Open a fresh `O_CREAT` file at `name` and return its fd.
+    fn open_create(name: &str, env: &Arc<Mutex<WasiEnv>>, mem: &mut LinearMemory) -> u32 {
+        mem.write_bytes(100, name.as_bytes()).unwrap();
+        let errno = path_open(3, 100, name.len() as u32, WASI_O_CREAT, 0, 200, mem, env);
+        assert_eq!(errno, WASI_ESUCCESS);
+        mem.read_i32(200).unwrap() as u32
+    }
+
+    /// Write `data` to `fd` at its current offset, returning the syscall errno.
+    fn write_bytes_to(
+        fd: u32,
+        data: &[u8],
+        env: &Arc<Mutex<WasiEnv>>,
+        mem: &mut LinearMemory,
+    ) -> i32 {
+        mem.write_bytes(400, data).unwrap();
+        mem.write_i32(0, 400).unwrap(); // iovec buf_ptr
+        mem.write_i32(4, data.len() as i32).unwrap(); // iovec buf_len
+        fd_write(fd, 0, 1, 300, mem, env)
+    }
+
+    #[test]
+    fn test_fd_write_disk_quota_limit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        env.lock().unwrap().set_max_disk_bytes(Some(10));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        // a.txt = 6 bytes → disk_used = 6.
+        let fd_a = open_create("a.txt", &env, &mut mem);
+        assert_eq!(
+            write_bytes_to(fd_a, b"123456", &env, &mut mem),
+            WASI_ESUCCESS
+        );
+        assert_eq!(env.lock().unwrap().disk_used(), 6);
+
+        // b.txt: a 6-byte write would push total to 12 > 10 → EDQUOT, no change.
+        let fd_b = open_create("b.txt", &env, &mut mem);
+        assert_eq!(write_bytes_to(fd_b, b"123456", &env, &mut mem), WASI_EDQUOT);
+        assert_eq!(env.lock().unwrap().disk_used(), 6);
+
+        // A 4-byte write fits exactly (6 + 4 = 10).
+        assert_eq!(write_bytes_to(fd_b, b"okay", &env, &mut mem), WASI_ESUCCESS);
+        assert_eq!(env.lock().unwrap().disk_used(), 10);
+    }
+
+    #[test]
+    fn test_unlink_frees_disk_quota() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        env.lock().unwrap().set_max_disk_bytes(Some(10));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        let fd_a = open_create("a.txt", &env, &mut mem);
+        assert_eq!(
+            write_bytes_to(fd_a, b"12345678", &env, &mut mem),
+            WASI_ESUCCESS
+        );
+
+        // b.txt 5-byte write → 13 > 10 → EDQUOT.
+        let fd_b = open_create("b.txt", &env, &mut mem);
+        assert_eq!(write_bytes_to(fd_b, b"hello", &env, &mut mem), WASI_EDQUOT);
+
+        // Unlink a.txt → frees 8, counter back to 0.
+        mem.write_bytes(100, b"a.txt").unwrap();
+        assert_eq!(path_unlink_file(3, 100, 5, &mut mem, &env), WASI_ESUCCESS);
+        assert_eq!(env.lock().unwrap().disk_used(), 0);
+
+        // The 5-byte write now fits.
+        assert_eq!(
+            write_bytes_to(fd_b, b"hello", &env, &mut mem),
+            WASI_ESUCCESS
+        );
+        assert_eq!(env.lock().unwrap().disk_used(), 5);
+    }
+
+    #[test]
+    fn test_disk_unlimited_never_rejects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        // No disk cap configured → writes always succeed and the counter stays 0.
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        let fd = open_create("big.txt", &env, &mut mem);
+        for _ in 0..5 {
+            assert_eq!(
+                write_bytes_to(fd, b"0123456789", &env, &mut mem),
+                WASI_ESUCCESS
+            );
+        }
+        assert_eq!(env.lock().unwrap().disk_used(), 0);
+    }
+
+    #[test]
+    fn test_seed_disk_used_respected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        {
+            let mut e = env.lock().unwrap();
+            e.set_max_disk_bytes(Some(10));
+            e.seed_disk_used(8); // pretend 8 bytes already on disk
+        }
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        let fd = open_create("c.txt", &env, &mut mem);
+
+        // 3-byte write → 8 + 3 = 11 > 10 → EDQUOT.
+        assert_eq!(write_bytes_to(fd, b"xyz", &env, &mut mem), WASI_EDQUOT);
+        // 2-byte write → 8 + 2 = 10 → ok.
+        assert_eq!(write_bytes_to(fd, b"yo", &env, &mut mem), WASI_ESUCCESS);
     }
 }
