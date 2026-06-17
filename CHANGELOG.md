@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Per-Tenant Resource-Limit Overrides (auth mode)**: assign each tenant its own resource ceiling as a hard cap
+  - Optional `[tenants.limits]` sub-table per `[[tenants]]` (same shape as the per-session `{"limits":{}}` override: `max_memory_mb`, `max_fuel`, `max_output_mb`, `max_file_size_mb`, `max_disk_mb`)
+  - Effective session limits compose in three layers: server defaults → tenant `[tenants.limits]` (the tenant baseline) → per-session `{"limits":{}}` override **clamped to the tenant baseline**
+  - The tenant limit is a **hard ceiling**: a per-session override may only *tighten* a dimension, never raise it above the tenant's cap (a per-session "unlimited" `0` is pulled down to the tenant's finite ceiling)
+  - Open mode (no `--auth`) is unchanged — with no tenant baseline a per-session override applies un-clamped, exactly as before
 - **Per-Tenant Rate Limiting (auth mode)**: throttle each tenant independently so one tenant can't exhaust a shared agent server
   - Optional `[tenants.rate]` sub-table per `[[tenants]]` in the auth config: `max_sessions`, `max_concurrent_exec`, `max_requests_per_min` (each `0`/omitted = inherit the server-wide default)
   - Per-tenant session cap enforced at session creation (counts only the tenant's own non-expired sessions, alongside the global `--max-sessions`); over limit returns **429**
