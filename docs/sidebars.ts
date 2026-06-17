@@ -64,6 +64,7 @@ const sidebars: SidebarsConfig = {
             'exec/usage/agent-exec',
             'exec/usage/agent-files',
             'exec/usage/agent-environment',
+            'exec/usage/agent-observability',
           ],
         },
       ],
