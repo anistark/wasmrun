@@ -44,6 +44,9 @@ pub struct AgentConfig {
     /// `Some`, every `/api/v1/*` request must present a valid `Bearer` key and
     /// sessions are isolated per tenant.
     pub auth: Option<Arc<AuthConfig>>,
+    /// Path to the auth config file, retained so the server can watch it for
+    /// live reloads. `None` when `--auth` was not given (open mode).
+    pub auth_path: Option<PathBuf>,
 }
 
 impl Default for AgentConfig {
@@ -56,6 +59,7 @@ impl Default for AgentConfig {
             max_body_bytes: Some(DEFAULT_MAX_BODY_BYTES),
             max_concurrent_exec: DEFAULT_MAX_CONCURRENT_EXEC,
             auth: None,
+            auth_path: None,
         }
     }
 }
@@ -238,26 +242,52 @@ pub struct AgentServer {
     exec_slots: Arc<ExecSlots>,
     tenant_limiter: Arc<TenantLimiter>,
     metrics: Arc<Metrics>,
+    /// Live, swappable auth config (`None` in open mode). Read on every request
+    /// via a brief read lock; replaced wholesale by the reload watcher when the
+    /// auth file changes. The inner `Arc` makes each request's snapshot cheap.
+    live_auth: Option<Arc<RwLock<Arc<AuthConfig>>>>,
+    /// The auth file to watch for live reloads (`None` if `--auth` was not set).
+    auth_path: Option<PathBuf>,
 }
 
 impl AgentServer {
     pub fn new(config: AgentConfig) -> Self {
         let session_manager = Arc::new(SessionManager::with_config(config.session_config.clone()));
         let exec_slots = ExecSlots::new(config.max_concurrent_exec);
+        let live_auth = config.auth.clone().map(|a| Arc::new(RwLock::new(a)));
+        let auth_path = config.auth_path.clone();
         Self {
             session_manager,
             config,
             exec_slots,
             tenant_limiter: TenantLimiter::new(),
             metrics: Arc::new(Metrics::new()),
+            live_auth,
+            auth_path,
         }
+    }
+
+    /// A cheap snapshot (`Arc` clone) of the current auth config, or `None` in
+    /// open mode. Taken under a brief read lock so a concurrent reload swap is
+    /// invisible mid-request.
+    fn auth_snapshot(&self) -> Option<Arc<AuthConfig>> {
+        self.live_auth
+            .as_ref()
+            .map(|cell| cell.read().unwrap_or_else(|e| e.into_inner()).clone())
     }
 
     /// The calling tenant's configured rate ceilings, or `None` in open mode or
     /// for an unknown tenant.
-    fn tenant_rate(&self, caller: Option<&str>) -> Option<&TenantRate> {
+    fn tenant_rate(&self, caller: Option<&str>) -> Option<TenantRate> {
         let id = caller?;
-        self.config.auth.as_ref()?.rate(id)
+        self.auth_snapshot()?.rate(id).cloned()
+    }
+
+    /// The calling tenant's operator-assigned limit override, or `None` in open
+    /// mode or when the tenant declared no `[tenants.limits]` table.
+    fn tenant_limits(&self, caller: Option<&str>) -> Option<LimitsOverride> {
+        let id = caller?;
+        self.auth_snapshot()?.limits(id).cloned()
     }
 
     /// Enforce the tenant's requests/min window. `true` = allowed. Always `true`
@@ -303,6 +333,19 @@ impl AgentServer {
             shutdown_flag.store(true, std::sync::atomic::Ordering::Relaxed);
         });
 
+        // Live auth-config reload: watch the auth file for mtime changes and
+        // hot-swap the live config (auth mode only). A bad edit is logged and
+        // the previous config is kept.
+        let auth_watcher = match (&self.auth_path, &self.live_auth) {
+            (Some(path), Some(cell)) => Some(spawn_auth_watcher(
+                path.clone(),
+                cell.clone(),
+                self.config.session_config.cleanup_interval,
+                shutdown.clone(),
+            )),
+            _ => None,
+        };
+
         for request in server.incoming_requests() {
             if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ =
@@ -318,6 +361,9 @@ impl AgentServer {
         let destroyed = self.session_manager.destroy_all().unwrap_or(0);
         self.session_manager.stop_cleanup();
         let _ = cleanup_handle.join();
+        if let Some(handle) = auth_watcher {
+            let _ = handle.join();
+        }
         if destroyed > 0 {
             eprintln!("   Cleaned up {destroyed} session(s)");
         }
@@ -365,10 +411,15 @@ impl AgentServer {
             fmt_count(self.config.max_concurrent_exec, "exec(s)")
         );
         match &self.config.auth {
-            Some(auth) => println!(
-                "   Auth:            enabled ({} tenants)",
-                auth.tenant_count()
-            ),
+            Some(auth) => {
+                println!(
+                    "   Auth:            enabled ({} tenants)",
+                    auth.tenant_count()
+                );
+                if let Some(path) = &self.auth_path {
+                    println!("   Auth reload:     watching {}", path.display());
+                }
+            }
             None => println!("   Auth:            disabled (open)"),
         }
         println!("   CORS:            {cors}");
@@ -443,23 +494,31 @@ impl AgentServer {
         // `/api/v1/*` routes including `/tools` and `/metrics` (simplest and
         // most secure; the metrics scrape is capped at global aggregates so a
         // tenant key cannot read another tenant's per-session data).
-        let tenant: Option<&str> = match &self.config.auth {
+        // Snapshot the live auth config (cheap Arc clone) so a concurrent reload
+        // can't change it mid-request. Resolved to an owned tenant id; `None`
+        // means open mode.
+        let tenant: Option<String> = match self.auth_snapshot() {
             None => None,
-            Some(auth) => match bearer_token(&request).and_then(|key| auth.resolve(key)) {
-                Some(t) => {
-                    log.tenant = t.to_string();
-                    Some(t)
+            Some(auth) => {
+                match bearer_token(&request).and_then(|key| auth.resolve(key).map(String::from)) {
+                    Some(t) => {
+                        log.tenant = t.clone();
+                        Some(t)
+                    }
+                    None => {
+                        self.metrics.record_rejected_unauthorized();
+                        let err = ApiError::Unauthorized(
+                            "missing or invalid API key (expected 'Authorization: Bearer <key>')"
+                                .into(),
+                        );
+                        return self.respond_json(request, Err::<serde_json::Value, _>(err), &log);
+                    }
                 }
-                None => {
-                    self.metrics.record_rejected_unauthorized();
-                    let err = ApiError::Unauthorized(
-                        "missing or invalid API key (expected 'Authorization: Bearer <key>')"
-                            .into(),
-                    );
-                    return self.respond_json(request, Err::<serde_json::Value, _>(err), &log);
-                }
-            },
+            }
         };
+        // Reborrow as `&str` for the handlers (the owned `String` lives to the
+        // end of this function, so the borrow is valid throughout routing).
+        let tenant: Option<&str> = tenant.as_deref();
 
         // Per-tenant requests/min throttle (auth mode only). Checked here — after
         // the tenant resolves, before the body is read — so a flood is rejected
@@ -646,7 +705,7 @@ impl AgentServer {
         // a per-session override applies un-clamped — preserving the existing
         // behavior where an open-mode override may raise a limit above defaults.
         let tenant_ov = self.tenant_limits(caller);
-        let baseline = match tenant_ov {
+        let baseline = match &tenant_ov {
             Some(ov) => defaults.with_overrides(ov),
             None => defaults,
         };
@@ -664,13 +723,6 @@ impl AgentServer {
         } else {
             merged
         })
-    }
-
-    /// The calling tenant's operator-assigned limit override, or `None` in open
-    /// mode or when the tenant declared no `[tenants.limits]` table.
-    fn tenant_limits(&self, caller: Option<&str>) -> Option<&LimitsOverride> {
-        let id = caller?;
-        self.config.auth.as_ref()?.limits(id)
     }
 
     fn create_session_with_limits(
@@ -1312,6 +1364,73 @@ fn map_session_err(e: SessionError) -> ApiError {
     }
 }
 
+/// Last-modified time of `path`, or `None` if it can't be read.
+fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// Reload the auth config from `path` and atomically swap it into `cell`.
+///
+/// On success returns the new tenant count and the live config is replaced. On a
+/// parse/validation error the previous config is **kept** and the error string
+/// is returned — a bad edit must never crash the server or silently open it.
+/// Factored out of the watcher thread so it can be unit-tested directly.
+fn reload_auth(
+    path: &Path,
+    cell: &Arc<RwLock<Arc<AuthConfig>>>,
+) -> std::result::Result<usize, String> {
+    match AuthConfig::load(path) {
+        Ok(new_cfg) => {
+            let n = new_cfg.tenant_count();
+            *cell.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(new_cfg);
+            Ok(n)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Spawn a background thread that polls `path`'s mtime every `interval` and
+/// hot-swaps the live auth config in `cell` when it changes. Logs each reload
+/// outcome; exits promptly once `shutdown` is set.
+fn spawn_auth_watcher(
+    path: PathBuf,
+    cell: Arc<RwLock<Arc<AuthConfig>>>,
+    interval: Duration,
+    shutdown: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut last_mtime = file_mtime(&path);
+        let slice = Duration::from_millis(500);
+        loop {
+            // Sleep up to `interval` in slices so shutdown stays responsive.
+            let mut waited = Duration::ZERO;
+            while waited < interval {
+                if shutdown.load(Ordering::Relaxed) {
+                    return;
+                }
+                let nap = slice.min(interval - waited);
+                std::thread::sleep(nap);
+                waited += nap;
+            }
+            if shutdown.load(Ordering::Relaxed) {
+                return;
+            }
+            let cur = file_mtime(&path);
+            if cur == last_mtime {
+                continue;
+            }
+            last_mtime = cur;
+            match reload_auth(&path, &cell) {
+                Ok(n) => eprintln!("auth: reloaded {} ({n} tenants)", path.display()),
+                Err(e) => eprintln!(
+                    "auth: reload of {} failed, keeping previous config: {e}",
+                    path.display()
+                ),
+            }
+        }
+    })
+}
+
 /// Extract the bearer token from a request's `Authorization` header.
 ///
 /// Returns `Some(token)` only for a well-formed `Authorization: Bearer <token>`
@@ -1464,6 +1583,7 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec,
             auth: None,
+            auth_path: None,
         })
     }
 
@@ -1500,6 +1620,7 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec: 100,
             auth: None,
+            auth_path: None,
         })
     }
 
@@ -1518,6 +1639,7 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec: 100,
             auth: Some(Arc::new(auth_config_for(tenants))),
+            auth_path: None,
         })
     }
 
@@ -1541,6 +1663,7 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec: 100,
             auth: Some(Arc::new(auth)),
+            auth_path: None,
         })
     }
 
@@ -1683,6 +1806,56 @@ mod tests {
             .resolve_session_limits(r#"{"limits":{"max_memory_mb":1024}}"#, None)
             .unwrap();
         assert_eq!(l.max_memory_pages, Some(1024 * 16));
+    }
+
+    #[test]
+    fn test_reload_auth_swaps_live_config() {
+        use crate::agent::auth::hash_key;
+        // Initial config: only "alice".
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        let v1 = format!(
+            "[[tenants]]\nid = \"alice\"\nkey_sha256 = \"{}\"\n",
+            hash_key("ka")
+        );
+        std::io::Write::write_all(&mut f, v1.as_bytes()).unwrap();
+        let cell = Arc::new(RwLock::new(Arc::new(AuthConfig::load(f.path()).unwrap())));
+
+        assert_eq!(cell.read().unwrap().resolve("ka"), Some("alice"));
+        assert_eq!(cell.read().unwrap().resolve("kb"), None);
+
+        // Rewrite: revoke alice's key, add bob with a rate cap.
+        let v2 = format!(
+            "[[tenants]]\nid = \"bob\"\nkey_sha256 = \"{}\"\n[tenants.rate]\nmax_sessions = 7\n",
+            hash_key("kb"),
+        );
+        std::fs::write(f.path(), v2).unwrap();
+
+        assert_eq!(reload_auth(f.path(), &cell).unwrap(), 1);
+
+        // The new config is live: alice's key is gone, bob resolves with its rate.
+        let live = cell.read().unwrap().clone();
+        assert_eq!(live.resolve("ka"), None);
+        assert_eq!(live.resolve("kb"), Some("bob"));
+        assert_eq!(live.rate("bob").unwrap().max_sessions, 7);
+    }
+
+    #[test]
+    fn test_reload_auth_keeps_prior_config_on_error() {
+        use crate::agent::auth::hash_key;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        let v1 = format!(
+            "[[tenants]]\nid = \"alice\"\nkey_sha256 = \"{}\"\n",
+            hash_key("ka")
+        );
+        std::io::Write::write_all(&mut f, v1.as_bytes()).unwrap();
+        let cell = Arc::new(RwLock::new(Arc::new(AuthConfig::load(f.path()).unwrap())));
+
+        // A malformed edit must not swap in a broken config.
+        std::fs::write(f.path(), "this is not valid toml = = =").unwrap();
+        assert!(reload_auth(f.path(), &cell).is_err());
+
+        // The previous config is retained — alice still resolves.
+        assert_eq!(cell.read().unwrap().resolve("ka"), Some("alice"));
     }
 
     // Hand-built WASM that calls fd_write to print "Hello, World!\n"
