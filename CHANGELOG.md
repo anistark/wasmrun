@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Per-Tenant Rate Limiting (auth mode)**: throttle each tenant independently so one tenant can't exhaust a shared agent server
+  - Optional `[tenants.rate]` sub-table per `[[tenants]]` in the auth config: `max_sessions`, `max_concurrent_exec`, `max_requests_per_min` (each `0`/omitted = inherit the server-wide default)
+  - Per-tenant session cap enforced at session creation (counts only the tenant's own non-expired sessions, alongside the global `--max-sessions`); over limit returns **429**
+  - Per-tenant concurrent-exec cap via a per-tenant counting semaphore acquired alongside the global one; both release on worker completion. Saturation returns **429**
+  - Per-tenant requests/min cap (fixed window) checked at the auth gate before the body is read, covering every `/api/v1/*` route; over limit returns **429**
+  - New `ApiError::RateLimited` (429) and a `rate` reason added to the `wasmrun_agent_exec_rejected_total` metric family
+  - Open mode (no `--auth`) is unaffected — only the existing global limits apply
 - **Agent Observability**: runtime metrics and a structured access log so an operator can see health, load, and failures without a debugger
   - `GET /api/v1/metrics` returns **Prometheus** text exposition by default (scrape-ready) or JSON with `?format=json`
   - Counters: executions by result (`success`/`error`/`timeout`), execution duration sum + count (for an average), output-truncated count, sessions created, and requests rejected before doing work by reason (`concurrency` 429, `payload` 413, `unauthorized` 401)

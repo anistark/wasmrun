@@ -1,7 +1,7 @@
 //! Agent mode: REST API server for AI agent sandbox management.
 
 use crate::agent::api::*;
-use crate::agent::auth::AuthConfig;
+use crate::agent::auth::{AuthConfig, TenantRate};
 use crate::agent::executor;
 use crate::agent::limits::{dir_size, ResourceLimits};
 use crate::agent::metrics::{Gauges, Metrics, SessionResourceRow};
@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
@@ -127,10 +127,116 @@ impl Drop for ExecPermit {
     }
 }
 
+/// Bundles the global and per-tenant exec permits so both slots release together
+/// when the worker completes. The worker closures move this in and drop it on
+/// completion — the same RAII discipline the single global permit used before.
+struct HeldPermits {
+    _global: ExecPermit,
+    _tenant: ExecPermit,
+}
+
+/// Fixed-window per-tenant request counter for the requests/min cap.
+///
+/// `max_per_min == 0` means unlimited. The window is a simple fixed interval
+/// reset when a minute elapses — cheap and dependency-free. A burst can straddle
+/// a window boundary (up to ~2× the cap across two adjacent windows); a smoothing
+/// token-bucket is left as a later refinement.
+struct RateWindow {
+    max_per_min: u64,
+    state: Mutex<(Instant, u64)>,
+}
+
+impl RateWindow {
+    fn new(max_per_min: u64) -> Self {
+        Self {
+            max_per_min,
+            state: Mutex::new((Instant::now(), 0)),
+        }
+    }
+
+    /// Record one request. Returns `false` when it exceeds the window cap.
+    fn allow(&self) -> bool {
+        if self.max_per_min == 0 {
+            return true;
+        }
+        // Recover the guard even if poisoned: never fail-closed on a panic
+        // elsewhere (throttling is best-effort, not a correctness invariant).
+        let mut g = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let (start, count) = &mut *g;
+        if start.elapsed() >= Duration::from_secs(60) {
+            *start = Instant::now();
+            *count = 0;
+        }
+        if *count >= self.max_per_min {
+            return false;
+        }
+        *count += 1;
+        true
+    }
+}
+
+/// Per-tenant concurrency + request-rate limiter.
+///
+/// Lazily creates a sized [`ExecSlots`] and [`RateWindow`] per tenant on first
+/// use; only consulted in auth mode (open mode has no tenant). Ceilings come from
+/// the tenant's `[tenants.rate]` table. Note: an entry is sized at first use, so
+/// a live config reload (0.20.6c) does not resize an already-created entry — a
+/// known, acceptable limitation revisited there.
+struct TenantLimiter {
+    exec: RwLock<HashMap<String, Arc<ExecSlots>>>,
+    windows: RwLock<HashMap<String, Arc<RateWindow>>>,
+}
+
+impl TenantLimiter {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            exec: RwLock::new(HashMap::new()),
+            windows: RwLock::new(HashMap::new()),
+        })
+    }
+
+    /// Get-or-create the tenant's exec slots, sized to `max` (`0` = unlimited).
+    fn exec_slots(&self, tenant: &str, max: usize) -> Arc<ExecSlots> {
+        if let Some(s) = self
+            .exec
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(tenant)
+        {
+            return s.clone();
+        }
+        self.exec
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(tenant.to_string())
+            .or_insert_with(|| ExecSlots::new(max))
+            .clone()
+    }
+
+    /// Get-or-create the tenant's request-rate window (`max` req/min; `0` = off).
+    fn window(&self, tenant: &str, max: u64) -> Arc<RateWindow> {
+        if let Some(w) = self
+            .windows
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(tenant)
+        {
+            return w.clone();
+        }
+        self.windows
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(tenant.to_string())
+            .or_insert_with(|| Arc::new(RateWindow::new(max)))
+            .clone()
+    }
+}
+
 pub struct AgentServer {
     session_manager: Arc<SessionManager>,
     config: AgentConfig,
     exec_slots: Arc<ExecSlots>,
+    tenant_limiter: Arc<TenantLimiter>,
     metrics: Arc<Metrics>,
 }
 
@@ -142,8 +248,43 @@ impl AgentServer {
             session_manager,
             config,
             exec_slots,
+            tenant_limiter: TenantLimiter::new(),
             metrics: Arc::new(Metrics::new()),
         }
+    }
+
+    /// The calling tenant's configured rate ceilings, or `None` in open mode or
+    /// for an unknown tenant.
+    fn tenant_rate(&self, caller: Option<&str>) -> Option<&TenantRate> {
+        let id = caller?;
+        self.config.auth.as_ref()?.rate(id)
+    }
+
+    /// Enforce the tenant's requests/min window. `true` = allowed. Always `true`
+    /// in open mode or when the tenant set no requests/min cap.
+    fn allow_request_rate(&self, caller: Option<&str>) -> bool {
+        let Some(tenant) = caller else {
+            return true;
+        };
+        let max = match self.tenant_rate(caller).map(|r| r.max_requests_per_min) {
+            Some(m) if m != 0 => m as u64,
+            _ => return true,
+        };
+        self.tenant_limiter.window(tenant, max).allow()
+    }
+
+    /// Acquire a per-tenant exec slot. Returns a no-op permit in open mode or
+    /// when the tenant has no concurrent-exec cap; `None` when the tenant is
+    /// saturated (caller → 429).
+    fn try_tenant_exec_permit(&self, caller: Option<&str>) -> Option<ExecPermit> {
+        let Some(tenant) = caller else {
+            return Some(ExecPermit { slots: None });
+        };
+        let max = match self.tenant_rate(caller).map(|r| r.max_concurrent_exec) {
+            Some(m) if m != 0 => m as usize,
+            _ => return Some(ExecPermit { slots: None }),
+        };
+        self.tenant_limiter.exec_slots(tenant, max).try_acquire()
     }
 
     pub fn start(self) -> Result<()> {
@@ -320,6 +461,15 @@ impl AgentServer {
             },
         };
 
+        // Per-tenant requests/min throttle (auth mode only). Checked here — after
+        // the tenant resolves, before the body is read — so a flood is rejected
+        // cheaply and the cap covers every `/api/v1/*` route uniformly.
+        if !self.allow_request_rate(tenant) {
+            self.metrics.record_rejected_rate();
+            let err = ApiError::RateLimited("requests-per-minute exceeded".into());
+            return self.respond_json(request, Err::<serde_json::Value, _>(err), &log);
+        }
+
         let segments: Vec<&str> = path
             .trim_start_matches(API_PREFIX)
             .trim_matches('/')
@@ -488,12 +638,18 @@ impl AgentServer {
         limits: ResourceLimits,
         owner: Option<&str>,
     ) -> std::result::Result<CreateSessionResponse, ApiError> {
+        // Resolve the calling tenant's per-tenant session ceiling (auth mode
+        // only; `0`/absent = inherit, i.e. no per-tenant cap beyond the global).
+        let owner_session_cap = self
+            .tenant_rate(owner)
+            .and_then(|r| (r.max_sessions != 0).then_some(r.max_sessions as usize));
         let id = self
             .session_manager
             .create_session_with_limits(
                 self.config.session_config.default_timeout,
                 limits,
                 owner.map(String::from),
+                owner_session_cap,
             )
             .map_err(map_session_err)?;
         self.metrics.record_session_created();
@@ -587,6 +743,22 @@ impl AgentServer {
                 self.metrics.record_rejected_concurrency();
                 return Err(ApiError::TooManyRequests(self.config.max_concurrent_exec));
             }
+        };
+        // Per-tenant concurrent-exec cap (auth mode only). Acquired after the
+        // global slot; both are bundled so they release together on worker
+        // completion (a timed-out-but-running worker keeps both until cancelled).
+        let tenant_permit = match self.try_tenant_exec_permit(caller) {
+            Some(p) => p,
+            None => {
+                self.metrics.record_rejected_rate();
+                return Err(ApiError::RateLimited(
+                    "per-tenant concurrent execution limit reached".into(),
+                ));
+            }
+        };
+        let permit = HeldPermits {
+            _global: permit,
+            _tenant: tenant_permit,
         };
 
         let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<i32, ApiError>>();
@@ -1092,6 +1264,9 @@ fn map_session_err(e: SessionError) -> ApiError {
         SessionError::NotFound { id } => ApiError::SessionNotFound(id),
         SessionError::Expired { id } => ApiError::SessionExpired(id),
         SessionError::MaxSessionsReached { max } => ApiError::MaxSessions(max),
+        SessionError::TenantMaxSessionsReached { max } => {
+            ApiError::RateLimited(format!("tenant session limit reached ({max})"))
+        }
         SessionError::IoError { message } => ApiError::Internal(message),
         SessionError::LockError => ApiError::Internal("Lock error".into()),
     }
@@ -1304,6 +1479,121 @@ mod tests {
             max_concurrent_exec: 100,
             auth: Some(Arc::new(auth_config_for(tenants))),
         })
+    }
+
+    /// A server whose auth config is loaded from a full TOML body (so tests can
+    /// include `[tenants.rate]` sub-tables). Generous server-wide caps so the
+    /// per-tenant ceilings are what's actually exercised.
+    fn auth_server_from_toml(toml: &str) -> AgentServer {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(&mut f, toml.as_bytes()).unwrap();
+        let auth = AuthConfig::load(f.path()).unwrap();
+        AgentServer::new(AgentConfig {
+            port: 0,
+            session_config: SessionConfig {
+                default_timeout: Duration::from_secs(60),
+                max_sessions: 100,
+                cleanup_interval: Duration::from_secs(300),
+                limits: crate::agent::limits::ResourceLimits::default(),
+            },
+            allow_cors: true,
+            verbose: false,
+            max_body_bytes: Some(32 * 1024 * 1024),
+            max_concurrent_exec: 100,
+            auth: Some(Arc::new(auth)),
+        })
+    }
+
+    #[test]
+    fn test_tenant_session_cap_enforced() {
+        use crate::agent::auth::hash_key;
+        let toml = format!(
+            "[[tenants]]\nid = \"alice\"\nkey_sha256 = \"{}\"\n[tenants.rate]\nmax_sessions = 2\n\n[[tenants]]\nid = \"bob\"\nkey_sha256 = \"{}\"\n",
+            hash_key("k_alice"),
+            hash_key("k_bob"),
+        );
+        let server = auth_server_from_toml(&toml);
+
+        // alice capped at 2; the 3rd create is a 429-class RateLimited error.
+        assert!(server
+            .handle_create_session_with_body("", Some("alice"))
+            .is_ok());
+        assert!(server
+            .handle_create_session_with_body("", Some("alice"))
+            .is_ok());
+        let err = server
+            .handle_create_session_with_body("", Some("alice"))
+            .unwrap_err();
+        assert!(matches!(err, ApiError::RateLimited(_)));
+        assert_eq!(err.status_code(), 429);
+
+        // bob has no per-tenant cap — unaffected by alice's ceiling.
+        for _ in 0..5 {
+            assert!(server
+                .handle_create_session_with_body("", Some("bob"))
+                .is_ok());
+        }
+    }
+
+    #[test]
+    fn test_tenant_concurrent_exec_permit_saturates() {
+        use crate::agent::auth::hash_key;
+        let toml = format!(
+            "[[tenants]]\nid = \"alice\"\nkey_sha256 = \"{}\"\n[tenants.rate]\nmax_concurrent_exec = 1\n\n[[tenants]]\nid = \"bob\"\nkey_sha256 = \"{}\"\n",
+            hash_key("a"),
+            hash_key("b"),
+        );
+        let server = auth_server_from_toml(&toml);
+
+        // alice's single slot: first acquire succeeds, second saturates.
+        let p1 = server.try_tenant_exec_permit(Some("alice"));
+        assert!(p1.is_some());
+        assert!(server.try_tenant_exec_permit(Some("alice")).is_none());
+
+        // bob (no cap) always gets a no-op permit; open mode (None) too.
+        assert!(server.try_tenant_exec_permit(Some("bob")).is_some());
+        assert!(server.try_tenant_exec_permit(None).is_some());
+
+        // Releasing alice's permit frees her slot.
+        drop(p1);
+        assert!(server.try_tenant_exec_permit(Some("alice")).is_some());
+    }
+
+    #[test]
+    fn test_tenant_requests_per_min_window() {
+        use crate::agent::auth::hash_key;
+        let toml = format!(
+            "[[tenants]]\nid = \"alice\"\nkey_sha256 = \"{}\"\n[tenants.rate]\nmax_requests_per_min = 2\n",
+            hash_key("a"),
+        );
+        let server = auth_server_from_toml(&toml);
+
+        assert!(server.allow_request_rate(Some("alice")));
+        assert!(server.allow_request_rate(Some("alice")));
+        assert!(!server.allow_request_rate(Some("alice"))); // 3rd within the window
+                                                            // Open-mode caller is never throttled.
+        assert!(server.allow_request_rate(None));
+    }
+
+    #[test]
+    fn test_rate_window_basic_and_reset() {
+        let w = RateWindow::new(1);
+        assert!(w.allow());
+        assert!(!w.allow());
+        // Rewind the window start so the next call sees a fresh minute.
+        {
+            let mut g = w.state.lock().unwrap();
+            g.0 = Instant::now() - Duration::from_secs(61);
+        }
+        assert!(w.allow());
+    }
+
+    #[test]
+    fn test_rate_window_unlimited() {
+        let w = RateWindow::new(0);
+        for _ in 0..1000 {
+            assert!(w.allow());
+        }
     }
 
     // Hand-built WASM that calls fd_write to print "Hello, World!\n"
@@ -2019,7 +2309,7 @@ mod tests {
     fn make_session_with_limits(server: &AgentServer, limits: ResourceLimits) -> String {
         server
             .session_manager
-            .create_session_with_limits(Duration::from_secs(60), limits, None)
+            .create_session_with_limits(Duration::from_secs(60), limits, None, None)
             .unwrap()
     }
 

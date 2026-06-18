@@ -49,6 +49,27 @@ struct RawAuth {
 struct RawTenant {
     id: String,
     key_sha256: String,
+    /// Optional `[tenants.rate]` sub-table; absent = inherit all defaults.
+    #[serde(default)]
+    rate: Option<TenantRate>,
+}
+
+/// Per-tenant rate ceilings, from the optional `[tenants.rate]` sub-table.
+///
+/// Each field caps one dimension of a tenant's load. A value of `0` (or an
+/// omitted field) means "inherit the server-wide default" for that dimension,
+/// matching the `0 = default/unlimited` convention used by the CLI limit flags.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TenantRate {
+    /// Max concurrent (non-expired) sessions this tenant may hold.
+    #[serde(default)]
+    pub max_sessions: u32,
+    /// Max exec workers this tenant may run concurrently.
+    #[serde(default)]
+    pub max_concurrent_exec: u32,
+    /// Max requests this tenant may issue within a rolling one-minute window.
+    #[serde(default)]
+    pub max_requests_per_min: u32,
 }
 
 /// Resolved auth configuration: a map from key hash → tenant id.
@@ -58,6 +79,8 @@ struct RawTenant {
 pub struct AuthConfig {
     /// SHA-256 hex of the key → tenant id.
     keys: HashMap<String, String>,
+    /// Tenant id → per-tenant rate ceilings (default = all-inherit).
+    rates: HashMap<String, TenantRate>,
 }
 
 impl AuthConfig {
@@ -106,6 +129,7 @@ impl AuthConfig {
         }
 
         let mut keys: HashMap<String, String> = HashMap::with_capacity(raw.tenants.len());
+        let mut rates: HashMap<String, TenantRate> = HashMap::with_capacity(raw.tenants.len());
         let mut seen_ids: HashMap<String, ()> = HashMap::with_capacity(raw.tenants.len());
 
         for tenant in raw.tenants {
@@ -138,9 +162,11 @@ impl AuthConfig {
                     ),
                 }));
             }
+
+            rates.insert(id.to_string(), tenant.rate.unwrap_or_default());
         }
 
-        Ok(AuthConfig { keys })
+        Ok(AuthConfig { keys, rates })
     }
 
     /// Number of configured tenants.
@@ -152,6 +178,13 @@ impl AuthConfig {
     pub fn resolve(&self, presented_key: &str) -> Option<&str> {
         let hash = hash_key(presented_key);
         self.keys.get(&hash).map(|s| s.as_str())
+    }
+
+    /// Per-tenant rate ceilings for `id`. Returns `None` for an unknown tenant;
+    /// a known tenant with no `[tenants.rate]` table yields the all-inherit
+    /// default.
+    pub fn rate(&self, id: &str) -> Option<&TenantRate> {
+        self.rates.get(id)
     }
 }
 
@@ -264,6 +297,28 @@ mod tests {
     fn test_missing_file() {
         let err = AuthConfig::load(Path::new("/nonexistent/wasmrun-auth.toml")).unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_parse_tenant_rate() {
+        let body = format!(
+            "[[tenants]]\nid = \"a\"\nkey_sha256 = \"{}\"\n[tenants.rate]\nmax_sessions = 5\nmax_concurrent_exec = 3\nmax_requests_per_min = 100\n\n[[tenants]]\nid = \"b\"\nkey_sha256 = \"{}\"\n",
+            hash_key("ka"),
+            hash_key("kb"),
+        );
+        let f = write_toml(&body);
+        let cfg = AuthConfig::load(f.path()).unwrap();
+
+        let ra = cfg.rate("a").unwrap();
+        assert_eq!(ra.max_sessions, 5);
+        assert_eq!(ra.max_concurrent_exec, 3);
+        assert_eq!(ra.max_requests_per_min, 100);
+
+        // A tenant without a [tenants.rate] table inherits the all-zero default.
+        assert_eq!(*cfg.rate("b").unwrap(), TenantRate::default());
+
+        // Unknown tenant id resolves to no rate.
+        assert!(cfg.rate("nope").is_none());
     }
 
     #[test]
