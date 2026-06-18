@@ -3,7 +3,7 @@
 use crate::agent::api::*;
 use crate::agent::auth::{AuthConfig, TenantRate};
 use crate::agent::executor;
-use crate::agent::limits::{dir_size, ResourceLimits};
+use crate::agent::limits::{dir_size, LimitsOverride, ResourceLimits};
 use crate::agent::metrics::{Gauges, Metrics, SessionResourceRow};
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::shell;
@@ -620,17 +620,57 @@ impl AgentServer {
         body: &str,
         caller: Option<&str>,
     ) -> std::result::Result<CreateSessionResponse, ApiError> {
-        let limits = if body.trim().is_empty() {
-            self.config.session_config.limits.clone()
-        } else {
-            let req: CreateSessionRequest =
-                serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
-            match req.limits {
-                Some(ov) => self.config.session_config.limits.with_overrides(&ov),
-                None => self.config.session_config.limits.clone(),
-            }
-        };
+        let limits = self.resolve_session_limits(body, caller)?;
         self.create_session_with_limits(limits, caller)
+    }
+
+    /// Compose the effective limits for a new session, in three layers:
+    ///   1. server defaults (`--max-*` flags),
+    ///   2. the tenant's `[tenants.limits]` override → the **tenant baseline**,
+    ///   3. the per-session `{"limits":{}}` override, **clamped to the baseline**.
+    ///
+    /// Clamping makes the tenant limit a hard ceiling: a per-session override may
+    /// only tighten a dimension, never raise it above the tenant's cap (a
+    /// per-session "unlimited" is pulled down to the tenant's finite ceiling). In
+    /// open mode there is no tenant baseline, so this reduces to defaults +
+    /// per-session override exactly as before.
+    fn resolve_session_limits(
+        &self,
+        body: &str,
+        caller: Option<&str>,
+    ) -> std::result::Result<ResourceLimits, ApiError> {
+        let defaults = self.config.session_config.limits.clone();
+        // The tenant baseline becomes the clamp ceiling, but *only* when the
+        // tenant actually declared `[tenants.limits]`. With no tenant override
+        // (open mode, or an auth tenant without limits) there is no ceiling, so
+        // a per-session override applies un-clamped — preserving the existing
+        // behavior where an open-mode override may raise a limit above defaults.
+        let tenant_ov = self.tenant_limits(caller);
+        let baseline = match tenant_ov {
+            Some(ov) => defaults.with_overrides(ov),
+            None => defaults,
+        };
+        if body.trim().is_empty() {
+            return Ok(baseline);
+        }
+        let req: CreateSessionRequest =
+            serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
+        let Some(ov) = req.limits else {
+            return Ok(baseline);
+        };
+        let merged = baseline.with_overrides(&ov);
+        Ok(if tenant_ov.is_some() {
+            merged.clamp_to(&baseline)
+        } else {
+            merged
+        })
+    }
+
+    /// The calling tenant's operator-assigned limit override, or `None` in open
+    /// mode or when the tenant declared no `[tenants.limits]` table.
+    fn tenant_limits(&self, caller: Option<&str>) -> Option<&LimitsOverride> {
+        let id = caller?;
+        self.config.auth.as_ref()?.limits(id)
     }
 
     fn create_session_with_limits(
@@ -1594,6 +1634,55 @@ mod tests {
         for _ in 0..1000 {
             assert!(w.allow());
         }
+    }
+
+    #[test]
+    fn test_tenant_limit_is_hard_ceiling() {
+        use crate::agent::auth::hash_key;
+        let toml = format!(
+            "[[tenants]]\nid = \"alice\"\nkey_sha256 = \"{}\"\n[tenants.limits]\nmax_memory_mb = 128\n",
+            hash_key("a"),
+        );
+        let server = auth_server_from_toml(&toml);
+        let cap_pages = 128 * 16; // MB → 64 KiB pages
+
+        // No per-session override → the tenant baseline applies.
+        let l = server.resolve_session_limits("", Some("alice")).unwrap();
+        assert_eq!(l.max_memory_pages, Some(cap_pages));
+
+        // A per-session override below the ceiling is honored.
+        let l = server
+            .resolve_session_limits(r#"{"limits":{"max_memory_mb":64}}"#, Some("alice"))
+            .unwrap();
+        assert_eq!(l.max_memory_pages, Some(64 * 16));
+
+        // A per-session override above the ceiling is clamped down to it.
+        let l = server
+            .resolve_session_limits(r#"{"limits":{"max_memory_mb":512}}"#, Some("alice"))
+            .unwrap();
+        assert_eq!(l.max_memory_pages, Some(cap_pages));
+
+        // A per-session "unlimited" (0) is clamped to the tenant's finite ceiling.
+        let l = server
+            .resolve_session_limits(r#"{"limits":{"max_memory_mb":0}}"#, Some("alice"))
+            .unwrap();
+        assert_eq!(l.max_memory_pages, Some(cap_pages));
+    }
+
+    #[test]
+    fn test_open_mode_limits_unchanged() {
+        let server = open_server(0);
+        let defaults = crate::agent::limits::ResourceLimits::default();
+
+        // No body → plain server defaults.
+        assert_eq!(server.resolve_session_limits("", None).unwrap(), defaults);
+
+        // With no tenant baseline, a per-session override applies un-clamped and
+        // may exceed the server default (existing 0.20.1 behavior, back-compat).
+        let l = server
+            .resolve_session_limits(r#"{"limits":{"max_memory_mb":1024}}"#, None)
+            .unwrap();
+        assert_eq!(l.max_memory_pages, Some(1024 * 16));
     }
 
     // Hand-built WASM that calls fd_write to print "Hello, World!\n"

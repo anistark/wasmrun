@@ -93,6 +93,23 @@ impl ResourceLimits {
         merged
     }
 
+    /// Clamp every dimension to a `ceiling`, returning the tighter of the two.
+    ///
+    /// Used to enforce a per-tenant limit as a hard ceiling: a per-session
+    /// override may *tighten* a dimension but never exceed the tenant's cap. A
+    /// `None` (unlimited) value is treated as +∞, so an unlimited `ceiling`
+    /// leaves the value untouched, and an unlimited value is pulled down to a
+    /// finite ceiling.
+    pub fn clamp_to(&self, ceiling: &ResourceLimits) -> Self {
+        ResourceLimits {
+            max_memory_pages: clamp_opt(self.max_memory_pages, ceiling.max_memory_pages),
+            max_fuel: clamp_opt(self.max_fuel, ceiling.max_fuel),
+            max_output_bytes: clamp_opt(self.max_output_bytes, ceiling.max_output_bytes),
+            max_file_size: clamp_opt(self.max_file_size, ceiling.max_file_size),
+            max_disk_bytes: clamp_opt(self.max_disk_bytes, ceiling.max_disk_bytes),
+        }
+    }
+
     /// Check that writing a file of `new_len` bytes is allowed. `existing_len`
     /// is the size of the file being replaced (0 for a new file), so that
     /// overwriting an existing file is measured by its net change on disk.
@@ -159,6 +176,17 @@ pub fn dir_size(dir: &std::path::Path) -> u64 {
         }
     }
     total
+}
+
+/// Clamp an optional ceiling onto an optional value, treating `None` as +∞
+/// (unlimited): no ceiling leaves the value as-is; an unlimited value is pulled
+/// down to a finite ceiling; two finite values take the smaller.
+fn clamp_opt<T: Ord + Copy>(val: Option<T>, ceiling: Option<T>) -> Option<T> {
+    match (val, ceiling) {
+        (_, None) => val,
+        (None, Some(c)) => Some(c),
+        (Some(v), Some(c)) => Some(v.min(c)),
+    }
 }
 
 fn mb_to_pages(mb: u32) -> u32 {
@@ -249,6 +277,66 @@ mod tests {
         };
         let merged = base.with_overrides(&ov);
         assert_eq!(merged.max_fuel, None);
+    }
+
+    #[test]
+    fn test_clamp_to_tightens_only() {
+        let ceiling = ResourceLimits {
+            max_memory_pages: Some(100),
+            max_fuel: Some(1000),
+            max_output_bytes: Some(50),
+            max_file_size: Some(500),
+            max_disk_bytes: Some(5000),
+        };
+        // A request below the ceiling on every dimension is left untouched.
+        let below = ResourceLimits {
+            max_memory_pages: Some(10),
+            max_fuel: Some(100),
+            max_output_bytes: Some(5),
+            max_file_size: Some(50),
+            max_disk_bytes: Some(500),
+        };
+        assert_eq!(below.clamp_to(&ceiling), below);
+
+        // A request above the ceiling on every dimension is pulled down to it.
+        let above = ResourceLimits {
+            max_memory_pages: Some(999),
+            max_fuel: Some(99999),
+            max_output_bytes: Some(999),
+            max_file_size: Some(99999),
+            max_disk_bytes: Some(99999),
+        };
+        assert_eq!(above.clamp_to(&ceiling), ceiling);
+    }
+
+    #[test]
+    fn test_clamp_to_none_semantics() {
+        // A finite ceiling pulls an "unlimited" (None) value down to it.
+        let ceiling = ResourceLimits {
+            max_memory_pages: Some(64),
+            max_fuel: Some(10),
+            max_output_bytes: Some(1),
+            max_file_size: Some(2),
+            max_disk_bytes: Some(3),
+        };
+        let unlimited = ResourceLimits {
+            max_memory_pages: None,
+            max_fuel: None,
+            max_output_bytes: None,
+            max_file_size: None,
+            max_disk_bytes: None,
+        };
+        assert_eq!(unlimited.clamp_to(&ceiling), ceiling);
+
+        // An unlimited ceiling leaves any value untouched.
+        let val = ResourceLimits {
+            max_memory_pages: Some(7),
+            max_fuel: None,
+            max_output_bytes: Some(9),
+            max_file_size: None,
+            max_disk_bytes: Some(11),
+        };
+        assert_eq!(val.clamp_to(&unlimited), val);
     }
 
     #[test]

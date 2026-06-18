@@ -23,6 +23,7 @@
 //! key_sha256 = "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"
 //! ```
 
+use crate::agent::limits::LimitsOverride;
 use crate::error::{ConfigError, WasmrunError};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -52,6 +53,10 @@ struct RawTenant {
     /// Optional `[tenants.rate]` sub-table; absent = inherit all defaults.
     #[serde(default)]
     rate: Option<TenantRate>,
+    /// Optional `[tenants.limits]` sub-table; the operator-assigned resource
+    /// ceiling for this tenant. Absent = inherit the server defaults.
+    #[serde(default)]
+    limits: Option<LimitsOverride>,
 }
 
 /// Per-tenant rate ceilings, from the optional `[tenants.rate]` sub-table.
@@ -81,6 +86,9 @@ pub struct AuthConfig {
     keys: HashMap<String, String>,
     /// Tenant id → per-tenant rate ceilings (default = all-inherit).
     rates: HashMap<String, TenantRate>,
+    /// Tenant id → operator-assigned resource-limit override. Only present for
+    /// tenants that declared a `[tenants.limits]` table.
+    limits: HashMap<String, LimitsOverride>,
 }
 
 impl AuthConfig {
@@ -130,6 +138,7 @@ impl AuthConfig {
 
         let mut keys: HashMap<String, String> = HashMap::with_capacity(raw.tenants.len());
         let mut rates: HashMap<String, TenantRate> = HashMap::with_capacity(raw.tenants.len());
+        let mut limits: HashMap<String, LimitsOverride> = HashMap::new();
         let mut seen_ids: HashMap<String, ()> = HashMap::with_capacity(raw.tenants.len());
 
         for tenant in raw.tenants {
@@ -164,9 +173,16 @@ impl AuthConfig {
             }
 
             rates.insert(id.to_string(), tenant.rate.unwrap_or_default());
+            if let Some(ov) = tenant.limits {
+                limits.insert(id.to_string(), ov);
+            }
         }
 
-        Ok(AuthConfig { keys, rates })
+        Ok(AuthConfig {
+            keys,
+            rates,
+            limits,
+        })
     }
 
     /// Number of configured tenants.
@@ -185,6 +201,12 @@ impl AuthConfig {
     /// default.
     pub fn rate(&self, id: &str) -> Option<&TenantRate> {
         self.rates.get(id)
+    }
+
+    /// The operator-assigned resource-limit override for `id`, or `None` if the
+    /// tenant declared no `[tenants.limits]` table (inherit server defaults).
+    pub fn limits(&self, id: &str) -> Option<&LimitsOverride> {
+        self.limits.get(id)
     }
 }
 
@@ -319,6 +341,27 @@ mod tests {
 
         // Unknown tenant id resolves to no rate.
         assert!(cfg.rate("nope").is_none());
+    }
+
+    #[test]
+    fn test_parse_tenant_limits() {
+        let body = format!(
+            "[[tenants]]\nid = \"a\"\nkey_sha256 = \"{}\"\n[tenants.limits]\nmax_memory_mb = 128\nmax_disk_mb = 50\n\n[[tenants]]\nid = \"b\"\nkey_sha256 = \"{}\"\n",
+            hash_key("ka"),
+            hash_key("kb"),
+        );
+        let f = write_toml(&body);
+        let cfg = AuthConfig::load(f.path()).unwrap();
+
+        let la = cfg.limits("a").unwrap();
+        assert_eq!(la.max_memory_mb, Some(128));
+        assert_eq!(la.max_disk_mb, Some(50));
+        assert_eq!(la.max_fuel, None); // unspecified field stays None
+
+        // A tenant without [tenants.limits] has no override (inherit defaults).
+        assert!(cfg.limits("b").is_none());
+        // Unknown tenant id → no override.
+        assert!(cfg.limits("nope").is_none());
     }
 
     #[test]
