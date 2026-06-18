@@ -529,6 +529,15 @@ impl AgentServer {
             return self.respond_json(request, Err::<serde_json::Value, _>(err), &log);
         }
 
+        // Per-tenant requests/min throttle (auth mode only). Checked here — after
+        // the tenant resolves, before the body is read — so a flood is rejected
+        // cheaply and the cap covers every `/api/v1/*` route uniformly.
+        if !self.allow_request_rate(tenant) {
+            self.metrics.record_rejected_rate();
+            let err = ApiError::RateLimited("requests-per-minute exceeded".into());
+            return self.respond_json(request, Err::<serde_json::Value, _>(err), &log);
+        }
+
         let segments: Vec<&str> = path
             .trim_start_matches(API_PREFIX)
             .trim_matches('/')
