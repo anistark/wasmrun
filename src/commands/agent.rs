@@ -5,7 +5,7 @@ use crate::agent::limits::ResourceLimits;
 use crate::agent::server::{AgentConfig, AgentServer};
 use crate::agent::session::SessionConfig;
 use crate::error::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,11 +34,13 @@ pub fn handle_agent_command(
     }
 
     // Load the auth config when requested. Abort startup on any error rather than
-    // silently running open when auth was asked for.
+    // silently running open when auth was asked for. The path is retained so the
+    // server can watch it for live reloads.
     let auth = match auth_config {
         Some(path) => Some(Arc::new(AuthConfig::load(Path::new(path))?)),
         None => None,
     };
+    let auth_path = auth_config.map(PathBuf::from);
 
     let limits =
         ResourceLimits::from_cli(max_memory, max_fuel, max_output, max_file_size, max_disk);
@@ -59,6 +61,7 @@ pub fn handle_agent_command(
         max_body_bytes,
         max_concurrent_exec,
         auth,
+        auth_path,
     };
 
     let server = AgentServer::new(config);

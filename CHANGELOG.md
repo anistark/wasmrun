@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Live Auth-Config Reload**: pick up tenant/key/rate/limit changes without restarting the server
+  - The `--auth` file is watched for modification; on change it is reloaded and the live config is hot-swapped atomically (each request reads a cheap snapshot, so a concurrent reload is invisible mid-request)
+  - A malformed or invalid edit is **logged and ignored** — the previous config is kept, so a bad edit never crashes the server or silently drops auth
+  - In-flight sessions keep their original owner and limits; a reload affects only subsequent key resolution and newly created sessions
+  - Dependency-free: mtime polling on the existing background thread (cross-platform; no SIGHUP/inotify); the banner shows the watched path
 - **Per-Tenant Resource-Limit Overrides (auth mode)**: assign each tenant its own resource ceiling as a hard cap
   - Optional `[tenants.limits]` sub-table per `[[tenants]]` (same shape as the per-session `{"limits":{}}` override: `max_memory_mb`, `max_fuel`, `max_output_mb`, `max_file_size_mb`, `max_disk_mb`)
   - Effective session limits compose in three layers: server defaults → tenant `[tenants.limits]` (the tenant baseline) → per-session `{"limits":{}}` override **clamped to the tenant baseline**
