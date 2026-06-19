@@ -529,15 +529,6 @@ impl AgentServer {
             return self.respond_json(request, Err::<serde_json::Value, _>(err), &log);
         }
 
-        // Per-tenant requests/min throttle (auth mode only). Checked here — after
-        // the tenant resolves, before the body is read — so a flood is rejected
-        // cheaply and the cap covers every `/api/v1/*` route uniformly.
-        if !self.allow_request_rate(tenant) {
-            self.metrics.record_rejected_rate();
-            let err = ApiError::RateLimited("requests-per-minute exceeded".into());
-            return self.respond_json(request, Err::<serde_json::Value, _>(err), &log);
-        }
-
         let segments: Vec<&str> = path
             .trim_start_matches(API_PREFIX)
             .trim_matches('/')
@@ -821,6 +812,12 @@ impl AgentServer {
                 for (k, v) in vars {
                     env.add_env(k.clone(), v.clone());
                 }
+            }
+            // Re-seed the disk counter from the work dir's actual footprint so
+            // agent-side file writes since the last exec are reflected. Within
+            // the exec the counter is then maintained incrementally (O(1)/write).
+            if env.max_disk_bytes().is_some() {
+                env.seed_disk_used(dir_size(&work_dir));
             }
         }
 
