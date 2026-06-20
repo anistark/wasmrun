@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0](https://github.com/anistark/wasmrun/releases/tag/v0.20.0) - 2026-06-20
+
 ### Added
 - **WASI-Layer Disk Accounting**: bound a session's total disk usage against writes made by sandboxed code itself
   - `fd_write` now checks the session's total on-disk footprint against `--max-disk` (per-session `max_disk_mb`) and rejects an over-quota write with `EDQUOT`, in addition to the existing per-file `EFBIG` cap

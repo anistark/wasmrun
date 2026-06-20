@@ -39,6 +39,8 @@ The body is optional. To override the server's default [resource limits](../agen
 
 Body size and exec concurrency are server-wide and cannot be overridden per session.
 
+When the server runs with [`--auth`](../agent.md#authentication) and the tenant has a `[tenants.limits]` baseline, a per-session override may only *tighten* a limit — it is clamped to the tenant ceiling and can never raise a cap above it.
+
 ## Get Session Status
 
 ```
@@ -86,6 +88,6 @@ Destroys the session and cleans up its filesystem.
 | 404 | Session not found — or owned by another tenant (see below) |
 | 410 | Session expired |
 | 413 | Request body exceeded the server's `--max-body` limit |
-| 429 | Maximum concurrent sessions reached |
+| 429 | Maximum concurrent sessions reached — the global `--max-sessions` cap, or the tenant's own `[tenants.rate]` session cap under `--auth` |
 
 When the server is started with [`--auth`](../agent.md#authentication), each session is owned by the tenant that created it. A request for a session owned by a different tenant returns **404** — identical to a nonexistent session — so existence isn't leaked across tenants.

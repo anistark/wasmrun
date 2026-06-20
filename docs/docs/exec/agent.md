@@ -90,7 +90,34 @@ A missing, malformed, or unknown key returns **401 Unauthorized**.
 
 Each session is owned by the tenant that created it. A tenant can only see and operate on its own sessions — any request targeting another tenant's session returns **404 Not Found**, identical to a nonexistent session so existence isn't leaked.
 
-> Per-tenant rate limiting is not yet implemented.
+### Per-tenant limits and rate limits
+
+Each tenant can carry its own resource ceiling and request budget, layered on top of the server defaults. Both are optional sub-tables under a `[[tenants]]` entry:
+
+```toml
+[[tenants]]
+id = "ci"
+key_sha256 = "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"
+
+  [tenants.limits]
+  max_memory_mb = 128
+  max_disk_mb = 50
+
+  [tenants.rate]
+  max_sessions = 10
+  max_concurrent_exec = 4
+  max_requests_per_min = 600
+```
+
+`[tenants.limits]` sets a per-tenant resource ceiling — same fields as a [per-session override](./usage/agent-sessions.md#per-session-limit-overrides) (`max_memory_mb`, `max_fuel`, `max_output_mb`, `max_file_size_mb`, `max_disk_mb`). Effective session limits compose in three layers: **server defaults → tenant baseline → per-session override clamped to the tenant baseline**. The tenant ceiling is a hard cap — a per-session override may only *tighten* a dimension, never raise it above the tenant's cap (a per-session "unlimited" `0` is pulled down to the tenant's finite ceiling).
+
+`[tenants.rate]` throttles the tenant independently so one tenant cannot exhaust the shared server: `max_sessions`, `max_concurrent_exec`, `max_requests_per_min` (each `0` or omitted inherits the server-wide default). Over any of these limits returns **429 Too Many Requests**.
+
+In open mode (no `--auth`) there is no tenant baseline: a per-session override applies un-clamped and only the global limits apply, exactly as before.
+
+### Live config reload
+
+The `--auth` file is watched for modification and reloaded **without a restart** — edit the config and the new tenants, keys, limits, and rates take effect for subsequent key resolution and newly created sessions. In-flight sessions keep their original owner and limits. A malformed or invalid edit is **logged and ignored**, keeping the previous config, so a bad edit never drops auth or crashes the server. The banner shows the watched path.
 
 ## How It Works
 

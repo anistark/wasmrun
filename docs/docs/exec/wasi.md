@@ -16,8 +16,8 @@ Wasmrun's exec mode provides WASI Preview 1 support, enabling WASM modules to in
 | `fd_close` | Close a file descriptor | ✅ |
 | `fd_seek` | Seek within a file descriptor | ✅ |
 | `fd_fdstat_get` | File descriptor status (filetype, flags, rights) | ✅ |
-| `fd_prestat_get` | Preopened directory info (returns EBADF — no preopens yet) | ✅ Stub |
-| `fd_prestat_dir_name` | Preopened directory name | ✅ Stub |
+| `fd_prestat_get` | Preopened directory info (returns the preopen, or EBADF when none mounted) | ✅ |
+| `fd_prestat_dir_name` | Preopened directory name | ✅ |
 | `args_get` | Retrieve command-line arguments from memory | ✅ |
 | `args_sizes_get` | Get argument count and buffer sizes | ✅ |
 | `environ_get` | Retrieve environment variables from memory | ✅ |
@@ -27,10 +27,18 @@ Wasmrun's exec mode provides WASI Preview 1 support, enabling WASM modules to in
 | `proc_exit` | Exit with a status code (terminates execution cleanly) | ✅ |
 | `poll_oneoff` | Poll for events (stub — returns ENOSYS) | ✅ Stub |
 | `sched_yield` | Yield execution (stub — returns success) | ✅ Stub |
-| `path_open` | Open a file by path | 🔧 Planned |
-| `path_filestat_get` | Stat a path | 🔧 Planned |
-| `path_create_directory` | Create directory | 🔧 Planned |
-| `fd_readdir` | Read directory entries | 🔧 Planned |
+| `path_open` | Open (or create) a file by path | ✅ |
+| `path_filestat_get` | Stat a path | ✅ |
+| `path_create_directory` | Create a directory | ✅ |
+| `path_remove_directory` | Remove a directory | ✅ |
+| `path_unlink_file` | Delete a file | ✅ |
+| `path_rename` | Rename / move a path | ✅ |
+| `fd_readdir` | Read directory entries | ✅ |
+| `fd_filestat_get` | Stat an open file descriptor | ✅ |
+| `fd_fdstat_set_flags` | Set file descriptor flags | ✅ |
+| `path_filestat_set_times` | Set path timestamps (returns ENOSYS) | ✅ Stub |
+| `path_readlink` | Read a symlink target (returns ENOSYS) | ✅ Stub |
+| `path_symlink` | Create a symlink (returns ENOSYS) | ✅ Stub |
 
 ## How It Works
 
@@ -93,11 +101,10 @@ match executor.execute_with_args(func_idx, args) {
 
 ## Filesystem
 
-WASI filesystem integration is planned for v0.17.4. It will bridge the exec mode executor to wasmrun's existing `WasiFilesystem`, which provides:
+Exec mode bridges the executor to wasmrun's `WasiFilesystem`, so modules can open, read, write, list, and delete files through the `path_*` / `fd_*` syscalls above. A host directory is mounted into the sandbox as a WASI preopen — the [agent API](./agent.md), for example, preopens each session's temp directory at `/`.
 
-- Mount host directories into the WASM sandbox
-- Path traversal protection
-- Read-only mode support
-- File size limits
-
-See the [roadmap](/docs/exec) for details on upcoming WASI filesystem support.
+- **Preopened directories** — host directories mounted to a virtual path, surfaced via `fd_prestat_get` / `fd_prestat_dir_name`
+- **Path traversal protection** — every guest path is resolved and confined to its mount; `..` escapes are rejected
+- **Read-only mode** — when enabled, writes and creates fail instead of mutating the host
+- **File size limit** — a write larger than the configured per-file cap is rejected with `EFBIG`
+- **Disk quota** — in the agent, a write that would push the session's total on-disk footprint past `--max-disk` is rejected with `EDQUOT` (see [Agent API](./agent.md))

@@ -49,7 +49,7 @@ wasmrun_agent_sessions_active 3
   "exec_duration_ms_count": 13,
   "output_truncated_total": 0,
   "sessions_created_total": 20,
-  "exec_rejected_total": { "concurrency": 0, "payload": 0, "unauthorized": 0 },
+  "exec_rejected_total": { "concurrency": 0, "payload": 0, "unauthorized": 0, "rate": 0 },
   "sessions_active": 3,
   "sessions_total": 3,
   "exec_in_flight": 1,
@@ -66,7 +66,7 @@ wasmrun_agent_sessions_active 3
 | `wasmrun_agent_exec_duration_ms_count` | counter | Number of executions in the sum — pair with `_sum` for the average |
 | `wasmrun_agent_output_truncated_total` | counter | Executions whose captured output hit the `--max-output` cap |
 | `wasmrun_agent_sessions_created_total` | counter | Sessions created since startup |
-| `wasmrun_agent_exec_rejected_total{reason}` | counter | Requests rejected before doing work, by `reason`: `concurrency` (429), `payload` (413), `unauthorized` (401) |
+| `wasmrun_agent_exec_rejected_total{reason}` | counter | Requests rejected before doing work, by `reason`: `concurrency` (429), `payload` (413), `unauthorized` (401), `rate` (429, per-tenant rate limit) |
 | `wasmrun_agent_sessions_active` | gauge | Active (non-expired) sessions right now |
 | `wasmrun_agent_sessions_total` | gauge | Sessions tracked, including expired-but-not-yet-cleaned |
 | `wasmrun_agent_exec_in_flight` | gauge | Exec workers currently running |
