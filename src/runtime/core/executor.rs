@@ -226,6 +226,21 @@ pub enum Instruction {
     GlobalGet(u32),
     GlobalSet(u32),
 
+    // Reference types (WASM reference-types proposal)
+    RefNull(ValueType), // null reference of the given ref type (funcref/externref)
+    RefIsNull,
+    RefFunc(u32), // function index
+
+    // Table operations (reference-types / bulk-memory proposals)
+    TableGet(u32),       // table index
+    TableSet(u32),       // table index
+    TableInit(u32, u32), // (element segment index, table index)
+    ElemDrop(u32),       // element segment index
+    TableCopy(u32, u32), // (dst table index, src table index)
+    TableGrow(u32),      // table index
+    TableSize(u32),      // table index
+    TableFill(u32),      // table index
+
     // Control flow
     Nop,
     Unreachable,
@@ -703,6 +718,30 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         }
         0x1A => Ok(Instruction::Drop),
         0x1B => Ok(Instruction::Select),
+        0x1C => {
+            // select with explicit result types (reference-types proposal).
+            // The type annotation only matters for validation; runtime behavior
+            // is identical to untyped select, so decode and discard the types.
+            let n = decode_u32_leb128(cursor)? as usize;
+            for _ in 0..n {
+                let _ty = read_u8(cursor)?;
+            }
+            Ok(Instruction::Select)
+        }
+
+        // Reference types
+        0x25 => Ok(Instruction::TableGet(decode_u32_leb128(cursor)?)),
+        0x26 => Ok(Instruction::TableSet(decode_u32_leb128(cursor)?)),
+        0xD0 => {
+            // ref.null <reftype>
+            let ty = read_u8(cursor)?;
+            let ref_type = ValueType::from_byte(ty)
+                .filter(|t| matches!(t, ValueType::FuncRef | ValueType::ExternRef))
+                .ok_or_else(|| format!("Invalid ref.null type: 0x{ty:02X}"))?;
+            Ok(Instruction::RefNull(ref_type))
+        }
+        0xD1 => Ok(Instruction::RefIsNull),
+        0xD2 => Ok(Instruction::RefFunc(decode_u32_leb128(cursor)?)),
 
         // Sign-extension operators (WASM sign-extension proposal)
         0xC0 => Ok(Instruction::I32Extend8S),
@@ -736,6 +775,38 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
                     // memory.fill: mem_idx(0x00)
                     let _mem_idx = read_u8(cursor)?;
                     Ok(Instruction::MemoryFill)
+                }
+                12 => {
+                    // table.init: elem_idx table_idx
+                    let elem_idx = decode_u32_leb128(cursor)?;
+                    let table_idx = decode_u32_leb128(cursor)?;
+                    Ok(Instruction::TableInit(elem_idx, table_idx))
+                }
+                13 => {
+                    // elem.drop: elem_idx
+                    let elem_idx = decode_u32_leb128(cursor)?;
+                    Ok(Instruction::ElemDrop(elem_idx))
+                }
+                14 => {
+                    // table.copy: dst_table src_table
+                    let dst = decode_u32_leb128(cursor)?;
+                    let src = decode_u32_leb128(cursor)?;
+                    Ok(Instruction::TableCopy(dst, src))
+                }
+                15 => {
+                    // table.grow: table_idx
+                    let table_idx = decode_u32_leb128(cursor)?;
+                    Ok(Instruction::TableGrow(table_idx))
+                }
+                16 => {
+                    // table.size: table_idx
+                    let table_idx = decode_u32_leb128(cursor)?;
+                    Ok(Instruction::TableSize(table_idx))
+                }
+                17 => {
+                    // table.fill: table_idx
+                    let table_idx = decode_u32_leb128(cursor)?;
+                    Ok(Instruction::TableFill(table_idx))
                 }
                 _ => Err(format!("Unknown 0xFC sub-opcode: {op}")),
             }
@@ -948,6 +1019,9 @@ fn evaluate_const_expr_value(expr: &[u8], already_init: &[Value]) -> Result<Valu
         Instruction::I64Const(v) => Ok(Value::I64(v)),
         Instruction::F32Const(v) => Ok(Value::F32(v)),
         Instruction::F64Const(v) => Ok(Value::F64(v)),
+        Instruction::RefNull(ValueType::ExternRef) => Ok(Value::ExternRef(None)),
+        Instruction::RefNull(_) => Ok(Value::FuncRef(None)),
+        Instruction::RefFunc(idx) => Ok(Value::FuncRef(Some(idx))),
         Instruction::GlobalGet(idx) => {
             // global.get in an init_expr refers to an already-initialized global
             already_init
@@ -971,15 +1045,95 @@ fn evaluate_const_expr(expr: &[u8]) -> Result<usize, String> {
     }
 }
 
+/// A runtime table instance: a growable vector of reference values, all of the
+/// table's declared element type (`funcref` or `externref`). Function tables
+/// hold `Value::FuncRef`, external tables hold `Value::ExternRef`.
+#[derive(Debug, Clone)]
+pub struct TableInstance {
+    pub element_type: ValueType,
+    pub max: Option<u32>,
+    pub elements: Vec<Value>,
+}
+
+impl TableInstance {
+    /// The null reference value matching `element_type`.
+    fn null_value(element_type: ValueType) -> Value {
+        match element_type {
+            ValueType::ExternRef => Value::ExternRef(None),
+            _ => Value::FuncRef(None),
+        }
+    }
+
+    fn new(element_type: ValueType, initial: u32, max: Option<u32>) -> Self {
+        let null = Self::null_value(element_type);
+        TableInstance {
+            element_type,
+            max,
+            elements: vec![null; initial as usize],
+        }
+    }
+
+    fn size(&self) -> u32 {
+        self.elements.len() as u32
+    }
+
+    fn get(&self, idx: u32) -> Result<Value, String> {
+        self.elements.get(idx as usize).copied().ok_or_else(|| {
+            format!(
+                "table access out of bounds: index {idx} (size {})",
+                self.elements.len()
+            )
+        })
+    }
+
+    fn set(&mut self, idx: u32, val: Value) -> Result<(), String> {
+        let len = self.elements.len();
+        let slot = self
+            .elements
+            .get_mut(idx as usize)
+            .ok_or_else(|| format!("table access out of bounds: index {idx} (size {len})"))?;
+        *slot = val;
+        Ok(())
+    }
+
+    /// Grow the table by `n` slots filled with `init`. Returns the previous
+    /// size on success, or `-1` if growth would exceed the table's maximum.
+    fn grow(&mut self, n: u32, init: Value) -> i32 {
+        let old = self.elements.len() as u32;
+        let new_size = match old.checked_add(n) {
+            Some(s) => s,
+            None => return -1,
+        };
+        if let Some(max) = self.max {
+            if new_size > max {
+                return -1;
+            }
+        }
+        self.elements.resize(new_size as usize, init);
+        old as i32
+    }
+}
+
+/// Runtime state of an element segment, used by `table.init` / `elem.drop`.
+/// Active segments are applied at instantiation and start out dropped.
+#[derive(Debug, Clone)]
+struct ElemSegmentState {
+    func_indices: Vec<u32>,
+    dropped: bool,
+}
+
 /// WASM instruction executor
 pub struct Executor {
     context: ExecutionContext,
     module: Module,
     linker: Option<Linker>,
     import_func_count: usize,
-    /// Flat function table initialized from element segments.
-    /// Index = table slot, value = absolute function index (or None if unset).
-    table: Vec<Option<u32>>,
+    /// Runtime table instances, indexed by the module's table index space
+    /// (imported tables first, then module-defined tables). Each holds
+    /// reference values of the table's element type.
+    tables: Vec<TableInstance>,
+    /// Per-element-segment state for `table.init` / `elem.drop`.
+    elem_segments: Vec<ElemSegmentState>,
     /// Remaining instruction budget ("fuel"). `None` = unlimited. When `Some`,
     /// each dispatched instruction decrements it; reaching zero aborts
     /// execution with `FUEL_EXHAUSTED_ERROR`.
@@ -1029,6 +1183,8 @@ impl Executor {
                     ValueType::I64 => Value::I64(0),
                     ValueType::F32 => Value::F32(0.0),
                     ValueType::F64 => Value::F64(0.0),
+                    ValueType::FuncRef => Value::FuncRef(None),
+                    ValueType::ExternRef => Value::ExternRef(None),
                     _ => return Err(format!("Unsupported global type: {:?}", global.value_type)),
                 }
             } else {
@@ -1054,23 +1210,51 @@ impl Executor {
             context.memory.write_bytes(offset, &segment.data)?;
         }
 
-        // Build a flat function table from active element segments.
-        // Each active segment has an offset (where in the table it starts) and a list of
-        // function indices. We compute table[offset + i] = function_indices[i].
-        let mut table: Vec<Option<u32>> = Vec::new();
+        // Build table instances spanning the module's table index space:
+        // imported tables first, then module-defined tables. Each is sized to
+        // its declared initial length and filled with null references.
+        let mut tables: Vec<TableInstance> = Vec::new();
+        for import in &module.imports {
+            if let ImportKind::Table(tt) = &import.kind {
+                tables.push(TableInstance::new(tt.element_type, tt.initial, tt.max));
+            }
+        }
+        for tt in &module.tables {
+            tables.push(TableInstance::new(tt.element_type, tt.initial, tt.max));
+        }
+
+        // Apply element segments. Active segments are written into their target
+        // table at instantiation (offset comes from a const expr) and start out
+        // dropped; passive/declarative segments remain available to table.init.
+        let mut elem_segments: Vec<ElemSegmentState> = Vec::with_capacity(module.elements.len());
         for seg in &module.elements {
             if seg.offset_expr.is_empty() {
-                // Passive element segment — skip (filled lazily via table.init)
+                // Passive or declarative segment — filled lazily via table.init.
+                elem_segments.push(ElemSegmentState {
+                    func_indices: seg.function_indices.clone(),
+                    dropped: false,
+                });
                 continue;
             }
             let offset = evaluate_const_expr(&seg.offset_expr)?;
             let end = offset + seg.function_indices.len();
-            if end > table.len() {
-                table.resize(end, None);
+            // Active segments target table 0 (the only table the parser records
+            // an offset for). Synthesize a funcref table 0 if none was declared.
+            if tables.is_empty() {
+                tables.push(TableInstance::new(ValueType::FuncRef, 0, None));
+            }
+            let table0 = &mut tables[0];
+            if end > table0.elements.len() {
+                let null = TableInstance::null_value(table0.element_type);
+                table0.elements.resize(end, null);
             }
             for (i, &func_idx) in seg.function_indices.iter().enumerate() {
-                table[offset + i] = Some(func_idx);
+                table0.elements[offset + i] = Value::FuncRef(Some(func_idx));
             }
+            elem_segments.push(ElemSegmentState {
+                func_indices: Vec::new(),
+                dropped: true,
+            });
         }
 
         Ok(Executor {
@@ -1078,7 +1262,8 @@ impl Executor {
             module,
             linker,
             import_func_count,
-            table,
+            tables,
+            elem_segments,
             fuel: None,
             cancel: None,
         })
@@ -1161,6 +1346,8 @@ impl Executor {
                         ValueType::I64 => Value::I64(0),
                         ValueType::F32 => Value::F32(0.0),
                         ValueType::F64 => Value::F64(0.0),
+                        ValueType::FuncRef => Value::FuncRef(None),
+                        ValueType::ExternRef => Value::ExternRef(None),
                         _ => {
                             return Err(format!("Unsupported value type in locals: {value_type:?}"))
                         }
@@ -1414,6 +1601,8 @@ impl Executor {
                     ValueType::I64 => Value::I64(0),
                     ValueType::F32 => Value::F32(0.0),
                     ValueType::F64 => Value::F64(0.0),
+                    ValueType::FuncRef => Value::FuncRef(None),
+                    ValueType::ExternRef => Value::ExternRef(None),
                     _ => return Err(format!("Unsupported value type in locals: {value_type:?}")),
                 };
                 locals.push(default_value);
@@ -1469,12 +1658,40 @@ impl Executor {
     }
 
     /// Call a function indirectly via table lookup
-    fn call_function_indirect(&mut self, table_idx: u32, type_idx: u32) -> Result<(), String> {
-        let abs_func_idx = self
-            .table
-            .get(table_idx as usize)
-            .and_then(|&v| v)
-            .ok_or_else(|| format!("Table index {table_idx} is null or out of bounds"))?;
+    /// Borrow table `idx`, erroring if the module has no such table.
+    fn table(&self, idx: u32) -> Result<&TableInstance, String> {
+        self.tables
+            .get(idx as usize)
+            .ok_or_else(|| format!("Table index {idx} out of bounds"))
+    }
+
+    /// Mutably borrow table `idx`, erroring if the module has no such table.
+    fn table_mut(&mut self, idx: u32) -> Result<&mut TableInstance, String> {
+        self.tables
+            .get_mut(idx as usize)
+            .ok_or_else(|| format!("Table index {idx} out of bounds"))
+    }
+
+    fn call_function_indirect(&mut self, elem_idx: u32, type_idx: u32) -> Result<(), String> {
+        // call_indirect dispatches through table 0 (the only table the MVP
+        // encoding targets). The slot must be a non-null funcref.
+        let table0 = self
+            .tables
+            .first()
+            .ok_or_else(|| "call_indirect: module defines no table".to_string())?;
+        let abs_func_idx = match table0.get(elem_idx)? {
+            Value::FuncRef(Some(f)) => f,
+            Value::FuncRef(None) => {
+                return Err(format!(
+                    "call_indirect: null function reference at index {elem_idx}"
+                ))
+            }
+            other => {
+                return Err(format!(
+                    "call_indirect: expected funcref in table, found {other:?}"
+                ))
+            }
+        };
 
         // Resolve defined function index for type checking
         if (abs_func_idx as usize) < self.import_func_count {
@@ -2649,6 +2866,143 @@ impl Executor {
                 *global = val;
             }
 
+            // Reference instructions
+            Instruction::RefNull(ref_type) => {
+                self.context.push(match ref_type {
+                    ValueType::ExternRef => Value::ExternRef(None),
+                    _ => Value::FuncRef(None),
+                });
+            }
+            Instruction::RefIsNull => {
+                let val = self.context.pop()?;
+                if !val.is_ref() {
+                    return Err("ref.is_null expects a reference operand".to_string());
+                }
+                self.context.push(Value::I32(val.is_null_ref() as i32));
+            }
+            Instruction::RefFunc(func_idx) => {
+                self.context.push(Value::FuncRef(Some(func_idx)));
+            }
+
+            // Table instructions
+            Instruction::TableGet(table_idx) => {
+                let elem = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.get index must be i32".to_string()),
+                };
+                let table = self.table(table_idx)?;
+                let val = table.get(elem)?;
+                self.context.push(val);
+            }
+            Instruction::TableSet(table_idx) => {
+                let val = self.context.pop()?;
+                let elem = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.set index must be i32".to_string()),
+                };
+                self.table_mut(table_idx)?.set(elem, val)?;
+            }
+            Instruction::TableSize(table_idx) => {
+                let size = self.table(table_idx)?.size();
+                self.context.push(Value::I32(size as i32));
+            }
+            Instruction::TableGrow(table_idx) => {
+                let n = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.grow count must be i32".to_string()),
+                };
+                let init = self.context.pop()?;
+                let prev = self.table_mut(table_idx)?.grow(n, init);
+                self.context.push(Value::I32(prev));
+            }
+            Instruction::TableFill(table_idx) => {
+                let n = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.fill count must be i32".to_string()),
+                };
+                let val = self.context.pop()?;
+                let start = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.fill index must be i32".to_string()),
+                };
+                let table = self.table_mut(table_idx)?;
+                for i in 0..n {
+                    table.set(start + i, val)?;
+                }
+            }
+            Instruction::TableCopy(dst_table, src_table) => {
+                let n = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.copy count must be i32".to_string()),
+                };
+                let src = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.copy src must be i32".to_string()),
+                };
+                let dst = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.copy dst must be i32".to_string()),
+                };
+                // Snapshot the source range first so an overlapping in-table
+                // copy (dst_table == src_table) reads pre-copy values.
+                let mut buf = Vec::with_capacity(n as usize);
+                {
+                    let src_t = self.table(src_table)?;
+                    for i in 0..n {
+                        buf.push(src_t.get(src + i)?);
+                    }
+                }
+                let dst_t = self.table_mut(dst_table)?;
+                for (i, v) in buf.into_iter().enumerate() {
+                    dst_t.set(dst + i as u32, v)?;
+                }
+            }
+            Instruction::TableInit(elem_idx, table_idx) => {
+                let n = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.init count must be i32".to_string()),
+                };
+                let src = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.init src must be i32".to_string()),
+                };
+                let dst = match self.context.pop()? {
+                    Value::I32(i) => i as u32,
+                    _ => return Err("table.init dst must be i32".to_string()),
+                };
+                let seg = self.elem_segments.get(elem_idx as usize).ok_or_else(|| {
+                    format!("table.init: element segment {elem_idx} out of bounds")
+                })?;
+                if seg.dropped {
+                    return Err(format!(
+                        "table.init: element segment {elem_idx} already dropped"
+                    ));
+                }
+                // Resolve the funcrefs first to avoid holding a borrow on
+                // self.elem_segments while mutating self.tables.
+                let mut refs = Vec::with_capacity(n as usize);
+                for i in 0..n {
+                    let f = seg.func_indices.get((src + i) as usize).ok_or_else(|| {
+                        format!("table.init: source index {} out of bounds", src + i)
+                    })?;
+                    refs.push(Value::FuncRef(Some(*f)));
+                }
+                let table = self.table_mut(table_idx)?;
+                for (i, v) in refs.into_iter().enumerate() {
+                    table.set(dst + i as u32, v)?;
+                }
+            }
+            Instruction::ElemDrop(elem_idx) => {
+                let seg = self
+                    .elem_segments
+                    .get_mut(elem_idx as usize)
+                    .ok_or_else(|| {
+                        format!("elem.drop: element segment {elem_idx} out of bounds")
+                    })?;
+                seg.dropped = true;
+                seg.func_indices = Vec::new();
+            }
+
             // Memory load operations — effective address = stack_val + offset
             Instruction::I32Load(offset) => {
                 let addr = match self.context.pop()? {
@@ -3355,7 +3709,7 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
-    use super::super::module::{Function, FunctionType};
+    use super::super::module::{Function, FunctionType, TableType};
     use super::*;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -4929,5 +5283,366 @@ mod tests {
             decode_instruction(&mut Cursor::new([0x9F].as_slice())).unwrap(),
             Instruction::F64Sqrt
         ));
+    }
+
+    // ----- Reference types (#93) -----
+
+    /// Build a single-function module from a type signature, locals, body, and
+    /// table declarations. Keeps the reference-type tests below terse.
+    fn ref_module(
+        params: Vec<ValueType>,
+        results: Vec<ValueType>,
+        locals: Vec<(u32, ValueType)>,
+        code: Vec<u8>,
+        tables: Vec<TableType>,
+    ) -> Module {
+        Module {
+            version: 1,
+            types: vec![FunctionType { params, results }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals,
+                code,
+            }],
+            tables,
+            memory: None,
+            globals: vec![],
+            exports: HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        }
+    }
+
+    #[test]
+    fn test_value_ref_helpers() {
+        assert!(Value::null_funcref().is_ref());
+        assert!(Value::null_externref().is_null_ref());
+        assert!(!Value::I32(0).is_ref());
+        assert!(!Value::I32(0).is_null_ref());
+        assert!(!Value::FuncRef(Some(3)).is_null_ref());
+        assert_eq!(Value::FuncRef(Some(7)).as_func_idx(), Some(7));
+        assert_eq!(Value::FuncRef(None).as_func_idx(), None);
+        assert_eq!(Value::ExternRef(Some(7)).as_func_idx(), None);
+    }
+
+    #[test]
+    fn test_decode_ref_instructions() {
+        // ref.null funcref / externref
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0xD0, 0x70].as_slice())).unwrap(),
+            Instruction::RefNull(ValueType::FuncRef)
+        ));
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0xD0, 0x6F].as_slice())).unwrap(),
+            Instruction::RefNull(ValueType::ExternRef)
+        ));
+        // ref.is_null
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0xD1].as_slice())).unwrap(),
+            Instruction::RefIsNull
+        ));
+        // ref.func 5
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0xD2, 0x05].as_slice())).unwrap(),
+            Instruction::RefFunc(5)
+        ));
+        // ref.null with a non-reference type is rejected
+        assert!(decode_instruction(&mut Cursor::new([0xD0, 0x7F].as_slice())).is_err());
+    }
+
+    #[test]
+    fn test_decode_table_instructions() {
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0x25, 0x00].as_slice())).unwrap(),
+            Instruction::TableGet(0)
+        ));
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0x26, 0x01].as_slice())).unwrap(),
+            Instruction::TableSet(1)
+        ));
+        // 0xFC table ops
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0xFC, 0x10, 0x00].as_slice())).unwrap(),
+            Instruction::TableSize(0)
+        ));
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0xFC, 0x0F, 0x00].as_slice())).unwrap(),
+            Instruction::TableGrow(0)
+        ));
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0xFC, 0x0C, 0x02, 0x01].as_slice())).unwrap(),
+            Instruction::TableInit(2, 1)
+        ));
+        // typed select decodes (and discards) its type vector
+        assert!(matches!(
+            decode_instruction(&mut Cursor::new([0x1C, 0x01, 0x7F].as_slice())).unwrap(),
+            Instruction::Select
+        ));
+    }
+
+    #[test]
+    fn test_ref_null_is_null() {
+        // () -> i32 : ref.null func; ref.is_null  => 1
+        let module = ref_module(
+            vec![],
+            vec![ValueType::I32],
+            vec![],
+            vec![0xD0, 0x70, 0xD1, 0x0b],
+            vec![],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        let results = executor.execute(0).unwrap();
+        assert_eq!(results, vec![Value::I32(1)]);
+    }
+
+    #[test]
+    fn test_ref_func_is_not_null() {
+        // () -> i32 : ref.func 0; ref.is_null  => 0
+        let module = ref_module(
+            vec![],
+            vec![ValueType::I32],
+            vec![],
+            vec![0xD2, 0x00, 0xD1, 0x0b],
+            vec![],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        let results = executor.execute(0).unwrap();
+        assert_eq!(results, vec![Value::I32(0)]);
+    }
+
+    #[test]
+    fn test_externref_param_roundtrip() {
+        // (externref) -> externref : local.get 0  => same handle back
+        let module = ref_module(
+            vec![ValueType::ExternRef],
+            vec![ValueType::ExternRef],
+            vec![],
+            vec![0x20, 0x00, 0x0b],
+            vec![],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        let results = executor
+            .execute_with_args(0, vec![Value::ExternRef(Some(42))])
+            .unwrap();
+        assert_eq!(results, vec![Value::ExternRef(Some(42))]);
+    }
+
+    #[test]
+    fn test_externref_table_set_get_roundtrip() {
+        // (externref) -> externref :
+        //   i32.const 0; local.get 0; table.set 0; i32.const 0; table.get 0
+        let table = TableType {
+            initial: 2,
+            max: None,
+            element_type: ValueType::ExternRef,
+        };
+        let module = ref_module(
+            vec![ValueType::ExternRef],
+            vec![ValueType::ExternRef],
+            vec![],
+            vec![
+                0x41, 0x00, // i32.const 0  (table index)
+                0x20, 0x00, // local.get 0  (value)
+                0x26, 0x00, // table.set 0
+                0x41, 0x00, // i32.const 0
+                0x25, 0x00, // table.get 0
+                0x0b, // end
+            ],
+            vec![table],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        let results = executor
+            .execute_with_args(0, vec![Value::ExternRef(Some(99))])
+            .unwrap();
+        assert_eq!(results, vec![Value::ExternRef(Some(99))]);
+    }
+
+    #[test]
+    fn test_table_size_and_grow() {
+        // () -> i32 : ref.null func; i32.const 3; table.grow 0; drop; table.size 0 => 5
+        let table = TableType {
+            initial: 2,
+            max: None,
+            element_type: ValueType::FuncRef,
+        };
+        let module = ref_module(
+            vec![],
+            vec![ValueType::I32],
+            vec![],
+            vec![
+                0xD0, 0x70, // ref.null func  (grow init value)
+                0x41, 0x03, // i32.const 3    (grow count)
+                0xFC, 0x0F, 0x00, // table.grow 0  => pushes prev size 2
+                0x1A, // drop
+                0xFC, 0x10, 0x00, // table.size 0  => 5
+                0x0b, // end
+            ],
+            vec![table],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        let results = executor.execute(0).unwrap();
+        assert_eq!(results, vec![Value::I32(5)]);
+    }
+
+    #[test]
+    fn test_table_grow_respects_max() {
+        // Growing past `max` returns -1 and leaves the size unchanged.
+        let table = TableType {
+            initial: 1,
+            max: Some(2),
+            element_type: ValueType::FuncRef,
+        };
+        let module = ref_module(
+            vec![],
+            vec![ValueType::I32],
+            vec![],
+            vec![
+                0xD0, 0x70, // ref.null func
+                0x41, 0x05, // i32.const 5  (over max)
+                0xFC, 0x0F, 0x00, // table.grow 0 => -1
+                0x0b,
+            ],
+            vec![table],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        let results = executor.execute(0).unwrap();
+        assert_eq!(results, vec![Value::I32(-1)]);
+    }
+
+    #[test]
+    fn test_call_indirect_through_funcref_table() {
+        use crate::runtime::core::module::ElementSegment;
+        // Two functions: f0 returns 111, f1 returns 222. An element segment
+        // installs [f0, f1] into table 0. The entry function call_indirects
+        // table slot 1, expecting 222 — exercising the funcref table path.
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![],
+                results: vec![ValueType::I32],
+            }],
+            imports: vec![],
+            functions: vec![
+                Function {
+                    type_index: 0,
+                    locals: vec![],
+                    code: vec![0x41, 0x6F, 0x0b], // i32.const 111; end
+                },
+                Function {
+                    type_index: 0,
+                    locals: vec![],
+                    code: vec![0x41, 0xDE, 0x01, 0x0b], // i32.const 222; end
+                },
+                Function {
+                    type_index: 0,
+                    locals: vec![],
+                    // i32.const 1; call_indirect type 0 table 0; end
+                    code: vec![0x41, 0x01, 0x11, 0x00, 0x00, 0x0b],
+                },
+            ],
+            tables: vec![TableType {
+                initial: 2,
+                max: None,
+                element_type: ValueType::FuncRef,
+            }],
+            memory: None,
+            globals: vec![],
+            exports: HashMap::new(),
+            start: None,
+            elements: vec![ElementSegment {
+                offset_expr: vec![0x41, 0x00, 0x0b], // i32.const 0
+                function_indices: vec![0, 1],
+            }],
+            data: vec![],
+        };
+        let mut executor = Executor::new(module).unwrap();
+        let results = executor.execute(2).unwrap();
+        assert_eq!(results, vec![Value::I32(222)]);
+    }
+
+    #[test]
+    fn test_table_fill() {
+        // () -> i32 : fill table[0..3] with ref.func 0, then read slot 2 and
+        // check it is non-null. table.fill pops (n, val, start) top-down.
+        let table = TableType {
+            initial: 3,
+            max: None,
+            element_type: ValueType::FuncRef,
+        };
+        let module = ref_module(
+            vec![],
+            vec![ValueType::I32],
+            vec![],
+            vec![
+                0x41, 0x00, // i32.const 0  (start)
+                0xD2, 0x00, // ref.func 0   (fill value)
+                0x41, 0x03, // i32.const 3  (count)
+                0xFC, 0x11, 0x00, // table.fill 0
+                0x41, 0x02, // i32.const 2
+                0x25, 0x00, // table.get 0
+                0xD1, // ref.is_null => 0
+                0x0b,
+            ],
+            vec![table],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        let results = executor.execute(0).unwrap();
+        assert_eq!(results, vec![Value::I32(0)]);
+    }
+
+    #[test]
+    fn test_table_init_from_passive_segment() {
+        use crate::runtime::core::module::ElementSegment;
+        // A passive element segment [f0] is copied into table slot 0 via
+        // table.init, then read back as a non-null funcref. table.init pops
+        // (n, src, dst) top-down.
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![],
+                results: vec![ValueType::I32],
+            }],
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![],
+                code: vec![
+                    0x41, 0x00, // i32.const 0  (dst)
+                    0x41, 0x00, // i32.const 0  (src)
+                    0x41, 0x01, // i32.const 1  (n)
+                    0xFC, 0x0C, 0x00, 0x00, // table.init elem 0 table 0
+                    0x41, 0x00, // i32.const 0
+                    0x25, 0x00, // table.get 0
+                    0xD1, // ref.is_null => 0
+                    0x0b,
+                ],
+            }],
+            tables: vec![TableType {
+                initial: 2,
+                max: None,
+                element_type: ValueType::FuncRef,
+            }],
+            memory: None,
+            globals: vec![],
+            exports: HashMap::new(),
+            start: None,
+            // Passive segment: empty offset_expr.
+            elements: vec![ElementSegment {
+                offset_expr: vec![],
+                function_indices: vec![0],
+            }],
+            data: vec![],
+        };
+        let mut executor = Executor::new(module).unwrap();
+        let results = executor.execute(0).unwrap();
+        assert_eq!(results, vec![Value::I32(0)]);
+
+        // The segment is still usable until elem.drop; re-running table.init
+        // would succeed again. Confirm a dropped segment is rejected.
+        executor.elem_segments[0].dropped = true;
+        let err = executor.execute(0).unwrap_err();
+        assert!(err.contains("already dropped"), "got: {err}");
     }
 }

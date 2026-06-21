@@ -92,6 +92,8 @@ pub struct MemoryType {
 pub struct TableType {
     pub initial: u32,
     pub max: Option<u32>,
+    /// Element type: `FuncRef` or `ExternRef` (the only two reference types).
+    pub element_type: ValueType,
 }
 
 /// Global variable with value and mutability
@@ -363,15 +365,18 @@ fn parse_import_section(data: &[u8], _types: &[FunctionType]) -> Result<Vec<Impo
             }
             0x01 => {
                 // Table import
-                let elem_type = read_u8(&mut cursor)?;
+                let elem_byte = read_u8(&mut cursor)?;
                 // Accept 0x70 (funcref) and 0x6f (externref)
-                if elem_type != 0x70 && elem_type != 0x6f {
-                    return Err(format!("Invalid element type for table: 0x{elem_type:02x}"));
-                }
+                let element_type = match elem_byte {
+                    0x70 => ValueType::FuncRef,
+                    0x6f => ValueType::ExternRef,
+                    _ => return Err(format!("Invalid element type for table: 0x{elem_byte:02x}")),
+                };
                 let limits = read_limits(&mut cursor)?;
                 ImportKind::Table(TableType {
                     initial: limits.0,
                     max: limits.1,
+                    element_type,
                 })
             }
             0x02 => {
@@ -471,11 +476,17 @@ fn parse_table_section(data: &[u8]) -> Result<Vec<TableType>, String> {
 
     let mut tables = Vec::with_capacity(count);
     for _ in 0..count {
-        let _elem_type = read_u8(&mut cursor)?; // 0x70 for funcref, 0x6f for externref, etc.
+        let elem_byte = read_u8(&mut cursor)?; // 0x70 for funcref, 0x6f for externref
+        let element_type = match elem_byte {
+            0x70 => ValueType::FuncRef,
+            0x6f => ValueType::ExternRef,
+            _ => return Err(format!("Invalid element type for table: 0x{elem_byte:02x}")),
+        };
         let limits = read_limits(&mut cursor)?;
         tables.push(TableType {
             initial: limits.0,
             max: limits.1,
+            element_type,
         });
     }
 
