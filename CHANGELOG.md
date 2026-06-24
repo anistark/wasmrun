@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Reference Types in the Interpreter**: `funcref`/`externref` in the runtime value model, the foundation for every Component Model path (WASI 0.2/0.3, the canonical ABI, WasmGC). Phase 0 of #92
+  - `Value` gains `FuncRef(Option<u32>)` and `ExternRef(Option<u32>)` (both still `Copy`; null is `None`), round-tripping references through params, locals, globals, and tables
+  - The flat function table is replaced by a typed `TableInstance` list (element type, values, max) spanning the module's full table index space; `call_indirect` reads a funcref from table 0 through this model
+  - New instructions decoded and executed: `ref.null`, `ref.is_null`, `ref.func`, `table.get`/`set`/`size`/`grow`/`fill`/`copy`/`init`, `elem.drop`, and typed `select`; passive element segments are retained so `table.init` can copy from them until `elem.drop`
+  - Purely additive: existing numeric WASI 0.1 modules are unaffected (#98, closes #93)
+
 ## [0.20.0](https://github.com/anistark/wasmrun/releases/tag/v0.20.0) - 2026-06-20
 
 ### Added
