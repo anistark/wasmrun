@@ -10,8 +10,8 @@ Run code inside a session's sandbox. The exec endpoint accepts four mutually exc
 | Mode | Request field(s) | Use when |
 |------|------------------|----------|
 | Shell command | `command` | You want a familiar terminal-style one-liner over the session FS |
-| JavaScript source | `source` + `language` | You have a single JS snippet to evaluate |
-| Multi-file JS project | `files` + `entry` (+ `language`) | You have several source files that need to live on disk together |
+| JS/TS source | `source` + `language` | You have a single JavaScript or TypeScript snippet to evaluate |
+| Multi-file JS/TS project | `files` + `entry` (+ `language`) | You have several source files that need to live on disk together |
 | Pre-compiled WASM | `wasm_path` (+ `function`, `args`) | You already have a `.wasm` file in the session FS |
 
 If more than one is provided, dispatch follows that priority order (`command` → `files` → `source` → `wasm_path`).
@@ -101,7 +101,7 @@ Evaluate a single source string with the wasmhub JavaScript runtime. The runtime
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `source` | yes | — | Source code to execute |
-| `language` | no | `javascript` | One of `javascript`, `js`, `nodejs` |
+| `language` | no | `javascript` | One of `javascript`, `js`, `nodejs`, `typescript`, `ts`, `tsx` |
 
 Unsupported languages return HTTP `400` with a clear message before any thread is spawned.
 
@@ -113,6 +113,32 @@ curl -X POST .../exec -H "Content-Type: application/json" -d '{
 }'
 # → {"stdout": "2\n", "exit_code": 0, ...}
 ```
+
+---
+
+## TypeScript
+
+Pass `language: "typescript"` (aliases `ts`, `tsx`) with either `source` or `files`. Before execution, wasmrun runs an swc-based transpiler — itself a WASI WASM module executing inside the sandbox — over the TypeScript inputs, then runs the emitted JavaScript with the usual runtime. No type *checking* is performed; types are stripped (like `tsc --transpileOnly` or esbuild).
+
+```json
+{
+  "files": {
+    "main.ts": "import {x} from './lib'; console.log(x)",
+    "lib.ts": "export const x = 2"
+  },
+  "entry": "main.ts",
+  "language": "typescript"
+}
+```
+
+What the transpile stage does:
+
+- **Types stripped** — interfaces, annotations, generics, `enum` lowering, decorators parsed
+- **ES modules lowered to CommonJS** — `import`/`export` become `require()`/`exports`, resolved by the runtime's module system (the runtime does not execute `import` syntax directly); default-import interop helpers are inlined
+- **TSX** — `.tsx` files (or `language: "tsx"` for a single `source` snippet) get JSX lowered to `React.createElement` calls; provide your own `React` implementation (e.g. vendored via `node_modules`)
+- In `files` mode every `.ts`/`.tsx` file is transpiled in place to a sibling `.js`; other files (`.js`, `.json`, `node_modules/**`) pass through untouched, and a `.ts` entry runs as its emitted `.js`
+
+Malformed TypeScript fails the request with `error: "TypeScript transpilation failed: <file>:<line>:<col>: <message>"` referencing the original `.ts` source. Runtime errors reference the emitted `.js` files (source maps are not yet applied).
 
 ---
 
@@ -135,11 +161,45 @@ Upload an entire project in one request. All files are written to the session ro
 |-------|----------|---------|-------------|
 | `files` | yes | — | Map of filename → file content. Filenames must be relative and free of `..` |
 | `entry` | yes | — | Entry filename; must be a key in `files` |
-| `language` | no | `javascript` | One of `javascript`, `js`, `nodejs` |
+| `language` | no | `javascript` | One of `javascript`, `js`, `nodejs`, `typescript`, `ts`, `tsx` |
 
 Validation (missing entry, unknown language, absolute/traversal paths) runs synchronously and returns HTTP `400` immediately.
 
-Sibling files are visible to the runtime via the preopened WASI directory, but loading them from JS requires runtime-side support. The wasmhub `nodejs` runtime (v0.2.0) does not yet implement CommonJS `require()` — files can be uploaded today and will become loadable once the runtime ships that.
+Files can load each other with CommonJS `require()` — the runtime resolves modules natively (see [JavaScript runtime capabilities](#javascript-runtime-capabilities)):
+
+```json
+{
+  "files": {
+    "main.js": "const {x} = require('./lib'); console.log(x);",
+    "lib.js": "module.exports = {x: 2};"
+  },
+  "entry": "main.js"
+}
+```
+
+Bare specifiers resolve through a `node_modules/<name>` tree, so a project can ship vendored pure-JS dependencies as part of `files` (e.g. `"node_modules/greet/index.js": "module.exports = ..."`).
+
+---
+
+## JavaScript Runtime Capabilities
+
+JavaScript executes in the wasmhub `nodejs` runtime (QuickJS-based, WASI; v0.3.0+), fetched once and cached. Supported surface:
+
+**Module system (CommonJS):**
+- Relative and absolute `require()` (`./x`, `../x`), with `.js`/`.json` extension probing, `index.*` resolution, and `package.json` `main`
+- Bare `require('<name>')` resolved via `node_modules/<name>` walk-up
+- Node-style module wrapper: `module.exports`, `require.cache`, `require.resolve`, `require.main`, `__filename`, `__dirname`
+- JSON loading via `require('./data.json')`
+
+**Built-in modules:** `path`, `fs`, `os`, `events`, `util`, `assert`, `stream`, `buffer`.
+
+**Globals & event loop:** `process`, `setTimeout`/`setInterval`/`setImmediate`, `queueMicrotask`, `process.nextTick`, async/await with full Promise resolution (pending timers and microtasks are drained before exit), `Buffer`, `TextEncoder`/`TextDecoder`, `atob`/`btoa`.
+
+**Not yet available:**
+- `URL`/`URLSearchParams`, `crypto.getRandomValues`, `structuredClone` — planned runtime additions
+- `fetch` and sockets — no network from sandboxed code yet (deferred to the wasmnet milestone)
+- Native extensions / C addons — pure JS only
+- npm installation — there is no package manager in the sandbox; vendor dependencies into `node_modules` via `files` (automatic vendoring is planned)
 
 ---
 

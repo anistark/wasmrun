@@ -128,7 +128,7 @@ The agent API manages **sessions** — each session is an isolated exec mode san
 - **Output buffers** — stdout/stderr captured per execution
 - **Timeout** — auto-cleanup after idle expiry
 
-The exec endpoint accepts four input modes — a shell command line, a JavaScript source snippet, a multi-file JS project, or a pre-compiled `.wasm` file — and returns captured stdout/stderr/exit code as JSON. JavaScript runs through a wasmhub-hosted language runtime; WASM modules run through the same interpreter used by `wasmrun exec`. Shell commands are handled by an in-process built-in shell with no subprocess or host shell access.
+The exec endpoint accepts four input modes — a shell command line, a JavaScript or TypeScript source snippet, a multi-file JS/TS project, or a pre-compiled `.wasm` file — and returns captured stdout/stderr/exit code as JSON. JavaScript runs through a wasmhub-hosted language runtime; TypeScript is first transpiled to JavaScript by an swc-based WASI module running inside the same sandbox; WASM modules run through the same interpreter used by `wasmrun exec`. Shell commands are handled by an in-process built-in shell with no subprocess or host shell access.
 
 ```
 ┌─ wasmrun agent ─────────────────────────────────────────┐

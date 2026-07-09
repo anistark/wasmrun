@@ -4,7 +4,25 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-const WASMHUB_BASE_URL: &str = "https://github.com/anistark/wasmhub/releases/download/v0.2.0";
+/// The wasmhub release wasmrun is pinned to. Must match the tag in
+/// `WASMHUB_BASE_URL`; cached runtimes downloaded from a different release
+/// are invalidated and re-fetched.
+const WASMHUB_RELEASE: &str = "v0.3.1";
+const WASMHUB_BASE_URL: &str = "https://github.com/anistark/wasmhub/releases/download/v0.3.1";
+/// Development/testing override: point runtime fetches at an alternate
+/// wasmhub-shaped host (e.g. a local HTTP server serving unreleased
+/// artifacts). When set, it also becomes the cache's release identity so
+/// override-fetched artifacts never masquerade as pinned-release ones.
+const WASMHUB_URL_ENV: &str = "WASMRUN_WASMHUB_BASE_URL";
+
+fn wasmhub_base_url() -> String {
+    std::env::var(WASMHUB_URL_ENV).unwrap_or_else(|_| WASMHUB_BASE_URL.to_string())
+}
+
+/// Identity string recorded in cache metadata and compared on load.
+fn wasmhub_release_id() -> String {
+    std::env::var(WASMHUB_URL_ENV).unwrap_or_else(|_| WASMHUB_RELEASE.to_string())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WasmhubManifest {
@@ -99,21 +117,21 @@ impl RuntimeCache {
     }
 
     pub fn fetch_manifest(&self) -> Result<WasmhubManifest> {
-        let url = format!("{WASMHUB_BASE_URL}/manifest.json");
+        let url = format!("{}/manifest.json", wasmhub_base_url());
         let body = http_get_string(&url)?;
         serde_json::from_str(&body)
             .map_err(|e| WasmrunError::from(format!("Failed to parse wasmhub manifest: {e}")))
     }
 
     fn fetch_language_manifest(&self, language: &str) -> Result<LanguageManifest> {
-        let url = format!("{WASMHUB_BASE_URL}/{language}-manifest.json");
+        let url = format!("{}/{language}-manifest.json", wasmhub_base_url());
         let body = http_get_string(&url)?;
         serde_json::from_str(&body)
             .map_err(|e| WasmrunError::from(format!("Failed to parse {language} manifest: {e}")))
     }
 
     fn download_runtime(&self, language: &str, filename: &str) -> Result<Vec<u8>> {
-        let url = format!("{WASMHUB_BASE_URL}/{filename}");
+        let url = format!("{}/{filename}", wasmhub_base_url());
         println!("📦 Downloading {language} runtime from wasmhub...");
         http_get_bytes(&url)
     }
@@ -138,6 +156,22 @@ impl RuntimeCache {
             .map_err(|e| WasmrunError::from(format!("Failed to read cache metadata: {e}")))?;
         let meta: CacheMetadata = serde_json::from_str(&meta_content)
             .map_err(|e| WasmrunError::from(format!("Failed to parse cache metadata: {e}")))?;
+
+        // A different wasmhub release can ship the same filename (e.g.
+        // nodejs-20.wasm) with different content, so a cache from another
+        // release is a miss even if its own checksum is intact.
+        let release_id = wasmhub_release_id();
+        if meta.wasmhub_release != release_id {
+            println!(
+                "📌 Cached {language} runtime is from wasmhub {}, pin is {release_id}; re-downloading...",
+                if meta.wasmhub_release.is_empty() {
+                    "an older release".to_string()
+                } else {
+                    meta.wasmhub_release.clone()
+                }
+            );
+            return Ok(None);
+        }
 
         let wasm_path = self.cache_dir.join(&meta.filename);
         if !wasm_path.exists() {
@@ -185,6 +219,7 @@ impl RuntimeCache {
             sha256: version_info.sha256.clone(),
             size: wasm_bytes.len() as u64,
             wasi: version_info.wasi.clone(),
+            wasmhub_release: wasmhub_release_id(),
         };
 
         let meta_path = self.cache_dir.join(format!("{language}.json"));
@@ -254,6 +289,11 @@ struct CacheMetadata {
     sha256: String,
     size: u64,
     wasi: String,
+    /// wasmhub release tag the artifact was downloaded from. Caches written
+    /// before this field existed deserialize to "", which never matches the
+    /// current pin and forces a re-download.
+    #[serde(default)]
+    wasmhub_release: String,
 }
 
 fn http_get_string(url: &str) -> Result<String> {
@@ -478,6 +518,58 @@ mod tests {
 
         let loaded = cache.load_from_cache("test").unwrap().unwrap();
         assert_eq!(loaded, wasm_bytes);
+    }
+
+    #[test]
+    fn test_base_url_matches_pinned_release() {
+        assert!(
+            WASMHUB_BASE_URL.ends_with(WASMHUB_RELEASE),
+            "WASMHUB_BASE_URL ({WASMHUB_BASE_URL}) must point at the pinned release {WASMHUB_RELEASE}"
+        );
+    }
+
+    #[test]
+    fn test_cache_from_older_release_is_a_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = RuntimeCache::with_cache_dir(dir.path().join("cache")).unwrap();
+
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        let meta = CacheMetadata {
+            language: "test".to_string(),
+            version: "1.0".to_string(),
+            filename: "test-1.0.wasm".to_string(),
+            sha256: sha256_hex(&wasm_bytes),
+            size: wasm_bytes.len() as u64,
+            wasi: "wasip1".to_string(),
+            wasmhub_release: "v0.2.0".to_string(),
+        };
+        fs::write(cache.cache_dir().join("test-1.0.wasm"), &wasm_bytes).unwrap();
+        fs::write(
+            cache.cache_dir().join("test.json"),
+            serde_json::to_string(&meta).unwrap(),
+        )
+        .unwrap();
+
+        // Checksum is intact, but the artifact came from a different release
+        assert!(cache.load_from_cache("test").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_cache_without_release_field_is_a_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = RuntimeCache::with_cache_dir(dir.path().join("cache")).unwrap();
+
+        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
+        // Metadata written by wasmrun < v0.21 has no wasmhub_release field
+        let meta_json = format!(
+            r#"{{"language":"test","version":"1.0","filename":"test-1.0.wasm","sha256":"{}","size":{},"wasi":"wasip1"}}"#,
+            sha256_hex(&wasm_bytes),
+            wasm_bytes.len()
+        );
+        fs::write(cache.cache_dir().join("test-1.0.wasm"), &wasm_bytes).unwrap();
+        fs::write(cache.cache_dir().join("test.json"), meta_json).unwrap();
+
+        assert!(cache.load_from_cache("test").unwrap().is_none());
     }
 
     #[test]
