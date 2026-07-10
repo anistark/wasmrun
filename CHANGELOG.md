@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **npm Dependency Vendoring**: `POST /exec` accepts `"dependencies": {"lodash": "^4.17.21"}` alongside `source` or `files`; packages are installed into the session's `node_modules` before execution and resolved by the runtime's own `require()`
+  - wasmrun talks to the npm registry directly (no `npm` binary on the host, keeping the zero-dependency deployment): abbreviated-metadata fetch, semver-range resolution (exact/`^`/`~`/`>=`/x-ranges/`*`/dist-tags; composite ranges rejected clearly), sha512 integrity verification, and hardened tarball extraction (traversal entries and symlinks never materialized)
+  - Lifecycle scripts are **never** executed, and packages with native bindings (install scripts, `binding.gyp`, `.node` binaries) are rejected with an error naming the package — pure-JS only, matching what the sandbox can run
+  - Transitive production dependencies install npm2-style (nested per-package `node_modules` with walk-up dedupe, which also terminates dependency cycles); hard ceilings bound tree depth, package count, and tarball/unpacked sizes, and vendored files count against the session's disk and file-size limits
+  - Per-`name@version` cache under `~/.wasmrun/npm/` skips re-downloads; dependencies already satisfied in the session are skipped, so repeat execs are free
+  - New `--npm-registry <URL>` flag points vendoring at private registries/mirrors; invalid names/ranges fail with HTTP 400 before an exec worker is spawned
+  - `execute_code` tool schema documents the field for LLM agents; offline test coverage runs against an in-process fake registry
 - **TypeScript Execution in the Agent Sandbox**: `POST /exec` accepts `language: "typescript"` (aliases `ts`, `tsx`) for both single-`source` snippets and multi-file `files` projects
   - TypeScript is transpiled to JavaScript *inside the sandbox* by an swc-based WASI transpiler (a new wasmhub artifact) — no native transpiler dependency, preserving the single-binary/WASM-isolation model; ~40 ms per transpile under the interpreter
   - Types stripped, enums/decorators handled, and ES `import`/`export` lowered to CommonJS for the runtime's module system, with default-import interop helpers inlined; `.tsx` inputs get JSX lowered to `React.createElement`

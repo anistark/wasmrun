@@ -356,6 +356,15 @@ pub enum Commands {
         )]
         max_concurrent_exec: usize,
 
+        /// npm registry base URL used to vendor `dependencies` requests
+        #[arg(
+            long,
+            value_name = "URL",
+            default_value = "https://registry.npmjs.org",
+            help = "npm registry base URL for dependency vendoring"
+        )]
+        npm_registry: String,
+
         /// Allow wildcard CORS (Access-Control-Allow-Origin: *)
         #[arg(long, help = "Allow cross-origin requests from any domain")]
         allow_cors: bool,

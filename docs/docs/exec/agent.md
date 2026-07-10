@@ -25,6 +25,7 @@ wasmrun agent [OPTIONS]
 | `--max-disk` | `100` | Maximum total disk usage per session (MB) |
 | `--max-body` | `32` | Maximum accepted request body size (MB) |
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
+| `--npm-registry` | `https://registry.npmjs.org` | npm registry base URL for dependency vendoring |
 | `--allow-cors` | off | Enable wildcard CORS |
 | `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted — see [Observability](./usage/agent-observability.md)) |
 | `--auth <PATH>` | off | Path to a TOML auth config; enables API-key auth & tenant isolation (omit = open) |

@@ -102,6 +102,7 @@ Evaluate a single source string with the wasmhub JavaScript runtime. The runtime
 |-------|----------|---------|-------------|
 | `source` | yes | — | Source code to execute |
 | `language` | no | `javascript` | One of `javascript`, `js`, `nodejs`, `typescript`, `ts`, `tsx` |
+| `dependencies` | no | — | npm packages to vendor before execution (see [npm Dependencies](#npm-dependencies)) |
 
 Unsupported languages return HTTP `400` with a clear message before any thread is spawned.
 
@@ -142,6 +143,37 @@ Malformed TypeScript fails the request with `error: "TypeScript transpilation fa
 
 ---
 
+## npm Dependencies
+
+Declare npm packages with the `dependencies` field (works with `source` and `files`, JavaScript and TypeScript alike). The sandbox has no network, so wasmrun resolves and fetches them host-side from the npm registry, verifies each tarball's sha512 integrity, and lays them out in the session's `node_modules`, where the runtime's own `require()` finds them:
+
+```json
+{
+  "source": "const _ = require('lodash'); console.log(_.chunk([1,2,3,4], 2));",
+  "dependencies": { "lodash": "^4.17.21" }
+}
+```
+
+**How it works:**
+
+- No `npm` binary involved — wasmrun talks to the registry directly, and package lifecycle scripts are **never** executed
+- Transitive (production) dependencies are installed npm2-style: each package's deps live in its own nested `node_modules`, deduped against ancestors exactly the way node resolves — always correct, at the cost of some duplication
+- Downloads are cached per `name@version` under `~/.wasmrun/npm/`, so repeat runs skip the network; a dependency already present in the session at a satisfying version is skipped entirely
+- Vendored files count against the session's disk and file-size limits
+- The registry defaults to `https://registry.npmjs.org` and is configurable with `wasmrun agent --npm-registry <URL>` (private registries, mirrors)
+
+**Supported version ranges:** exact (`4.17.21`), caret (`^4.17.21`), tilde (`~4.17.0`), `>=`, x-ranges (`4`, `4.17`, `4.17.x`), `*`, and dist-tags (`latest`). Composite ranges (`||`, hyphen ranges, multi-comparator) are rejected with a clear error.
+
+**Limitations:**
+
+- Pure-JS packages only: anything with an install script, `binding.gyp`, or prebuilt `.node` binaries is rejected with an error naming the package (native code can't run in the sandbox)
+- CommonJS entry points work best; packages relying on ESM-only entry, `exports` maps, or `fetch`/network at import time may not load
+- An uploaded `package.json` is inert — dependencies are only installed when the `dependencies` field is present (no surprise network fetches)
+
+Malformed names/ranges fail with HTTP `400` before execution; resolution or download failures surface in the response's `error` field.
+
+---
+
 ## Multi-file JavaScript Project
 
 Upload an entire project in one request. All files are written to the session root (creating intermediate directories) and the entry file is run.
@@ -162,6 +194,7 @@ Upload an entire project in one request. All files are written to the session ro
 | `files` | yes | — | Map of filename → file content. Filenames must be relative and free of `..` |
 | `entry` | yes | — | Entry filename; must be a key in `files` |
 | `language` | no | `javascript` | One of `javascript`, `js`, `nodejs`, `typescript`, `ts`, `tsx` |
+| `dependencies` | no | — | npm packages to vendor before execution (see [npm Dependencies](#npm-dependencies)) |
 
 Validation (missing entry, unknown language, absolute/traversal paths) runs synchronously and returns HTTP `400` immediately.
 
@@ -199,7 +232,7 @@ JavaScript executes in the wasmhub `nodejs` runtime (QuickJS-based, WASI; v0.3.0
 - `URL`/`URLSearchParams`, `crypto.getRandomValues`, `structuredClone` — planned runtime additions
 - `fetch` and sockets — no network from sandboxed code yet (deferred to the wasmnet milestone)
 - Native extensions / C addons — pure JS only
-- npm installation — there is no package manager in the sandbox; vendor dependencies into `node_modules` via `files` (automatic vendoring is planned)
+- npm installation from inside the sandbox — there is no package manager in it; declare packages with the [`dependencies` field](#npm-dependencies) (vendored host-side) or ship a `node_modules` tree via `files`
 
 ---
 

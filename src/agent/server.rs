@@ -8,6 +8,7 @@ use crate::agent::metrics::{Gauges, Metrics, SessionResourceRow};
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::shell;
 use crate::agent::tools;
+use crate::agent::vendor;
 use crate::error::{Result, WasmrunError};
 use crate::runtime::core::native_executor::{execute_wasm_bytes_with_env, ExecLimits};
 use serde::Serialize;
@@ -47,6 +48,9 @@ pub struct AgentConfig {
     /// Path to the auth config file, retained so the server can watch it for
     /// live reloads. `None` when `--auth` was not given (open mode).
     pub auth_path: Option<PathBuf>,
+    /// npm registry base URL used to vendor `dependencies` (private
+    /// registries and tests point this elsewhere).
+    pub npm_registry: String,
 }
 
 impl Default for AgentConfig {
@@ -60,6 +64,7 @@ impl Default for AgentConfig {
             max_concurrent_exec: DEFAULT_MAX_CONCURRENT_EXEC,
             auth: None,
             auth_path: None,
+            npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
         }
     }
 }
@@ -892,6 +897,13 @@ impl AgentServer {
                     "Entry '{entry}' not found in 'files' map"
                 )));
             }
+            // Validate dependency names/ranges before spawning (fast 400);
+            // the network-bound vendoring itself runs on the worker.
+            let deps = req.dependencies.clone();
+            if let Some(ref d) = deps {
+                vendor::validate_deps(d)?;
+            }
+            let registry = self.config.npm_registry.clone();
             let work_dir_clone = work_dir.clone();
             let limits_clone = limits.clone();
             let cancel_worker = cancel.clone();
@@ -899,15 +911,24 @@ impl AgentServer {
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
                     let permit = permit; // held for the duration of execution
-                    let result = executor::execute_source_project(
-                        &files,
-                        &entry,
-                        &lang,
-                        exec_env,
-                        &work_dir_clone,
-                        &limits_clone,
-                        Some(cancel_worker),
-                    );
+                    let result = (|| {
+                        if let Some(ref d) = deps {
+                            vendor::Vendor::new(&registry)?.vendor(
+                                d,
+                                &work_dir_clone,
+                                &limits_clone,
+                            )?;
+                        }
+                        executor::execute_source_project(
+                            &files,
+                            &entry,
+                            &lang,
+                            exec_env,
+                            &work_dir_clone,
+                            &limits_clone,
+                            Some(cancel_worker),
+                        )
+                    })();
                     drop(permit); // free the slot once execution is done
                     let _ = tx.send(result);
                 })
@@ -917,6 +938,11 @@ impl AgentServer {
             let lang = req.language.unwrap_or_else(|| "javascript".into());
             // Validate language before spawning so callers get a 400 immediately
             executor::resolve_language(&lang)?;
+            let deps = req.dependencies.clone();
+            if let Some(ref d) = deps {
+                vendor::validate_deps(d)?;
+            }
+            let registry = self.config.npm_registry.clone();
             let work_dir_clone = work_dir.clone();
             let limits_clone = limits.clone();
             let cancel_worker = cancel.clone();
@@ -924,14 +950,23 @@ impl AgentServer {
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
                     let permit = permit; // held for the duration of execution
-                    let result = executor::execute_source(
-                        &source,
-                        &lang,
-                        exec_env,
-                        &work_dir_clone,
-                        &limits_clone,
-                        Some(cancel_worker),
-                    );
+                    let result = (|| {
+                        if let Some(ref d) = deps {
+                            vendor::Vendor::new(&registry)?.vendor(
+                                d,
+                                &work_dir_clone,
+                                &limits_clone,
+                            )?;
+                        }
+                        executor::execute_source(
+                            &source,
+                            &lang,
+                            exec_env,
+                            &work_dir_clone,
+                            &limits_clone,
+                            Some(cancel_worker),
+                        )
+                    })();
                     drop(permit); // free the slot once execution is done
                     let _ = tx.send(result);
                 })
@@ -1590,6 +1625,7 @@ mod tests {
             max_concurrent_exec,
             auth: None,
             auth_path: None,
+            npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
         })
     }
 
@@ -1627,6 +1663,7 @@ mod tests {
             max_concurrent_exec: 100,
             auth: None,
             auth_path: None,
+            npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
         })
     }
 
@@ -1646,6 +1683,7 @@ mod tests {
             max_concurrent_exec: 100,
             auth: Some(Arc::new(auth_config_for(tenants))),
             auth_path: None,
+            npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
         })
     }
 
@@ -1670,6 +1708,7 @@ mod tests {
             max_concurrent_exec: 100,
             auth: Some(Arc::new(auth)),
             auth_path: None,
+            npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
         })
     }
 
@@ -2365,6 +2404,59 @@ mod tests {
         assert!(
             err.contains("TypeScript transpilation failed") && err.contains("_run_.ts:1:"),
             "error should name the failure and the .ts location: {err}"
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_invalid_dependencies_rejected_before_spawn() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // Invalid package name → immediate 400, no worker spawned, no network.
+        let body = r#"{"source": "1", "dependencies": {"../evil": "*"}}"#;
+        let err = server.handle_exec(&id, body, None).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("Invalid package name"));
+
+        // Unsupported composite range → immediate 400.
+        let body = r#"{"source": "1", "dependencies": {"lodash": ">=1.0.0 <2.0.0"}}"#;
+        let err = server.handle_exec(&id, body, None).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("Unsupported version range"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: the 0.21.3 exit criteria — a project depending on a
+    /// real pure-JS npm package (lodash) executes in one request, resolved
+    /// through the runtime's own `require()` from the vendored node_modules.
+    ///
+    /// Needs network (npm registry + wasmhub runtime fetch on first run).
+    /// Ignored by default; see test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_npm_dependency_lodash_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "source": "const _ = require('lodash'); console.log(JSON.stringify(_.chunk([1,2,3,4], 2)));",
+            "language": "javascript",
+            "dependencies": {"lodash": "^4.17.21"},
+            "timeout": 120
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        assert!(
+            resp.stdout.contains("[[1,2],[3,4]]"),
+            "lodash output missing: {:?}",
+            resp.stdout
         );
 
         server.session_manager.destroy_all().unwrap();

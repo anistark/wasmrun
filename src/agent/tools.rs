@@ -70,6 +70,11 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                             "type": "string",
                             "description": "Entry filename for a multi-file project (must be a key in 'files'). Required when 'files' is provided."
                         },
+                        "dependencies": {
+                            "type": "object",
+                            "additionalProperties": { "type": "string" },
+                            "description": "npm dependencies to install before execution, as a map of package name → version range (e.g. {\"lodash\": \"^4.17.21\"}). Only pure-JS packages work (no native bindings, no install scripts). Use with 'source' or 'files'; the code can then require() them."
+                        },
                         "language": {
                             "type": "string",
                             "enum": ["javascript", "js", "nodejs", "typescript", "ts", "tsx"],

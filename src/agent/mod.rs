@@ -13,3 +13,4 @@ pub mod server;
 pub mod session;
 pub mod shell;
 pub mod tools;
+pub mod vendor;
