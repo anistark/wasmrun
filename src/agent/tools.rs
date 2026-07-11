@@ -45,7 +45,7 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
             r#type: "function",
             function: OpenAiFunction {
                 name: "execute_code",
-                description: "Execute code inside a sandbox session. Provide one of: 'command' (shell-style command line with pipes, redirection, and built-ins like echo/cat/ls/pwd/cd/mkdir/rm/cp/mv/env/export), 'source'+'language' (single JavaScript or TypeScript snippet), 'files'+'entry'+'language' (multi-file JS/TS project with relative require() and node_modules resolution), or 'wasm_path' (pre-compiled WASM). TypeScript is transpiled in-sandbox before execution. Returns stdout, stderr, exit code, and duration.",
+                description: "Execute code inside a sandbox session. Provide one of: 'command' (shell-style command line with pipes, redirection, and built-ins like echo/cat/ls/pwd/cd/mkdir/rm/cp/mv/env/export), 'source'+'language' (single JavaScript or TypeScript snippet), 'files'+'entry'+'language' (multi-file JS/TS project with relative require() and node_modules resolution), or 'wasm_path' (pre-compiled WASM). TypeScript is transpiled in-sandbox before execution. JS/TS code can use Node built-ins (path, fs, os, events, util, assert, stream, buffer) and standard globals (Buffer, TextEncoder/TextDecoder, URL/URLSearchParams, crypto.getRandomValues, structuredClone, timers, async/await). The sandbox has NO network access: fetch() rejects with a clear error, and npm packages must be declared via 'dependencies' (vendored host-side). Returns stdout, stderr, exit code, and duration.",
                 parameters: json!({
                     "type": "object",
                     "properties": {

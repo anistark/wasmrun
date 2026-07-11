@@ -216,7 +216,7 @@ Bare specifiers resolve through a `node_modules/<name>` tree, so a project can s
 
 ## JavaScript Runtime Capabilities
 
-JavaScript executes in the wasmhub `nodejs` runtime (QuickJS-based, WASI; v0.3.0+), fetched once and cached. Supported surface:
+JavaScript executes in the wasmhub `nodejs` runtime (QuickJS-based, WASI; v0.3.2+), fetched once and cached. Supported surface:
 
 **Module system (CommonJS):**
 - Relative and absolute `require()` (`./x`, `../x`), with `.js`/`.json` extension probing, `index.*` resolution, and `package.json` `main`
@@ -228,9 +228,14 @@ JavaScript executes in the wasmhub `nodejs` runtime (QuickJS-based, WASI; v0.3.0
 
 **Globals & event loop:** `process`, `setTimeout`/`setInterval`/`setImmediate`, `queueMicrotask`, `process.nextTick`, async/await with full Promise resolution (pending timers and microtasks are drained before exit), `Buffer`, `TextEncoder`/`TextDecoder`, `atob`/`btoa`.
 
+**Web platform globals:**
+- `URL` / `URLSearchParams` — WHATWG parsing, relative resolution against a base, `searchParams` kept in sync with the URL
+- `crypto.getRandomValues` / `crypto.randomUUID` — entropy comes from the WASI `random_get` syscall
+- `structuredClone` — deep clone with cycles, `Map`/`Set`/`Date`/`RegExp`/`ArrayBuffer`/TypedArrays; functions and symbols throw `DataCloneError`, matching the spec
+- `fetch` is **defined but always rejects** with a clear `network access is not supported` error (`code: 'ERR_NETWORK_UNSUPPORTED'`) — sandboxed code has no sockets yet, and a documented rejection beats a bare `ReferenceError`
+
 **Not yet available:**
-- `URL`/`URLSearchParams`, `crypto.getRandomValues`, `structuredClone` — planned runtime additions
-- `fetch` and sockets — no network from sandboxed code yet (deferred to the wasmnet milestone)
+- Network I/O — `fetch` and sockets are deferred to the wasmnet milestone (see above for the interim `fetch` behavior)
 - Native extensions / C addons — pure JS only
 - npm installation from inside the sandbox — there is no package manager in it; declare packages with the [`dependencies` field](#npm-dependencies) (vendored host-side) or ship a `node_modules` tree via `files`
 

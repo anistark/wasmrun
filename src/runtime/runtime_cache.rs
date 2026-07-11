@@ -7,8 +7,8 @@ use std::path::PathBuf;
 /// The wasmhub release wasmrun is pinned to. Must match the tag in
 /// `WASMHUB_BASE_URL`; cached runtimes downloaded from a different release
 /// are invalidated and re-fetched.
-const WASMHUB_RELEASE: &str = "v0.3.1";
-const WASMHUB_BASE_URL: &str = "https://github.com/anistark/wasmhub/releases/download/v0.3.1";
+const WASMHUB_RELEASE: &str = "v0.3.2";
+const WASMHUB_BASE_URL: &str = "https://github.com/anistark/wasmhub/releases/download/v0.3.2";
 /// Development/testing override: point runtime fetches at an alternate
 /// wasmhub-shaped host (e.g. a local HTTP server serving unreleased
 /// artifacts). When set, it also becomes the cache's release identity so

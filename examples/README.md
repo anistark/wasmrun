@@ -41,6 +41,11 @@ This directory contains example projects demonstrating how to create WebAssembly
 - **Functions**: Counter, todo list, interactive forms with Leptos framework
 - **Build**: Rust Leptos framework compiled to WebAssembly
 
+### 🤖 Agent API Flows (`agent-flows/`)
+- **Features**: End-to-end Agent API request sequences — multi-file TypeScript execution and npm dependency vendoring
+- **Scripts**: `typescript-project.sh`, `npm-dependencies.sh`
+- **Run**: Start `wasmrun agent`, then run the scripts (see `agent-flows/README.md`)
+
 ## Quick Start
 
 Examples work with standard wasmrun commands:
