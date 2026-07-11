@@ -8,6 +8,7 @@ use crate::agent::metrics::{Gauges, Metrics, SessionResourceRow};
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::shell;
 use crate::agent::tools;
+use crate::agent::vendor;
 use crate::error::{Result, WasmrunError};
 use crate::runtime::core::native_executor::{execute_wasm_bytes_with_env, ExecLimits};
 use serde::Serialize;
@@ -47,6 +48,9 @@ pub struct AgentConfig {
     /// Path to the auth config file, retained so the server can watch it for
     /// live reloads. `None` when `--auth` was not given (open mode).
     pub auth_path: Option<PathBuf>,
+    /// npm registry base URL used to vendor `dependencies` (private
+    /// registries and tests point this elsewhere).
+    pub npm_registry: String,
 }
 
 impl Default for AgentConfig {
@@ -60,6 +64,7 @@ impl Default for AgentConfig {
             max_concurrent_exec: DEFAULT_MAX_CONCURRENT_EXEC,
             auth: None,
             auth_path: None,
+            npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
         }
     }
 }
@@ -882,7 +887,7 @@ impl AgentServer {
         } else if let Some(files) = req.files {
             // Multi-file source project: write all files and run entry through runtime
             let lang = req.language.unwrap_or_else(|| "javascript".into());
-            executor::resolve_runtime(&lang)?;
+            executor::resolve_language(&lang)?;
             let entry = req
                 .entry
                 .clone()
@@ -892,6 +897,13 @@ impl AgentServer {
                     "Entry '{entry}' not found in 'files' map"
                 )));
             }
+            // Validate dependency names/ranges before spawning (fast 400);
+            // the network-bound vendoring itself runs on the worker.
+            let deps = req.dependencies.clone();
+            if let Some(ref d) = deps {
+                vendor::validate_deps(d)?;
+            }
+            let registry = self.config.npm_registry.clone();
             let work_dir_clone = work_dir.clone();
             let limits_clone = limits.clone();
             let cancel_worker = cancel.clone();
@@ -899,15 +911,24 @@ impl AgentServer {
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
                     let permit = permit; // held for the duration of execution
-                    let result = executor::execute_source_project(
-                        &files,
-                        &entry,
-                        &lang,
-                        exec_env,
-                        &work_dir_clone,
-                        &limits_clone,
-                        Some(cancel_worker),
-                    );
+                    let result = (|| {
+                        if let Some(ref d) = deps {
+                            vendor::Vendor::new(&registry)?.vendor(
+                                d,
+                                &work_dir_clone,
+                                &limits_clone,
+                            )?;
+                        }
+                        executor::execute_source_project(
+                            &files,
+                            &entry,
+                            &lang,
+                            exec_env,
+                            &work_dir_clone,
+                            &limits_clone,
+                            Some(cancel_worker),
+                        )
+                    })();
                     drop(permit); // free the slot once execution is done
                     let _ = tx.send(result);
                 })
@@ -916,7 +937,12 @@ impl AgentServer {
             // Source execution: write code to session FS and run via language runtime
             let lang = req.language.unwrap_or_else(|| "javascript".into());
             // Validate language before spawning so callers get a 400 immediately
-            executor::resolve_runtime(&lang)?;
+            executor::resolve_language(&lang)?;
+            let deps = req.dependencies.clone();
+            if let Some(ref d) = deps {
+                vendor::validate_deps(d)?;
+            }
+            let registry = self.config.npm_registry.clone();
             let work_dir_clone = work_dir.clone();
             let limits_clone = limits.clone();
             let cancel_worker = cancel.clone();
@@ -924,14 +950,23 @@ impl AgentServer {
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
                     let permit = permit; // held for the duration of execution
-                    let result = executor::execute_source(
-                        &source,
-                        &lang,
-                        exec_env,
-                        &work_dir_clone,
-                        &limits_clone,
-                        Some(cancel_worker),
-                    );
+                    let result = (|| {
+                        if let Some(ref d) = deps {
+                            vendor::Vendor::new(&registry)?.vendor(
+                                d,
+                                &work_dir_clone,
+                                &limits_clone,
+                            )?;
+                        }
+                        executor::execute_source(
+                            &source,
+                            &lang,
+                            exec_env,
+                            &work_dir_clone,
+                            &limits_clone,
+                            Some(cancel_worker),
+                        )
+                    })();
                     drop(permit); // free the slot once execution is done
                     let _ = tx.send(result);
                 })
@@ -1590,6 +1625,7 @@ mod tests {
             max_concurrent_exec,
             auth: None,
             auth_path: None,
+            npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
         })
     }
 
@@ -1627,6 +1663,7 @@ mod tests {
             max_concurrent_exec: 100,
             auth: None,
             auth_path: None,
+            npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
         })
     }
 
@@ -1646,6 +1683,7 @@ mod tests {
             max_concurrent_exec: 100,
             auth: Some(Arc::new(auth_config_for(tenants))),
             auth_path: None,
+            npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
         })
     }
 
@@ -1670,6 +1708,7 @@ mod tests {
             max_concurrent_exec: 100,
             auth: Some(Arc::new(auth)),
             auth_path: None,
+            npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
         })
     }
 
@@ -2161,27 +2200,27 @@ mod tests {
         server.session_manager.destroy_all().unwrap();
     }
 
-    /// Integration test: fetches the nodejs runtime from wasmhub and verifies
-    /// that all files in a multi-file project are written to the session FS and
-    /// the entry file executes. Sibling files are visible in the session
-    /// directory; whether they can be loaded depends on the runtime's module
-    /// system (the QuickJS-based nodejs runtime currently lacks `require`).
+    /// Integration test: fetches the nodejs runtime from wasmhub (>= v0.3.0,
+    /// which ships native CommonJS) and verifies that a multi-file project
+    /// resolves a sibling file via relative `require()` — the v0.21.1 exit
+    /// criteria.
     ///
-    /// Ignored by default so the test suite stays offline-friendly. Run with:
-    ///   cargo test --release --bin wasmrun multi_file_js_project_integration -- --ignored --nocapture
+    /// Ignored by default so the test suite stays offline-friendly (needs
+    /// network on first run to fetch the runtime; cached after). Run with:
+    ///   cargo test --release multi_file_js_require_integration -- --ignored --nocapture
     #[test]
     #[ignore]
-    fn test_multi_file_js_project_integration() {
+    fn test_multi_file_js_require_integration() {
         let server = test_server();
         let id = server.handle_create_session().unwrap().session_id;
 
         let body = r#"{
             "files": {
-                "main.js": "console.log('main-ran');",
-                "extra.js": "// sibling file, just present"
+                "main.js": "const {x} = require('./lib'); console.log(x);",
+                "lib.js": "module.exports = {x: 2};"
             },
             "entry": "main.js",
-            "timeout": 60
+            "timeout": 120
         }"#;
         let resp = server.handle_exec(&id, body, None).unwrap();
         assert_eq!(
@@ -2190,14 +2229,253 @@ mod tests {
             resp.stderr, resp.error
         );
         assert!(
-            resp.stdout.contains("main-ran"),
-            "stdout did not contain expected output: {:?}",
+            resp.stdout.contains('2'),
+            "stdout did not contain require()d value: {:?}",
             resp.stdout
         );
 
         // Verify the sibling file was actually written to the session FS
-        let extra = server.handle_read_file(&id, "extra.js", None).unwrap();
-        assert!(extra.content.contains("sibling file"));
+        let lib = server.handle_read_file(&id, "lib.js", None).unwrap();
+        assert!(lib.content.contains("module.exports"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: bare `require('<name>')` resolves through the
+    /// project's `node_modules/<name>` tree (wasmhub nodejs >= v0.3.0).
+    /// Ignored by default; see test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_node_modules_resolution_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "files": {
+                "main.js": "const greet = require('greet'); console.log(greet('agent'));",
+                "node_modules/greet/index.js": "module.exports = (n) => 'hello ' + n;"
+            },
+            "entry": "main.js",
+            "timeout": 120
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        assert!(
+            resp.stdout.contains("hello agent"),
+            "stdout did not contain node_modules output: {:?}",
+            resp.stdout
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: the runtime's event loop and stdlib globals —
+    /// setTimeout, Buffer, TextEncoder and a built-in module (path) — work
+    /// end-to-end through /exec (wasmhub nodejs >= v0.3.0).
+    /// Ignored by default; see test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_js_stdlib_and_timers_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "source": "const path = require('path'); console.log(path.join('a','b')); console.log(Buffer.from('hi').toString('base64')); console.log(new TextEncoder().encode('abc').length); setTimeout(() => console.log('timer-fired'), 5);",
+            "language": "javascript",
+            "timeout": 120
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        assert!(
+            resp.stdout.contains("a/b"),
+            "path.join output missing: {:?}",
+            resp.stdout
+        );
+        assert!(
+            resp.stdout.contains("aGk="),
+            "Buffer base64 output missing: {:?}",
+            resp.stdout
+        );
+        assert!(
+            resp.stdout.contains('3'),
+            "TextEncoder length missing: {:?}",
+            resp.stdout
+        );
+        assert!(
+            resp.stdout.contains("timer-fired"),
+            "setTimeout callback did not run before exit: {:?}",
+            resp.stdout
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: single-file TypeScript is transpiled in-sandbox by
+    /// the swc WASI transpiler, then run by the nodejs runtime.
+    ///
+    /// Needs the `swc` artifact on the pinned wasmhub release (or a
+    /// `WASMRUN_WASMHUB_BASE_URL` override serving it). Ignored by default;
+    /// see test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_typescript_single_file_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "source": "interface P {x: number}; const p: P = {x: 7}; console.log(p.x * 6);",
+            "language": "typescript",
+            "timeout": 120
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        assert!(
+            resp.stdout.contains("42"),
+            "stdout did not contain expected output: {:?}",
+            resp.stdout
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: multi-file TypeScript with an ES `import` between
+    /// files — the v0.21.2 exit criteria. The transpiler lowers ESM to
+    /// CommonJS and the runtime resolves the emitted `.js` sibling.
+    /// Ignored by default; see test_typescript_single_file_integration.
+    #[test]
+    #[ignore]
+    fn test_typescript_multi_file_import_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "files": {
+                "main.ts": "import {x} from './lib'; console.log(x)",
+                "lib.ts": "export const x=2"
+            },
+            "entry": "main.ts",
+            "language": "typescript",
+            "timeout": 120
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        assert!(
+            resp.stdout.contains('2'),
+            "stdout did not contain imported value: {:?}",
+            resp.stdout
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: malformed TypeScript surfaces a clear transpilation
+    /// error referencing the original .ts file, line and column.
+    /// Ignored by default; see test_typescript_single_file_integration.
+    #[test]
+    #[ignore]
+    fn test_typescript_syntax_error_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "source": "const x: = broken(",
+            "language": "typescript",
+            "timeout": 120
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(resp.exit_code, -1);
+        let err = resp.error.expect("expected a transpilation error");
+        assert!(
+            err.contains("TypeScript transpilation failed") && err.contains("_run_.ts:1:"),
+            "error should name the failure and the .ts location: {err}"
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_invalid_dependencies_rejected_before_spawn() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // Invalid package name → immediate 400, no worker spawned, no network.
+        let body = r#"{"source": "1", "dependencies": {"../evil": "*"}}"#;
+        let err = server.handle_exec(&id, body, None).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("Invalid package name"));
+
+        // Unsupported composite range → immediate 400.
+        let body = r#"{"source": "1", "dependencies": {"lodash": ">=1.0.0 <2.0.0"}}"#;
+        let err = server.handle_exec(&id, body, None).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("Unsupported version range"));
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: the 0.21.3 exit criteria — a project depending on a
+    /// real pure-JS npm package (lodash) executes in one request, resolved
+    /// through the runtime's own `require()` from the vendored node_modules.
+    ///
+    /// Needs network (npm registry + wasmhub runtime fetch on first run).
+    /// Ignored by default; see test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_npm_dependency_lodash_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "source": "const _ = require('lodash'); console.log(JSON.stringify(_.chunk([1,2,3,4], 2)));",
+            "language": "javascript",
+            "dependencies": {"lodash": "^4.17.21"},
+            "timeout": 120
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        assert!(
+            resp.stdout.contains("[[1,2],[3,4]]"),
+            "lodash output missing: {:?}",
+            resp.stdout
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_exec_typescript_language_passes_validation() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // "ts" must be accepted at the synchronous validation stage — any
+        // runtime/transpiler fetch failure surfaces later as ExecResponse.error,
+        // not as an ApiError from handle_exec itself.
+        let body = r#"{"files": {"main.ts": "const n: number = 1;"}, "entry": "main.ts", "language": "ts"}"#;
+        let result = server.handle_exec(&id, body, None);
+        assert!(
+            result.is_ok(),
+            "valid TS files+entry should not return ApiError, got: {result:?}"
+        );
 
         server.session_manager.destroy_all().unwrap();
     }

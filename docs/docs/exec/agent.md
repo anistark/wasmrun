@@ -25,6 +25,7 @@ wasmrun agent [OPTIONS]
 | `--max-disk` | `100` | Maximum total disk usage per session (MB) |
 | `--max-body` | `32` | Maximum accepted request body size (MB) |
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
+| `--npm-registry` | `https://registry.npmjs.org` | npm registry base URL for dependency vendoring |
 | `--allow-cors` | off | Enable wildcard CORS |
 | `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted — see [Observability](./usage/agent-observability.md)) |
 | `--auth <PATH>` | off | Path to a TOML auth config; enables API-key auth & tenant isolation (omit = open) |
@@ -128,7 +129,7 @@ The agent API manages **sessions** — each session is an isolated exec mode san
 - **Output buffers** — stdout/stderr captured per execution
 - **Timeout** — auto-cleanup after idle expiry
 
-The exec endpoint accepts four input modes — a shell command line, a JavaScript source snippet, a multi-file JS project, or a pre-compiled `.wasm` file — and returns captured stdout/stderr/exit code as JSON. JavaScript runs through a wasmhub-hosted language runtime; WASM modules run through the same interpreter used by `wasmrun exec`. Shell commands are handled by an in-process built-in shell with no subprocess or host shell access.
+The exec endpoint accepts four input modes — a shell command line, a JavaScript or TypeScript source snippet, a multi-file JS/TS project, or a pre-compiled `.wasm` file — and returns captured stdout/stderr/exit code as JSON. JavaScript runs through a wasmhub-hosted language runtime; TypeScript is first transpiled to JavaScript by an swc-based WASI module running inside the same sandbox; WASM modules run through the same interpreter used by `wasmrun exec`. Shell commands are handled by an in-process built-in shell with no subprocess or host shell access.
 
 ```
 ┌─ wasmrun agent ─────────────────────────────────────────┐

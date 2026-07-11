@@ -45,7 +45,7 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
             r#type: "function",
             function: OpenAiFunction {
                 name: "execute_code",
-                description: "Execute code inside a sandbox session. Provide one of: 'command' (shell-style command line with pipes, redirection, and built-ins like echo/cat/ls/pwd/cd/mkdir/rm/cp/mv/env/export), 'source'+'language' (single snippet), 'files'+'entry'+'language' (multi-file project with relative require() support), or 'wasm_path' (pre-compiled WASM). Returns stdout, stderr, exit code, and duration.",
+                description: "Execute code inside a sandbox session. Provide one of: 'command' (shell-style command line with pipes, redirection, and built-ins like echo/cat/ls/pwd/cd/mkdir/rm/cp/mv/env/export), 'source'+'language' (single JavaScript or TypeScript snippet), 'files'+'entry'+'language' (multi-file JS/TS project with relative require() and node_modules resolution), or 'wasm_path' (pre-compiled WASM). TypeScript is transpiled in-sandbox before execution. Returns stdout, stderr, exit code, and duration.",
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -70,10 +70,15 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                             "type": "string",
                             "description": "Entry filename for a multi-file project (must be a key in 'files'). Required when 'files' is provided."
                         },
+                        "dependencies": {
+                            "type": "object",
+                            "additionalProperties": { "type": "string" },
+                            "description": "npm dependencies to install before execution, as a map of package name → version range (e.g. {\"lodash\": \"^4.17.21\"}). Only pure-JS packages work (no native bindings, no install scripts). Use with 'source' or 'files'; the code can then require() them."
+                        },
                         "language": {
                             "type": "string",
-                            "enum": ["javascript", "js", "nodejs"],
-                            "description": "Language for source/files execution (defaults to javascript)"
+                            "enum": ["javascript", "js", "nodejs", "typescript", "ts", "tsx"],
+                            "description": "Language for source/files execution (defaults to javascript). TypeScript ('typescript'/'ts'/'tsx') is transpiled to JavaScript in the sandbox before running; .ts/.tsx files in a multi-file project are transpiled automatically."
                         },
                         "wasm_path": {
                             "type": "string",

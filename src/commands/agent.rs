@@ -21,6 +21,7 @@ pub fn handle_agent_command(
     max_disk: u32,
     max_body: u32,
     max_concurrent_exec: usize,
+    npm_registry: &str,
     allow_cors: bool,
     verbose: bool,
     auth_config: Option<&str>,
@@ -62,6 +63,7 @@ pub fn handle_agent_command(
         max_concurrent_exec,
         auth,
         auth_path,
+        npm_registry: npm_registry.to_string(),
     };
 
     let server = AgentServer::new(config);

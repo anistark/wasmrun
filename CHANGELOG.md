@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **npm Dependency Vendoring**: `POST /exec` accepts `"dependencies": {"lodash": "^4.17.21"}` alongside `source` or `files`; packages are installed into the session's `node_modules` before execution and resolved by the runtime's own `require()`
+  - wasmrun talks to the npm registry directly (no `npm` binary on the host, keeping the zero-dependency deployment): abbreviated-metadata fetch, semver-range resolution (exact/`^`/`~`/`>=`/x-ranges/`*`/dist-tags; composite ranges rejected clearly), sha512 integrity verification, and hardened tarball extraction (traversal entries and symlinks never materialized)
+  - Lifecycle scripts are **never** executed, and packages with native bindings (install scripts, `binding.gyp`, `.node` binaries) are rejected with an error naming the package — pure-JS only, matching what the sandbox can run
+  - Transitive production dependencies install npm2-style (nested per-package `node_modules` with walk-up dedupe, which also terminates dependency cycles); hard ceilings bound tree depth, package count, and tarball/unpacked sizes, and vendored files count against the session's disk and file-size limits
+  - Per-`name@version` cache under `~/.wasmrun/npm/` skips re-downloads; dependencies already satisfied in the session are skipped, so repeat execs are free
+  - New `--npm-registry <URL>` flag points vendoring at private registries/mirrors; invalid names/ranges fail with HTTP 400 before an exec worker is spawned
+  - `execute_code` tool schema documents the field for LLM agents; offline test coverage runs against an in-process fake registry
+- **TypeScript Execution in the Agent Sandbox**: `POST /exec` accepts `language: "typescript"` (aliases `ts`, `tsx`) for both single-`source` snippets and multi-file `files` projects
+  - TypeScript is transpiled to JavaScript *inside the sandbox* by an swc-based WASI transpiler (a new wasmhub artifact) — no native transpiler dependency, preserving the single-binary/WASM-isolation model; ~40 ms per transpile under the interpreter
+  - Types stripped, enums/decorators handled, and ES `import`/`export` lowered to CommonJS for the runtime's module system, with default-import interop helpers inlined; `.tsx` inputs get JSX lowered to `React.createElement`
+  - In `files` mode every `.ts`/`.tsx` file is transpiled in place to a sibling `.js` (other files pass through), so relative imports resolve via the runtime's own `require()`; a `.ts` entry runs as its emitted `.js`
+  - Malformed TypeScript fails with `TypeScript transpilation failed: <file>:<line>:<col>: <message>` referencing the original `.ts` source; transpiler output is isolated from the program's captured stdout/stderr
+  - `execute_code` tool schema and docs updated with the new language values
+  - New `WASMRUN_WASMHUB_BASE_URL` env override points runtime fetches at an alternate wasmhub-shaped host (development/testing); the override also becomes the cache identity so artifacts never masquerade as pinned-release ones
+- **wasmhub v0.3.1 Runtimes (native CommonJS + Node stdlib + swc transpiler)**: bump the pinned wasmhub release from v0.2.0 to v0.3.1, turning on the runtime-side JS ecosystem work with no wasmrun code path changes and picking up the new `swc` artifact that powers TypeScript execution
+  - Multi-file projects now load siblings via relative `require()` (`./x`, `../x`, `.js`/`.json`, `index.*`, `package.json` `main`) — the v0.19.2 upload path is now fully usable end-to-end
+  - Bare `require('<name>')` resolves through `node_modules/<name>`, so vendored pure-JS dependencies shipped in `files` work
+  - Event loop and stdlib: `setTimeout`/`setInterval`/`setImmediate`, `queueMicrotask`, async/await, `Buffer`, `TextEncoder`/`TextDecoder`, `atob`/`btoa`, and built-in `path`/`fs`/`os`/`events`/`util`/`assert`/`stream`
+  - Runtime cache metadata now records the wasmhub release it was downloaded from; a cached runtime from a different release (or a pre-v0.21 cache without the field) is invalidated and re-fetched, so pin bumps take effect for existing installs (previously a stale same-filename artifact would be served forever)
+  - New network-backed integration tests (`--ignored`) cover relative `require()`, `node_modules` resolution, and timers/`Buffer`/`TextEncoder` end-to-end through `/exec`; agent docs document the supported Node built-in surface
 - **Reference Types in the Interpreter**: `funcref`/`externref` in the runtime value model, the foundation for every Component Model path (WASI 0.2/0.3, the canonical ABI, WasmGC). Phase 0 of #92
   - `Value` gains `FuncRef(Option<u32>)` and `ExternRef(Option<u32>)` (both still `Copy`; null is `None`), round-tripping references through params, locals, globals, and tables
   - The flat function table is replaced by a typed `TableInstance` list (element type, values, max) spanning the module's full table index space; `call_indirect` reads a funcref from table 0 through this model

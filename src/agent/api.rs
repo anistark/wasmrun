@@ -25,8 +25,15 @@ pub struct ExecRequest {
     pub files: Option<HashMap<String, String>>,
     /// Entry filename for a multi-file project (must be a key in `files`).
     pub entry: Option<String>,
-    /// Language for source execution: "javascript", "js", or "nodejs".
+    /// Language for source execution: "javascript"/"js"/"nodejs" or
+    /// "typescript"/"ts"/"tsx".
     pub language: Option<String>,
+    /// npm dependencies to vendor into the session's `node_modules` before
+    /// execution: package name → version range (e.g. {"lodash": "^4.17.21"}).
+    /// Resolved host-side from the npm registry (the sandbox has no network);
+    /// only pure-JS packages are supported and lifecycle scripts never run.
+    /// Applies to `source` and `files` execution.
+    pub dependencies: Option<HashMap<String, String>>,
     /// Shell command line to execute via the built-in shell emulator.
     /// Supports pipes (`|`), redirection (`>`, `>>`, `<`), and sequencing
     /// (`&&`, `;`) with built-ins for common file/env operations.
