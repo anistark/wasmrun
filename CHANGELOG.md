@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Web Platform Globals in the JS Runtime (wasmhub v0.3.2)**: bump the pinned wasmhub release from v0.3.1 to v0.3.2, whose nodejs runtime adds the remaining common globals — JS/TS using them now runs unchanged in the agent sandbox
+  - `URL` / `URLSearchParams` (WHATWG parsing, relative resolution against a base, `searchParams` kept in sync with the URL)
+  - `crypto.getRandomValues` / `crypto.randomUUID`, backed by the WASI `random_get` syscall
+  - `structuredClone` (cycles, `Map`/`Set`/`Date`/`RegExp`/`ArrayBuffer`/TypedArrays; functions and symbols throw `DataCloneError`)
+  - `fetch` is now defined but rejects with a clear `network access is not supported` error (`code: 'ERR_NETWORK_UNSUPPORTED'`) instead of a bare `ReferenceError` — real network arrives with the wasmnet milestone
+  - New network-backed integration test (`--ignored`) covers all four through `/exec`
+- **Agent API Example Flows**: new `examples/agent-flows/` with runnable end-to-end scripts for a multi-file TypeScript project and an npm-dependency project against a local `wasmrun agent`
+- **`execute_code` tool schema polish**: the description now spells out the available Node built-ins and web globals and the no-network caveat, so LLM agents can discover the execution surface from `GET /api/v1/tools` alone
+
+### Changed
+- Agent docs: the JS runtime capabilities section documents the new web globals and the interim `fetch` rejection behavior
 - **npm Dependency Vendoring**: `POST /exec` accepts `"dependencies": {"lodash": "^4.17.21"}` alongside `source` or `files`; packages are installed into the session's `node_modules` before execution and resolved by the runtime's own `require()`
   - wasmrun talks to the npm registry directly (no `npm` binary on the host, keeping the zero-dependency deployment): abbreviated-metadata fetch, semver-range resolution (exact/`^`/`~`/`>=`/x-ranges/`*`/dist-tags; composite ranges rejected clearly), sha512 integrity verification, and hardened tarball extraction (traversal entries and symlinks never materialized)
   - Lifecycle scripts are **never** executed, and packages with native bindings (install scripts, `binding.gyp`, `.node` binaries) are rejected with an error naming the package — pure-JS only, matching what the sandbox can run

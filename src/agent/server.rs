@@ -2462,6 +2462,58 @@ mod tests {
         server.session_manager.destroy_all().unwrap();
     }
 
+    /// Integration test: the 0.21.4 polyfill tail — `URL`/`URLSearchParams`,
+    /// `crypto.getRandomValues`/`randomUUID`, and `structuredClone` run
+    /// without ReferenceError, and `fetch` rejects with a clear
+    /// network-not-supported message instead of a bare ReferenceError
+    /// (wasmhub nodejs >= v0.3.2).
+    /// Ignored by default; see test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_js_web_globals_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "source": "const u = new URL('https://example.com:8443/a/../b?x=1'); u.searchParams.append('y', 'z z'); console.log(u.href); const r = crypto.getRandomValues(new Uint8Array(16)); console.log('rand=' + (r.length === 16 && Array.from(r).some(b => b !== 0))); console.log('uuid=' + /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(crypto.randomUUID())); const o = {a: [1, 2], m: new Map([['k', 'v']])}; o.self = o; const c = structuredClone(o); console.log('clone=' + (c.self === c && c.m.get('k') === 'v' && c.a !== o.a)); fetch('http://example.com').catch(e => console.log('fetch=' + /network/.test(e.message)));",
+            "language": "javascript",
+            "timeout": 120
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        assert!(
+            resp.stdout.contains("https://example.com:8443/b?x=1&y=z+z"),
+            "URL/searchParams output missing: {:?}",
+            resp.stdout
+        );
+        assert!(
+            resp.stdout.contains("rand=true"),
+            "getRandomValues output missing: {:?}",
+            resp.stdout
+        );
+        assert!(
+            resp.stdout.contains("uuid=true"),
+            "randomUUID output missing: {:?}",
+            resp.stdout
+        );
+        assert!(
+            resp.stdout.contains("clone=true"),
+            "structuredClone output missing: {:?}",
+            resp.stdout
+        );
+        assert!(
+            resp.stdout.contains("fetch=true"),
+            "fetch should reject with a clear network-unsupported error: {:?}",
+            resp.stdout
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
     #[test]
     fn test_exec_typescript_language_passes_validation() {
         let server = test_server();
