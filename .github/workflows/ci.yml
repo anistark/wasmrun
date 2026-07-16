@@ -6,26 +6,30 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   ci:
     name: Format and Lint
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '22'
 
     - name: Install pnpm
-      uses: pnpm/action-setup@v3
+      uses: pnpm/action-setup@v6
       with:
         version: 10
 
     - name: Cache pnpm store
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.local/share/pnpm/store
         key: ${{ runner.os }}-pnpm-ui-${{ hashFiles('ui/pnpm-lock.yaml') }}
@@ -42,7 +46,7 @@ jobs:
         components: rustfmt, clippy
 
     - name: Cache cargo registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cargo/registry
         key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -50,7 +54,7 @@ jobs:
           ${{ runner.os }}-cargo-registry-
 
     - name: Cache cargo index
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cargo/git
         key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
@@ -58,7 +62,7 @@ jobs:
           ${{ runner.os }}-cargo-index-
 
     - name: Cache target directory
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: target
         key: ${{ runner.os }}-target-ci-${{ hashFiles('**/Cargo.lock') }}
@@ -76,15 +80,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '22'
 
     - name: Install pnpm
-      uses: pnpm/action-setup@v3
+      uses: pnpm/action-setup@v6
       with:
         version: 10
 
@@ -95,7 +99,7 @@ jobs:
         echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
 
     - name: Setup pnpm cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
         key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -109,3 +113,11 @@ jobs:
     - name: Build docs
       working-directory: docs
       run: pnpm run build
+
+  # On PRs, run the examples only after format, lint, and docs pass.
+  # On main, examples run via the CI -> Tests -> Examples workflow_run chain.
+  examples:
+    name: Examples
+    needs: [ci, docs]
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/examples.yml

@@ -57,7 +57,7 @@ fn HomePage() -> impl IntoView {
                         placeholder="Enter your name"
                         prop:value=name
                         on:input=move |ev| {
-                            set_name(event_target_value(&ev));
+                            set_name.set(event_target_value(&ev));
                         }
                     />
                     <button on:click=move |_| {
@@ -124,7 +124,7 @@ fn Counter() -> impl IntoView {
                             prop:value=step
                             on:input=move |ev| {
                                 if let Ok(new_step) = event_target_value(&ev).parse::<i32>() {
-                                    set_step(new_step);
+                                    set_step.set(new_step);
                                 }
                             }
                         />
@@ -141,7 +141,7 @@ fn Counter() -> impl IntoView {
                     
                     <button
                         class="reset"
-                        on:click=move |_| set_count(0)
+                        on:click=move |_| set_count.set(0)
                     >
                         "Reset"
                     </button>
@@ -177,7 +177,7 @@ fn TodoApp() -> impl IntoView {
     let (new_todo, set_new_todo) = create_signal(String::new());
     let (next_id, set_next_id) = create_signal(1);
 
-    let add_todo = move |_| {
+    let add_todo = move || {
         console::log_1(&"[LEPTOS-WEB] add_todo() function called (running from web-leptos)".into());
         let text = new_todo.get().trim().to_string();
         if !text.is_empty() {
@@ -189,7 +189,7 @@ fn TodoApp() -> impl IntoView {
             };
             set_todos.update(|todos| todos.push(todo));
             set_next_id.update(|id| *id += 1);
-            set_new_todo(String::new());
+            set_new_todo.set(String::new());
             console::log_1(&"[LEPTOS-WEB] add_todo() todo added successfully".into());
         } else {
             console::log_1(&"[LEPTOS-WEB] add_todo() empty text, not adding".into());
@@ -227,15 +227,15 @@ fn TodoApp() -> impl IntoView {
                         placeholder="Add a new todo..."
                         prop:value=new_todo
                         on:input=move |ev| {
-                            set_new_todo(event_target_value(&ev));
+                            set_new_todo.set(event_target_value(&ev));
                         }
                         on:keydown=move |ev| {
                             if ev.key() == "Enter" {
-                                add_todo(ev);
+                                add_todo();
                             }
                         }
                     />
-                    <button on:click=add_todo>"Add Todo"</button>
+                    <button on:click=move |_| add_todo()>"Add Todo"</button>
                 </div>
 
                 <div class="todo-stats">
@@ -248,8 +248,9 @@ fn TodoApp() -> impl IntoView {
                         key=|todo| todo.id
                         children=move |todo: TodoItem| {
                             let id = todo.id;
+                            let completed = todo.completed;
                             view! {
-                                <div class=("todo-item", move || if todo.completed { "completed" } else { "" })>
+                                <div class="todo-item" class:completed=completed>
                                     <input
                                         type="checkbox"
                                         prop:checked=todo.completed
