@@ -137,9 +137,22 @@ jobs:
         Add-Content $env:GITHUB_PATH "$emsdkPath\node\current\bin"
       shell: powershell
 
+    # wasm-bindgen's bindgen format is unstable: the CLI version must exactly
+    # match the wasm-bindgen crate version the example was built against. When
+    # the example commits a Cargo.lock, install the CLI at the locked version;
+    # otherwise both resolve to latest and already agree.
     - name: Install wasm-bindgen-cli
       if: matrix.example.lang == 'rust'
-      run: cargo install wasm-bindgen-cli
+      run: |
+        LOCK="examples/${{ matrix.example.name }}/Cargo.lock"
+        if [ -f "$LOCK" ]; then
+          VERSION=$(grep -A 1 '^name = "wasm-bindgen"$' "$LOCK" | sed -n 's/^version = "\(.*\)"$/\1/p')
+          echo "Installing wasm-bindgen-cli $VERSION (pinned by $LOCK)"
+          cargo install wasm-bindgen-cli --version "$VERSION"
+        else
+          cargo install wasm-bindgen-cli
+        fi
+      shell: bash
 
     - name: Install Python
       if: matrix.example.lang == 'python'
