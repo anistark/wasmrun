@@ -52,8 +52,8 @@ wasmrun exec ./echo.wasm hello world
 ```
 
 Inside the WASM program, these are accessible through:
-- `args_sizes_get` — returns argument count and total buffer size
-- `args_get` — writes argument strings into the program's memory
+- `args_sizes_get`: returns argument count and total buffer size
+- `args_get`: writes argument strings into the program's memory
 
 This is the standard WASI mechanism, equivalent to `argc`/`argv` in C.
 
@@ -123,12 +123,12 @@ wasmrun exec ./program.wasm --name "John Doe" --age 30
 
 ## Limitations
 
-- **No float arguments** — string arguments like `3.14` are not parsed as `f32`/`f64`. They become `i32(0)` when used as function parameters. Float values can only be passed through WASI args as strings.
-- **No string function parameters** — WASM functions don't have a string type. Strings are passed via WASI args, not function parameters.
-- **Argument encoding** — WASI args are null-terminated UTF-8 strings in linear memory.
+- **No float arguments**: string arguments like `3.14` are not parsed as `f32`/`f64`. They become `i32(0)` when used as function parameters. Float values can only be passed through WASI args as strings.
+- **No string function parameters**: WASM functions don't have a string type. Strings are passed via WASI args, not function parameters.
+- **Argument encoding**: WASI args are null-terminated UTF-8 strings in linear memory.
 
 ## See Also
 
-- [Function Calling](./functions.md) — `--call` flag details
-- [Running WASM Files](./running.md) — entry point and execution flow
-- [WASI Support](../wasi.md) — `args_get` and other syscalls
+- [Function Calling](./functions.md): `--call` flag details
+- [Running WASM Files](./running.md): entry point and execution flow
+- [WASI Support](../wasi.md): `args_get` and other syscalls

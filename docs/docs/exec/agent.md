@@ -5,7 +5,7 @@ title: Agent API
 
 # Agent API
 
-The agent API wraps exec mode in an HTTP server, letting AI agents create isolated WASM sandboxes, upload files, execute code, and retrieve structured output — all via REST.
+The agent API wraps exec mode in an HTTP server, letting AI agents create isolated WASM sandboxes, upload files, execute code, and retrieve structured output, all via REST.
 
 ## Starting the Server
 
@@ -27,9 +27,9 @@ wasmrun agent [OPTIONS]
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
 | `--npm-registry` | `https://registry.npmjs.org` | npm registry base URL for dependency vendoring |
 | `--allow-cors` | off | Enable wildcard CORS |
-| `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted — see [Observability](./usage/agent-observability.md)) |
+| `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted; see [Observability](./usage/agent-observability.md)) |
 | `--auth <PATH>` | off | Path to a TOML auth config; enables API-key auth & tenant isolation (omit = open) |
-| `--hash-key <KEY>` | — | Print `sha256(KEY)` for the auth config and exit (does not start the server) |
+| `--hash-key <KEY>` | - | Print `sha256(KEY)` for the auth config and exit (does not start the server) |
 
 For every size/count limit, `0` means **unlimited**. Memory, fuel, output, file-size, and disk caps are **per session** and can be overridden per session at creation (see [Sessions](./usage/agent-sessions.md)); body size and exec concurrency are **server-wide** ingress guards.
 
@@ -37,7 +37,7 @@ All endpoints are under `http://<host>:<port>/api/v1/`.
 
 ## Authentication
 
-By default the server is **open** — any caller can create and access any session. Pass `--auth <path>` to require an API key on every request and isolate sessions per tenant. Without `--auth`, behavior is exactly as before (no header needed).
+By default the server is **open**; any caller can create and access any session. Pass `--auth <path>` to require an API key on every request and isolate sessions per tenant. Without `--auth`, behavior is exactly as before (no header needed).
 
 ```sh
 wasmrun agent --port 8430 --auth ./auth.toml
@@ -46,7 +46,7 @@ wasmrun agent --port 8430 --auth ./auth.toml
 
 ### Config file
 
-The auth config is a TOML file listing tenants. Keys are stored **hashed** (SHA-256, hex) — never in plaintext:
+The auth config is a TOML file listing tenants. Keys are stored **hashed** (SHA-256, hex), never in plaintext:
 
 ```toml
 [[tenants]]
@@ -58,7 +58,7 @@ id = "ci"
 key_sha256 = "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"
 ```
 
-Each `id` and `key_sha256` must be unique, and `key_sha256` must be 64 lowercase hex characters. Invalid or missing config **aborts startup** — the server never silently runs open when auth was requested. Restrict the file so other users can't read the hashes:
+Each `id` and `key_sha256` must be unique, and `key_sha256` must be 64 lowercase hex characters. Invalid or missing config **aborts startup**; the server never silently runs open when auth was requested. Restrict the file so other users can't read the hashes:
 
 ```sh
 chmod 600 auth.toml
@@ -89,7 +89,7 @@ A missing, malformed, or unknown key returns **401 Unauthorized**.
 
 ### Tenant isolation
 
-Each session is owned by the tenant that created it. A tenant can only see and operate on its own sessions — any request targeting another tenant's session returns **404 Not Found**, identical to a nonexistent session so existence isn't leaked.
+Each session is owned by the tenant that created it. A tenant can only see and operate on its own sessions; any request targeting another tenant's session returns **404 Not Found**, identical to a nonexistent session so existence isn't leaked.
 
 ### Per-tenant limits and rate limits
 
@@ -110,7 +110,7 @@ key_sha256 = "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"
   max_requests_per_min = 600
 ```
 
-`[tenants.limits]` sets a per-tenant resource ceiling — same fields as a [per-session override](./usage/agent-sessions.md#per-session-limit-overrides) (`max_memory_mb`, `max_fuel`, `max_output_mb`, `max_file_size_mb`, `max_disk_mb`). Effective session limits compose in three layers: **server defaults → tenant baseline → per-session override clamped to the tenant baseline**. The tenant ceiling is a hard cap — a per-session override may only *tighten* a dimension, never raise it above the tenant's cap (a per-session "unlimited" `0` is pulled down to the tenant's finite ceiling).
+`[tenants.limits]` sets a per-tenant resource ceiling, with the same fields as a [per-session override](./usage/agent-sessions.md#per-session-limit-overrides) (`max_memory_mb`, `max_fuel`, `max_output_mb`, `max_file_size_mb`, `max_disk_mb`). Effective session limits compose in three layers: **server defaults → tenant baseline → per-session override clamped to the tenant baseline**. The tenant ceiling is a hard cap; a per-session override may only *tighten* a dimension, never raise it above the tenant's cap (a per-session "unlimited" `0` is pulled down to the tenant's finite ceiling).
 
 `[tenants.rate]` throttles the tenant independently so one tenant cannot exhaust the shared server: `max_sessions`, `max_concurrent_exec`, `max_requests_per_min` (each `0` or omitted inherits the server-wide default). Over any of these limits returns **429 Too Many Requests**.
 
@@ -118,18 +118,18 @@ In open mode (no `--auth`) there is no tenant baseline: a per-session override a
 
 ### Live config reload
 
-The `--auth` file is watched for modification and reloaded **without a restart** — edit the config and the new tenants, keys, limits, and rates take effect for subsequent key resolution and newly created sessions. In-flight sessions keep their original owner and limits. A malformed or invalid edit is **logged and ignored**, keeping the previous config, so a bad edit never drops auth or crashes the server. The banner shows the watched path.
+The `--auth` file is watched for modification and reloaded **without a restart**; edit the config and the new tenants, keys, limits, and rates take effect for subsequent key resolution and newly created sessions. In-flight sessions keep their original owner and limits. A malformed or invalid edit is **logged and ignored**, keeping the previous config, so a bad edit never drops auth or crashes the server. The banner shows the watched path.
 
 ## How It Works
 
-The agent API manages **sessions** — each session is an isolated exec mode sandbox with its own:
+The agent API manages **sessions**. Each session is an isolated exec mode sandbox with its own:
 
-- **Filesystem** — temp directory on the host, preopened at `/` via WASI
-- **Environment variables** — independent per session
-- **Output buffers** — stdout/stderr captured per execution
-- **Timeout** — auto-cleanup after idle expiry
+- **Filesystem**: temp directory on the host, preopened at `/` via WASI
+- **Environment variables**: independent per session
+- **Output buffers**: stdout/stderr captured per execution
+- **Timeout**: auto-cleanup after idle expiry
 
-The exec endpoint accepts four input modes — a shell command line, a JavaScript or TypeScript source snippet, a multi-file JS/TS project, or a pre-compiled `.wasm` file — and returns captured stdout/stderr/exit code as JSON. JavaScript runs through a wasmhub-hosted language runtime; TypeScript is first transpiled to JavaScript by an swc-based WASI module running inside the same sandbox; WASM modules run through the same interpreter used by `wasmrun exec`. Shell commands are handled by an in-process built-in shell with no subprocess or host shell access.
+The exec endpoint accepts four input modes (a shell command line, a JavaScript or TypeScript source snippet, a multi-file JS/TS project, or a pre-compiled `.wasm` file) and returns captured stdout/stderr/exit code as JSON. JavaScript runs through the [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/); TypeScript is first transpiled to JavaScript by the [wasmhub `swc` module](https://anistark.github.io/wasmhub/runtimes/swc/) running inside the same sandbox; WASM modules run through the same interpreter used by `wasmrun exec`. Shell commands are handled by an in-process built-in shell with no subprocess or host shell access.
 
 ```
 ┌─ wasmrun agent ─────────────────────────────────────────┐
@@ -203,7 +203,7 @@ curl http://localhost:8430/api/v1/tools?format=anthropic
 
 Available tools: `create_session`, `execute_code`, `write_file`, `read_file`, `list_files`, `destroy_session`.
 
-Each tool includes a description, parameter schema with types, and required fields — ready to pass to an LLM as function definitions.
+Each tool includes a description, parameter schema with types, and required fields, ready to pass to an LLM as function definitions.
 
 ## Observability
 
@@ -220,8 +220,8 @@ curl http://localhost:8430/api/v1/metrics
 
 See the usage sub-pages for full endpoint documentation:
 
-- [Sessions](./usage/agent-sessions.md) — create, status, destroy
-- [Execution](./usage/agent-exec.md) — run WASM with timeout and structured output
-- [File Operations](./usage/agent-files.md) — write, read, list, delete
-- [Environment Variables](./usage/agent-environment.md) — set and get per-session env
-- [Observability](./usage/agent-observability.md) — metrics endpoint and access log
+- [Sessions](./usage/agent-sessions.md): create, status, destroy
+- [Execution](./usage/agent-exec.md): run WASM with timeout and structured output
+- [File Operations](./usage/agent-files.md): write, read, list, delete
+- [Environment Variables](./usage/agent-environment.md): set and get per-session env
+- [Observability](./usage/agent-observability.md): metrics endpoint and access log

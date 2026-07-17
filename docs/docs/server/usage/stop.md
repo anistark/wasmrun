@@ -52,7 +52,7 @@ Output when no server is running:
 
 ```sh
 wasmrun stop
-wasmrun run ./my-project --port 3000
+wasmrun ./my-project --port 3000
 ```
 
 ### Stop Before Switching Projects
@@ -60,7 +60,7 @@ wasmrun run ./my-project --port 3000
 ```sh
 wasmrun stop
 cd ../other-project
-wasmrun run
+wasmrun
 ```
 
 ### Port Conflict Resolution
@@ -68,7 +68,7 @@ wasmrun run
 ```sh
 # "Port 8420 already in use"
 wasmrun stop
-wasmrun run --port 8420
+wasmrun --port 8420
 ```
 
 ### Force Stop
@@ -97,5 +97,5 @@ These are created on server start and cleaned up on stop.
 
 ## See Also
 
-- [run](./run.md) — start the development server
-- [clean](./clean.md) — remove build artifacts
+- [run](./run.md): start the development server
+- [clean](./clean.md): remove build artifacts

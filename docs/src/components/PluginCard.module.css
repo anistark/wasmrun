@@ -1,32 +1,23 @@
 .pluginCard {
-  border: 1px solid rgba(45, 80, 22, 0.18);
-  border-radius: 12px;
+  border: 1px solid var(--wr-border);
+  border-radius: var(--wr-radius-lg);
   padding: 1.5rem;
   margin-bottom: 1rem;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(10px) saturate(180%);
-  -webkit-backdrop-filter: blur(10px) saturate(180%);
-  box-shadow: 0 8px 32px 0 rgba(45, 80, 22, 0.15);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  color: #1a1a1a;
-}
-
-[data-theme='dark'] .pluginCard {
-  background: rgba(0, 0, 0, 0.85);
-  border: 1px solid rgba(16, 185, 129, 0.15);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
-  color: #a7f3d0;
+  background: var(--wr-surface);
+  transition:
+    border-color 150ms ease,
+    transform 150ms ease,
+    box-shadow 150ms ease;
 }
 
 .pluginCard:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 48px 0 rgba(45, 80, 22, 0.25);
-  border-color: var(--ifm-color-primary);
+  transform: translateY(-2px);
+  border-color: var(--wr-border-strong);
+  box-shadow: 0 8px 24px -12px rgba(4, 120, 87, 0.3);
 }
 
 [data-theme='dark'] .pluginCard:hover {
-  box-shadow: 0 12px 48px 0 rgba(16, 185, 129, 0.4);
-  border-color: rgba(16, 185, 129, 0.3);
+  box-shadow: 0 8px 24px -8px rgba(16, 185, 129, 0.2);
 }
 
 .pluginHeader {
@@ -44,8 +35,8 @@
 
 .badge {
   padding: 0.25rem 0.75rem;
-  border-radius: 12px;
-  font-size: 0.875rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
   font-weight: 600;
 }
 

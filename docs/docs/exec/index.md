@@ -5,7 +5,7 @@ title: Overview
 
 # Exec Mode
 
-Wasmrun's exec mode (`wasmrun exec`) runs WebAssembly files natively using a built-in interpreter — no browser, no server, just direct execution.
+Wasmrun's exec mode (`wasmrun exec`) runs WebAssembly files natively using a built-in interpreter: no browser, no server, just direct execution.
 
 ## What It Does
 

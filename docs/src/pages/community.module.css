@@ -1,53 +1,24 @@
 .communityPage {
-  padding: 2rem 0;
+  padding: 3rem 0;
   min-height: calc(100vh - 60px);
-  background-image: url('/img/backgrounds/light-mode-bg.jpg');
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;
-  position: relative;
-}
-
-.communityPage::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(255, 255, 255, 0.2);
-  z-index: 0;
-  pointer-events: none;
-}
-
-.communityPage > * {
-  position: relative;
-  z-index: 1;
-}
-
-[data-theme='dark'] .communityPage {
-  background-image: url('/img/backgrounds/page-background.jpg');
-}
-
-[data-theme='dark'] .communityPage::before {
-  background: rgba(0, 0, 0, 0.7);
 }
 
 .header {
   text-align: center;
   margin-bottom: 4rem;
-  padding: 2rem 0;
+  padding: 1rem 0;
 }
 
 .header h1 {
-  font-size: 3rem;
+  font-family: var(--wr-font-display);
+  font-size: clamp(2.25rem, 5vw, 3rem);
+  letter-spacing: -0.02em;
   margin-bottom: 1rem;
-  color: var(--ifm-heading-color);
 }
 
 .subtitle {
-  font-size: 1.25rem;
-  color: var(--ifm-color-emphasis-700);
+  font-size: 1.15rem;
+  color: var(--wr-text-muted);
   max-width: 600px;
   margin: 0 auto;
 }
@@ -57,15 +28,14 @@
 }
 
 .section h2 {
-  font-size: 2rem;
+  font-size: 1.75rem;
   margin-bottom: 2rem;
-  color: var(--ifm-heading-color);
 }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 
 .cardLink {
@@ -79,40 +49,34 @@
 }
 
 .card {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(10px) saturate(180%);
-  -webkit-backdrop-filter: blur(10px) saturate(180%);
-  border: 1px solid rgba(45, 80, 22, 0.18);
-  border-radius: 12px;
-  padding: 2rem;
-  box-shadow: 0 8px 32px 0 rgba(45, 80, 22, 0.15);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  height: 100%;
+  background: var(--wr-surface);
+  border: 1px solid var(--wr-border);
+  border-radius: var(--wr-radius-lg);
+  padding: 1.75rem;
+  transition:
+    border-color 150ms ease,
+    transform 150ms ease,
+    box-shadow 150ms ease;
 }
 
 .card:hover,
 .cardLink:hover .card {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 48px 0 rgba(45, 80, 22, 0.25);
+  transform: translateY(-2px);
+  border-color: var(--wr-border-strong);
+  box-shadow: 0 8px 24px -12px rgba(4, 120, 87, 0.3);
   cursor: pointer;
-}
-
-[data-theme='dark'] .card {
-  background: rgba(0, 0, 0, 0.85);
-  border: 1px solid rgba(16, 185, 129, 0.15);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
 }
 
 [data-theme='dark'] .card:hover,
 [data-theme='dark'] .cardLink:hover .card {
-  box-shadow: 0 12px 48px 0 rgba(16, 185, 129, 0.4);
-  border-color: rgba(16, 185, 129, 0.3);
+  box-shadow: 0 8px 24px -8px rgba(16, 185, 129, 0.2);
 }
 
 .cardContent h3,
 .cardContent h4 {
   margin-top: 0;
   margin-bottom: 0.5rem;
-  color: var(--ifm-heading-color);
 }
 
 .contributorHeader {
@@ -123,8 +87,8 @@
 }
 
 .avatar {
-  width: 60px;
-  height: 60px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   border: 2px solid var(--ifm-color-primary);
   object-fit: cover;
@@ -133,7 +97,7 @@
 .loading {
   text-align: center;
   font-size: 1.1rem;
-  color: var(--ifm-color-emphasis-700);
+  color: var(--wr-text-muted);
   padding: 2rem;
 }
 
@@ -141,7 +105,7 @@
 .contributions,
 .speaker,
 .event {
-  color: var(--ifm-color-emphasis-700);
+  color: var(--wr-text-muted);
   margin: 0.5rem 0;
 }
 
@@ -159,25 +123,15 @@
 }
 
 .getInvolved {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(10px) saturate(180%);
-  -webkit-backdrop-filter: blur(10px) saturate(180%);
-  border: 1px solid rgba(45, 80, 22, 0.18);
-  border-radius: 12px;
+  background: var(--wr-surface);
+  border: 1px solid var(--wr-border);
+  border-radius: var(--wr-radius-lg);
   padding: 2rem;
-  box-shadow: 0 8px 32px 0 rgba(45, 80, 22, 0.15);
-}
-
-[data-theme='dark'] .getInvolved {
-  background: rgba(0, 0, 0, 0.85);
-  border: 1px solid rgba(16, 185, 129, 0.15);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
 }
 
 .getInvolved p {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   margin-bottom: 1.5rem;
-  color: var(--ifm-font-color-base);
 }
 
 .getInvolved ul {
@@ -186,9 +140,8 @@
 }
 
 .getInvolved li {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   margin-bottom: 1rem;
-  color: var(--ifm-font-color-base);
 }
 
 .getInvolved a {
@@ -203,10 +156,6 @@
 }
 
 @media screen and (max-width: 768px) {
-  .header h1 {
-    font-size: 2rem;
-  }
-
   .grid {
     grid-template-columns: 1fr;
   }

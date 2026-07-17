@@ -1,6 +1,6 @@
 # Agent API Example Flows
 
-Runnable end-to-end flows against the [Agent API](https://wasmrun.readthedocs.io/en/latest/docs/exec/agent) — the same request sequences an LLM agent makes through the `execute_code` tool schema (`GET /api/v1/tools`).
+Runnable end-to-end flows against the [Agent API](https://wasmrun.readthedocs.io/en/latest/docs/exec/agent): the same request sequences an LLM agent makes through the `execute_code` tool schema (`GET /api/v1/tools`).
 
 ## Prerequisites
 
@@ -15,7 +15,7 @@ Runnable end-to-end flows against the [Agent API](https://wasmrun.readthedocs.io
 
 ## Flows
 
-### `typescript-project.sh` — multi-file TypeScript project
+### `typescript-project.sh`: multi-file TypeScript project
 
 Creates a session, executes a three-file TypeScript project in a single request (`files` + `entry` + `language: "typescript"`), and destroys the session. The `.ts` files are transpiled in-sandbox by the swc WASI transpiler; the emitted JavaScript resolves its imports through the runtime's own CommonJS `require()`.
 
@@ -25,9 +25,9 @@ Creates a session, executes a three-file TypeScript project in a single request 
 #         perimeter=31.41592653589793
 ```
 
-### `npm-dependencies.sh` — npm dependency vendoring
+### `npm-dependencies.sh`: npm dependency vendoring
 
-Executes JavaScript that `require()`s a real npm package (`lodash`), declared with the `dependencies` field. wasmrun resolves and fetches the package host-side (the sandbox has no network), verifies its sha512 integrity, and vendors it into the session's `node_modules` — no `npm` binary involved, lifecycle scripts never run.
+Executes JavaScript that `require()`s a real npm package (`lodash`), declared with the `dependencies` field. wasmrun resolves and fetches the package host-side (the sandbox has no network), verifies its sha512 integrity, and vendors it into the session's `node_modules`; no `npm` binary involved, lifecycle scripts never run.
 
 ```sh
 ./npm-dependencies.sh

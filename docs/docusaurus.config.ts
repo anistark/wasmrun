@@ -1,6 +1,36 @@
 import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
-import { themes as prismThemes } from 'prism-react-renderer';
+import type { PrismTheme } from 'prism-react-renderer';
+
+// Custom Prism themes in the site's palette: neutral surfaces with an
+// emerald anchor, instead of the stock github/dracula pairing.
+const wasmrunPrismLight: PrismTheme = {
+  plain: { color: '#2b2925', backgroundColor: '#f4f0e7' },
+  styles: [
+    { types: ['comment', 'prolog', 'cdata'], style: { color: '#6e7781', fontStyle: 'italic' } },
+    { types: ['keyword', 'atrule', 'selector', 'important'], style: { color: '#047857' } },
+    { types: ['string', 'char', 'inserted', 'attr-value', 'url'], style: { color: '#0a7ea4' } },
+    { types: ['function', 'function-variable'], style: { color: '#6f42c1' } },
+    { types: ['number', 'boolean', 'constant', 'symbol', 'deleted'], style: { color: '#b35900' } },
+    { types: ['punctuation', 'operator'], style: { color: '#57606a' } },
+    { types: ['class-name', 'builtin', 'namespace', 'tag'], style: { color: '#116329' } },
+    { types: ['variable', 'property', 'attr-name'], style: { color: '#24292f' } },
+  ],
+};
+
+const wasmrunPrismDark: PrismTheme = {
+  plain: { color: '#d4dcd8', backgroundColor: '#0d1512' },
+  styles: [
+    { types: ['comment', 'prolog', 'cdata'], style: { color: '#5f6f68', fontStyle: 'italic' } },
+    { types: ['keyword', 'atrule', 'selector', 'important'], style: { color: '#34d399' } },
+    { types: ['string', 'char', 'inserted', 'attr-value', 'url'], style: { color: '#7dd3fc' } },
+    { types: ['function', 'function-variable'], style: { color: '#c4b5fd' } },
+    { types: ['number', 'boolean', 'constant', 'symbol', 'deleted'], style: { color: '#fbbf24' } },
+    { types: ['punctuation', 'operator'], style: { color: '#8b9a93' } },
+    { types: ['class-name', 'builtin', 'namespace', 'tag'], style: { color: '#6ee7b7' } },
+    { types: ['variable', 'property', 'attr-name'], style: { color: '#d4dcd8' } },
+  ],
+};
 
 // ReadTheDocs serves the site under /<language>/<version>/ (e.g. /en/latest/)
 // and sets these env vars only inside its build environment. Everywhere else
@@ -22,6 +52,13 @@ const config: Config = {
   projectName: 'wasmrun',
 
   onBrokenLinks: 'throw',
+
+  stylesheets: [
+    {
+      href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap',
+      type: 'text/css',
+    },
+  ],
 
   markdown: {
     hooks: {
@@ -53,6 +90,10 @@ const config: Config = {
   ],
 
   themeConfig: {
+    colorMode: {
+      defaultMode: 'dark',
+      respectPrefersColorScheme: false,
+    },
     image: 'img/banner.png',
     navbar: {
       title: 'Wasmrun',
@@ -113,8 +154,9 @@ const config: Config = {
         },
         {
           href: 'https://github.com/anistark/wasmrun',
-          label: 'GitHub',
           position: 'right',
+          className: 'header-github-link',
+          'aria-label': 'GitHub repository',
         },
       ],
     },
@@ -171,8 +213,8 @@ const config: Config = {
     },
 
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: wasmrunPrismLight,
+      darkTheme: wasmrunPrismDark,
       additionalLanguages: ['rust', 'go', 'python', 'bash', 'toml', 'json'],
     },
   } satisfies Preset.ThemeConfig,

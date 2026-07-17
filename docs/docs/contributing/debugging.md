@@ -18,7 +18,7 @@ wasmrun --debug plugin install wasmrust
 wasmrun --debug exec file.wasm
 
 # Or set environment variable
-WASMRUN_DEBUG=1 wasmrun run ./project
+WASMRUN_DEBUG=1 wasmrun ./project
 ```
 
 ## Debug Output Types
@@ -423,7 +423,7 @@ Debug mode is disabled by default. Only use it when troubleshooting.
 
 ```sh
 # Normal operation (no debug output)
-wasmrun run ./project
+wasmrun ./project
 ```
 
 ## Next Steps

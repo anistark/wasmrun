@@ -11,13 +11,17 @@ When no `--language` flag is provided, wasmrun detects the project language by c
 
 | File | Detected Language | Runtime |
 |---|---|---|
-| `package.json` | `nodejs` | QuickJS (from wasmhub) |
-| `requirements.txt` | `python` | RustPython (from wasmhub) |
-| `pyproject.toml` | `python` | RustPython (from wasmhub) |
-| `Cargo.toml` | `rust` | Rust WASM runtime |
-| `go.mod` | `go` | Go WASM runtime |
+| `package.json` | `nodejs` | [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/) |
+| `Cargo.toml` | `rust` | [wasmhub `rust` runtime](https://anistark.github.io/wasmhub/runtimes/rust/); OS-kernel integration pending |
+| `go.mod` | `go` | [wasmhub `go` runtime](https://anistark.github.io/wasmhub/runtimes/go/); OS-kernel integration pending |
+| `requirements.txt` | `python` | wasmhub `rustpython` runtime |
+| `pyproject.toml` | `python` | wasmhub `rustpython` runtime |
 
 Detection is checked in this order. The first match wins.
+
+:::note Runtime availability
+The OS kernel currently registers the **Node.js runtime only**. Python (`rustpython`) and Go runtimes are scaffolded in the codebase but not yet enabled, so Node.js projects are the fully supported path today.
+:::
 
 ```sh
 # Has package.json → detected as nodejs
@@ -49,8 +53,10 @@ wasmrun os ./my-app -l python
 
 | Value | Aliases | Runtime |
 |---|---|---|
-| `nodejs` | `node`, `js`, `javascript` | QuickJS |
-| `python` | `py` | RustPython |
+| `nodejs` | `node`, `js`, `javascript` | [wasmhub `nodejs`](https://anistark.github.io/wasmhub/runtimes/nodejs/) |
+| `python` | `py` | wasmhub `rustpython` (integration in progress) |
+
+Any other value is rejected: `Unsupported OS mode language: '<value>'. Supported languages: nodejs, python`.
 
 ```sh
 # All equivalent
@@ -76,14 +82,13 @@ wasmrun os ./hybrid-project --language python
 
 ## Runtime Fetching
 
-Language runtimes are WASM binaries from [wasmhub](https://github.com/anistark/wasmhub). They're fetched on first use and cached at `~/.wasmrun/runtimes/`.
+Language runtimes are WASM binaries from [wasmhub](https://github.com/anistark/wasmhub), pinned to a specific wasmhub release. They're fetched on first use and cached at `~/.wasmrun/runtimes/`:
 
 ```
 ~/.wasmrun/runtimes/
-├── quickjs.wasm          # Node.js/JavaScript runtime
-├── quickjs.wasm.sha256   # Checksum
-├── rustpython.wasm       # Python runtime
-└── rustpython.wasm.sha256
+├── nodejs.json       # Metadata: version, sha256, wasmhub release
+├── nodejs-20.wasm    # Runtime binary (filename comes from the wasmhub manifest)
+└── ...
 ```
 
 ### Language Name Mapping
@@ -92,18 +97,18 @@ wasmrun maps detected language names to wasmhub runtime names:
 
 | Detected Language | wasmhub Runtime |
 |---|---|
-| `nodejs` | `quickjs` |
+| `nodejs`, `javascript`, `js` | `nodejs` |
 | `python` | `rustpython` |
-| `rust` | `rust` |
-| `go` | `go` |
+
+Other names pass through unchanged.
 
 ### Cache Management
 
-Runtimes are cached indefinitely. To force a re-download:
+Cached runtimes are keyed to the wasmhub release wasmrun is pinned to; when a new wasmrun version bumps the pin, stale runtimes are invalidated and re-fetched automatically. To force a re-download manually:
 
 ```sh
-# Remove cached runtime
-rm ~/.wasmrun/runtimes/quickjs.wasm*
+# Remove cached runtime and metadata
+rm ~/.wasmrun/runtimes/nodejs*
 
 # Next run will re-fetch
 wasmrun os ./my-app
@@ -125,12 +130,15 @@ curl http://localhost:8420/api/runtimes
 ```json
 {
   "detected_language": "nodejs",
-  "wasmhub_runtime": "quickjs",
+  "wasmhub_runtime": "nodejs",
   "cached": true,
   "cached_version": "0.1.4",
-  "available_languages": ["quickjs", "rustpython", "rust", "go"]
+  "wasmhub_version": "0.3.2",
+  "available_languages": ["nodejs", "rustpython"]
 }
 ```
+
+`wasmhub_version` and `available_languages` come from the live wasmhub manifest and are omitted if it can't be fetched.
 
 ```sh
 # Download the runtime binary directly
@@ -139,6 +147,6 @@ curl http://localhost:8420/api/runtime/nodejs -o runtime.wasm
 
 ## See Also
 
-- [Running Projects](./running.md) — startup flow and UI
-- [Server Options](./server-options.md) — port, CORS, watch configuration
-- [Plugins](/docs/plugins) — language plugins for server mode (different from OS mode runtimes)
+- [Running Projects](./running.md): startup flow and UI
+- [Server Options](./server-options.md): port, CORS, watch configuration
+- [Plugins](/docs/plugins): language plugins for server mode (different from OS mode runtimes)

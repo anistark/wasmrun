@@ -23,7 +23,7 @@ POST /api/v1/sessions
 
 ### Per-Session Limit Overrides
 
-The body is optional. To override the server's default [resource limits](../agent.md#starting-the-server) for this session only, pass a `limits` object — any omitted field keeps the server default, and `0` disables that cap:
+The body is optional. To override the server's default [resource limits](../agent.md#starting-the-server) for this session only, pass a `limits` object; any omitted field keeps the server default, and `0` disables that cap:
 
 ```json
 {
@@ -39,7 +39,7 @@ The body is optional. To override the server's default [resource limits](../agen
 
 Body size and exec concurrency are server-wide and cannot be overridden per session.
 
-When the server runs with [`--auth`](../agent.md#authentication) and the tenant has a `[tenants.limits]` baseline, a per-session override may only *tighten* a limit — it is clamped to the tenant ceiling and can never raise a cap above it.
+When the server runs with [`--auth`](../agent.md#authentication) and the tenant has a `[tenants.limits]` baseline, a per-session override may only *tighten* a limit; it is clamped to the tenant ceiling and can never raise a cap above it.
 
 ## Get Session Status
 
@@ -75,19 +75,19 @@ Destroys the session and cleans up its filesystem.
 
 ## Session Lifecycle
 
-1. **Created** — `POST /sessions` allocates an isolated temp directory and WASI environment
-2. **Active** — every API call to the session resets the idle timer
-3. **Expired** — after `timeout` seconds of inactivity, the session is marked expired
-4. **Cleaned up** — a background thread periodically removes expired sessions and their files
+1. **Created**: `POST /sessions` allocates an isolated temp directory and WASI environment
+2. **Active**: every API call to the session resets the idle timer
+3. **Expired**: after `timeout` seconds of inactivity, the session is marked expired
+4. **Cleaned up**: a background thread periodically removes expired sessions and their files
 
 ## Error Responses
 
 | Status | When |
 |--------|------|
 | 401 | Auth enabled (`--auth`) but the API key is missing, malformed, or unknown |
-| 404 | Session not found — or owned by another tenant (see below) |
+| 404 | Session not found, or owned by another tenant (see below) |
 | 410 | Session expired |
 | 413 | Request body exceeded the server's `--max-body` limit |
-| 429 | Maximum concurrent sessions reached — the global `--max-sessions` cap, or the tenant's own `[tenants.rate]` session cap under `--auth` |
+| 429 | Maximum concurrent sessions reached: the global `--max-sessions` cap, or the tenant's own `[tenants.rate]` session cap under `--auth` |
 
-When the server is started with [`--auth`](../agent.md#authentication), each session is owned by the tenant that created it. A request for a session owned by a different tenant returns **404** — identical to a nonexistent session — so existence isn't leaked across tenants.
+When the server is started with [`--auth`](../agent.md#authentication), each session is owned by the tenant that created it. A request for a session owned by a different tenant returns **404**, identical to a nonexistent session, so existence isn't leaked across tenants.

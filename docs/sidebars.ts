@@ -29,6 +29,18 @@ const sidebars: SidebarsConfig = {
             'server/usage/clean',
           ],
         },
+        {
+          type: 'category',
+          label: 'Languages',
+          collapsed: false,
+          items: [
+            'server/languages/rust',
+            'server/languages/go',
+            'server/languages/python',
+            'server/languages/c-cpp',
+            'server/languages/assemblyscript',
+          ],
+        },
         'server/live-reload',
       ],
     },
@@ -53,6 +65,7 @@ const sidebars: SidebarsConfig = {
             'exec/usage/arguments',
           ],
         },
+        'exec/languages',
         'exec/wasi',
         {
           type: 'category',
@@ -98,28 +111,13 @@ const sidebars: SidebarsConfig = {
   ],
 
   plugins: [
-    {
-      type: 'category',
-      label: 'Plugins',
-      collapsed: false,
-      link: { type: 'doc', id: 'plugins/index' },
-      items: [
-        'plugins/usage',
-        {
-          type: 'category',
-          label: 'Languages',
-          collapsed: false,
-          items: [
-            'plugins/languages/rust',
-            'plugins/languages/go',
-            'plugins/languages/python',
-            'plugins/languages/c-cpp',
-            'plugins/languages/assemblyscript',
-          ],
-        },
-        'plugins/creating-plugins',
-      ],
-    },
+    'plugins/index',
+    'plugins/usage',
+    'plugins/c-cpp',
+    'plugins/wasmrust',
+    'plugins/wasmgo',
+    'plugins/wasmasc',
+    'plugins/creating-plugins',
   ],
 
   contributing: [

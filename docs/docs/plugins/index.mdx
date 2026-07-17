@@ -1,0 +1,112 @@
+---
+sidebar_position: 1
+title: Overview
+---
+
+import Link from '@docusaurus/Link';
+
+# Plugin System
+
+Wasmrun uses a plugin architecture to support compiling multiple programming languages to WebAssembly. Each language has a dedicated plugin that handles project detection, compilation, and output configuration.
+
+Plugins power [Server Mode](/docs/server) compilation. [Exec Mode](/docs/exec/languages) and [OS Mode](/docs/os/usage/language) do not use compilation plugins; they run pre-built WASM and language runtimes fetched from wasmhub.
+
+## Available Plugins
+
+export const cardStyle = {height: '100%', display: 'block', color: 'inherit', textDecoration: 'none'};
+export const cardHeader = {display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.75rem'};
+
+<div className="row">
+  <div className="col col--6 margin-bottom--lg">
+    <Link className="card padding--lg" to="/docs/plugins/c-cpp" style={cardStyle}>
+      <div style={cardHeader}>
+        <h3 style={{margin: 0}}>⚙️ c</h3>
+        <span className="badge badge--success">Built-in</span>
+      </div>
+      <p><strong>C/C++</strong></p>
+      <p>C and C++ compiled to WASM via Emscripten. Ships inside wasmrun; nothing to install.</p>
+    </Link>
+  </div>
+  <div className="col col--6 margin-bottom--lg">
+    <Link className="card padding--lg" to="/docs/plugins/wasmrust" style={cardStyle}>
+      <div style={cardHeader}>
+        <h3 style={{margin: 0}}>🦀 wasmrust</h3>
+        <span className="badge badge--secondary">External</span>
+      </div>
+      <p><strong>Rust</strong></p>
+      <p>Standard WASM, wasm-bindgen interop, and full web apps with Yew, Leptos, Dioxus, and Sycamore.</p>
+    </Link>
+  </div>
+  <div className="col col--6 margin-bottom--lg">
+    <Link className="card padding--lg" to="/docs/plugins/wasmgo" style={cardStyle}>
+      <div style={cardHeader}>
+        <h3 style={{margin: 0}}>🐹 wasmgo</h3>
+        <span className="badge badge--secondary">External</span>
+      </div>
+      <p><strong>Go</strong></p>
+      <p>Go projects compiled to compact WASM binaries through TinyGo, with live reload and size optimization.</p>
+    </Link>
+  </div>
+  <div className="col col--6 margin-bottom--lg">
+    <Link className="card padding--lg" to="/docs/plugins/wasmasc" style={cardStyle}>
+      <div style={cardHeader}>
+        <h3 style={{margin: 0}}>🚀 wasmasc</h3>
+        <span className="badge badge--secondary">External</span>
+      </div>
+      <p><strong>AssemblyScript</strong></p>
+      <p>TypeScript-like syntax compiled to WASM via <code>asc</code>, with npm, yarn, pnpm, and bun support.</p>
+    </Link>
+  </div>
+  <div className="col col--6 margin-bottom--lg">
+    <a className="card padding--lg" href="https://anistark.github.io/waspy" target="_blank" rel="noopener noreferrer" style={cardStyle}>
+      <div style={cardHeader}>
+        <h3 style={{margin: 0}}>🐍 waspy ↗</h3>
+        <span className="badge badge--secondary">External</span>
+      </div>
+      <p><strong>Python</strong></p>
+      <p>A Python to WASM compiler written in Rust.</p>
+    </a>
+  </div>
+</div>
+
+## How It Works
+
+Plugins extend wasmrun's compilation pipeline:
+
+```
+wasmrun ./my-project
+    → Plugin system checks installed plugins
+    → Matching plugin detects project type (e.g., Cargo.toml → wasmrust)
+    → Plugin compiles source → .wasm (+ optional .js glue)
+    → Server serves the compiled output
+```
+
+## Quick Start
+
+```sh
+# List installed plugins
+wasmrun plugin list
+
+# Install a plugin
+wasmrun plugin install wasmrust
+
+# Use it (auto-detected from project files)
+wasmrun ./my-rust-project
+
+# Plugin info
+wasmrun plugin info wasmrust
+```
+
+## Plugin Location
+
+Plugins are installed to `~/.wasmrun/plugins/` and tracked in wasmrun's configuration.
+
+## Plugin Capabilities
+
+Each plugin declares its capabilities:
+
+- **compile_wasm**: can compile to standard WASM
+- **compile_webapp**: can compile web applications (wasm-bindgen, etc.)
+- **live_reload**: supports watch mode recompilation
+- **optimization**: supports debug/release/size optimization levels
+- **custom_targets**: supports custom compilation targets

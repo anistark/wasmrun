@@ -62,9 +62,9 @@ wasmrun exec ./hello.wasm
 # Hello, World!
 ```
 
-- **stdout** (fd 1) — printed normally
-- **stderr** (fd 2) — printed to stderr
-- **Exit code** — returned as the process exit code
+- **stdout** (fd 1): printed normally
+- **stderr** (fd 2): printed to stderr
+- **Exit code**: returned as the process exit code
 
 ## File Validation
 
@@ -124,6 +124,6 @@ wasmrun exec ./module.wasm --call process_data
 
 ## See Also
 
-- [Function Calling](./functions.md) — call specific exports
-- [Argument Passing](./arguments.md) — pass data to programs
-- [WASI Support](../wasi.md) — available syscalls
+- [Function Calling](./functions.md): call specific exports
+- [Argument Passing](./arguments.md): pass data to programs
+- [WASI Support](../wasi.md): available syscalls

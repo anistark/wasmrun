@@ -41,7 +41,7 @@ func main() {
 EOF
 
 # Run with Wasmrun
-wasmrun run . --watch
+wasmrun . --watch
 ```
 
 ## Native Execution
@@ -58,5 +58,6 @@ Example: [`examples/go-hello`](https://github.com/anistark/wasmrun/tree/main/exa
 
 ## Additional Resources
 
+- [wasmgo Plugin Repository](https://github.com/anistark/wasmgo)
 - [TinyGo Documentation](https://tinygo.org/docs/)
 - [Wasmrun Examples](https://github.com/anistark/wasmrun/tree/main/examples)
