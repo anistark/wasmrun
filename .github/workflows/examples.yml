@@ -1,16 +1,24 @@
 name: Examples
 
 on:
+  # On PRs, this workflow is called from ci.yml after the Format and Lint
+  # and Docs Build jobs succeed, so examples only run once those pass.
+  workflow_call:
   workflow_run:
     workflows: ["Tests"]
     types:
       - completed
     branches: [ main ]
 
+concurrency:
+  group: examples-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   examples:
     name: Test Examples
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # The workflow_run gate only applies on main; PR runs always execute.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -38,7 +46,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
@@ -46,7 +54,7 @@ jobs:
         targets: wasm32-unknown-unknown
 
     - name: Cache cargo registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cargo/registry
         key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -54,7 +62,7 @@ jobs:
           ${{ runner.os }}-cargo-registry-
 
     - name: Cache cargo index
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.cargo/git
         key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
@@ -62,7 +70,7 @@ jobs:
           ${{ runner.os }}-cargo-index-
 
     - name: Cache target directory
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: target
         key: ${{ runner.os }}-target-examples-${{ hashFiles('**/Cargo.lock') }}
@@ -75,7 +83,7 @@ jobs:
     # 1.26), which TinyGo rejects: "requires go version 1.19 through 1.23".
     - name: Install Go
       if: matrix.example.lang == 'go'
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version: '1.24'
 
@@ -100,7 +108,7 @@ jobs:
 
     - name: Install Node.js
       if: matrix.example.lang == 'asc' || matrix.example.lang == 'nodejs'
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 'lts/*'
 
@@ -129,13 +137,26 @@ jobs:
         Add-Content $env:GITHUB_PATH "$emsdkPath\node\current\bin"
       shell: powershell
 
+    # wasm-bindgen's bindgen format is unstable: the CLI version must exactly
+    # match the wasm-bindgen crate version the example was built against. When
+    # the example commits a Cargo.lock, install the CLI at the locked version;
+    # otherwise both resolve to latest and already agree.
     - name: Install wasm-bindgen-cli
       if: matrix.example.lang == 'rust'
-      run: cargo install wasm-bindgen-cli
+      run: |
+        LOCK="examples/${{ matrix.example.name }}/Cargo.lock"
+        if [ -f "$LOCK" ]; then
+          VERSION=$(grep -A 1 '^name = "wasm-bindgen"$' "$LOCK" | sed -n 's/^version = "\(.*\)"$/\1/p')
+          echo "Installing wasm-bindgen-cli $VERSION (pinned by $LOCK)"
+          cargo install wasm-bindgen-cli --version "$VERSION"
+        else
+          cargo install wasm-bindgen-cli
+        fi
+      shell: bash
 
     - name: Install Python
       if: matrix.example.lang == 'python'
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.x'
 
