@@ -1,4 +1,4 @@
-# AGENTS.md — AI Coding Agent Instructions for Wasmrun
+# AGENTS.md: AI Coding Agent Instructions for Wasmrun
 
 > Instructions for Claude Code, pi, Cursor, Copilot, and other AI coding agents working on this project.
 
@@ -17,7 +17,7 @@
 
 ---
 
-## ⚠️ The Three Modes — Read This First
+## ⚠️ The Three Modes: Read This First
 
 Wasmrun has **three distinct execution modes**. They are separate systems with separate philosophies. **Do not conflate them.** When working on one mode, do not break another mode's functionality.
 
@@ -28,16 +28,16 @@ Wasmrun has **three distinct execution modes**. They are separate systems with s
 - **Trigger:** `wasmrun run ./project` or just `wasmrun ./project`
 - **What it does:** Detects project language → compiles to WASM via plugins → starts HTTP server → serves browser UI that loads and runs the WASM
 - **Key files:**
-  - `src/commands/run.rs` — command handler
-  - `src/config/server.rs` — server config, `run_server()`
-  - `src/server/` — HTTP server infrastructure (handler, API, wasm serving, lifecycle)
-  - `src/compiler/` — project compilation
-  - `src/plugin/` — plugin system (compile plugins)
-  - `src/watcher.rs` — live reload file watching
-  - `src/template.rs` — HTML template injection
-  - `ui/src/` — Preact UI source (builds into `templates/app/`, `templates/console/` at compile time via `build.rs`)
-- **Uses plugins:** Yes — plugins provide compilation (wasmrust, wasmgo, waspy, wasmasc)
-- **Uses browser:** Yes — serves HTML + JS that loads WASM via `WebAssembly.instantiate()`
+  - `src/commands/run.rs`: command handler
+  - `src/config/server.rs`: server config, `run_server()`
+  - `src/server/`: HTTP server infrastructure (handler, API, wasm serving, lifecycle)
+  - `src/compiler/`: project compilation
+  - `src/plugin/`: plugin system (compile plugins)
+  - `src/watcher.rs`: live reload file watching
+  - `src/template.rs`: HTML template injection
+  - `ui/src/`: Preact UI source (builds into `templates/app/`, `templates/console/` at compile time via `build.rs`)
+- **Uses plugins:** Yes. Plugins provide compilation (wasmrust, wasmgo, waspy, wasmasc)
+- **Uses browser:** Yes. Serves HTML + JS that loads WASM via `WebAssembly.instantiate()`
 - **Docs:** `docs/docs/server/`
 
 ### 2. Exec Mode (`wasmrun exec`)
@@ -47,18 +47,18 @@ Wasmrun has **three distinct execution modes**. They are separate systems with s
 - **Trigger:** `wasmrun exec ./file.wasm [args...]`
 - **What it does:** Parses WASM binary → initializes memory → links WASI host functions → interprets bytecode → prints output → returns exit code
 - **Key files:**
-  - `src/commands/exec.rs` — command handler
-  - `src/runtime/core/` — **the entire WASM interpreter engine**
-    - `module.rs` — binary parser
-    - `executor.rs` — instruction executor (~4400 lines, all WASM opcodes)
-    - `memory.rs` — linear memory (pages, bounds checking)
-    - `values.rs` — value types (i32, i64, f32, f64)
-    - `linker.rs` — host function imports/exports linking
-    - `native_executor.rs` — high-level API: `execute_wasm_file()`, `execute_wasm_file_with_args()`
-    - `control_flow.rs` — control flow analysis
-  - `src/runtime/wasi/` — WASI syscall implementations (fd_write, args_get, clock, etc.)
-    - `mod.rs` — WasiEnv, create_wasi_linker()
-    - `syscalls.rs` — individual syscall host functions
+  - `src/commands/exec.rs`: command handler
+  - `src/runtime/core/`: **the entire WASM interpreter engine**
+    - `module.rs`: binary parser
+    - `executor.rs`: instruction executor (~4400 lines, all WASM opcodes)
+    - `memory.rs`: linear memory (pages, bounds checking)
+    - `values.rs`: value types (i32, i64, f32, f64)
+    - `linker.rs`: host function imports/exports linking
+    - `native_executor.rs`: high-level API: `execute_wasm_file()`, `execute_wasm_file_with_args()`
+    - `control_flow.rs`: control flow analysis
+  - `src/runtime/wasi/`: WASI syscall implementations (fd_write, args_get, clock, etc.)
+    - `mod.rs`: WasiEnv, create_wasi_linker()
+    - `syscalls.rs`: individual syscall host functions
 - **Uses plugins:** No
 - **Uses browser:** No
 - **Docs:** `docs/docs/exec/`
@@ -70,27 +70,27 @@ Wasmrun has **three distinct execution modes**. They are separate systems with s
 - **Trigger:** `wasmrun os ./project`
 - **What it does:** Detects language → starts HTTP server → serves Preact UI → fetches language runtime WASM from wasmhub → populates virtual FS with project files → boots WASM VM in browser → runs user code sandboxed
 - **Key files:**
-  - `src/commands/os.rs` — command handler
-  - `src/runtime/os_server.rs` — OS mode HTTP server (serves UI, APIs for kernel/fs/logs/tunnel)
-  - `src/runtime/multilang_kernel.rs` — multi-language kernel (process management, language detection)
-  - `src/runtime/microkernel.rs` — base micro-kernel (process table, WASI, VFS)
-  - `src/runtime/dev_server.rs` — per-process dev server (serves WASI filesystem files)
-  - `src/runtime/scheduler.rs` — process scheduler
-  - `src/runtime/network_namespace.rs` — network isolation, port forwarding
-  - `src/runtime/wasi_fs.rs` — virtual filesystem (in-memory, mount points)
-  - `src/runtime/project_files.rs` — project file collection for browser transfer
-  - `src/runtime/runtime_cache.rs` — language runtime WASM caching (from wasmhub)
-  - `src/runtime/tunnel/` — bore tunneling for public access
-  - `src/runtime/languages/` — language runtime traits (Node.js, Go, Python)
-  - `src/logging/` — structured log trail system
-  - `ui/src/` — Preact UI source (components, OS panels, WASI shim; builds into `templates/os/` at compile time via `build.rs`)
+  - `src/commands/os.rs`: command handler
+  - `src/runtime/os_server.rs`: OS mode HTTP server (serves UI, APIs for kernel/fs/logs/tunnel)
+  - `src/runtime/multilang_kernel.rs`: multi-language kernel (process management, language detection)
+  - `src/runtime/microkernel.rs`: base micro-kernel (process table, WASI, VFS)
+  - `src/runtime/dev_server.rs`: per-process dev server (serves WASI filesystem files)
+  - `src/runtime/scheduler.rs`: process scheduler
+  - `src/runtime/network_namespace.rs`: network isolation, port forwarding
+  - `src/runtime/wasi_fs.rs`: virtual filesystem (in-memory, mount points)
+  - `src/runtime/project_files.rs`: project file collection for browser transfer
+  - `src/runtime/runtime_cache.rs`: language runtime WASM caching (from wasmhub)
+  - `src/runtime/tunnel/`: bore tunneling for public access
+  - `src/runtime/languages/`: language runtime traits (Node.js, Go, Python)
+  - `src/logging/`: structured log trail system
+  - `ui/src/`: Preact UI source (components, OS panels, WASI shim; builds into `templates/os/` at compile time via `build.rs`)
 - **Uses plugins:** No (uses its own language detection and wasmhub runtimes)
-- **Uses browser:** Yes — full Preact UI with console, filesystem, kernel panels
+- **Uses browser:** Yes. Full Preact UI with console, filesystem, kernel panels
 - **Docs:** `docs/docs/os/`
 
-### Mode Boundaries — Critical Rules
+### Mode Boundaries: Critical Rules
 
-1. **Never mix mode-specific logic.** Exec mode must never start an HTTP server. Server mode must never invoke the bytecode interpreter. OS mode has its own kernel — don't route it through the server mode pipeline.
+1. **Never mix mode-specific logic.** Exec mode must never start an HTTP server. Server mode must never invoke the bytecode interpreter. OS mode has its own kernel; don't route it through the server mode pipeline.
 
 2. **Shared code is encouraged, but not at the cost of mode integrity.** If a utility function is useful across modes (e.g., path resolution, error types, WASM binary analysis), keep it in shared modules (`src/utils/`, `src/error.rs`, `src/config/`). But don't bend a mode's design just to share code.
 
@@ -101,7 +101,7 @@ Wasmrun has **three distinct execution modes**. They are separate systems with s
    //! OS mode: Multi-language kernel for browser-based WASM execution
    ```
 
-5. **The plugin system belongs to Server Mode.** Plugins provide compilation support (Rust → WASM, Go → WASM, etc.). Exec mode does not compile — it runs pre-built `.wasm` files. OS mode uses wasmhub runtimes, not compilation plugins.
+5. **The plugin system belongs to Server Mode.** Plugins provide compilation support (Rust → WASM, Go → WASM, etc.). Exec mode does not compile; it runs pre-built `.wasm` files. OS mode uses wasmhub runtimes, not compilation plugins.
 
 ### Shared Components (used by multiple modes)
 
@@ -143,13 +143,13 @@ ui/src/ (→ templates/console/)                           src/runtime/project_f
 
 After completing any set of changes, **always** run these in order:
 
-1. **`just format`** — Format all Rust and UI code.
-2. **`just lint`** — Run clippy (zero warnings enforced) and UI ESLint.
-3. **`just build`** — Full build (format → lint → test → release build).
+1. **`just format`**: Format all Rust and UI code.
+2. **`just lint`**: Run clippy (zero warnings enforced) and UI ESLint.
+3. **`just build`**: Full build (format → lint → test → release build).
 
 If new functionality was added:
 
-4. **`just test`** — Run the full test suite to ensure nothing is broken.
+4. **`just test`**: Run the full test suite to ensure nothing is broken.
 
 Do not consider a change complete until all of the above pass cleanly.
 
@@ -158,12 +158,12 @@ Do not consider a change complete until all of the above pass cleanly.
 - **Update `CHANGELOG.md`** as and when needed. Add entries under `[Unreleased]` for any user-facing changes (features, fixes, breaking changes).
 - **Update `docs/docs/`** whenever behaviour, CLI usage, or features change. Place docs in the correct mode's section (server/exec/os).
 - **Prefer `just` commands** over raw `cargo`/`pnpm` commands. The justfile handles sequencing, version sync, and cross-project builds correctly.
-- **Prompt the user if `AGENTS.md` needs updating.** If your changes alter architecture, mode boundaries, CLI commands, key file locations, or behavioural conventions, tell the user: *"This change may require an update to AGENTS.md — would you like me to update it?"*
+- **Prompt the user if `AGENTS.md` needs updating.** If your changes alter architecture, mode boundaries, CLI commands, key file locations, or behavioural conventions, tell the user: *"This change may require an update to AGENTS.md. Would you like me to update it?"*
 
 ### Planning Documents
 
 - **Check `plan/` for active plans** when a related task is mentioned. Files like `plan/ROADMAP.md` and `plan/*_IMPLEMENTATION.md` contain detailed implementation plans, checklists, and phase tracking.
-- **`plan/` is for local planning only.** It is gitignored — never commit it. Use it to understand context, track progress, and follow implementation checklists.
+- **`plan/` is for local planning only.** It is gitignored; never commit it. Use it to understand context, track progress, and follow implementation checklists.
 
 ### Git Discipline
 
@@ -248,7 +248,7 @@ src/
 ### Key Architectural Patterns
 
 - **Plugin-based compilation (Server Mode only):** Language support is via external crates.io plugins (`wasmrust`, `wasmgo`, `waspy`, `wasmasc`), except C/C++ (built-in via Emscripten).
-- **Self-contained WASM interpreter (Exec Mode):** The `runtime/core/` module is a from-scratch WASM bytecode interpreter — no dependency on wasmtime/wasmer.
+- **Self-contained WASM interpreter (Exec Mode):** The `runtime/core/` module is a from-scratch WASM bytecode interpreter, with no dependency on wasmtime/wasmer.
 - **WASI syscalls** are implemented as host functions linked via `Linker`, operating on `LinearMemory`. Used by Exec Mode.
 - **Virtual filesystem (OS Mode):** `wasi_fs.rs` provides an in-memory filesystem with mount points, used by the OS mode kernel and dev server.
 - **UI is embedded:** The `build.rs` script compiles the Preact UI (`ui/`) into `templates/` which get embedded in the binary.
@@ -296,7 +296,7 @@ When updating documentation, place content in the correct mode's section. Don't 
 |------|---------|-------|
 | **Rust** | Core runtime | Edition 2021, MSRV 1.85 |
 | **Cargo** | Build system | `cargo build --release` |
-| **Just** | Task runner | `justfile` — run `just` for available commands |
+| **Just** | Task runner | `justfile`: run `just` for available commands |
 | **clap** | CLI parsing | Derive-based, see `src/cli.rs` |
 | **Preact** | UI framework | In `ui/`, uses Vite + TypeScript + Tailwind |
 | **pnpm** | JS package manager | For both `ui/` and `docs/` |
@@ -378,14 +378,14 @@ pnpm typecheck      # TypeScript check
 - Use `thiserror` for error types. Add new error variants to `src/error.rs` when needed.
 - Keep `#[allow(dead_code)]` annotated with a `// TODO:` comment explaining the plan.
 - Prefer `eprintln!` for user-facing error output. Use the `debug_println!` / `debug_enter!` / `debug_exit!` macros for debug-only output.
-- The executor (`src/runtime/core/executor.rs`) is large by design — it's a single dispatch loop for all WASM opcodes. Keep instruction implementations in that file.
+- The executor (`src/runtime/core/executor.rs`) is large by design; it's a single dispatch loop for all WASM opcodes. Keep instruction implementations in that file.
 - Memory operations must always include bounds checking.
 - WASI syscalls must return proper errno values (ESUCCESS, EINVAL, EBADF, etc.).
 - **Comment mode ownership** on mode-specific files (e.g., `//! [OS Mode] ...` or `//! [Exec Mode] ...`).
 
 ### TypeScript (UI & Docs)
 
-- Use Preact (not React) for the UI — imports from `preact` and `preact/hooks`.
+- Use Preact (not React) for the UI, importing from `preact` and `preact/hooks`.
 - Vite handles three template builds: `app`, `console`, `os` (controlled by `VITE_TEMPLATE` env var).
 - Follow existing component patterns in `ui/src/components/`.
 
@@ -404,10 +404,10 @@ test: description          # Adding/fixing tests
 
 ### Branching
 
-- `main` — stable release branch
-- `feat/*` — feature branches (e.g., `feat/wasi-filesystem-syscalls`)
-- `fix/*` — bug fix branches
-- `docs/*` — documentation branches
+- `main`: stable release branch
+- `feat/*`: feature branches (e.g., `feat/wasi-filesystem-syscalls`)
+- `fix/*`: bug fix branches
+- `docs/*`: documentation branches
 - PRs are squash-merged with descriptive titles.
 
 ---
@@ -452,10 +452,10 @@ wasmrun os <path> --watch --port 3000  # With file watching and custom port
 
 | File | Mode | Why It Matters |
 |------|------|----------------|
-| `Cargo.toml` | All | Dependencies, version, metadata — start here |
+| `Cargo.toml` | All | Dependencies, version, metadata; start here |
 | `src/cli.rs` | All | All CLI arguments and subcommands defined here |
-| `src/main.rs` | All | Command dispatch — maps CLI args to handlers |
-| `src/error.rs` | All | All error types — extend here for new error categories |
+| `src/main.rs` | All | Command dispatch; maps CLI args to handlers |
+| `src/error.rs` | All | All error types; extend here for new error categories |
 | `src/commands/run.rs` | Server | Server mode entry point |
 | `src/commands/exec.rs` | Exec | Exec mode entry point |
 | `src/commands/os.rs` | OS | OS mode entry point |
@@ -467,9 +467,9 @@ wasmrun os <path> --watch --port 3000  # With file watching and custom port
 | `src/runtime/multilang_kernel.rs` | OS | Multi-language kernel |
 | `src/config/server.rs` | Server | Server config and `run_server()` |
 | `src/plugin/mod.rs` | Server | Plugin system definitions |
-| `build.rs` | All | Build script — compiles UI into templates |
+| `build.rs` | All | Build script; compiles UI into templates |
 | `justfile` | All | All development task commands |
-| `CHANGELOG.md` | — | Keep updated with every change |
+| `CHANGELOG.md` | - | Keep updated with every change |
 
 ---
 
@@ -519,18 +519,18 @@ wasmrun os <path> --watch --port 3000  # With file watching and custom port
 1. Edit components in `ui/src/`
 2. Test with `cd ui && pnpm dev`
 3. The `build.rs` will rebuild templates on `cargo build`
-4. Three template modes: `app`, `console`, `os` — controlled via `VITE_TEMPLATE`
+4. Three template modes: `app`, `console`, `os`: controlled via `VITE_TEMPLATE`
 
 ---
 
 ## Gotchas & Pitfalls
 
 - **`build.rs` compiles the UI.** If you don't have `pnpm` or `node`, set `SKIP_UI_BUILD=1` to bypass.
-- **The `templates/` directory is gitignored** — it's generated at build time. Don't commit it.
-- **Executor is intentionally large.** Don't try to split `executor.rs` into multiple files — the dispatch loop benefits from being co-located.
+- **The `templates/` directory is gitignored**: it's generated at build time. Don't commit it.
+- **Executor is intentionally large.** Don't try to split `executor.rs` into multiple files; the dispatch loop benefits from being co-located.
 - **WASM uses little-endian** byte order for all memory operations.
 - **Division by zero** in WASM should trap (return error), not panic.
-- **clippy must pass with zero warnings** — the CI enforces `-D warnings`.
+- **clippy must pass with zero warnings**: the CI enforces `-D warnings`.
 - **Version must stay in sync** across `Cargo.toml`, `ui/package.json`, and `docs/package.json`. Use `just sync-version`.
 - **Two different WASI systems exist:** `src/runtime/wasi/` is for Exec Mode (host functions linked to interpreter). `src/runtime/wasi_fs.rs` is for OS Mode (virtual filesystem in browser). Don't confuse them.
 - **Two different "server" concepts:** Server Mode's HTTP server (`src/server/`) serves WASM files for browser execution. OS Mode's HTTP server (`src/runtime/os_server.rs`) serves the OS UI and APIs. They are independent.
@@ -541,15 +541,15 @@ wasmrun os <path> --watch --port 3000  # With file watching and custom port
 
 The `examples/` directory contains sample projects in various languages:
 
-- `rust-hello/` — Rust WASM project (Server Mode)
-- `go-hello/` — Go WASM project (Server Mode)
-- `c-hello/` — C WASM project via Emscripten (Server Mode)
-- `asc-hello/` — AssemblyScript WASM project (Server Mode)
-- `python-hello/` — Python WASM project (Server Mode)
-- `native-rust/` — Native Rust → WASM (Exec Mode)
-- `native-go/` — Native Go → WASM (Exec Mode)
-- `web-leptos/` — Leptos web framework example (Server Mode)
-- `web-asc/` — AssemblyScript web example (Server Mode)
-- `nodejs-express-api/` — Node.js Express API (OS Mode)
+- `rust-hello/`: Rust WASM project (Server Mode)
+- `go-hello/`: Go WASM project (Server Mode)
+- `c-hello/`: C WASM project via Emscripten (Server Mode)
+- `asc-hello/`: AssemblyScript WASM project (Server Mode)
+- `python-hello/`: Python WASM project (Server Mode)
+- `native-rust/`: Native Rust → WASM (Exec Mode)
+- `native-go/`: Native Go → WASM (Exec Mode)
+- `web-leptos/`: Leptos web framework example (Server Mode)
+- `web-asc/`: AssemblyScript web example (Server Mode)
+- `nodejs-express-api/`: Node.js Express API (OS Mode)
 
 Use these for testing. Integration tests in `tests/exec_integration_tests.rs` build and run some of these.

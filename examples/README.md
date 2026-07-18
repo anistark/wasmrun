@@ -42,7 +42,7 @@ This directory contains example projects demonstrating how to create WebAssembly
 - **Build**: Rust Leptos framework compiled to WebAssembly
 
 ### 🤖 Agent API Flows (`agent-flows/`)
-- **Features**: End-to-end Agent API request sequences — multi-file TypeScript execution and npm dependency vendoring
+- **Features**: End-to-end Agent API request sequences: multi-file TypeScript execution and npm dependency vendoring
 - **Scripts**: `typescript-project.sh`, `npm-dependencies.sh`
 - **Run**: Start `wasmrun agent`, then run the scripts (see `agent-flows/README.md`)
 
@@ -52,20 +52,20 @@ Examples work with standard wasmrun commands:
 
 ```sh
 # Run any example (from wasmrun project root)
-wasmrun run examples/rust-hello
-wasmrun run examples/go-hello
-wasmrun run examples/python-hello
-wasmrun run examples/c-hello
-wasmrun run examples/asc-hello
-wasmrun run examples/web-asc
-wasmrun run examples/web-leptos
+wasmrun examples/rust-hello
+wasmrun examples/go-hello
+wasmrun examples/python-hello
+wasmrun examples/c-hello
+wasmrun examples/asc-hello
+wasmrun examples/web-asc
+wasmrun examples/web-leptos
 
 # Compile only
 wasmrun compile examples/rust-hello
 wasmrun compile examples/python-hello
 
 # Run with options
-wasmrun run examples/go-hello --port 3000 --watch
+wasmrun examples/go-hello --port 3000 --watch
 ```
 
 ## Example Structure
@@ -120,7 +120,7 @@ To add a new example:
 2. Add source code and build configuration
 3. Create a `README.md` with usage instructions
 4. Update this main `README.md` file
-5. Test with `wasmrun run examples/your-example`
+5. Test with `wasmrun examples/your-example`
 
 ## Common Functions
 

@@ -11,8 +11,8 @@ Language runtimes are fetched from [wasmhub](https://github.com/anistark/wasmhub
 
 | Language | Runtime | Detection |
 |---|---|---|
-| Node.js / JavaScript | QuickJS | `package.json` |
-| Python | RustPython | `requirements.txt`, `pyproject.toml` |
+| Node.js / JavaScript | [wasmhub `nodejs`](https://anistark.github.io/wasmhub/runtimes/nodejs/) | `package.json` |
+| Python | wasmhub `rustpython` (integration in progress) | `requirements.txt`, `pyproject.toml` |
 | Rust | Rust WASM runtime | `Cargo.toml` |
 | Go | Go WASM runtime | `go.mod` |
 
@@ -22,11 +22,11 @@ Runtimes are downloaded on first use with SHA-256 checksum validation.
 
 The OS mode UI provides several panels:
 
-- **Console** — live stdout/stderr with color-coded streams (green for stdout, red for stderr, blue for system) and timestamps
-- **Filesystem** — browse the WASI virtual filesystem populated from your project files
-- **Kernel Status** — active processes, memory usage, WASI capabilities, supported languages
-- **Logs** — structured log trail from kernel, server, and runtime events
-- **Application** — iframe for app output (when running web servers)
+- **Console**: live stdout/stderr with color-coded streams (green for stdout, red for stderr, blue for system) and timestamps
+- **Filesystem**: browse the WASI virtual filesystem populated from your project files
+- **Kernel Status**: active processes, memory usage, WASI capabilities, supported languages
+- **Logs**: structured log trail from kernel, server, and runtime events
+- **Application**: iframe for app output (when running web servers)
 
 ## Virtual Filesystem
 

@@ -47,7 +47,7 @@ export function greet(name: string): string {
 EOF
 
 # Run with Wasmrun
-wasmrun run . --watch
+wasmrun . --watch
 ```
 
 ## Project Structure
@@ -132,6 +132,7 @@ See [`examples/web-asc`](https://github.com/anistark/wasmrun/tree/main/examples/
 
 ## Additional Resources
 
+- [wasmasc Plugin Repository](https://github.com/anistark/wasmasc)
 - [AssemblyScript Documentation](https://www.assemblyscript.org/)
 - [AssemblyScript Book](https://www.assemblyscript.org/introduction.html)
 - [Wasmrun Examples](https://github.com/anistark/wasmrun/tree/main/examples)

@@ -7,7 +7,7 @@ title: Features
 
 ## Native WASM Interpreter
 
-A self-hosted WebAssembly interpreter written in Rust. No external runtime dependency — the interpreter is part of the wasmrun binary.
+A self-hosted WebAssembly interpreter written in Rust. No external runtime dependency; the interpreter is part of the wasmrun binary.
 
 ### Instruction Support
 
@@ -36,21 +36,21 @@ A self-hosted WebAssembly interpreter written in Rust. No external runtime depen
 
 Basic WASI syscall support for system interaction:
 
-- `fd_write` — write to stdout/stderr
-- `fd_read` — read from stdin
-- `environ_get` / `environ_sizes_get` — environment variables
-- `args_get` / `args_sizes_get` — command-line arguments
-- `clock_time_get` — real-time and monotonic clocks
-- `random_get` — random bytes
-- `proc_exit` — process exit
+- `fd_write`: write to stdout/stderr
+- `fd_read`: read from stdin
+- `environ_get` / `environ_sizes_get`: environment variables
+- `args_get` / `args_sizes_get`: command-line arguments
+- `clock_time_get`: real-time and monotonic clocks
+- `random_get`: random bytes
+- `proc_exit`: process exit
 
 ## Entry Point Detection
 
 The executor automatically finds the entry point by checking (in order):
 
-1. **Start section** — WASM module's designated start function
-2. **`_start` export** — WASI convention
-3. **`main` export** — common convention
+1. **Start section**: WASM module's designated start function
+2. **`_start` export**: WASI convention
+3. **`main` export**: common convention
 
 Or you can specify a function explicitly with `--call`.
 

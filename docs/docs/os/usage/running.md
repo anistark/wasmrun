@@ -47,9 +47,9 @@ Once the server starts, open `http://localhost:8420` in your browser. The UI has
 
 ### Console Panel
 Live stdout/stderr output from your running project. Color-coded:
-- 🟢 Green — stdout
-- 🔴 Red — stderr
-- 🔵 Blue — system messages
+- 🟢 Green: stdout
+- 🔴 Red: stderr
+- 🔵 Blue: system messages
 
 Includes Run/Stop controls and a clear button.
 
@@ -111,7 +111,7 @@ This gracefully shuts down the kernel, stops all processes, and cleans up networ
 
 wasmrun os ./my-app
 # Auto-detects Node.js from package.json
-# Fetches QuickJS runtime from wasmhub
+# Fetches the nodejs runtime from wasmhub
 # Opens browser UI with console output
 ```
 
@@ -124,7 +124,7 @@ wasmrun os ./my-app
 # └── app.py
 
 wasmrun os ./my-api --language python
-# Fetches RustPython runtime from wasmhub
+# Fetches the rustpython runtime from wasmhub
 ```
 
 ### Development Workflow
@@ -139,6 +139,6 @@ wasmrun os ./my-project --watch --verbose
 
 ## See Also
 
-- [Language Selection](./language.md) — how auto-detection works, manual overrides
-- [Server Options](./server-options.md) — port, CORS, verbose, watch
-- [Features](../features.md) — REST API, runtime management, virtual filesystem
+- [Language Selection](./language.md): how auto-detection works, manual overrides
+- [Server Options](./server-options.md): port, CORS, verbose, watch
+- [Features](../features.md): REST API, runtime management, virtual filesystem

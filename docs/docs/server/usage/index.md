@@ -11,12 +11,12 @@ Server mode provides commands for compiling, serving, inspecting, and managing W
 
 ```sh
 # Compile + serve in one step
-wasmrun run ./my-project
+wasmrun ./my-project
 
 # Or step by step
 wasmrun compile ./my-project --output ./dist
 wasmrun verify ./dist/output.wasm
-wasmrun run ./dist/output.wasm
+wasmrun ./dist/output.wasm
 ```
 
 ## Command Reference

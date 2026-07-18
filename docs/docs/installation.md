@@ -272,4 +272,4 @@ sudo pacman -R wasmrun-bin
 
 ## Next Steps
 
-Now that Wasmrun is installed, continue to the [Quick Start](./quick-start.md) guide to create your first WebAssembly project, or explore the [Language Guides](./plugins/languages/rust.md) to learn about using Wasmrun with your preferred programming language.
+Now that Wasmrun is installed, continue to the [Quick Start](./quick-start.md) guide to create your first WebAssembly project, or explore the [Language Guides](./server/languages/rust.md) to learn about using Wasmrun with your preferred programming language.

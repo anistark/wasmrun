@@ -8,11 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Web Platform Globals in the JS Runtime (wasmhub v0.3.2)**: bump the pinned wasmhub release from v0.3.1 to v0.3.2, whose nodejs runtime adds the remaining common globals — JS/TS using them now runs unchanged in the agent sandbox
+- **Web Platform Globals in the JS Runtime (wasmhub v0.3.2)**: bump the pinned wasmhub release from v0.3.1 to v0.3.2, whose nodejs runtime adds the remaining common globals; JS/TS using them now runs unchanged in the agent sandbox
   - `URL` / `URLSearchParams` (WHATWG parsing, relative resolution against a base, `searchParams` kept in sync with the URL)
   - `crypto.getRandomValues` / `crypto.randomUUID`, backed by the WASI `random_get` syscall
   - `structuredClone` (cycles, `Map`/`Set`/`Date`/`RegExp`/`ArrayBuffer`/TypedArrays; functions and symbols throw `DataCloneError`)
-  - `fetch` is now defined but rejects with a clear `network access is not supported` error (`code: 'ERR_NETWORK_UNSUPPORTED'`) instead of a bare `ReferenceError` — real network arrives with the wasmnet milestone
+  - `fetch` is now defined but rejects with a clear `network access is not supported` error (`code: 'ERR_NETWORK_UNSUPPORTED'`) instead of a bare `ReferenceError`: real network arrives with the wasmnet milestone
   - New network-backed integration test (`--ignored`) covers all four through `/exec`
 - **Agent API Example Flows**: new `examples/agent-flows/` with runnable end-to-end scripts for a multi-file TypeScript project and an npm-dependency project against a local `wasmrun agent`
 - **`execute_code` tool schema polish**: the description now spells out the available Node built-ins and web globals and the no-network caveat, so LLM agents can discover the execution surface from `GET /api/v1/tools` alone
@@ -21,20 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent docs: the JS runtime capabilities section documents the new web globals and the interim `fetch` rejection behavior
 - **npm Dependency Vendoring**: `POST /exec` accepts `"dependencies": {"lodash": "^4.17.21"}` alongside `source` or `files`; packages are installed into the session's `node_modules` before execution and resolved by the runtime's own `require()`
   - wasmrun talks to the npm registry directly (no `npm` binary on the host, keeping the zero-dependency deployment): abbreviated-metadata fetch, semver-range resolution (exact/`^`/`~`/`>=`/x-ranges/`*`/dist-tags; composite ranges rejected clearly), sha512 integrity verification, and hardened tarball extraction (traversal entries and symlinks never materialized)
-  - Lifecycle scripts are **never** executed, and packages with native bindings (install scripts, `binding.gyp`, `.node` binaries) are rejected with an error naming the package — pure-JS only, matching what the sandbox can run
+  - Lifecycle scripts are **never** executed, and packages with native bindings (install scripts, `binding.gyp`, `.node` binaries) are rejected with an error naming the package; pure-JS only, matching what the sandbox can run
   - Transitive production dependencies install npm2-style (nested per-package `node_modules` with walk-up dedupe, which also terminates dependency cycles); hard ceilings bound tree depth, package count, and tarball/unpacked sizes, and vendored files count against the session's disk and file-size limits
   - Per-`name@version` cache under `~/.wasmrun/npm/` skips re-downloads; dependencies already satisfied in the session are skipped, so repeat execs are free
   - New `--npm-registry <URL>` flag points vendoring at private registries/mirrors; invalid names/ranges fail with HTTP 400 before an exec worker is spawned
   - `execute_code` tool schema documents the field for LLM agents; offline test coverage runs against an in-process fake registry
 - **TypeScript Execution in the Agent Sandbox**: `POST /exec` accepts `language: "typescript"` (aliases `ts`, `tsx`) for both single-`source` snippets and multi-file `files` projects
-  - TypeScript is transpiled to JavaScript *inside the sandbox* by an swc-based WASI transpiler (a new wasmhub artifact) — no native transpiler dependency, preserving the single-binary/WASM-isolation model; ~40 ms per transpile under the interpreter
+  - TypeScript is transpiled to JavaScript *inside the sandbox* by an swc-based WASI transpiler (a new wasmhub artifact): no native transpiler dependency, preserving the single-binary/WASM-isolation model; ~40 ms per transpile under the interpreter
   - Types stripped, enums/decorators handled, and ES `import`/`export` lowered to CommonJS for the runtime's module system, with default-import interop helpers inlined; `.tsx` inputs get JSX lowered to `React.createElement`
   - In `files` mode every `.ts`/`.tsx` file is transpiled in place to a sibling `.js` (other files pass through), so relative imports resolve via the runtime's own `require()`; a `.ts` entry runs as its emitted `.js`
   - Malformed TypeScript fails with `TypeScript transpilation failed: <file>:<line>:<col>: <message>` referencing the original `.ts` source; transpiler output is isolated from the program's captured stdout/stderr
   - `execute_code` tool schema and docs updated with the new language values
   - New `WASMRUN_WASMHUB_BASE_URL` env override points runtime fetches at an alternate wasmhub-shaped host (development/testing); the override also becomes the cache identity so artifacts never masquerade as pinned-release ones
 - **wasmhub v0.3.1 Runtimes (native CommonJS + Node stdlib + swc transpiler)**: bump the pinned wasmhub release from v0.2.0 to v0.3.1, turning on the runtime-side JS ecosystem work with no wasmrun code path changes and picking up the new `swc` artifact that powers TypeScript execution
-  - Multi-file projects now load siblings via relative `require()` (`./x`, `../x`, `.js`/`.json`, `index.*`, `package.json` `main`) — the v0.19.2 upload path is now fully usable end-to-end
+  - Multi-file projects now load siblings via relative `require()` (`./x`, `../x`, `.js`/`.json`, `index.*`, `package.json` `main`): the v0.19.2 upload path is now fully usable end-to-end
   - Bare `require('<name>')` resolves through `node_modules/<name>`, so vendored pure-JS dependencies shipped in `files` work
   - Event loop and stdlib: `setTimeout`/`setInterval`/`setImmediate`, `queueMicrotask`, async/await, `Buffer`, `TextEncoder`/`TextDecoder`, `atob`/`btoa`, and built-in `path`/`fs`/`os`/`events`/`util`/`assert`/`stream`
   - Runtime cache metadata now records the wasmhub release it was downloaded from; a cached runtime from a different release (or a pre-v0.21 cache without the field) is invalidated and re-fetched, so pin bumps take effect for existing installs (previously a stale same-filename artifact would be served forever)
@@ -50,48 +50,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **WASI-Layer Disk Accounting**: bound a session's total disk usage against writes made by sandboxed code itself
   - `fd_write` now checks the session's total on-disk footprint against `--max-disk` (per-session `max_disk_mb`) and rejects an over-quota write with `EDQUOT`, in addition to the existing per-file `EFBIG` cap
-  - Enforced via a running per-session counter in the WASI environment (O(1) per write — no directory walk in tight write loops); `path_unlink_file` and truncating `path_open` return freed bytes to the quota
+  - Enforced via a running per-session counter in the WASI environment (O(1) per write, no directory walk in tight write loops); `path_unlink_file` and truncating `path_open` return freed bytes to the quota
   - The counter is seeded from the work-dir's real footprint at session start and re-seeded before each exec, so agent-side file writes between execs are reflected
   - Previously, sandbox writes were bounded only indirectly (per-file size × fuel); agent-side writes already checked total disk and still do
 - **Live Auth-Config Reload**: pick up tenant/key/rate/limit changes without restarting the server
   - The `--auth` file is watched for modification; on change it is reloaded and the live config is hot-swapped atomically (each request reads a cheap snapshot, so a concurrent reload is invisible mid-request)
-  - A malformed or invalid edit is **logged and ignored** — the previous config is kept, so a bad edit never crashes the server or silently drops auth
+  - A malformed or invalid edit is **logged and ignored**: the previous config is kept, so a bad edit never crashes the server or silently drops auth
   - In-flight sessions keep their original owner and limits; a reload affects only subsequent key resolution and newly created sessions
   - Dependency-free: mtime polling on the existing background thread (cross-platform; no SIGHUP/inotify); the banner shows the watched path
 - **Per-Tenant Resource-Limit Overrides (auth mode)**: assign each tenant its own resource ceiling as a hard cap
   - Optional `[tenants.limits]` sub-table per `[[tenants]]` (same shape as the per-session `{"limits":{}}` override: `max_memory_mb`, `max_fuel`, `max_output_mb`, `max_file_size_mb`, `max_disk_mb`)
   - Effective session limits compose in three layers: server defaults → tenant `[tenants.limits]` (the tenant baseline) → per-session `{"limits":{}}` override **clamped to the tenant baseline**
   - The tenant limit is a **hard ceiling**: a per-session override may only *tighten* a dimension, never raise it above the tenant's cap (a per-session "unlimited" `0` is pulled down to the tenant's finite ceiling)
-  - Open mode (no `--auth`) is unchanged — with no tenant baseline a per-session override applies un-clamped, exactly as before
+  - Open mode (no `--auth`) is unchanged; with no tenant baseline a per-session override applies un-clamped, exactly as before
 - **Per-Tenant Rate Limiting (auth mode)**: throttle each tenant independently so one tenant can't exhaust a shared agent server
   - Optional `[tenants.rate]` sub-table per `[[tenants]]` in the auth config: `max_sessions`, `max_concurrent_exec`, `max_requests_per_min` (each `0`/omitted = inherit the server-wide default)
   - Per-tenant session cap enforced at session creation (counts only the tenant's own non-expired sessions, alongside the global `--max-sessions`); over limit returns **429**
   - Per-tenant concurrent-exec cap via a per-tenant counting semaphore acquired alongside the global one; both release on worker completion. Saturation returns **429**
   - Per-tenant requests/min cap (fixed window) checked at the auth gate before the body is read, covering every `/api/v1/*` route; over limit returns **429**
   - New `ApiError::RateLimited` (429) and a `rate` reason added to the `wasmrun_agent_exec_rejected_total` metric family
-  - Open mode (no `--auth`) is unaffected — only the existing global limits apply
+  - Open mode (no `--auth`) is unaffected; only the existing global limits apply
 - **Agent Observability**: runtime metrics and a structured access log so an operator can see health, load, and failures without a debugger
   - `GET /api/v1/metrics` returns **Prometheus** text exposition by default (scrape-ready) or JSON with `?format=json`
   - Counters: executions by result (`success`/`error`/`timeout`), execution duration sum + count (for an average), output-truncated count, sessions created, and requests rejected before doing work by reason (`concurrency` 429, `payload` 413, `unauthorized` 401)
   - Live gauges sampled at scrape time (no mirrored state, no drift): active sessions, total sessions, in-flight execs, and total session disk footprint
   - Every request emits a one-line `key=value` access log to stderr (`ts`/`id`/`method`/`path`/`status`/`dur_ms`/`tenant`) and carries an `X-Request-Id` response header for correlation; `--verbose` adds a request-received line
-  - When `--auth` is enabled, `/metrics` is gated like any endpoint and limited to **global aggregates** — per-session rows (disk + configured memory cap, JSON only) are exposed solely in open mode, so no tenant can infer another's footprint
+  - When `--auth` is enabled, `/metrics` is gated like any endpoint and limited to **global aggregates**: per-session rows (disk + configured memory cap, JSON only) are exposed solely in open mode, so no tenant can infer another's footprint
   - Dependency-free: hand-rolled `AtomicU64` registry and exposition text, no new metrics crate
 - **Authentication & Tenant Isolation (opt-in)**: run one agent server shared by independent tenants who authenticate with API keys and cannot see each other's sessions
-  - `--auth <path>` enables API-key auth from a TOML config of `[[tenants]]` (`id` + `key_sha256`); without it the server stays fully **open**, exactly as before (back-compat — existing clients need no header)
+  - `--auth <path>` enables API-key auth from a TOML config of `[[tenants]]` (`id` + `key_sha256`); without it the server stays fully **open**, exactly as before (back-compat; existing clients need no header)
   - Keys are stored **SHA-256-hashed** (hex), never in plaintext; `--hash-key <KEY>` prints the hash and exits so operators can populate the config
   - Every `/api/v1/*` request (including `/tools`) must present `Authorization: Bearer <key>`; missing, malformed, or unknown keys return **401 Unauthorized**. The presented key is hashed and matched by map lookup, sidestepping secret-timing attacks without a constant-time compare
   - Sessions are **owned** by the tenant that created them; any cross-tenant access returns **404 Not Found** (identical to a nonexistent session, so existence isn't leaked), enforced centrally in the session manager
   - The auth config is validated at startup (non-empty unique ids, unique 64-char-hex hashes); an invalid or missing config **aborts startup** rather than silently running open. The banner shows `Auth: enabled (N tenants)` or `disabled (open)`
   - New `ApiError::Unauthorized` (401). Per-tenant rate limiting is deferred to a later release
 - **Request Body & Execution Concurrency Limits**: bound the server's memory and thread footprint regardless of client behavior
-  - `--max-body` flag (default 32 MB, `0` = unlimited): oversized request bodies are rejected with **413 Payload Too Large** before being fully buffered — the body is read via `Read::take(limit + 1)` and the `Content-Length` header is never trusted
+  - `--max-body` flag (default 32 MB, `0` = unlimited): oversized request bodies are rejected with **413 Payload Too Large** before being fully buffered; the body is read via `Read::take(limit + 1)` and the `Content-Length` header is never trusted
   - `--max-concurrent-exec` flag (default 100, `0` = unlimited): a global cap on in-flight exec workers across all sessions; saturation returns **429 Too Many Requests** before a fresh 64 MB-stack thread is spawned
   - The concurrency permit is held for the duration of execution and released on worker completion (not when the HTTP response returns), so a timed-out-but-still-running worker keeps its slot until cancellation halts it
   - Request body is now read once, up front, in the router so the body cap applies uniformly to every POST route
   - New `ApiError` variants `PayloadTooLarge` (413) and `TooManyRequests` (429); both new limits are shown in the startup banner
 - **Per-Session Resource Limits**: configurable ceilings enforced at the layer that owns each resource
-  - `--max-fuel` (instruction budget per execution; default `0` = unlimited), `--max-output` (captured stdout+stderr, MB), `--max-file-size` (per-file write, MB), `--max-disk` (total session disk, MB) CLI flags — `0` disables any individual cap
+  - `--max-fuel` (instruction budget per execution; default `0` = unlimited), `--max-output` (captured stdout+stderr, MB), `--max-file-size` (per-file write, MB), `--max-disk` (total session disk, MB) CLI flags; `0` disables any individual cap
   - Per-session overrides via an optional `{"limits": {...}}` body on `POST /api/v1/sessions`, merged over the server defaults
   - Fuel exhaustion aborts runaway / infinite-loop modules; captured output beyond the cap is truncated and flagged via `output_truncated` in the exec response; oversized or over-quota file writes are rejected (per-file via `EFBIG` at the WASI layer, disk total at the agent ingress)
   - New `ResourceLimits` (`src/agent/limits.rs`) is the single source of truth, fed by both the CLI and per-session overrides
@@ -104,38 +104,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `export KEY=value` writes through to the session's `WasiEnv`, so exported variables persist across `command`/`exec` calls and are visible to subsequent WASM executions
   - CWD scoped to a single shell invocation (each `command` request starts at `/`); `cd` mutates the in-invocation CWD so chains like `cd sub && pwd` work
   - All shell file operations resolved through the session work_dir with path-traversal prevention
-  - All in-process built-ins — no subprocess execution, no access to the host shell or native binaries
+  - All in-process built-ins; no subprocess execution, no access to the host shell or native binaries
   - `execute_code` tool schema documents the `command` field for LLM agents
 - **Multi-file JavaScript Project Execution**: agents can upload and run an entire JS project in a single exec request
   - `POST /api/v1/sessions/:id/exec` accepts `files` (map of filename → content) and `entry` (entry filename)
   - All files written to the session work_dir (with intermediate directories created) before execution
   - Filename validation rejects empty names, absolute paths, and `..` traversal
   - Dispatch order in `handle_exec`: `command` → `files` → `source` → `wasm_path`; language/entry validation runs synchronously so callers get HTTP 400 immediately
-  - Sibling files visible to the runtime via the preopened WASI directory (`require()` of siblings depends on runtime-side support — the wasmhub `nodejs` runtime v0.2.0 does not yet implement CommonJS `require()`)
+  - Sibling files visible to the runtime via the preopened WASI directory (`require()` of siblings depends on runtime-side support; the wasmhub `nodejs` runtime v0.2.0 does not yet implement CommonJS `require()`)
   - `execute_code` tool schema documents `files`/`entry` for LLM agents
 - **JavaScript Source Execution in Agent Exec API**: run JS without precompiling to WASM
   - `POST /api/v1/sessions/:id/exec` accepts `source` + `language` as an alternative to `wasm_path`
-  - Supported language aliases: `javascript`, `js`, `nodejs` — all map to the wasmhub nodejs runtime
+  - Supported language aliases: `javascript`, `js`, `nodejs`: all map to the wasmhub nodejs runtime
   - Unsupported languages (e.g. `python`) return HTTP 400 with a clear message, before any thread spawn or network I/O
   - Runtime fetched from wasmhub via `runtime_cache` and cached after first download
   - Source written to `_run_.js` in the session work_dir and executed with the runtime
   - `source` without `language` defaults to JavaScript
 
 ### Changed
-- Exec threads (both source and WASM execution paths) now run with a 64 MB stack via `std::thread::Builder::stack_size` — language runtimes like QuickJS generate deep call chains that overflow the default 8 MB stack
+- Exec threads (both source and WASM execution paths) now run with a 64 MB stack via `std::thread::Builder::stack_size`: language runtimes like QuickJS generate deep call chains that overflow the default 8 MB stack
 - wasmhub runtime renamed `quickjs` → `nodejs`; manifest URL pinned to v0.2.0
 - Removed six WASI debug `eprintln!` calls that leaked to host stderr
 
 ### Fixed
-- **Runaway execution halted on timeout**: exec workers now observe a cooperative cancel flag (checked per-instruction, alongside the fuel decrement, in the interpreter's hot loop). When the wall-clock timeout fires, the handler trips the flag and the detached worker self-terminates at its next instruction — freeing its CPU, memory, and 64 MB stack. Previously a runaway / infinite-loop module under the default (unlimited-fuel) config kept pinning a core indefinitely after the client had already received its timeout response.
+- **Runaway execution halted on timeout**: exec workers now observe a cooperative cancel flag (checked per-instruction, alongside the fuel decrement, in the interpreter's hot loop). When the wall-clock timeout fires, the handler trips the flag and the detached worker self-terminates at its next instruction, freeing its CPU, memory, and 64 MB stack. Previously a runaway / infinite-loop module under the default (unlimited-fuel) config kept pinning a core indefinitely after the client had already received its timeout response.
 
 ## [0.19.0](https://github.com/anistark/wasmrun/releases/tag/v0.19.0) - 2026-05-20
 
 ### Added
 - **Agent Tool Schemas for LLM Agents**: Function-calling definitions for AI agent integration
-  - `GET /api/v1/tools` — returns tool definitions for LLM function calling
-  - `?format=openai` (default) — OpenAI function-calling format
-  - `?format=anthropic` — Anthropic tool-use format
+  - `GET /api/v1/tools`: returns tool definitions for LLM function calling
+  - `?format=openai` (default): OpenAI function-calling format
+  - `?format=anthropic`: Anthropic tool-use format
   - Tools: `create_session`, `execute_code`, `write_file`, `read_file`, `list_files`, `destroy_session`
   - Schemas include descriptions, parameter types, required fields
 - **Agent CLI enhancements**:
@@ -144,24 +144,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Graceful shutdown on Ctrl+C with session cleanup
 - **Agent REST API Server**: HTTP server for AI agent sandbox management
   - `wasmrun agent` CLI command to start the agent API server
-  - `POST /api/v1/sessions` — create isolated sandbox sessions
-  - `GET /api/v1/sessions/:id` — get session status (state, uptime, timeout)
-  - `DELETE /api/v1/sessions/:id` — destroy session and clean up resources
-  - `POST /api/v1/sessions/:id/exec` — execute WASM in session with structured output capture
+  - `POST /api/v1/sessions`: create isolated sandbox sessions
+  - `GET /api/v1/sessions/:id`: get session status (state, uptime, timeout)
+  - `DELETE /api/v1/sessions/:id`: destroy session and clean up resources
+  - `POST /api/v1/sessions/:id/exec`: execute WASM in session with structured output capture
     - Accepts `wasm_path`, `function`, `args`, `timeout`, `env` parameters
     - Returns `stdout`, `stderr`, `exit_code`, `duration_ms`
     - Thread-based timeout enforcement per execution
-  - `POST /api/v1/sessions/:id/files` — write files to session filesystem
-  - `GET /api/v1/sessions/:id/files?path=...` — read file content
-  - `GET /api/v1/sessions/:id/files?path=...&list=true` — list directory entries
-  - `DELETE /api/v1/sessions/:id/files?path=...` — delete files or directories
-  - `POST /api/v1/sessions/:id/env` — set environment variables
-  - `GET /api/v1/sessions/:id/env` — get current environment variables
+  - `POST /api/v1/sessions/:id/files`: write files to session filesystem
+  - `GET /api/v1/sessions/:id/files?path=...`: read file content
+  - `GET /api/v1/sessions/:id/files?path=...&list=true`: list directory entries
+  - `DELETE /api/v1/sessions/:id/files?path=...`: delete files or directories
+  - `POST /api/v1/sessions/:id/env`: set environment variables
+  - `GET /api/v1/sessions/:id/env`: get current environment variables
   - CORS headers (configurable via `--allow-cors`)
   - JSON error responses with consistent format and HTTP status codes
   - Path traversal prevention on all file operations
-  - `execute_wasm_bytes_with_env()` — exec mode API for running WASM with an existing WasiEnv
-  - `WasiEnv::set_args()` — set WASM program arguments on existing environment
+  - `execute_wasm_bytes_with_env()`: exec mode API for running WASM with an existing WasiEnv
+  - `WasiEnv::set_args()`: set WASM program arguments on existing environment
   - CLI flags: `--port`, `--timeout`, `--max-sessions`, `--allow-cors`, `--verbose`
 - **Agent Session Management**: Foundation for AI agent sandbox mode
   - `Session` struct: isolated WASM sandbox with per-session WASI environment, filesystem, and output buffers
@@ -257,13 +257,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Console Output in UI**: Live stdout/stderr display from WASM execution
-  - New `ConsolePanel` component (`ui/src/components/os/ConsolePanel.tsx`) — displays color-coded stdout (green), stderr (red), and system (blue) output with timestamps
-  - WasmRunner integrated into `OSMode.tsx` — Run/Stop buttons, status lifecycle tracking, auto-scroll
+  - New `ConsolePanel` component (`ui/src/components/os/ConsolePanel.tsx`): displays color-coded stdout (green), stderr (red), and system (blue) output with timestamps
+  - WasmRunner integrated into `OSMode.tsx`: Run/Stop buttons, status lifecycle tracking, auto-scroll
   - `StatusIndicator` updated with `stopped` state styling (blue)
   - Console panel activated in sidebar (removed "Coming Soon")
   - Added `ConsoleLine` type to `osTypes.ts`
 - **Browser Runtime Loader**: Client-side WASM runtime loader for browser-based execution
-  - New `WasmRunner` class (`ui/src/os/WasmRunner.ts`) — fetches runtime + project files, populates WASI virtual FS, instantiates and runs WASM
+  - New `WasmRunner` class (`ui/src/os/WasmRunner.ts`): fetches runtime + project files, populates WASI virtual FS, instantiates and runs WASM
   - Fetches runtime `.wasm` and project files from server APIs in parallel
   - Decodes base64 project files and writes them to the WASI virtual filesystem with proper directory structure
   - Entry file auto-detection: parses `package.json` main field, falls back to common candidates (`index.js`, `main.py`, etc.)
@@ -271,24 +271,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Callbacks for stdout, stderr, status changes, errors, and exit codes
   - Added ES module exports to WASI shim + TypeScript declarations (`wasmrun_wasi_impl.d.ts`)
 - **Project Files API**: Serve project files to browser for WASI virtual filesystem population
-  - New `project_files` module (`src/runtime/project_files.rs`) — recursively reads project directory, encodes files as base64
-  - `GET /api/project/files` endpoint — returns all project files as a JSON bundle `{ files: { "path": "base64content" }, ... }`
+  - New `project_files` module (`src/runtime/project_files.rs`): recursively reads project directory, encodes files as base64
+  - `GET /api/project/files` endpoint: returns all project files as a JSON bundle `{ files: { "path": "base64content" }, ... }`
   - `.gitignore` support with glob pattern matching (`*`, `**`, `?`)
   - Default ignore patterns for common directories (`node_modules`, `target`, `.git`, `__pycache__`, etc.) and binary extensions (`.o`, `.so`, `.wasm`, etc.)
   - Size limits: 10MB per file, 50MB total, 5000 file count cap
   - Skipped files reported in response with reasons
   - 20 new unit tests for file collection, ignore patterns, glob matching, base64 encoding, and edge cases
 - **Runtime Binary Management**: Fetch, cache, and serve wasmhub language runtimes for browser WASM execution
-  - New `runtime_cache` module (`src/runtime/runtime_cache.rs`) — downloads `.wasm` runtimes from wasmhub on first use, caches to `~/.wasmrun/runtimes/`
-  - `GET /api/runtime/<language>` endpoint — serves cached runtime binaries with `application/wasm` content type
-  - `GET /api/runtimes` endpoint — returns detected language, cache status, and available wasmhub runtimes
+  - New `runtime_cache` module (`src/runtime/runtime_cache.rs`): downloads `.wasm` runtimes from wasmhub on first use, caches to `~/.wasmrun/runtimes/`
+  - `GET /api/runtime/<language>` endpoint: serves cached runtime binaries with `application/wasm` content type
+  - `GET /api/runtimes` endpoint: returns detected language, cache status, and available wasmhub runtimes
   - SHA-256 checksum validation on all downloaded runtimes
   - Language name mapping for wasmhub (nodejs→quickjs, python→rustpython)
   - Cache integrity checks with automatic re-download on corruption
   - 16 new unit tests for cache roundtrip, integrity, language detection, and checksums
 
 - **Exec Agent Mode Implementation Plan**: Design document for AI agent sandbox using exec mode
-  - `EXEC_AGENT_IMPLEMENTATION.md` — full roadmap from v0.16 to v0.20
+  - `EXEC_AGENT_IMPLEMENTATION.md`: full roadmap from v0.16 to v0.20
   - REST API design for agent sessions, code execution, file operations, and tool schemas
   - Gap analysis vs NVIDIA OpenShell with positioning as lightweight/secure/embeddable alternative
   - Version-segregated task checklist (187 tasks across 5 releases)
@@ -325,7 +325,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Unified Dual Filesystems**: Removed disconnected in-memory VFS; all FS operations route through `WasiFilesystem`
 - **Dev Server Reads Through WASI FS**: Uses `wasi_fs.read_file()` instead of broken host FS reads
-- **Embedded OS Templates**: All templates embedded via `include_str!`/`include_bytes!` — works from any CWD
+- **Embedded OS Templates**: All templates embedded via `include_str!`/`include_bytes!`: works from any CWD
 - **OsServer Race Conditions**: Start/restart handlers hold a single write lock (no TOCTOU)
 - **sock_open Broken Implementation**: TCP uses `SocketHandle::Placeholder` with deferred creation at bind/connect
 - **Port Allocation Overflow**: `calculate_base_port()` uses `u64` arithmetic; `allocate_port()` tracks used ports and skips conflicts on wraparound
@@ -615,5 +615,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **v0.13.x**: OS Mode, UI refactor with Preact, and waspy integration
 - **v0.14.x**: Real-time logs panel, distribution packages (RPM/APT), external plugin migration
 - **v0.15.x**: Native WASM execution with exec command, complete runtime implementation
+- **v0.19.x**: Agent REST API server with sandbox sessions, WASI filesystem syscalls, LLM tool schemas
+- **v0.20.x**: Multi-tenant agent serving with API-key auth, per-tenant limits and rate limiting, observability, shell emulation, JavaScript source and multi-file execution
 
 Checkout all [releases](https://github.com/anistark/wasmrun/releases) and [tags](https://github.com/anistark/wasmrun/tags).

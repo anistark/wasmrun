@@ -43,19 +43,11 @@
 
 .changelogError {
   padding: 2rem;
-  background: rgba(255, 193, 7, 0.1);
-  backdrop-filter: blur(10px) saturate(180%);
-  -webkit-backdrop-filter: blur(10px) saturate(180%);
-  border-left: 4px solid var(--ifm-color-warning);
-  border-radius: 12px;
+  background: rgba(255, 193, 7, 0.08);
   border: 1px solid rgba(255, 193, 7, 0.3);
-  box-shadow: 0 8px 32px 0 rgba(45, 80, 22, 0.15);
+  border-left: 3px solid var(--ifm-color-warning);
+  border-radius: var(--wr-radius);
   margin: 2rem 0;
-}
-
-[data-theme='dark'] .changelogError {
-  background: rgba(255, 193, 7, 0.15);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
 }
 
 .changelogError p {

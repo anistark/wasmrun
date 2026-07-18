@@ -17,7 +17,7 @@ wasmrun compile [PROJECT] [OPTIONS]
 
 ## Description
 
-The `compile` command builds your project to WebAssembly using the detected language plugin. Unlike `run`, it does not start a dev server — it only produces the compiled output. Useful for CI/CD pipelines, production builds, and scripting.
+The `compile` command builds your project to WebAssembly using the detected language plugin. Unlike `run`, it does not start a dev server; it only produces the compiled output. Useful for CI/CD pipelines, production builds, and scripting.
 
 ## Options
 
@@ -152,13 +152,13 @@ wasmrun compile ./asc-project
 
 Compilation produces:
 
-- **Standard WASM** — `output.wasm` (all languages)
-- **wasm-bindgen** — `output_bg.wasm` + `output.js` (Rust with wasm-bindgen)
+- **Standard WASM**: `output.wasm` (all languages)
+- **wasm-bindgen**: `output_bg.wasm` + `output.js` (Rust with wasm-bindgen)
 
 The exact output name depends on the project configuration (e.g., `Cargo.toml` package name for Rust).
 
 ## See Also
 
-- [run](./run.md) — compile and serve in one step
-- [verify](./verify.md) — validate compiled output
-- [clean](./clean.md) — remove build artifacts
+- [run](./run.md): compile and serve in one step
+- [verify](./verify.md): validate compiled output
+- [clean](./clean.md): remove build artifacts

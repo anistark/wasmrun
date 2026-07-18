@@ -21,7 +21,7 @@ POST /api/v1/sessions/:id/env
 }
 ```
 
-Variables are merged — existing keys are updated, new keys are added.
+Variables are merged; existing keys are updated, new keys are added.
 
 **Response** (200):
 ```json

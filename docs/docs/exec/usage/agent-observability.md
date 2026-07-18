@@ -16,10 +16,10 @@ GET /api/v1/metrics
 Returns server metrics in **Prometheus text exposition format** by default, or as JSON with `?format=json`.
 
 ```sh
-# Prometheus (default) — point a Prometheus/Grafana scraper here
+# Prometheus (default): point a Prometheus/Grafana scraper here
 curl http://localhost:8430/api/v1/metrics
 
-# JSON — convenient for ad-hoc inspection or a custom dashboard
+# JSON, convenient for ad-hoc inspection or a custom dashboard
 curl "http://localhost:8430/api/v1/metrics?format=json"
 ```
 
@@ -63,7 +63,7 @@ wasmrun_agent_sessions_active 3
 |--------|------|---------|
 | `wasmrun_agent_exec_total{result}` | counter | Executions by terminal result: `success` (ran to completion), `error` (failed to run), `timeout` |
 | `wasmrun_agent_exec_duration_ms_sum` | counter | Sum of execution wall-clock durations (ms) |
-| `wasmrun_agent_exec_duration_ms_count` | counter | Number of executions in the sum — pair with `_sum` for the average |
+| `wasmrun_agent_exec_duration_ms_count` | counter | Number of executions in the sum; pair with `_sum` for the average |
 | `wasmrun_agent_output_truncated_total` | counter | Executions whose captured output hit the `--max-output` cap |
 | `wasmrun_agent_sessions_created_total` | counter | Sessions created since startup |
 | `wasmrun_agent_exec_rejected_total{reason}` | counter | Requests rejected before doing work, by `reason`: `concurrency` (429), `payload` (413), `unauthorized` (401), `rate` (429, per-tenant rate limit) |
@@ -76,7 +76,7 @@ Average execution duration is `exec_duration_ms_sum / exec_duration_ms_count`.
 
 ### Authentication
 
-When [`--auth`](../agent.md#authentication) is enabled, `/metrics` requires a valid API key like every other endpoint, and the scrape is limited to **global aggregates** — no per-tenant or per-session data — so one tenant cannot infer another's activity. A missing or invalid key returns **401** (and increments `exec_rejected_total{reason="unauthorized"}`).
+When [`--auth`](../agent.md#authentication) is enabled, `/metrics` requires a valid API key like every other endpoint, and the scrape is limited to **global aggregates**, with no per-tenant or per-session data, so one tenant cannot infer another's activity. A missing or invalid key returns **401** (and increments `exec_rejected_total{reason="unauthorized"}`).
 
 ### Per-session breakdown (open mode only)
 
@@ -91,7 +91,7 @@ In open mode (no `--auth`), the JSON format adds a `sessions` array with each ac
 }
 ```
 
-`memory_cap_pages` is in WASM pages (64 KiB each); `null` means unlimited. This breakdown is **not** emitted in the Prometheus format (session ids would be unbounded-cardinality labels) and is withheld entirely when auth is enabled — leaving only the aggregate `sessions_disk_bytes` gauge.
+`memory_cap_pages` is in WASM pages (64 KiB each); `null` means unlimited. This breakdown is **not** emitted in the Prometheus format (session ids would be unbounded-cardinality labels) and is withheld entirely when auth is enabled, leaving only the aggregate `sessions_disk_bytes` gauge.
 
 ## Access Log
 
@@ -104,7 +104,7 @@ ts=2026-06-13T11:18:55.354+00:00 id=d5aafbe6c56c32ec method=POST path=/api/v1/se
 | Field | Meaning |
 |-------|---------|
 | `ts` | RFC 3339 timestamp |
-| `id` | Request id — also returned as the `X-Request-Id` response header |
+| `id` | Request id; also returned as the `X-Request-Id` response header |
 | `method` | HTTP method |
 | `path` | Request path |
 | `status` | HTTP status code |

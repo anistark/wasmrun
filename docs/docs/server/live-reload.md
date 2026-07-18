@@ -23,25 +23,25 @@ The live reload system monitors your project directory for changes and:
 
 ```sh
 # Enable live reload during development
-wasmrun run ./my-project --watch
+wasmrun ./my-project --watch
 
 # With custom port
-wasmrun run ./my-project --watch --port 3000
+wasmrun ./my-project --watch --port 3000
 
 # Specify language explicitly
-wasmrun run ./my-project --watch --language rust
+wasmrun ./my-project --watch --language rust
 ```
 
 ### Default Behavior
 
-By default, `wasmrun run` starts the development server **without** live reload. You must explicitly enable it with `--watch`.
+By default, `wasmrun` starts the development server **without** live reload. You must explicitly enable it with `--watch`.
 
 ```sh
 # No live reload (manual refresh needed)
-wasmrun run ./my-project
+wasmrun ./my-project
 
 # With live reload (auto refresh on changes)
-wasmrun run ./my-project --watch
+wasmrun ./my-project --watch
 ```
 
 ## Supported File Types
@@ -81,10 +81,10 @@ Live reload is most effective with:
 
 ```sh
 # Use debug builds during development (faster compilation)
-wasmrun run ./my-project --watch --optimization debug
+wasmrun ./my-project --watch --optimization debug
 
 # Use release builds for final testing
-wasmrun run ./my-project --optimization release
+wasmrun ./my-project --optimization release
 ```
 
 ### Large Projects
@@ -145,16 +145,16 @@ Fix the error and save the file - wasmrun automatically:
 
 ```sh
 # Basic live reload
-wasmrun run ./rust-project --watch
+wasmrun ./rust-project --watch
 
 # With specific port and language
-wasmrun run ./my-project --watch --port 8080 --language go
+wasmrun ./my-project --watch --port 8080 --language go
 
 # Verbose output to see all file changes
-wasmrun run ./my-project --watch --verbose
+wasmrun ./my-project --watch --verbose
 
 # Debug mode for faster rebuilds
-wasmrun run ./my-project --watch --optimization debug
+wasmrun ./my-project --watch --optimization debug
 ```
 
 ## OS Mode with Live Reload
@@ -177,7 +177,7 @@ See [OS Mode](../os/) for more details.
 
 ```sh
 # Check if watcher is running (verbose mode shows file changes)
-wasmrun run ./my-project --watch --verbose
+wasmrun ./my-project --watch --verbose
 
 # Verify file is in watched directories
 ```
@@ -186,7 +186,7 @@ wasmrun run ./my-project --watch --verbose
 
 ```sh
 # Use debug optimization for faster builds
-wasmrun run ./my-project --watch --optimization debug
+wasmrun ./my-project --watch --optimization debug
 
 # Check project size and split into modules
 # Consider using incremental compilation in Cargo.toml

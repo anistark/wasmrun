@@ -58,9 +58,9 @@ wasmrun clean --all
 
 Additionally removes:
 
-- `~/.wasmrun/temp/` — temporary compilation files
-- `~/.wasmrun/cache/` — build cache
-- `.wasmrun-server/` — server state files
+- `~/.wasmrun/temp/`: temporary compilation files
+- `~/.wasmrun/cache/`: build cache
+- `.wasmrun-server/`: server state files
 
 :::warning
 `--all` does **not** remove installed plugins from `~/.wasmrun/plugins/`. Use `wasmrun plugin uninstall` for that.
@@ -105,5 +105,5 @@ done
 
 ## See Also
 
-- [compile](./compile.md) — rebuild after cleaning
-- [stop](./stop.md) — stop server before cleaning
+- [compile](./compile.md): rebuild after cleaning
+- [stop](./stop.md): stop server before cleaning

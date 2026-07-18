@@ -52,7 +52,7 @@ If execution fails (parse error, trap, etc.), the response still returns 200 wit
 }
 ```
 
-Output buffers are cleared between calls — each response contains only the output of that invocation.
+Output buffers are cleared between calls; each response contains only the output of that invocation.
 
 ---
 
@@ -75,7 +75,7 @@ Run a built-in shell command line against the session filesystem. No language ru
 - `export KEY=value` writes through to the session's environment, so the variable is visible to subsequent `command`/`source`/`files`/`wasm_path` executions in the same session.
 - Path traversal that escapes the session root is rejected.
 
-Unknown commands return exit code `127` with `command not found` on stderr — there is no fallback to the host shell.
+Unknown commands return exit code `127` with `command not found` on stderr; there is no fallback to the host shell.
 
 **Example:**
 ```sh
@@ -89,7 +89,7 @@ curl -X POST .../exec -H "Content-Type: application/json" -d '{
 
 ## JavaScript Source
 
-Evaluate a single source string with the wasmhub JavaScript runtime. The runtime is fetched once and cached.
+Evaluate a single source string with the [wasmhub JavaScript runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/). The runtime is fetched once and cached.
 
 ```json
 {
@@ -100,9 +100,9 @@ Evaluate a single source string with the wasmhub JavaScript runtime. The runtime
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `source` | yes | — | Source code to execute |
+| `source` | yes | - | Source code to execute |
 | `language` | no | `javascript` | One of `javascript`, `js`, `nodejs`, `typescript`, `ts`, `tsx` |
-| `dependencies` | no | — | npm packages to vendor before execution (see [npm Dependencies](#npm-dependencies)) |
+| `dependencies` | no | - | npm packages to vendor before execution (see [npm Dependencies](#npm-dependencies)) |
 
 Unsupported languages return HTTP `400` with a clear message before any thread is spawned.
 
@@ -119,7 +119,7 @@ curl -X POST .../exec -H "Content-Type: application/json" -d '{
 
 ## TypeScript
 
-Pass `language: "typescript"` (aliases `ts`, `tsx`) with either `source` or `files`. Before execution, wasmrun runs an swc-based transpiler — itself a WASI WASM module executing inside the sandbox — over the TypeScript inputs, then runs the emitted JavaScript with the usual runtime. No type *checking* is performed; types are stripped (like `tsc --transpileOnly` or esbuild).
+Pass `language: "typescript"` (aliases `ts`, `tsx`) with either `source` or `files`. Before execution, wasmrun runs an swc-based transpiler (itself a WASI WASM module executing inside the sandbox) over the TypeScript inputs, then runs the emitted JavaScript with the usual runtime. No type *checking* is performed; types are stripped (like `tsc --transpileOnly` or esbuild).
 
 ```json
 {
@@ -134,9 +134,9 @@ Pass `language: "typescript"` (aliases `ts`, `tsx`) with either `source` or `fil
 
 What the transpile stage does:
 
-- **Types stripped** — interfaces, annotations, generics, `enum` lowering, decorators parsed
-- **ES modules lowered to CommonJS** — `import`/`export` become `require()`/`exports`, resolved by the runtime's module system (the runtime does not execute `import` syntax directly); default-import interop helpers are inlined
-- **TSX** — `.tsx` files (or `language: "tsx"` for a single `source` snippet) get JSX lowered to `React.createElement` calls; provide your own `React` implementation (e.g. vendored via `node_modules`)
+- **Types stripped**: interfaces, annotations, generics, `enum` lowering, decorators parsed
+- **ES modules lowered to CommonJS**: `import`/`export` become `require()`/`exports`, resolved by the runtime's module system (the runtime does not execute `import` syntax directly); default-import interop helpers are inlined
+- **TSX**: `.tsx` files (or `language: "tsx"` for a single `source` snippet) get JSX lowered to `React.createElement` calls; provide your own `React` implementation (e.g. vendored via `node_modules`)
 - In `files` mode every `.ts`/`.tsx` file is transpiled in place to a sibling `.js`; other files (`.js`, `.json`, `node_modules/**`) pass through untouched, and a `.ts` entry runs as its emitted `.js`
 
 Malformed TypeScript fails the request with `error: "TypeScript transpilation failed: <file>:<line>:<col>: <message>"` referencing the original `.ts` source. Runtime errors reference the emitted `.js` files (source maps are not yet applied).
@@ -156,8 +156,8 @@ Declare npm packages with the `dependencies` field (works with `source` and `fil
 
 **How it works:**
 
-- No `npm` binary involved — wasmrun talks to the registry directly, and package lifecycle scripts are **never** executed
-- Transitive (production) dependencies are installed npm2-style: each package's deps live in its own nested `node_modules`, deduped against ancestors exactly the way node resolves — always correct, at the cost of some duplication
+- No `npm` binary involved; wasmrun talks to the registry directly, and package lifecycle scripts are **never** executed
+- Transitive (production) dependencies are installed npm2-style: each package's deps live in its own nested `node_modules`, deduped against ancestors exactly the way node resolves; always correct, at the cost of some duplication
 - Downloads are cached per `name@version` under `~/.wasmrun/npm/`, so repeat runs skip the network; a dependency already present in the session at a satisfying version is skipped entirely
 - Vendored files count against the session's disk and file-size limits
 - The registry defaults to `https://registry.npmjs.org` and is configurable with `wasmrun agent --npm-registry <URL>` (private registries, mirrors)
@@ -168,7 +168,7 @@ Declare npm packages with the `dependencies` field (works with `source` and `fil
 
 - Pure-JS packages only: anything with an install script, `binding.gyp`, or prebuilt `.node` binaries is rejected with an error naming the package (native code can't run in the sandbox)
 - CommonJS entry points work best; packages relying on ESM-only entry, `exports` maps, or `fetch`/network at import time may not load
-- An uploaded `package.json` is inert — dependencies are only installed when the `dependencies` field is present (no surprise network fetches)
+- An uploaded `package.json` is inert; dependencies are only installed when the `dependencies` field is present (no surprise network fetches)
 
 Malformed names/ranges fail with HTTP `400` before execution; resolution or download failures surface in the response's `error` field.
 
@@ -191,14 +191,14 @@ Upload an entire project in one request. All files are written to the session ro
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `files` | yes | — | Map of filename → file content. Filenames must be relative and free of `..` |
-| `entry` | yes | — | Entry filename; must be a key in `files` |
+| `files` | yes | - | Map of filename → file content. Filenames must be relative and free of `..` |
+| `entry` | yes | - | Entry filename; must be a key in `files` |
 | `language` | no | `javascript` | One of `javascript`, `js`, `nodejs`, `typescript`, `ts`, `tsx` |
-| `dependencies` | no | — | npm packages to vendor before execution (see [npm Dependencies](#npm-dependencies)) |
+| `dependencies` | no | - | npm packages to vendor before execution (see [npm Dependencies](#npm-dependencies)) |
 
 Validation (missing entry, unknown language, absolute/traversal paths) runs synchronously and returns HTTP `400` immediately.
 
-Files can load each other with CommonJS `require()` — the runtime resolves modules natively (see [JavaScript runtime capabilities](#javascript-runtime-capabilities)):
+Files can load each other with CommonJS `require()`; the runtime resolves modules natively (see [JavaScript runtime capabilities](#javascript-runtime-capabilities)):
 
 ```json
 {
@@ -216,7 +216,7 @@ Bare specifiers resolve through a `node_modules/<name>` tree, so a project can s
 
 ## JavaScript Runtime Capabilities
 
-JavaScript executes in the wasmhub `nodejs` runtime (QuickJS-based, WASI; v0.3.2+), fetched once and cached. Supported surface:
+JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/) (QuickJS-based, WASI; v0.3.2+), fetched once and cached. Supported surface:
 
 **Module system (CommonJS):**
 - Relative and absolute `require()` (`./x`, `../x`), with `.js`/`.json` extension probing, `index.*` resolution, and `package.json` `main`
@@ -229,15 +229,15 @@ JavaScript executes in the wasmhub `nodejs` runtime (QuickJS-based, WASI; v0.3.2
 **Globals & event loop:** `process`, `setTimeout`/`setInterval`/`setImmediate`, `queueMicrotask`, `process.nextTick`, async/await with full Promise resolution (pending timers and microtasks are drained before exit), `Buffer`, `TextEncoder`/`TextDecoder`, `atob`/`btoa`.
 
 **Web platform globals:**
-- `URL` / `URLSearchParams` — WHATWG parsing, relative resolution against a base, `searchParams` kept in sync with the URL
-- `crypto.getRandomValues` / `crypto.randomUUID` — entropy comes from the WASI `random_get` syscall
-- `structuredClone` — deep clone with cycles, `Map`/`Set`/`Date`/`RegExp`/`ArrayBuffer`/TypedArrays; functions and symbols throw `DataCloneError`, matching the spec
-- `fetch` is **defined but always rejects** with a clear `network access is not supported` error (`code: 'ERR_NETWORK_UNSUPPORTED'`) — sandboxed code has no sockets yet, and a documented rejection beats a bare `ReferenceError`
+- `URL` / `URLSearchParams`: WHATWG parsing, relative resolution against a base, `searchParams` kept in sync with the URL
+- `crypto.getRandomValues` / `crypto.randomUUID`: entropy comes from the WASI `random_get` syscall
+- `structuredClone`: deep clone with cycles, `Map`/`Set`/`Date`/`RegExp`/`ArrayBuffer`/TypedArrays; functions and symbols throw `DataCloneError`, matching the spec
+- `fetch` is **defined but always rejects** with a clear `network access is not supported` error (`code: 'ERR_NETWORK_UNSUPPORTED'`): sandboxed code has no sockets yet, and a documented rejection beats a bare `ReferenceError`
 
 **Not yet available:**
-- Network I/O — `fetch` and sockets are deferred to the wasmnet milestone (see above for the interim `fetch` behavior)
-- Native extensions / C addons — pure JS only
-- npm installation from inside the sandbox — there is no package manager in it; declare packages with the [`dependencies` field](#npm-dependencies) (vendored host-side) or ship a `node_modules` tree via `files`
+- Network I/O: `fetch` and sockets are deferred to the wasmnet milestone (see above for the interim `fetch` behavior)
+- Native extensions / C addons: pure JS only
+- npm installation from inside the sandbox: there is no package manager in it; declare packages with the [`dependencies` field](#npm-dependencies) (vendored host-side) or ship a `node_modules` tree via `files`
 
 ---
 
@@ -255,7 +255,7 @@ Execute a `.wasm` file already present in the session filesystem.
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `wasm_path` | yes | — | Path to `.wasm` file relative to session root |
+| `wasm_path` | yes | - | Path to `.wasm` file relative to session root |
 | `function` | no | auto-detect | Exported function to call (defaults to `_start`, `main`, or start section) |
 | `args` | no | `[]` | Arguments passed to the WASM program |
 
@@ -293,12 +293,12 @@ Execution is bounded by the per-session resource limits and server-wide ingress 
 
 | Status | When |
 |--------|------|
-| 400 | Bad request — no input mode given, unknown language, invalid `files`/`entry`, or path traversal |
+| 400 | Bad request: no input mode given, unknown language, invalid `files`/`entry`, or path traversal |
 | 401 | Auth enabled (`--auth`) but the API key is missing, malformed, or unknown |
-| 404 | Session not found — or owned by another tenant (cross-tenant access is hidden as 404) |
+| 404 | Session not found, or owned by another tenant (cross-tenant access is hidden as 404) |
 | 410 | Session expired |
 | 413 | Request body exceeded `--max-body` |
-| 429 | `--max-concurrent-exec` reached — too many executions already in flight; retry after backoff |
+| 429 | `--max-concurrent-exec` reached; too many executions already in flight; retry after backoff |
 
 A 429 is returned immediately (no thread is spawned). The exec slot it was waiting on is freed only when an in-flight execution actually completes, so a long-running or timed-out execution continues to hold its slot until it is cancelled.
 
@@ -310,5 +310,5 @@ A typical agent loop:
 2. Either upload files explicitly (file endpoints) or pass them inline via `files`/`source`/`command`.
 3. Execute via `/exec`.
 4. Read the structured response.
-5. Optionally run more executions in the same session — the filesystem and exported env vars persist.
+5. Optionally run more executions in the same session; the filesystem and exported env vars persist.
 6. Destroy the session when done.

@@ -5,7 +5,7 @@ title: Overview
 
 # Server Mode
 
-Wasmrun's server mode (`wasmrun run`) compiles and serves WebAssembly projects with a built-in development server, live reload, and browser-based execution.
+Wasmrun's server mode (`wasmrun`) compiles and serves WebAssembly projects with a built-in development server, live reload, and browser-based execution.
 
 ## What It Does
 
@@ -18,7 +18,7 @@ Server mode is a development tool that:
 5. **Watches** for file changes and auto-recompiles (with `--watch`)
 
 ```sh
-wasmrun run ./my-rust-project --watch
+wasmrun ./my-rust-project --watch
 ```
 
 ## When to Use
@@ -32,13 +32,13 @@ wasmrun run ./my-rust-project --watch
 
 ```sh
 # Compile and serve a Rust WASM project
-wasmrun run ./examples/rust-hello
+wasmrun ./examples/rust-hello
 
 # Serve a pre-built WASM file
-wasmrun run ./output.wasm
+wasmrun ./output.wasm
 
 # With live reload
-wasmrun run ./my-project --watch --port 3000
+wasmrun ./my-project --watch --port 3000
 ```
 
 The server starts at `http://localhost:8420` by default, serving an HTML page that loads and runs your WASM module.

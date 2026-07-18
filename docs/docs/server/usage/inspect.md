@@ -15,7 +15,7 @@ wasmrun inspect [WASM_FILE] [OPTIONS]
 
 ## Description
 
-The `inspect` command provides a deep analysis of a WASM binary's structure. While `verify` checks validity, `inspect` gives you a comprehensive view of what's inside the module — exports, imports, function signatures, memory layout, data sections, and more.
+The `inspect` command provides a deep analysis of a WASM binary's structure. While `verify` checks validity, `inspect` gives you a comprehensive view of what's inside the module: exports, imports, function signatures, memory layout, data sections, and more.
 
 ## Options
 
@@ -125,5 +125,5 @@ wasmrun inspect ./module.wasm
 
 ## See Also
 
-- [verify](./verify.md) — quick validity check
-- [compile](./compile.md) — compile projects to WASM
+- [verify](./verify.md): quick validity check
+- [compile](./compile.md): compile projects to WASM

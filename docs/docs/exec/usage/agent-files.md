@@ -87,4 +87,4 @@ Deletes files or directories (recursive for directories).
 
 ## Authentication & Tenant Scoping
 
-When the server runs with [`--auth`](../agent.md#authentication), every file request must carry a valid `Authorization: Bearer <key>` header — a missing, malformed, or unknown key returns **401 Unauthorized**. File operations are scoped to the calling tenant's own sessions; targeting a session owned by another tenant returns **404 Not Found**, the same as a nonexistent session.
+When the server runs with [`--auth`](../agent.md#authentication), every file request must carry a valid `Authorization: Bearer <key>` header; a missing, malformed, or unknown key returns **401 Unauthorized**. File operations are scoped to the calling tenant's own sessions; targeting a session owned by another tenant returns **404 Not Found**, the same as a nonexistent session.

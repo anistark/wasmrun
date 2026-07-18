@@ -114,6 +114,21 @@ docs-dev:
     #!/usr/bin/env bash
     cd docs && pnpm start
 
+# Start documentation dev server reachable from the network (LAN/Tailscale)
+docs-host port="3000":
+    #!/usr/bin/env bash
+    if command -v tailscale &>/dev/null; then
+        TS_IP=$(tailscale ip -4 2>/dev/null | head -1)
+        [ -n "$TS_IP" ] && echo "🔗 Tailscale: http://$TS_IP:{{port}}"
+    fi
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+    else
+        LAN_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
+    [ -n "$LAN_IP" ] && echo "🔗 LAN:       http://$LAN_IP:{{port}}"
+    cd docs && pnpm start --host 0.0.0.0 --port {{port}}
+
 # Build documentation for production
 docs-build:
     #!/usr/bin/env bash

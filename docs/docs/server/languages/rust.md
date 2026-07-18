@@ -167,7 +167,7 @@ pub fn sort_array(mut numbers: Vec<i32>) -> Vec<i32> {
 Start the development server with live reload:
 
 ```sh
-wasmrun run . --watch
+wasmrun . --watch
 ```
 
 This will:
@@ -179,7 +179,7 @@ This will:
 ### Specify Port
 
 ```sh
-wasmrun run . --port 3000 --watch
+wasmrun . --port 3000 --watch
 ```
 
 ### Compilation Only
@@ -216,7 +216,7 @@ pub fn update_dom() {
 }
 ```
 
-**Run with:** `wasmrun run .`
+**Run with:** `wasmrun .`
 
 ### Pure WASM (Native Execution)
 
@@ -255,7 +255,7 @@ git clone https://github.com/anistark/wasmrun.git
 cd wasmrun/examples/rust-hello
 
 # Run the example
-wasmrun run .
+wasmrun .
 ```
 
 ### Example 2: Web Application
@@ -264,7 +264,7 @@ See [`examples/web-leptos`](https://github.com/anistark/wasmrun/tree/main/exampl
 
 ```sh
 cd wasmrun/examples/web-leptos
-wasmrun run . --watch
+wasmrun . --watch
 ```
 
 ## Native Execution
@@ -389,7 +389,7 @@ Warning: wasm-bindgen module detected
 
 **Solution:** wasm-bindgen modules need a browser environment. Use the dev server instead:
 ```sh
-wasmrun run .
+wasmrun .
 ```
 
 ### Build Failures
@@ -413,6 +413,7 @@ wasmrun plugin install wasmrust
 
 ## Additional Resources
 
+- [wasmrust Plugin Repository](https://github.com/anistark/wasmrust)
 - [Official wasm-bindgen Guide](https://rustwasm.github.io/wasm-bindgen/)
 - [Rust WASM Book](https://rustwasm.github.io/docs/book/)
 - [Wasmrun Examples](https://github.com/anistark/wasmrun/tree/main/examples)

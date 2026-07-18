@@ -68,7 +68,7 @@ Works well during active development for quick iteration.
 
 ### `--allow-cors`
 
-By default, the OS mode server restricts CORS to `http://127.0.0.1:<port>` — only the local browser UI can access the API.
+By default, the OS mode server restricts CORS to `http://127.0.0.1:<port>`; only the local browser UI can access the API.
 
 With `--allow-cors`, the server sets `Access-Control-Allow-Origin: *`, allowing any origin to access the API:
 
@@ -105,7 +105,7 @@ Verbose output includes:
 🏷️  Detected language: nodejs
 ✅ Multi-language kernel started
 ✅ OS mode templates loaded
-📦 Loading QuickJS runtime from cache (~/.wasmrun/runtimes/quickjs.wasm)
+📦 Loading nodejs runtime from cache (~/.wasmrun/runtimes/)
 🌐 OS Mode server listening on http://127.0.0.1:8420
 ✅ Project started with PID: 1
 📝 Received request for: /
@@ -156,7 +156,7 @@ wasmrun os ./backend --port 8421
 
 ## See Also
 
-- [Running Projects](./running.md) — startup flow and UI panels
-- [Language Selection](./language.md) — auto-detection and manual override
-- [Network Isolation](../network-isolation.md) — per-process network namespaces
-- [Port Forwarding](../port-forwarding.md) — expose sandbox services to the host
+- [Running Projects](./running.md): startup flow and UI panels
+- [Language Selection](./language.md): auto-detection and manual override
+- [Network Isolation](../network-isolation.md): per-process network namespaces
+- [Port Forwarding](../port-forwarding.md): expose sandbox services to the host

@@ -27,11 +27,11 @@ cargo clippy
 
 ## What's in This Section
 
-- **[Architecture](./architecture.md)** — how the codebase is structured, module responsibilities, data flow
-- **[How to Contribute](./how-to-contribute.md)** — code style, PR process, issue guidelines
-- **[Debugging](./debugging.md)** — debug flags, verbose output, common debugging workflows
-- **[Troubleshooting](./troubleshooting.md)** — solutions for common build and runtime issues
-- **[Changelog](./changelog.mdx)** — release history and what changed in each version
+- **[Architecture](./architecture.md)**: how the codebase is structured, module responsibilities, data flow
+- **[How to Contribute](./how-to-contribute.md)**: code style, PR process, issue guidelines
+- **[Debugging](./debugging.md)**: debug flags, verbose output, common debugging workflows
+- **[Troubleshooting](./troubleshooting.md)**: solutions for common build and runtime issues
+- **[Changelog](./changelog.mdx)**: release history and what changed in each version
 
 ## Repository Structure
 

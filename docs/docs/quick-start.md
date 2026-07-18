@@ -71,7 +71,7 @@ pub fn add(a: i32, b: i32) -> i32 {
 Start the development server with live reload:
 
 ```sh
-wasmrun run . --watch
+wasmrun . --watch
 ```
 
 Wasmrun will:
@@ -124,11 +124,11 @@ cd wasmrun/examples
 ```sh
 # Simple Rust hello world
 cd rust-hello
-wasmrun run .
+wasmrun .
 
 # Rust web application with Leptos
 cd ../web-leptos
-wasmrun run . --watch
+wasmrun . --watch
 ```
 
 ### Go Examples
@@ -139,11 +139,11 @@ wasmrun plugin install wasmgo
 
 # Simple Go example
 cd go-hello
-wasmrun run .
+wasmrun .
 
 # Native execution example
 cd ../native-go
-wasmrun run .
+wasmrun .
 wasmrun exec ./path/to/compiled.wasm --call main
 ```
 
@@ -155,7 +155,7 @@ wasmrun plugin install waspy
 
 # Python example
 cd python-hello
-wasmrun run .
+wasmrun .
 ```
 
 ### C/C++ Example
@@ -163,7 +163,7 @@ wasmrun run .
 ```sh
 # C example (no plugin needed - built-in support)
 cd c-hello
-wasmrun run .
+wasmrun .
 ```
 
 ### AssemblyScript Examples
@@ -174,11 +174,11 @@ wasmrun plugin install wasmasc
 
 # Simple AssemblyScript example
 cd asc-hello
-wasmrun run .
+wasmrun .
 
 # Web application example
 cd ../web-asc
-wasmrun run . --watch
+wasmrun . --watch
 ```
 
 ## Common Commands
@@ -189,13 +189,13 @@ Here are the most common commands you'll use:
 
 ```sh
 # Run with auto-reload
-wasmrun run ./my-project --watch
+wasmrun ./my-project --watch
 
 # Run on a specific port
-wasmrun run ./my-project --port 3000
+wasmrun ./my-project --port 3000
 
 # Specify language explicitly
-wasmrun run ./my-project --language rust
+wasmrun ./my-project --language rust
 ```
 
 ### Compilation
@@ -259,11 +259,11 @@ Now that you've created your first WebAssembly project, here's what to explore n
 
 ### Learn More About Your Language
 
-- **[Rust Guide](./plugins/languages/rust.md)** - Deep dive into Rust and WebAssembly
-- **[Go Guide](./plugins/languages/go.md)** - Using TinyGo for WebAssembly
-- **[Python Guide](./plugins/languages/python.md)** - Python to WebAssembly with waspy
-- **[C/C++ Guide](./plugins/languages/c-cpp.md)** - Traditional C/C++ compilation
-- **[AssemblyScript Guide](./plugins/languages/assemblyscript.md)** - TypeScript-like WebAssembly
+- **[Rust Guide](./server/languages/rust.md)** - Deep dive into Rust and WebAssembly
+- **[Go Guide](./server/languages/go.md)** - Using TinyGo for WebAssembly
+- **[Python Guide](./server/languages/python.md)** - Python to WebAssembly with waspy
+- **[C/C++ Guide](./server/languages/c-cpp.md)** - Traditional C/C++ compilation
+- **[AssemblyScript Guide](./server/languages/assemblyscript.md)** - TypeScript-like WebAssembly
 
 ### Explore Features
 

@@ -55,7 +55,7 @@ clean:
 EOF
 
 # Run with Wasmrun
-wasmrun run .
+wasmrun .
 ```
 
 ## Compiling

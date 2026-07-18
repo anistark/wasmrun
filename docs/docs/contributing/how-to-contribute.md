@@ -271,7 +271,7 @@ For plugin-related issues:
 wasmrun plugin info [plugin-name]
 
 # Test with verbose output
-WASMRUN_DEBUG=1 wasmrun run ./project --language [plugin-name] --verbose
+WASMRUN_DEBUG=1 wasmrun ./project --language [plugin-name] --verbose
 ```
 
 ## Feature Requests
@@ -368,7 +368,7 @@ When adding a new language example:
 2. **Add source code** with standard functions: `greet()`, `fibonacci()`, `sum_array()`
 3. **Include build config**: Language-specific (Cargo.toml, package.json, etc.)
 4. **Write README.md** with usage instructions
-5. **Test**: `wasmrun run examples/language-hello`
+5. **Test**: `wasmrun examples/language-hello`
 
 ### Example Requirements
 

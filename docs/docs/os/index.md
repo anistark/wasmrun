@@ -11,8 +11,8 @@ Wasmrun's OS mode (`wasmrun os`) provides a browser-based execution environment 
 
 OS mode is a micro-kernel environment that:
 
-1. **Detects** your project language (Node.js, Python, Rust, Go, C)
-2. **Fetches** the appropriate language runtime from [wasmhub](https://github.com/anistark/wasmhub) (QuickJS for JS, RustPython for Python)
+1. **Detects** your project language (Node.js, Rust, Go, Python)
+2. **Fetches** the appropriate language runtime from [wasmhub](https://github.com/anistark/wasmhub) ([`nodejs`](https://anistark.github.io/wasmhub/runtimes/nodejs/) for JavaScript, `rustpython` for Python)
 3. **Serves** a browser UI with panels for console, filesystem, kernel status, and logs
 4. **Boots** a WASM VM in the browser using `WebAssembly.instantiate()`
 5. **Runs** your project code inside the sandboxed VM with WASI syscalls
@@ -59,7 +59,7 @@ The UI opens at `http://localhost:8420` with panels for application output, cons
 │  │  Console, Filesystem, Kernel Status, Logs panels │  │
 │  └──────────────────────────────────────────────────┘  │
 │  ┌─ WASM VM ────────────────────────────────────────┐  │
-│  │  Language Runtime .wasm (QuickJS, RustPython)     │  │
+│  │  Language Runtime .wasm (nodejs, rustpython)     │  │
 │  │  WASI Shim (JS) → virtual FS, stdout, args       │  │
 │  │  User code runs fully sandboxed                   │  │
 │  └──────────────────────────────────────────────────┘  │

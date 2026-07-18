@@ -107,7 +107,7 @@ wasmrun exec ./lib.wasm --call cleanup
 Modules that export utility functions rather than a `_start` entry point:
 
 ```sh
-# No _start — must use --call
+# No _start, must use --call
 wasmrun exec ./crypto.wasm --call hash_sha256 12345
 ```
 
@@ -120,5 +120,5 @@ time wasmrun exec ./compute.wasm --call heavy_computation 1000000
 
 ## See Also
 
-- [Running WASM Files](./running.md) — default entry point behavior
-- [Argument Passing](./arguments.md) — how arguments are converted
+- [Running WASM Files](./running.md): default entry point behavior
+- [Argument Passing](./arguments.md): how arguments are converted

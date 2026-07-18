@@ -221,7 +221,7 @@ wasmrun stop
 
 Option 2: Use a different port
 ```sh
-wasmrun run ./project --port 3001
+wasmrun ./project --port 3001
 ```
 
 Option 3: Find and kill the process using the port
@@ -369,7 +369,7 @@ wasmrun compile ./project --output ./build/
 
 Option 1: Run the project directory (uses dev server):
 ```sh
-wasmrun run ./my-rust-project
+wasmrun ./my-rust-project
 ```
 
 Option 2: Compile without wasm-bindgen:
@@ -471,7 +471,7 @@ tinygo build -o out.wasm -scheduler=none main.go
 
 1. Ensure `--watch` flag is used:
 ```sh
-wasmrun run ./project --watch
+wasmrun ./project --watch
 ```
 
 2. Check file permissions:
@@ -489,7 +489,7 @@ ls -la ./project/src/
 4. Try restarting the server:
 ```sh
 wasmrun stop
-wasmrun run ./project --watch
+wasmrun ./project --watch
 ```
 
 ### Too Many Open Files

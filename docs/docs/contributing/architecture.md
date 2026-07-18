@@ -53,7 +53,7 @@ Each command is implemented in its own file:
 
 | File | Command | Purpose |
 |------|---------|---------|
-| **run.rs** | `wasmrun run` | Development server with live reload |
+| **run.rs** | `wasmrun` | Development server with live reload |
 | **compile.rs** | `wasmrun compile` | Project compilation with optimization |
 | **exec.rs** | `wasmrun exec` | Native WASM execution |
 | **plugin.rs** | `wasmrun plugin` | Plugin management (install, list, info) |
@@ -237,7 +237,7 @@ See [Debugging](debugging.md) for details.
 ### Development Server Flow
 
 ```
-User runs: wasmrun run ./project --watch
+User runs: wasmrun ./project --watch
 
 1. CLI parses arguments (cli.rs)
    ↓

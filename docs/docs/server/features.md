@@ -17,7 +17,7 @@ Server mode auto-detects your project type and compiles using the appropriate to
 | Python | `*.py` files | waspy plugin |
 | AssemblyScript | `asconfig.json` | asc via wasmasc plugin |
 
-Plugins are installed separately — see [Plugins](/docs/plugins) for setup.
+Plugins are installed separately; see [Plugins](/docs/plugins) for setup.
 
 ## Built-in HTTP Server
 
@@ -38,7 +38,7 @@ Server mode automatically detects wasm-bindgen projects:
 
 ```sh
 # Automatically detected
-wasmrun run ./my-wasm-bindgen-project
+wasmrun ./my-wasm-bindgen-project
 ```
 
 ## Live Reload
@@ -51,7 +51,7 @@ With `--watch`, wasmrun monitors your source files and recompiles on changes:
 4. Build errors are displayed in the terminal without crashing the server
 
 ```sh
-wasmrun run ./my-project --watch
+wasmrun ./my-project --watch
 ```
 
 ### Watched File Types
@@ -64,9 +64,9 @@ wasmrun run ./my-project --watch
 
 The browser UI provides:
 
-- **Module info** — exports, imports, memory layout, section sizes
-- **Plugin info** — which plugin compiled the module, its capabilities
-- **Version info** — wasmrun version and build metadata
+- **Module info**: exports, imports, memory layout, section sizes
+- **Plugin info**: which plugin compiled the module, its capabilities
+- **Version info**: wasmrun version and build metadata
 
 Available via the `/api/module-info` and `/api/version` endpoints.
 

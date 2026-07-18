@@ -11,7 +11,7 @@ Wasmrun's exec mode provides WASI Preview 1 support, enabling WASM modules to in
 
 | Syscall | Description | Status |
 |---|---|---|
-| `fd_write` | Write to file descriptors (stdout, stderr) — reads iovecs from memory | ✅ |
+| `fd_write` | Write to file descriptors (stdout, stderr): reads iovecs from memory | ✅ |
 | `fd_read` | Read from file descriptors (stdin returns EOF) | ✅ |
 | `fd_close` | Close a file descriptor | ✅ |
 | `fd_seek` | Seek within a file descriptor | ✅ |
@@ -25,8 +25,8 @@ Wasmrun's exec mode provides WASI Preview 1 support, enabling WASM modules to in
 | `clock_time_get` | Get current time (realtime, monotonic) in nanoseconds | ✅ |
 | `random_get` | Fill buffer with random bytes | ✅ |
 | `proc_exit` | Exit with a status code (terminates execution cleanly) | ✅ |
-| `poll_oneoff` | Poll for events (stub — returns ENOSYS) | ✅ Stub |
-| `sched_yield` | Yield execution (stub — returns success) | ✅ Stub |
+| `poll_oneoff` | Poll for events (stub, returns ENOSYS) | ✅ Stub |
+| `sched_yield` | Yield execution (stub, returns success) | ✅ Stub |
 | `path_open` | Open (or create) a file by path | ✅ |
 | `path_filestat_get` | Stat a path | ✅ |
 | `path_create_directory` | Create a directory | ✅ |
@@ -65,9 +65,9 @@ WasiEnv::new()
     .with_env("KEY".into(), "value".into())
 ```
 
-- **Arguments** — written to linear memory via `args_get` / `args_sizes_get`
-- **Environment variables** — written as `KEY=VALUE\0` strings via `environ_get` / `environ_sizes_get`
-- **Output capture** — stdout/stderr buffered in `WasiEnv` for programmatic access via `get_stdout()` / `get_stderr()`
+- **Arguments**: written to linear memory via `args_get` / `args_sizes_get`
+- **Environment variables**: written as `KEY=VALUE\0` strings via `environ_get` / `environ_sizes_get`
+- **Output capture**: stdout/stderr buffered in `WasiEnv` for programmatic access via `get_stdout()` / `get_stderr()`
 
 ## Linker Integration
 
@@ -101,10 +101,10 @@ match executor.execute_with_args(func_idx, args) {
 
 ## Filesystem
 
-Exec mode bridges the executor to wasmrun's `WasiFilesystem`, so modules can open, read, write, list, and delete files through the `path_*` / `fd_*` syscalls above. A host directory is mounted into the sandbox as a WASI preopen — the [agent API](./agent.md), for example, preopens each session's temp directory at `/`.
+Exec mode bridges the executor to wasmrun's `WasiFilesystem`, so modules can open, read, write, list, and delete files through the `path_*` / `fd_*` syscalls above. A host directory is mounted into the sandbox as a WASI preopen; the [agent API](./agent.md), for example, preopens each session's temp directory at `/`.
 
-- **Preopened directories** — host directories mounted to a virtual path, surfaced via `fd_prestat_get` / `fd_prestat_dir_name`
-- **Path traversal protection** — every guest path is resolved and confined to its mount; `..` escapes are rejected
-- **Read-only mode** — when enabled, writes and creates fail instead of mutating the host
-- **File size limit** — a write larger than the configured per-file cap is rejected with `EFBIG`
-- **Disk quota** — in the agent, a write that would push the session's total on-disk footprint past `--max-disk` is rejected with `EDQUOT` (see [Agent API](./agent.md))
+- **Preopened directories**: host directories mounted to a virtual path, surfaced via `fd_prestat_get` / `fd_prestat_dir_name`
+- **Path traversal protection**: every guest path is resolved and confined to its mount; `..` escapes are rejected
+- **Read-only mode**: when enabled, writes and creates fail instead of mutating the host
+- **File size limit**: a write larger than the configured per-file cap is rejected with `EFBIG`
+- **Disk quota**: in the agent, a write that would push the session's total on-disk footprint past `--max-disk` is rejected with `EDQUOT` (see [Agent API](./agent.md))

@@ -41,7 +41,7 @@ if __name__ == "__main__":
 EOF
 
 # Run with Wasmrun
-wasmrun run .
+wasmrun .
 ```
 
 ## Supported Features
@@ -67,5 +67,6 @@ See [`examples/python-hello`](https://github.com/anistark/wasmrun/tree/main/exam
 
 ## Additional Resources
 
-- [Waspy Documentation](https://github.com/anistark/waspy)
+- [Waspy Documentation](https://anistark.github.io/waspy/)
+- [waspy Plugin Repository](https://github.com/anistark/waspy)
 - [Wasmrun Examples](https://github.com/anistark/wasmrun/tree/main/examples)
