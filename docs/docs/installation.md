@@ -136,7 +136,7 @@ After installation, verify that Wasmrun is working correctly:
 # Check version
 wasmrun --version
 
-# Should output something like: wasmrun 0.20.0
+# Should output something like: wasmrun 0.21.0
 
 # View available commands
 wasmrun --help
