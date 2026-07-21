@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 import type { PrismTheme } from 'prism-react-renderer';
@@ -40,6 +42,13 @@ const wasmrunPrismDark: PrismTheme = {
 const isReadTheDocs = process.env.READTHEDOCS === 'True';
 const rtdLanguage = process.env.READTHEDOCS_LANGUAGE || 'en';
 const rtdVersion = process.env.READTHEDOCS_VERSION || 'latest';
+
+// The crate version, read from the workspace manifest at build time so the
+// footer of the mobile drawer never drifts from the released version.
+const crateVersion =
+  fs
+    .readFileSync(path.resolve(__dirname, '../Cargo.toml'), 'utf8')
+    .match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? '';
 
 const config: Config = {
   title: 'Wasmrun',
@@ -96,10 +105,9 @@ const config: Config = {
     },
     image: 'img/banner.png',
     navbar: {
-      title: 'Wasmrun',
       logo: {
-        alt: 'Wasmrun Logo',
-        src: 'img/logo.png',
+        alt: 'Wasmrun',
+        src: 'img/logo-text.png',
       },
       items: [
         {
@@ -142,21 +150,31 @@ const config: Config = {
           label: 'Community',
           position: 'left',
         },
+        // The drawer-footer-* classes park these at the bottom of the mobile
+        // drawer; on desktop they are ordinary right-hand navbar links.
         {
           href: 'https://docs.rs/wasmrun',
           label: 'API',
           position: 'right',
+          className: 'drawer-footer drawer-footer-start',
         },
         {
           href: 'https://crates.io/crates/wasmrun',
           label: 'Crate',
           position: 'right',
+          className: 'drawer-footer',
         },
         {
           href: 'https://github.com/anistark/wasmrun',
           position: 'right',
           className: 'header-github-link',
           'aria-label': 'GitHub repository',
+        },
+        {
+          type: 'html',
+          position: 'right',
+          className: 'drawer-footer nav-version',
+          value: `v${crateVersion}`,
         },
       ],
     },
@@ -170,7 +188,6 @@ const config: Config = {
             { label: 'Server Mode', to: '/docs/server' },
             { label: 'Exec Mode', to: '/docs/exec' },
             { label: 'OS Mode', to: '/docs/os' },
-            { label: 'Plugins', to: '/docs/plugins' },
             { label: 'Changelog', to: '/docs/contributing/changelog' },
           ],
         },
@@ -178,8 +195,9 @@ const config: Config = {
           title: 'Community',
           items: [
             { label: 'Overview', to: '/community' },
+            { label: 'Plugins', to: '/docs/plugins' },
             { label: 'Issues', href: 'https://github.com/anistark/wasmrun/issues' },
-            { label: 'Discussions', href: 'https://github.com/anistark/wasmrun/discussions' },
+            { label: 'WasmHub', href: 'https://anistark.github.io/wasmhub/' },
           ],
         },
         {
