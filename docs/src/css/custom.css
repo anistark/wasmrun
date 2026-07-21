@@ -133,18 +133,34 @@ h4 {
  * Navbar: the one glass surface.
  * ------------------------------------------------------------------------- */
 
+/* The blur lives on a pseudo-element, not on .navbar itself: backdrop-filter
+ * would make the navbar a containing block for the fixed mobile drawer nested
+ * inside it, which pins the drawer to the navbar box and hides it. */
 .navbar {
-  background: var(--wr-navbar-bg);
-  backdrop-filter: blur(12px) saturate(160%);
-  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  background: transparent;
   border-bottom: 1px solid var(--wr-border);
   box-shadow: none;
 }
 
-.navbar__title {
-  font-family: var(--wr-font-display);
-  font-weight: 700;
-  letter-spacing: -0.01em;
+.navbar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--wr-navbar-bg);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+}
+
+/* Wordmark logo: sized by height, no title text alongside it. */
+.navbar__logo {
+  height: 1.35rem;
+  width: auto;
+  margin-right: 0;
+}
+
+.navbar__brand {
+  margin-right: 1rem;
 }
 
 .navbar__link {
@@ -416,21 +432,190 @@ table tr:nth-child(2n) {
 }
 
 /* ---------------------------------------------------------------------------
- * Mobile nav drawer
+ * Mobile bar and nav drawer: hamburger left, wordmark centered, GitHub and
+ * theme toggle right; the drawer slides in full height from the left with the
+ * same glass as the navbar.
  * ------------------------------------------------------------------------- */
 
-.navbar-sidebar {
-  background: var(--wr-bg);
-}
-
-.navbar-sidebar__backdrop {
-  background: rgba(0, 0, 0, 0.5);
-}
-
 @media (max-width: 996px) {
+  :root {
+    /* Drives the drawer width and the secondary-panel slide distance. */
+    --ifm-navbar-sidebar-width: min(72vw, 300px);
+  }
+
   .navbar__toggle {
     display: inherit;
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* Centre the wordmark independently of what sits either side of it. */
+  .navbar__inner {
+    position: relative;
+  }
+
+  .navbar__brand {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 0;
+  }
+
+  /* Infima hides every navbar item on mobile; keep the two icon ones. The
+   * colour-mode toggle is a CSS-module class, hence the substring match. */
+  .navbar__items--right > .header-github-link,
+  .navbar__items--right > [class*='colorModeToggle'] {
+    display: flex;
+    align-items: center;
+  }
+
+  .navbar-sidebar {
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: auto;
+    overflow-y: auto;
+    transform: translate3d(-100%, 0, 0);
+    background: var(--wr-navbar-bg);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border-right: 1px solid var(--wr-border);
+    border-radius: 0 16px 16px 0;
+    box-shadow: 16px 0 40px rgba(0, 0, 0, 0.18);
+    transition-duration: var(--ifm-transition-slow);
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .navbar-sidebar--show .navbar-sidebar {
+    transform: translate3d(0, 0, 0);
+  }
+
+  /* The drawer has its own brand row, so the centring above must not leak in. */
+  .navbar-sidebar__brand .navbar__brand {
+    position: static;
+    transform: none;
+  }
+
+  .navbar-sidebar__brand {
+    box-shadow: none;
+    border-bottom: 1px solid var(--wr-border);
+  }
+
+  /* The theme toggle already sits in the top bar; the drawer header keeps just
+   * the mark and the close button. The toggle is the only div in that row. */
+  .navbar-sidebar__brand > div {
+    display: none;
+  }
+
+  /* Swap the wordmark for the square mark in the drawer. The path is relative
+   * so the emitted asset keeps working under a non-root baseUrl (ReadTheDocs). */
+  .navbar-sidebar__brand .navbar__logo {
+    content: url('../../static/img/icon-128x128.png');
+    height: 1.85rem;
+  }
+
+  /* GitHub is an icon in the top bar, not a tile in the list. */
+  .navbar-sidebar .header-github-link,
+  .navbar-sidebar .menu__list-item:has(> .header-github-link) {
+    display: none;
+  }
+
+  .navbar-sidebar__item {
+    padding: 0.6rem;
+  }
+
+  /* Tile-sized touch targets rather than the default tight list rows. A
+   * collapsible category is one tile: the row wraps the link and its caret. */
+  .navbar-sidebar .menu__list-item:not(:first-child) {
+    margin-top: 0.4rem;
+  }
+
+  .navbar-sidebar .menu > .menu__list > .menu__list-item > .menu__link,
+  .navbar-sidebar .menu > .menu__list > .menu__list-item-collapsible {
+    min-height: 3rem;
+    border: 1px solid var(--wr-border);
+    border-radius: var(--wr-radius-sm);
+    background: var(--ifm-code-background);
+  }
+
+  .navbar-sidebar .menu__list-item-collapsible > .menu__link {
+    border: 0;
+    background: transparent;
+  }
+
+  .navbar-sidebar .menu__link {
+    padding: 0.75rem 0.85rem;
+    line-height: 1.3;
+  }
+
+  /* Nested pages stay plain, indented under their tile. */
+  .navbar-sidebar .menu__list .menu__list {
+    padding-left: 0.5rem;
+  }
+
+  .navbar-sidebar .menu__list .menu__list .menu__link {
+    min-height: 2.5rem;
+    background: transparent;
+  }
+
+  /* API, Crate and the version line sit at the foot of the drawer: the panel
+   * and its list stretch, and the first footer item eats the slack above it. */
+  .navbar-sidebar__item.menu {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .navbar-sidebar__item.menu > .menu__list {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+
+  /* A nav item's className lands on its link, not its <li>, so the row that
+   * absorbs the slack has to be selected through the child. */
+  .navbar-sidebar .menu__list-item:has(> .drawer-footer-start) {
+    margin-top: auto;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--wr-border);
+  }
+
+  /* Same pill as the desktop navbar; align-self keeps it hugging its text
+   * instead of stretching across the column. The list-item class is carried
+   * for specificity, to beat the row spacing rule above. */
+  .navbar-sidebar .menu__list-item.nav-version {
+    align-self: center;
+    margin: 0.75rem 0 0.25rem;
+    padding: 0.1rem 0.55rem;
+    border: 1px solid var(--wr-border);
+    border-radius: 999px;
+    background: var(--ifm-code-background);
+    font-family: var(--ifm-font-family-monospace);
+    font-size: 0.75rem;
+    color: var(--wr-text-muted);
+  }
+
+  .navbar-sidebar__backdrop {
+    background: rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* Same item, two homes: last in the drawer, but a badge ahead of API on the
+ * desktop navbar. The right-hand group is a flexbox, so order does the moving
+ * without disturbing the drawer, which follows DOM order. */
+@media (min-width: 997px) {
+  .navbar__items--right > .nav-version {
+    order: -1;
+    display: flex;
+    align-items: center;
+    margin-right: 0.75rem;
+    padding: 0.1rem 0.55rem;
+    border: 1px solid var(--wr-border);
+    border-radius: 999px;
+    background: var(--ifm-code-background);
+    font-family: var(--ifm-font-family-monospace);
+    font-size: 0.75rem;
+    color: var(--wr-text-muted);
   }
 }
