@@ -58,6 +58,34 @@ GET /api/v1/sessions/:id
 }
 ```
 
+## List Sessions
+
+```
+GET /api/v1/sessions
+```
+
+Lists the sessions currently available, newest first, so an agent can find one to reuse instead of creating another.
+
+**Response** (200):
+```json
+{
+  "sessions": [
+    {
+      "session_id": "a1b2c3d4e5f6...",
+      "state": "active",
+      "created_at_elapsed_ms": 5000,
+      "last_accessed_elapsed_ms": 1200,
+      "timeout_secs": 300
+    }
+  ],
+  "count": 1
+}
+```
+
+Each entry has the same shape as [Get Session Status](#get-session-status). Expired sessions are omitted even before the cleanup thread collects them, so the listing never advertises a session that cannot be used.
+
+Under [`--auth`](../agent.md#authentication) the listing is scoped to the calling tenant, matching the visibility rule everywhere else: a tenant never learns that another tenant's sessions exist.
+
 ## Destroy a Session
 
 ```

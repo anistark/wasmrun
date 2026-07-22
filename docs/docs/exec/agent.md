@@ -183,6 +183,10 @@ curl -X POST http://localhost:8430/api/v1/sessions/a1b2c3.../exec \
   -d '{"wasm_path": "hello.wasm"}'
 # → {"stdout": "Hello, World!\n", "stderr": "", "exit_code": 0, "duration_ms": 12}
 
+# List the sessions you can reuse
+curl http://localhost:8430/api/v1/sessions
+# → {"sessions": [{"session_id": "a1b2c3...", "state": "active", ...}], "count": 1}
+
 # Clean up
 curl -X DELETE http://localhost:8430/api/v1/sessions/a1b2c3...
 ```
@@ -201,7 +205,7 @@ curl http://localhost:8430/api/v1/tools
 curl http://localhost:8430/api/v1/tools?format=anthropic
 ```
 
-Available tools: `create_session`, `execute_code`, `write_file`, `read_file`, `list_files`, `destroy_session`.
+Available tools: `create_session`, `execute_code`, `write_file`, `read_file`, `list_files`, `list_sessions`, `destroy_session`.
 
 Each tool includes a description, parameter schema with types, and required fields, ready to pass to an LLM as function definitions.
 

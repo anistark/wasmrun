@@ -34,6 +34,23 @@ pub struct ExecRequest {
     /// only pure-JS packages are supported and lifecycle scripts never run.
     /// Applies to `source` and `files` execution.
     pub dependencies: Option<HashMap<String, String>>,
+    /// A lockfile returned by a previous exec, replayed to install exactly the
+    /// versions it records instead of re-resolving `dependencies`. Ranges
+    /// resolve to whatever is newest at the time, so this is what makes a
+    /// repeat exec reproducible. Any `dependencies` not covered by the
+    /// lockfile are resolved normally on top of it.
+    pub lockfile: Option<crate::agent::vendor::Lockfile>,
+    /// Install the `dependencies` of the session's package.json (uploaded in
+    /// `files`, or already in the session root) in addition to any listed in
+    /// `dependencies`. Off by default: an uploaded package.json stays inert
+    /// unless asked for, so no exec turns into an unrequested network fetch.
+    /// `devDependencies` are ignored.
+    pub install_package_json: Option<bool>,
+    /// Stream output as Server-Sent Events while the code runs, instead of
+    /// waiting for the buffered JSON response. `output` events carry
+    /// incremental stdout/stderr; a final `result` event carries the same
+    /// object the buffered response would have returned.
+    pub stream: Option<bool>,
     /// Shell command line to execute via the built-in shell emulator.
     /// Supports pipes (`|`), redirection (`>`, `>>`, `<`), and sequencing
     /// (`&&`, `;`) with built-ins for common file/env operations.
@@ -70,6 +87,12 @@ pub struct SessionStatusResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ListSessionsResponse {
+    pub sessions: Vec<SessionStatusResponse>,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ExecResponse {
     pub stdout: String,
     pub stderr: String,
@@ -81,6 +104,11 @@ pub struct ExecResponse {
     pub output_truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The dependency tree that was installed, when this exec vendored any.
+    /// Send it back as the request's `lockfile` to reproduce these exact
+    /// versions. Omitted when the exec installed nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lockfile: Option<crate::agent::vendor::Lockfile>,
 }
 
 #[derive(Debug, Serialize)]

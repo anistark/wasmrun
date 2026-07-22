@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Reproducible npm installs**: every agent execution that installs dependencies now returns a `lockfile` describing the resolved tree, including transitive packages. Send it back as the request's `lockfile` to install exactly those versions again
+  - Replay walks the lockfile rather than the dependency graph, so nothing is re-resolved and no registry metadata is fetched; with a warm cache the install runs offline
+  - Tarballs are still integrity-verified and scanned for native artifacts on replay
+  - Dependencies not covered by the lockfile resolve normally on top of it, so adding one package to a pinned tree does not unpin the rest
+- **Install from `package.json`**: set `install_package_json` on an execution to install the project's declared dependencies, from an uploaded `package.json` or one already in the session. Off by default, so an uploaded `package.json` never triggers an unrequested install. `devDependencies` are ignored
+- **Streaming execution output**: set `stream` on an execution to receive Server-Sent Events as the code runs, instead of waiting for the full response. `output` events carry incremental stdout/stderr and a final `result` event carries the usual response object, so long-running code is no longer silent until it finishes
+- **Session listing**: `GET /api/v1/sessions` lists the available sessions, newest first, so an agent can reuse one instead of creating another. Scoped to the calling tenant when authentication is enabled. Exposed to LLM agents as a new `list_sessions` tool
+- **TypeScript project configuration**: a project may now ship a `tsconfig.json`, parsed as JSONC so comments and trailing commas are accepted
+  - `paths` aliases are honored, materialized so the runtime's own module resolver handles them with no rewriting of your imports
+  - Options the sandbox transpiler cannot apply (`experimentalDecorators`, `emitDecoratorMetadata`, and `jsx` modes other than the classic runtime) fail the request by name instead of silently producing broken output
+
+### Changed
+- **Full npm version-range support**: dependency ranges now accept the complete npm grammar, including comparator sets (`>=1.2.0 <2.0.0`), unions (`^1 || ^2`), hyphen ranges (`1.2.0 - 1.4.0`), and the `<`, `<=`, `>`, `=` operators. Previously these were rejected, which meant a single composite range anywhere in a transitive dependency tree failed the whole install even when every package involved was pure JavaScript
+  - Partial versions widen bounds as npm specifies, so `>1.2` excludes all of `1.2.x`
+  - Prereleases follow the npm rule: a prerelease only satisfies a range that names a prerelease of that same version, so `<2.0.0` no longer risks admitting `2.0.0-rc.1`
+  - Prerelease identifiers compare numerically, so `alpha.2` sorts below `alpha.10`
+
 ## [0.21.0](https://github.com/anistark/wasmrun/releases/tag/v0.21.0) - 2026-07-20
 
 ### Added

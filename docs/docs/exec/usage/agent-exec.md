@@ -28,6 +28,7 @@ These apply to every mode:
 |-------|----------|---------|-------------|
 | `timeout` | no | `30` | Execution timeout in seconds |
 | `env` | no | `{}` | Environment variables to set before execution |
+| `stream` | no | `false` | Stream output as Server-Sent Events while the code runs (see [Streaming Output](#streaming-output)) |
 
 ## Common Response
 
@@ -162,15 +163,65 @@ Declare npm packages with the `dependencies` field (works with `source` and `fil
 - Vendored files count against the session's disk and file-size limits
 - The registry defaults to `https://registry.npmjs.org` and is configurable with `wasmrun agent --npm-registry <URL>` (private registries, mirrors)
 
-**Supported version ranges:** exact (`4.17.21`), caret (`^4.17.21`), tilde (`~4.17.0`), `>=`, x-ranges (`4`, `4.17`, `4.17.x`), `*`, and dist-tags (`latest`). Composite ranges (`||`, hyphen ranges, multi-comparator) are rejected with a clear error.
+**Supported version ranges:** the full npm range grammar. Exact (`4.17.21`), caret (`^4.17.21`), tilde (`~4.17.0`), comparators (`>=`, `>`, `<=`, `<`, `=`), x-ranges (`4`, `4.17`, `4.17.x`), `*`, dist-tags (`latest`), comparator sets (`>=1.2.0 <2.0.0`), unions (`^1 || ^2`), and hyphen ranges (`1.2.0 - 1.4.0`).
+
+Prereleases follow the npm rule: `1.2.3-beta` only satisfies a range that names a prerelease of `1.2.3`, so `<2.0.0` never quietly pulls in `2.0.0-rc.1`.
 
 **Limitations:**
 
 - Pure-JS packages only: anything with an install script, `binding.gyp`, or prebuilt `.node` binaries is rejected with an error naming the package (native code can't run in the sandbox)
 - CommonJS entry points work best; packages relying on ESM-only entry, `exports` maps, or `fetch`/network at import time may not load
-- An uploaded `package.json` is inert; dependencies are only installed when the `dependencies` field is present (no surprise network fetches)
+- An uploaded `package.json` is inert unless you set `install_package_json`, so no execution turns into an unrequested network fetch. `devDependencies` are ignored: there is nothing in the sandbox to run them with yet
 
 Malformed names/ranges fail with HTTP `400` before execution; resolution or download failures surface in the response's `error` field.
+
+### Installing from package.json
+
+Set `install_package_json` to read the `dependencies` of the project's `package.json`, either one uploaded in `files` or one already written to the session:
+
+```json
+{
+  "files": {
+    "package.json": "{\"dependencies\":{\"lodash\":\"^4.17.21\"}}",
+    "main.js": "const _ = require('lodash'); console.log(_.chunk([1,2,3,4], 2));"
+  },
+  "entry": "main.js",
+  "install_package_json": true
+}
+```
+
+An explicit `dependencies` map still wins on conflict, so you can pin one package without rewriting the file.
+
+### Reproducible installs with a lockfile
+
+Version ranges resolve to whatever is newest at the time, so the same request can install different versions on different days. Every execution that installs anything returns a `lockfile` describing the resolved tree, keyed by install path:
+
+```json
+{
+  "stdout": "[[1,2],[3,4]]\n",
+  "exit_code": 0,
+  "lockfile": {
+    "node_modules/lodash": {
+      "version": "4.17.21",
+      "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+      "integrity": "sha512-..."
+    }
+  }
+}
+```
+
+Send it back as the request's `lockfile` to install exactly those versions:
+
+```json
+{
+  "source": "const _ = require('lodash'); console.log(_.VERSION);",
+  "lockfile": { "node_modules/lodash": { "version": "4.17.21", "resolved": "...", "integrity": "..." } }
+}
+```
+
+Replay walks the lockfile rather than the dependency graph, so nothing is re-resolved and no registry document is fetched. With a warm package cache the whole install runs offline. Tarballs are still integrity-verified and still scanned for native artifacts. Any `dependencies` not covered by the lockfile are resolved normally on top of it, so adding one package to a pinned tree does not unpin the rest.
+
+A package skipped because an earlier execution in the same session already installed it is not in the lockfile: recording it would need the registry lookup the skip exists to avoid. Lock from a fresh session to get a complete tree.
 
 ---
 
@@ -238,6 +289,68 @@ JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io
 - Network I/O: `fetch` and sockets are deferred to the wasmnet milestone (see above for the interim `fetch` behavior)
 - Native extensions / C addons: pure JS only
 - npm installation from inside the sandbox: there is no package manager in it; declare packages with the [`dependencies` field](#npm-dependencies) (vendored host-side) or ship a `node_modules` tree via `files`
+
+---
+
+## TypeScript Project Configuration
+
+A project may ship a `tsconfig.json`, uploaded in `files` or already in the session. It is parsed as JSONC, so comments and trailing commas are fine.
+
+**`paths` aliases are honored.** Each alias is materialized under `node_modules` as a small CommonJS shim, so the runtime's own resolver handles it with no rewriting of your imports:
+
+```json
+{
+  "files": {
+    "tsconfig.json": "{\"compilerOptions\":{\"paths\":{\"@app/*\":[\"src/*\"]}}}",
+    "src/util.ts": "export const greet = (n: string) => `hi ${n}`;",
+    "main.ts": "import { greet } from '@app/util'; console.log(greet('there'));"
+  },
+  "entry": "main.ts",
+  "language": "typescript"
+}
+```
+
+`baseUrl` is applied to alias targets. Both sides of an alias must agree on whether they use `*`, and an alias pointing outside the project fails with a `400` rather than a confusing require error at runtime.
+
+**Options that are refused.** These would silently produce broken output, so they fail the request by name instead:
+
+| Option | Why |
+|--------|-----|
+| `experimentalDecorators` | The transpiler has no decorator transform, so decorators would be emitted as-is and the runtime cannot execute them |
+| `emitDecoratorMetadata` | Same |
+| `jsx` other than `"react"` | Only the classic runtime is available; JSX compiles to `React.createElement` calls |
+
+**`target` is accepted and ignored.** There is no down-level pass, so the source syntax reaches the runtime either way. It is a no-op rather than a wrong answer.
+
+**Types are stripped, not checked.** A project with type errors still runs. Run `tsc` yourself if you need type checking.
+
+---
+
+## Streaming Output
+
+By default a response arrives only when execution finishes, which makes a long run silent until the end. Set `stream` to receive output as it happens, as [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events):
+
+```bash
+curl -N -X POST http://127.0.0.1:8420/api/v1/sessions/$SID/exec \
+  -H 'Content-Type: application/json' \
+  -d '{"source": "for (let i = 0; i < 3; i++) console.log(i);", "stream": true}'
+```
+
+```
+event: output
+data: {"stdout":"0\n1\n","stderr":""}
+
+event: output
+data: {"stdout":"2\n","stderr":""}
+
+event: result
+data: {"stdout":"0\n1\n2\n","stderr":"","exit_code":0,"duration_ms":412}
+```
+
+- `output` events carry only what is new since the previous event. They are best-effort: a fast program may finish before the first sample and produce none at all
+- The final `result` event carries the same object the buffered response would have returned, including the complete output, so a client can ignore the intermediate events entirely
+- Errors that prevent execution from starting (unknown session, bad request) are returned as an ordinary JSON error response, not as an event stream
+- Disconnecting cancels the execution, so an abandoned run does not keep burning a worker
 
 ---
 
