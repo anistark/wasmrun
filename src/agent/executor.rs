@@ -151,11 +151,13 @@ pub fn execute_source_project(
     }
 
     let entry_to_run = if lang.is_typescript() {
+        let tsconfig = TsConfig::load(files, work_dir)?;
         let mut ts_files: Vec<String> = files.keys().filter(|p| is_ts_path(p)).cloned().collect();
         ts_files.sort(); // deterministic transpile order
         if !ts_files.is_empty() {
             transpile_in_session(&ts_files, wasi_env.clone(), limits, cancel.clone())?;
         }
+        tsconfig.write_path_aliases(files, work_dir, limits)?;
         js_output_path(entry)
     } else {
         entry.to_string()
@@ -175,6 +177,254 @@ pub fn execute_source_project(
         cancel,
     )
     .map_err(|e| ApiError::Internal(e.to_string()))
+}
+
+/// The parts of a project's `tsconfig.json` that reach the sandbox.
+///
+/// The transpiler takes file paths and no options, so most compiler options
+/// cannot be honored here. The ones whose absence breaks the output are
+/// refused by name; `paths` is the one this side can deliver.
+#[derive(Debug, Default)]
+struct TsConfig {
+    /// Alias pattern → first target, both as written.
+    paths: Vec<(String, String)>,
+    /// `baseUrl`, normalized to a project-relative prefix ("" for the root).
+    base_url: String,
+}
+
+impl TsConfig {
+    fn load(
+        files: &HashMap<String, String>,
+        work_dir: &Path,
+    ) -> std::result::Result<Self, ApiError> {
+        let raw = match files.get("tsconfig.json") {
+            Some(uploaded) => uploaded.clone(),
+            None => match std::fs::read_to_string(work_dir.join("tsconfig.json")) {
+                Ok(s) => s,
+                Err(_) => return Ok(Self::default()),
+            },
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&strip_jsonc(&raw))
+            .map_err(|e| ApiError::BadRequest(format!("Invalid tsconfig.json: {e}")))?;
+        let Some(opts) = parsed.get("compilerOptions").and_then(|o| o.as_object()) else {
+            return Ok(Self::default());
+        };
+
+        // Refused rather than dropped: the failure otherwise (decorator syntax
+        // QuickJS rejects, JSX for the wrong runtime) is far harder to read.
+        let unsupported = |opt: &str, why: &str| {
+            Err(ApiError::BadRequest(format!(
+                "tsconfig.json sets '{opt}', which the sandbox transpiler cannot apply yet: {why}"
+            )))
+        };
+        if opts.get("experimentalDecorators") == Some(&serde_json::Value::Bool(true)) {
+            return unsupported(
+                "experimentalDecorators",
+                "decorators would be emitted as-is and the runtime cannot execute them",
+            );
+        }
+        if opts.get("emitDecoratorMetadata") == Some(&serde_json::Value::Bool(true)) {
+            return unsupported(
+                "emitDecoratorMetadata",
+                "no decorator transform is available",
+            );
+        }
+        if let Some(jsx) = opts.get("jsx").and_then(|j| j.as_str()) {
+            if jsx != "react" {
+                return unsupported(
+                    "jsx",
+                    &format!(
+                        "only the classic 'react' runtime is available, not '{jsx}'; \
+                         JSX compiles to React.createElement calls"
+                    ),
+                );
+            }
+        }
+        // `target` is not refused: with no down-level pass the source syntax
+        // reaches the runtime either way, so it is a no-op, not a wrong answer.
+
+        let base_url = opts
+            .get("baseUrl")
+            .and_then(|b| b.as_str())
+            .map(|b| {
+                let b = b.trim_start_matches("./").trim_matches('/');
+                if b.is_empty() || b == "." {
+                    String::new()
+                } else {
+                    format!("{b}/")
+                }
+            })
+            .unwrap_or_default();
+
+        let mut paths = Vec::new();
+        if let Some(map) = opts.get("paths").and_then(|p| p.as_object()) {
+            for (pattern, targets) in map {
+                // tsc tries each in order; there is no ambiguity here to resolve.
+                let Some(target) = targets
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|t| t.as_str())
+                else {
+                    return Err(ApiError::BadRequest(format!(
+                        "tsconfig.json path alias '{pattern}' must map to a non-empty array of strings"
+                    )));
+                };
+                if pattern.contains('*') != target.contains('*') {
+                    return Err(ApiError::BadRequest(format!(
+                        "tsconfig.json path alias '{pattern}' -> '{target}': either both sides must use '*' or neither"
+                    )));
+                }
+                paths.push((pattern.clone(), target.to_string()));
+            }
+            paths.sort();
+        }
+        Ok(Self { paths, base_url })
+    }
+
+    /// Materialize `paths` aliases as CommonJS shims under `node_modules`, so
+    /// the runtime's stock bare-specifier walk-up resolves them with no
+    /// specifier rewriting and no transpiler involvement.
+    fn write_path_aliases(
+        &self,
+        files: &HashMap<String, String>,
+        work_dir: &Path,
+        limits: &ResourceLimits,
+    ) -> std::result::Result<(), ApiError> {
+        for (pattern, target) in &self.paths {
+            let (alias, module_path) = (pattern.as_str(), target.as_str());
+            match (alias.split_once('*'), module_path.split_once('*')) {
+                // Wildcard alias: shim every project file under the target.
+                (Some((a_pre, a_post)), Some((t_pre, t_post))) => {
+                    let t_pre = format!("{}{}", self.base_url, t_pre.trim_start_matches("./"));
+                    for source in files.keys() {
+                        let Some(rest) = source.strip_prefix(&t_pre) else {
+                            continue;
+                        };
+                        let Some(stem) = rest.strip_suffix(t_post).or_else(|| {
+                            // "src/*" with no suffix matches any extension.
+                            t_post.is_empty().then(|| strip_module_ext(rest))
+                        }) else {
+                            continue;
+                        };
+                        let stem = strip_module_ext(stem);
+                        let shim = format!("node_modules/{a_pre}{stem}{a_post}.js");
+                        write_alias_shim(&shim, &js_output_path(source), work_dir, limits)?;
+                    }
+                }
+                // Exposed through package.json `main` so the alias resolves
+                // as a directory.
+                (None, None) => {
+                    let target =
+                        format!("{}{}", self.base_url, module_path.trim_start_matches("./"));
+                    if !files.contains_key(&target) {
+                        return Err(ApiError::BadRequest(format!(
+                            "tsconfig.json path alias '{alias}' points at '{target}', which is not in the project"
+                        )));
+                    }
+                    write_checked(
+                        &work_dir.join(format!("node_modules/{alias}/package.json")),
+                        br#"{"main":"index.js"}"#,
+                        limits,
+                        work_dir,
+                    )?;
+                    write_alias_shim(
+                        &format!("node_modules/{alias}/index.js"),
+                        &js_output_path(&target),
+                        work_dir,
+                        limits,
+                    )?;
+                }
+                _ => unreachable!("mixed wildcards are rejected at load"),
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Drop a module extension so the stem can be re-suffixed with `.js`.
+fn strip_module_ext(path: &str) -> &str {
+    for ext in [".tsx", ".ts", ".jsx", ".js", ".mjs", ".cjs"] {
+        if let Some(stem) = path.strip_suffix(ext) {
+            return stem;
+        }
+    }
+    path
+}
+
+/// Write a shim at `shim_path` re-exporting the project-relative `target`.
+fn write_alias_shim(
+    shim_path: &str,
+    target: &str,
+    work_dir: &Path,
+    limits: &ResourceLimits,
+) -> std::result::Result<(), ApiError> {
+    // The session root is preopened at `/`, so an absolute specifier is stable
+    // however deeply the shim is nested.
+    let body = format!("module.exports = require('/{target}');\n");
+    write_checked(&work_dir.join(shim_path), body.as_bytes(), limits, work_dir)
+}
+
+/// Strip `//` and `/* */` comments and trailing commas from JSONC. Real
+/// tsconfigs have comments, so refusing them would make this useless.
+fn strip_jsonc(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut chars = src.chars().peekable();
+    let mut in_string = false;
+    let mut escaped = false;
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut prev = '\0';
+                for c in chars.by_ref() {
+                    if prev == '*' && c == '/' {
+                        break;
+                    }
+                    prev = c;
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    // Trailing commas: drop any comma followed only by whitespace and a close.
+    let mut cleaned = String::with_capacity(out.len());
+    let bytes: Vec<char> = out.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == ',' {
+            let next = bytes[i + 1..].iter().find(|c| !c.is_whitespace());
+            if matches!(next, Some('}') | Some(']')) {
+                i += 1;
+                continue;
+            }
+        }
+        cleaned.push(bytes[i]);
+        i += 1;
+    }
+    cleaned
 }
 
 /// True for paths the transpile stage should convert to JavaScript.
@@ -508,6 +758,155 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("traversal"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── tsconfig.json ─────────────────────────────────────────────
+
+    fn tsconfig_from(json: &str) -> std::result::Result<TsConfig, ApiError> {
+        let files = HashMap::from([("tsconfig.json".to_string(), json.to_string())]);
+        TsConfig::load(&files, Path::new("/nonexistent"))
+    }
+
+    #[test]
+    fn test_tsconfig_absent_is_a_no_op() {
+        let files = HashMap::from([("main.ts".to_string(), "export const x = 1".to_string())]);
+        let cfg = TsConfig::load(&files, Path::new("/nonexistent")).unwrap();
+        assert!(cfg.paths.is_empty());
+        assert_eq!(cfg.base_url, "");
+    }
+
+    #[test]
+    fn test_tsconfig_accepts_comments_and_trailing_commas() {
+        let cfg = tsconfig_from(
+            r#"{
+                // a real-world tsconfig is JSON with comments
+                "compilerOptions": {
+                    /* block comment */
+                    "target": "ES2022",
+                    "baseUrl": "./src",
+                },
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.base_url, "src/");
+    }
+
+    #[test]
+    fn test_tsconfig_refuses_options_it_cannot_apply() {
+        for (json, named) in [
+            (
+                r#"{"compilerOptions":{"experimentalDecorators":true}}"#,
+                "experimentalDecorators",
+            ),
+            (
+                r#"{"compilerOptions":{"emitDecoratorMetadata":true}}"#,
+                "emitDecoratorMetadata",
+            ),
+            (r#"{"compilerOptions":{"jsx":"react-jsx"}}"#, "jsx"),
+        ] {
+            let err = tsconfig_from(json).unwrap_err();
+            assert_eq!(err.status_code(), 400);
+            assert!(
+                err.to_string().contains(named),
+                "error should name '{named}': {err}"
+            );
+        }
+
+        // `target` is a no-op rather than a failure: with no down-level pass
+        // the source syntax reaches the runtime either way.
+        assert!(tsconfig_from(r#"{"compilerOptions":{"target":"ES5"}}"#).is_ok());
+        assert!(tsconfig_from(r#"{"compilerOptions":{"jsx":"react"}}"#).is_ok());
+    }
+
+    #[test]
+    fn test_tsconfig_rejects_malformed_path_aliases() {
+        let err = tsconfig_from(r#"{"compilerOptions":{"paths":{"@app/*":["src"]}}}"#).unwrap_err();
+        assert!(err.to_string().contains("both sides must use"), "{err}");
+
+        let err = tsconfig_from(r#"{"compilerOptions":{"paths":{"@app":[]}}}"#).unwrap_err();
+        assert!(err.to_string().contains("non-empty array"), "{err}");
+
+        assert!(tsconfig_from("{not json").is_err());
+    }
+
+    #[test]
+    fn test_tsconfig_wildcard_aliases_become_resolvable_shims() {
+        let tmp = std::env::temp_dir().join(format!("wasmrun-tscfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let files = HashMap::from([
+            (
+                "tsconfig.json".to_string(),
+                r#"{"compilerOptions":{"paths":{"@app/*":["src/*"]}}}"#.to_string(),
+            ),
+            ("src/util.ts".to_string(), "export const x = 1".to_string()),
+            (
+                "src/deep/thing.ts".to_string(),
+                "export const y = 2".to_string(),
+            ),
+            (
+                "main.ts".to_string(),
+                "import {x} from '@app/util'".to_string(),
+            ),
+        ]);
+        let cfg = TsConfig::load(&files, &tmp).unwrap();
+        cfg.write_path_aliases(&files, &tmp, &ResourceLimits::default())
+            .unwrap();
+
+        // require('@app/util') resolves to node_modules/@app/util.js.
+        let shim = std::fs::read_to_string(tmp.join("node_modules/@app/util.js")).unwrap();
+        assert_eq!(shim.trim(), "module.exports = require('/src/util.js');");
+        let deep = std::fs::read_to_string(tmp.join("node_modules/@app/deep/thing.js")).unwrap();
+        assert_eq!(
+            deep.trim(),
+            "module.exports = require('/src/deep/thing.js');"
+        );
+        // Files outside the aliased directory are not shimmed.
+        assert!(!tmp.join("node_modules/@app/main.js").exists());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_tsconfig_exact_alias_uses_package_main() {
+        let tmp = std::env::temp_dir().join(format!("wasmrun-tscfg-exact-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let files = HashMap::from([
+            (
+                "tsconfig.json".to_string(),
+                r#"{"compilerOptions":{"paths":{"@config":["src/config.ts"]}}}"#.to_string(),
+            ),
+            (
+                "src/config.ts".to_string(),
+                "export const c = 1".to_string(),
+            ),
+        ]);
+        let cfg = TsConfig::load(&files, &tmp).unwrap();
+        cfg.write_path_aliases(&files, &tmp, &ResourceLimits::default())
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(tmp.join("node_modules/@config/package.json")).unwrap(),
+            r#"{"main":"index.js"}"#
+        );
+        let shim = std::fs::read_to_string(tmp.join("node_modules/@config/index.js")).unwrap();
+        assert_eq!(shim.trim(), "module.exports = require('/src/config.js');");
+
+        // Outside the project: a clear 400, not a shim failing at require time.
+        let files = HashMap::from([(
+            "tsconfig.json".to_string(),
+            r#"{"compilerOptions":{"paths":{"@gone":["src/missing.ts"]}}}"#.to_string(),
+        )]);
+        let cfg = TsConfig::load(&files, &tmp).unwrap();
+        let err = cfg
+            .write_path_aliases(&files, &tmp, &ResourceLimits::default())
+            .unwrap_err();
+        assert!(err.to_string().contains("not in the project"), "{err}");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

@@ -45,7 +45,7 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
             r#type: "function",
             function: OpenAiFunction {
                 name: "execute_code",
-                description: "Execute code inside a sandbox session. Provide one of: 'command' (shell-style command line with pipes, redirection, and built-ins like echo/cat/ls/pwd/cd/mkdir/rm/cp/mv/env/export), 'source'+'language' (single JavaScript or TypeScript snippet), 'files'+'entry'+'language' (multi-file JS/TS project with relative require() and node_modules resolution), or 'wasm_path' (pre-compiled WASM). TypeScript is transpiled in-sandbox before execution. JS/TS code can use Node built-ins (path, fs, os, events, util, assert, stream, buffer) and standard globals (Buffer, TextEncoder/TextDecoder, URL/URLSearchParams, crypto.getRandomValues, structuredClone, timers, async/await). The sandbox has NO network access: fetch() rejects with a clear error, and npm packages must be declared via 'dependencies' (vendored host-side). Returns stdout, stderr, exit code, and duration.",
+                description: "Execute code inside a sandbox session. Provide one of: 'command' (shell-style command line with pipes, redirection, and built-ins like echo/cat/ls/pwd/cd/mkdir/rm/cp/mv/env/export), 'source'+'language' (single JavaScript or TypeScript snippet), 'files'+'entry'+'language' (multi-file JS/TS project with relative require() and node_modules resolution), or 'wasm_path' (pre-compiled WASM). TypeScript is transpiled in-sandbox before execution. JS/TS code can use Node built-ins (path, fs, os, events, util, assert, stream, buffer) and standard globals (Buffer, TextEncoder/TextDecoder, URL/URLSearchParams, crypto.getRandomValues, structuredClone, timers, async/await). The sandbox has NO network access: fetch() rejects with a clear error, and npm packages must be declared via 'dependencies' (vendored host-side) or read from the project's package.json with 'install_package_json'. A project may ship a tsconfig.json; its 'paths' aliases are honored. Returns stdout, stderr, exit code, duration, and a 'lockfile' pinning any packages that were installed.",
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -73,7 +73,27 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                         "dependencies": {
                             "type": "object",
                             "additionalProperties": { "type": "string" },
-                            "description": "npm dependencies to install before execution, as a map of package name → version range (e.g. {\"lodash\": \"^4.17.21\"}). Only pure-JS packages work (no native bindings, no install scripts). Use with 'source' or 'files'; the code can then require() them."
+                            "description": "npm dependencies to install before execution, as a map of package name → version range (e.g. {\"lodash\": \"^4.17.21\"}). Full npm range syntax is supported, including unions (\"^1 || ^2\"), comparator sets (\">=1.2.0 <2.0.0\") and hyphen ranges. Only pure-JS packages work (no native bindings, no install scripts). Use with 'source' or 'files'; the code can then require() them."
+                        },
+                        "install_package_json": {
+                            "type": "boolean",
+                            "description": "Also install the dependencies listed in the project's package.json (uploaded in 'files', or already in the session). Off by default so an uploaded package.json never triggers an unrequested install. devDependencies are ignored."
+                        },
+                        "lockfile": {
+                            "type": "object",
+                            "description": "A lockfile from a previous execute_code response, replayed to install exactly the versions it records instead of re-resolving ranges. Use it to make repeat runs reproducible; version ranges otherwise resolve to whatever is newest at the time.",
+                            "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                    "version": { "type": "string" },
+                                    "resolved": { "type": "string" },
+                                    "integrity": { "type": "string" }
+                                }
+                            }
+                        },
+                        "stream": {
+                            "type": "boolean",
+                            "description": "Stream output as Server-Sent Events while the code runs, instead of waiting for the full response. 'output' events carry incremental stdout/stderr; a final 'result' event carries the normal response object. Useful for long runs that would otherwise be silent until they finish."
                         },
                         "language": {
                             "type": "string",
@@ -181,6 +201,18 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
         OpenAiTool {
             r#type: "function",
             function: OpenAiFunction {
+                name: "list_sessions",
+                description: "List the sandbox sessions currently available, newest first, with their state and idle timeout. Use it to find a session to reuse instead of creating another one.",
+                parameters: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            },
+        },
+        OpenAiTool {
+            r#type: "function",
+            function: OpenAiFunction {
                 name: "destroy_session",
                 description: "Destroy a sandbox session and clean up all its files and resources.",
                 parameters: json!({
@@ -217,7 +249,7 @@ mod tests {
     #[test]
     fn test_openai_tools_valid_structure() {
         let tools = openai_tools();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
         for tool in &tools {
             assert_eq!(tool.r#type, "function");
             assert!(!tool.function.name.is_empty());
@@ -225,7 +257,10 @@ mod tests {
             assert!(tool.function.parameters.is_object());
             assert_eq!(tool.function.parameters["type"], "object");
             assert!(tool.function.parameters["properties"].is_object());
-            assert!(tool.function.parameters["required"].is_array());
+            // list_sessions takes no arguments, so it has no "required" list.
+            if tool.function.name != "list_sessions" {
+                assert!(tool.function.parameters["required"].is_array());
+            }
         }
     }
 
@@ -238,6 +273,7 @@ mod tests {
         assert!(names.contains(&"write_file"));
         assert!(names.contains(&"read_file"));
         assert!(names.contains(&"list_files"));
+        assert!(names.contains(&"list_sessions"));
         assert!(names.contains(&"destroy_session"));
     }
 
@@ -254,6 +290,22 @@ mod tests {
         // wasm_path and source are now both optional (either may be provided)
         assert!(!req_strs.contains(&"wasm_path"));
         assert!(!req_strs.contains(&"source"));
+    }
+
+    #[test]
+    fn test_execute_code_advertises_the_v0_22_fields() {
+        let tools = openai_tools();
+        let exec = tools
+            .iter()
+            .find(|t| t.function.name == "execute_code")
+            .unwrap();
+        let props = exec.function.parameters["properties"].as_object().unwrap();
+        for field in ["lockfile", "install_package_json", "stream"] {
+            assert!(
+                props.contains_key(field),
+                "schema should describe '{field}'"
+            );
+        }
     }
 
     #[test]
@@ -329,7 +381,7 @@ mod tests {
         let tools = openai_tools();
         let json = serde_json::to_string(&tools).unwrap();
         let parsed: Vec<Value> = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.len(), 6);
+        assert_eq!(parsed.len(), 7);
         assert_eq!(parsed[0]["type"], "function");
     }
 }

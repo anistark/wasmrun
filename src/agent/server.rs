@@ -20,6 +20,115 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
+/// An exec that has been spawned and is running detached. The session's WASI
+/// buffers accumulate output as it goes, which is what lets the streaming
+/// endpoint report progress without the worker knowing about HTTP.
+struct RunningExec {
+    rx: std::sync::mpsc::Receiver<std::result::Result<i32, ApiError>>,
+    cancel: Arc<AtomicBool>,
+    wasi_env: Arc<Mutex<crate::runtime::wasi::WasiEnv>>,
+    lock_slot: Arc<Mutex<Option<vendor::Lockfile>>>,
+    start: Instant,
+    timeout: Duration,
+    timeout_secs: u64,
+}
+
+/// How often a streaming exec samples the session buffers. Short enough to
+/// feel live, long enough that a tight loop is not one frame per line.
+const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Shared by the single-session and list endpoints so they cannot disagree.
+fn session_status_row(s: &crate::agent::session::Session) -> SessionStatusResponse {
+    SessionStatusResponse {
+        session_id: s.id().to_string(),
+        state: match s.state() {
+            SessionState::Active => "active".into(),
+            SessionState::Expired => "expired".into(),
+        },
+        created_at_elapsed_ms: s.created_at().elapsed().as_millis() as u64,
+        last_accessed_elapsed_ms: s.last_accessed().elapsed().as_millis() as u64,
+        timeout_secs: s.timeout().as_secs(),
+    }
+}
+
+/// Work out which npm dependencies an exec should install, and validate them.
+///
+/// Reading package.json is opt-in because an uploaded one would otherwise turn
+/// an ordinary exec into a network fetch nobody asked for. The explicit
+/// `dependencies` map wins on conflict, being the more specific instruction.
+fn resolve_exec_deps(
+    req: &ExecRequest,
+    work_dir: &Path,
+) -> std::result::Result<Option<HashMap<String, String>>, ApiError> {
+    let mut deps = HashMap::new();
+
+    if req.install_package_json.unwrap_or(false) {
+        let raw = match req.files.as_ref().and_then(|f| f.get("package.json")) {
+            Some(uploaded) => Some(uploaded.clone()),
+            None => std::fs::read_to_string(work_dir.join("package.json")).ok(),
+        };
+        let raw = raw.ok_or_else(|| {
+            ApiError::BadRequest(
+                "'install_package_json' is set but no package.json was uploaded or found in the session".into(),
+            )
+        })?;
+        let parsed: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| ApiError::BadRequest(format!("Invalid package.json: {e}")))?;
+        // devDependencies: nothing in the sandbox runs them yet.
+        if let Some(map) = parsed.get("dependencies").and_then(|d| d.as_object()) {
+            for (name, range) in map {
+                let range = range.as_str().ok_or_else(|| {
+                    ApiError::BadRequest(format!(
+                        "package.json dependency '{name}' must map to a version range string"
+                    ))
+                })?;
+                deps.insert(name.clone(), range.to_string());
+            }
+        }
+    }
+
+    if let Some(explicit) = &req.dependencies {
+        deps.extend(explicit.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+
+    if deps.is_empty() {
+        return Ok(None);
+    }
+    vendor::validate_deps(&deps)?;
+    Ok(Some(deps))
+}
+
+/// Install an exec's npm dependencies, recording the tree in `lock_out`.
+///
+/// Runs on the exec worker because it is network-bound. A supplied lockfile is
+/// replayed first and carried into the result, so pinning a tree and adding a
+/// dependency yields a lockfile describing both.
+fn vendor_for_exec(
+    registry: &str,
+    deps: Option<&HashMap<String, String>>,
+    lock_in: Option<&vendor::Lockfile>,
+    work_dir: &Path,
+    limits: &ResourceLimits,
+    lock_out: &Mutex<Option<vendor::Lockfile>>,
+) -> std::result::Result<(), ApiError> {
+    if deps.is_none() && lock_in.is_none() {
+        return Ok(());
+    }
+    let v = vendor::Vendor::new(registry)?;
+    let mut lock = vendor::Lockfile::new();
+    if let Some(l) = lock_in {
+        v.vendor_locked(l, work_dir, limits)?;
+        lock.extend(l.iter().map(|(k, e)| (k.clone(), e.clone())));
+    }
+    if let Some(d) = deps {
+        lock.extend(v.vendor(d, work_dir, limits)?);
+    }
+    if let Ok(mut slot) = lock_out.lock() {
+        *slot = Some(lock);
+    }
+    Ok(())
+}
+
 const API_PREFIX: &str = "/api/v1";
 const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 30;
 // Language runtimes (e.g. QuickJS compiled to WASM) generate deep call chains that
@@ -586,6 +695,9 @@ impl AgentServer {
                 self.handle_create_session_with_body(&body, tenant),
                 &log,
             ),
+            (Method::Get, ["sessions"]) => {
+                self.respond_json(request, self.handle_list_sessions(tenant), &log)
+            }
             (Method::Get, ["sessions", id]) => {
                 self.respond_json(request, self.handle_get_session(id, tenant), &log)
             }
@@ -593,7 +705,18 @@ impl AgentServer {
                 self.respond_json(request, self.handle_delete_session(id, tenant), &log)
             }
             (Method::Post, ["sessions", id, "exec"]) => {
-                self.respond_json(request, self.handle_exec(id, &body, tenant), &log)
+                // Read before the request is consumed; a malformed body still
+                // reaches the buffered path, which reports it as a 400.
+                let stream = serde_json::from_str::<ExecRequest>(&body)
+                    .ok()
+                    .and_then(|r| r.stream)
+                    .unwrap_or(false);
+                if stream {
+                    self.handle_exec_stream(request, id, &body, tenant, &log);
+                    Ok(())
+                } else {
+                    self.respond_json(request, self.handle_exec(id, &body, tenant), &log)
+                }
             }
             (Method::Post, ["sessions", id, "files"]) => {
                 self.respond_json(request, self.handle_write_file(id, &body, tenant), &log)
@@ -756,22 +879,26 @@ impl AgentServer {
         })
     }
 
+    pub fn handle_list_sessions(
+        &self,
+        caller: Option<&str>,
+    ) -> std::result::Result<ListSessionsResponse, ApiError> {
+        let sessions = self
+            .session_manager
+            .list_sessions(caller, session_status_row);
+        Ok(ListSessionsResponse {
+            count: sessions.len(),
+            sessions,
+        })
+    }
+
     pub fn handle_get_session(
         &self,
         id: &str,
         caller: Option<&str>,
     ) -> std::result::Result<SessionStatusResponse, ApiError> {
         self.session_manager
-            .get_session(id, caller, |s| SessionStatusResponse {
-                session_id: s.id().to_string(),
-                state: match s.state() {
-                    SessionState::Active => "active".into(),
-                    SessionState::Expired => "expired".into(),
-                },
-                created_at_elapsed_ms: s.created_at().elapsed().as_millis() as u64,
-                last_accessed_elapsed_ms: s.last_accessed().elapsed().as_millis() as u64,
-                timeout_secs: s.timeout().as_secs(),
-            })
+            .get_session(id, caller, session_status_row)
             .map_err(map_session_err)
     }
 
@@ -790,12 +917,28 @@ impl AgentServer {
 
     // ── Exec endpoint ─────────────────────────────────────────────
 
+    /// Buffered exec: start the run and wait for it to finish.
     pub fn handle_exec(
         &self,
         id: &str,
         body: &str,
         caller: Option<&str>,
     ) -> std::result::Result<ExecResponse, ApiError> {
+        let run = self.start_exec(id, body, caller)?;
+        self.collect_exec(run)
+    }
+
+    /// Validate the request, prepare the session, and spawn the exec worker.
+    ///
+    /// Split from collection so the buffered and streaming endpoints share
+    /// every decision about *what* runs. Everything that can fail with a 4xx
+    /// happens here, before a worker or a permit is taken.
+    fn start_exec(
+        &self,
+        id: &str,
+        body: &str,
+        caller: Option<&str>,
+    ) -> std::result::Result<RunningExec, ApiError> {
         let req: ExecRequest =
             serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
 
@@ -825,6 +968,9 @@ impl AgentServer {
                 env.seed_disk_used(dir_size(&work_dir));
             }
         }
+
+        // Validated synchronously so bad input is a 400 before a worker runs.
+        let resolved_deps = resolve_exec_deps(&req, &work_dir)?;
 
         let timeout_secs = req.timeout.unwrap_or(DEFAULT_EXEC_TIMEOUT_SECS);
         let timeout = Duration::from_secs(timeout_secs);
@@ -864,6 +1010,10 @@ impl AgentServer {
             _tenant: tenant_permit,
         };
 
+        // Vendoring runs on the worker but its result belongs in the response,
+        // including on timeout; a slot keeps the channel carrying the exit code.
+        let lock_slot: Arc<Mutex<Option<vendor::Lockfile>>> = Arc::new(Mutex::new(None));
+
         let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<i32, ApiError>>();
         // Cooperative cancellation: the worker runs detached, so if the
         // wall-clock timeout fires we trip this flag to make the (possibly
@@ -899,26 +1049,26 @@ impl AgentServer {
             }
             // Validate dependency names/ranges before spawning (fast 400);
             // the network-bound vendoring itself runs on the worker.
-            let deps = req.dependencies.clone();
-            if let Some(ref d) = deps {
-                vendor::validate_deps(d)?;
-            }
+            let deps = resolved_deps.clone();
+            let lock_in = req.lockfile.clone();
             let registry = self.config.npm_registry.clone();
             let work_dir_clone = work_dir.clone();
             let limits_clone = limits.clone();
             let cancel_worker = cancel.clone();
+            let lock_out = lock_slot.clone();
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
                     let permit = permit; // held for the duration of execution
                     let result = (|| {
-                        if let Some(ref d) = deps {
-                            vendor::Vendor::new(&registry)?.vendor(
-                                d,
-                                &work_dir_clone,
-                                &limits_clone,
-                            )?;
-                        }
+                        vendor_for_exec(
+                            &registry,
+                            deps.as_ref(),
+                            lock_in.as_ref(),
+                            &work_dir_clone,
+                            &limits_clone,
+                            &lock_out,
+                        )?;
                         executor::execute_source_project(
                             &files,
                             &entry,
@@ -938,26 +1088,26 @@ impl AgentServer {
             let lang = req.language.unwrap_or_else(|| "javascript".into());
             // Validate language before spawning so callers get a 400 immediately
             executor::resolve_language(&lang)?;
-            let deps = req.dependencies.clone();
-            if let Some(ref d) = deps {
-                vendor::validate_deps(d)?;
-            }
+            let deps = resolved_deps.clone();
+            let lock_in = req.lockfile.clone();
             let registry = self.config.npm_registry.clone();
             let work_dir_clone = work_dir.clone();
             let limits_clone = limits.clone();
             let cancel_worker = cancel.clone();
+            let lock_out = lock_slot.clone();
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
                 .spawn(move || {
                     let permit = permit; // held for the duration of execution
                     let result = (|| {
-                        if let Some(ref d) = deps {
-                            vendor::Vendor::new(&registry)?.vendor(
-                                d,
-                                &work_dir_clone,
-                                &limits_clone,
-                            )?;
-                        }
+                        vendor_for_exec(
+                            &registry,
+                            deps.as_ref(),
+                            lock_in.as_ref(),
+                            &work_dir_clone,
+                            &limits_clone,
+                            &lock_out,
+                        )?;
                         executor::execute_source(
                             &source,
                             &lang,
@@ -1002,6 +1152,169 @@ impl AgentServer {
             ));
         }
 
+        Ok(RunningExec {
+            rx,
+            cancel,
+            wasi_env,
+            lock_slot,
+            start,
+            timeout,
+            timeout_secs,
+        })
+    }
+
+    /// Streaming exec: emit output as Server-Sent Events while it runs.
+    ///
+    /// Takes the raw socket rather than `respond_json`, because the point is
+    /// to send bytes before the result exists. A final `result` event carries
+    /// the same object the buffered endpoint returns, so a client can ignore
+    /// the intermediate frames.
+    fn handle_exec_stream(
+        &self,
+        request: Request,
+        id: &str,
+        body: &str,
+        caller: Option<&str>,
+        log: &ReqLog,
+    ) {
+        let run = match self.start_exec(id, body, caller) {
+            Ok(run) => run,
+            // Nothing has been written yet, so a failure to start is still an
+            // ordinary JSON error response.
+            Err(e) => {
+                let _ = self.respond_json(request, Err::<(), _>(e), log);
+                return;
+            }
+        };
+
+        let mut out = request.into_writer();
+        let headers = "HTTP/1.1 200 OK\r\n\
+             Content-Type: text/event-stream\r\n\
+             Cache-Control: no-cache\r\n\
+             Connection: close\r\n\r\n";
+        if out.write_all(headers.as_bytes()).is_err() {
+            run.cancel.store(true, Ordering::Relaxed);
+            return;
+        }
+
+        let response = self.stream_exec(run, &mut out);
+        let event = serde_json::to_string(&response)
+            .unwrap_or_else(|e| format!(r#"{{"error":"failed to serialize result: {e}"}}"#));
+        let _ = out.write_all(format!("event: result\ndata: {event}\n\n").as_bytes());
+        let _ = out.flush();
+        log.emit(200);
+    }
+
+    /// Drive a running exec, writing `output` events as it produces them, and
+    /// return the response that describes how it ended.
+    fn stream_exec(&self, run: RunningExec, out: &mut dyn std::io::Write) -> ExecResponse {
+        let RunningExec {
+            rx,
+            cancel,
+            wasi_env,
+            lock_slot,
+            start,
+            timeout,
+            timeout_secs,
+        } = run;
+
+        let (mut seen_out, mut seen_err) = (0usize, 0usize);
+        // False once the client has gone away, which is the signal to stop.
+        let mut flush = |out: &mut dyn std::io::Write| -> bool {
+            let (stdout, stderr) = match wasi_env.lock() {
+                Ok(env) => (
+                    take_new_output(&env.get_stdout(), &mut seen_out),
+                    take_new_output(&env.get_stderr(), &mut seen_err),
+                ),
+                Err(_) => return true,
+            };
+            if stdout.is_empty() && stderr.is_empty() {
+                return true;
+            }
+            let payload = serde_json::json!({"stdout": stdout, "stderr": stderr});
+            out.write_all(format!("event: output\ndata: {payload}\n\n").as_bytes())
+                .and_then(|()| out.flush())
+                .is_ok()
+        };
+
+        let exec_result = loop {
+            match rx.recv_timeout(STREAM_POLL_INTERVAL) {
+                Ok(result) => {
+                    flush(out);
+                    break Some(result);
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if !flush(out) || start.elapsed() >= timeout {
+                        cancel.store(true, Ordering::Relaxed);
+                        break None;
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break None,
+            }
+        };
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let truncated = read_env_truncated(&wasi_env);
+        if truncated {
+            self.metrics.record_output_truncated();
+        }
+        let lockfile = lock_slot.lock().ok().and_then(|mut l| l.take());
+
+        // Repeat the full output so a client that dropped a frame still has it.
+        let (stdout, stderr) = (read_env_stdout(&wasi_env), read_env_stderr(&wasi_env));
+        match exec_result {
+            Some(Ok(exit_code)) => {
+                self.metrics.record_exec_success(duration_ms);
+                ExecResponse {
+                    stdout,
+                    stderr,
+                    exit_code,
+                    duration_ms,
+                    output_truncated: truncated,
+                    error: None,
+                    lockfile,
+                }
+            }
+            Some(Err(e)) => {
+                self.metrics.record_exec_error(duration_ms);
+                ExecResponse {
+                    stdout,
+                    stderr,
+                    exit_code: -1,
+                    duration_ms,
+                    output_truncated: truncated,
+                    error: Some(e.to_string()),
+                    lockfile,
+                }
+            }
+            None => {
+                self.metrics.record_exec_timeout(duration_ms);
+                ExecResponse {
+                    stdout,
+                    stderr,
+                    exit_code: -1,
+                    duration_ms,
+                    output_truncated: truncated,
+                    error: Some(format!("Execution timed out after {timeout_secs}s")),
+                    lockfile,
+                }
+            }
+        }
+    }
+
+    /// Wait for a running exec and build its response.
+    fn collect_exec(&self, run: RunningExec) -> std::result::Result<ExecResponse, ApiError> {
+        let RunningExec {
+            rx,
+            cancel,
+            wasi_env,
+            lock_slot,
+            start,
+            timeout,
+            timeout_secs,
+        } = run;
+        let take_lock = || lock_slot.lock().ok().and_then(|mut l| l.take());
+
         let duration_ms;
         let exec_result = match rx.recv_timeout(timeout) {
             Ok(result) => {
@@ -1026,6 +1339,7 @@ impl AgentServer {
                     duration_ms,
                     output_truncated: truncated,
                     error: Some(format!("Execution timed out after {timeout_secs}s")),
+                    lockfile: take_lock(),
                 });
             }
             Err(_) => {
@@ -1038,6 +1352,7 @@ impl AgentServer {
                     duration_ms,
                     output_truncated: false,
                     error: Some("Execution thread panicked".into()),
+                    lockfile: take_lock(),
                 });
             }
         };
@@ -1056,6 +1371,7 @@ impl AgentServer {
                     duration_ms,
                     output_truncated: truncated,
                     error: None,
+                    lockfile: take_lock(),
                 })
             }
             Err(e) => {
@@ -1067,6 +1383,7 @@ impl AgentServer {
                     duration_ms,
                     output_truncated: truncated,
                     error: Some(e.to_string()),
+                    lockfile: take_lock(),
                 })
             }
         }
@@ -1592,6 +1909,23 @@ fn read_env_stderr(
     env.lock()
         .map(|e| String::from_utf8_lossy(&e.get_stderr()).into_owned())
         .unwrap_or_default()
+}
+
+/// Bytes appended to a session buffer since `seen`, advancing `seen`.
+///
+/// The buffers only grow during an exec, so an offset is enough. A trailing
+/// partial UTF-8 character is held back rather than emitted as U+FFFD.
+fn take_new_output(buffer: &[u8], seen: &mut usize) -> String {
+    if buffer.len() <= *seen {
+        return String::new();
+    }
+    let fresh = &buffer[*seen..];
+    let valid = match std::str::from_utf8(fresh) {
+        Ok(s) => s.len(),
+        Err(e) => e.valid_up_to(),
+    };
+    *seen += valid;
+    String::from_utf8_lossy(&fresh[..valid]).into_owned()
 }
 
 fn read_env_truncated(
@@ -2420,13 +2754,178 @@ mod tests {
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("Invalid package name"));
 
-        // Unsupported composite range → immediate 400.
-        let body = r#"{"source": "1", "dependencies": {"lodash": ">=1.0.0 <2.0.0"}}"#;
+        // Composite ranges are supported now, so this needs a malformed one.
+        let body = r#"{"source": "1", "dependencies": {"lodash": ">=not.a.version"}}"#;
         let err = server.handle_exec(&id, body, None).unwrap_err();
         assert_eq!(err.status_code(), 400);
         assert!(err.to_string().contains("Unsupported version range"));
 
         server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_take_new_output_emits_only_the_delta() {
+        let mut seen = 0;
+        assert_eq!(take_new_output(b"hello", &mut seen), "hello");
+        assert_eq!(seen, 5);
+        assert_eq!(take_new_output(b"hello", &mut seen), "");
+        assert_eq!(take_new_output(b"hello world", &mut seen), " world");
+        assert_eq!(seen, 11);
+    }
+
+    #[test]
+    fn test_take_new_output_holds_back_split_utf8() {
+        // A character split across samples must not become U+FFFD.
+        let full = "aé".as_bytes(); // [0x61, 0xC3, 0xA9]
+        let mut seen = 0;
+        assert_eq!(take_new_output(&full[..2], &mut seen), "a");
+        assert_eq!(seen, 1, "the partial character is not consumed");
+        assert_eq!(take_new_output(full, &mut seen), "é");
+        assert_eq!(seen, 3);
+    }
+
+    #[test]
+    fn test_stream_exec_writes_output_and_result_events() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // The shell path is fast, so this covers event ordering, not sampling.
+        let run = server
+            .start_exec(&id, r#"{"command": "echo streamed"}"#, None)
+            .unwrap();
+        let mut out: Vec<u8> = Vec::new();
+        let response = server.stream_exec(run, &mut out);
+
+        assert_eq!(response.exit_code, 0);
+        assert!(response.stdout.contains("streamed"));
+
+        let events = String::from_utf8(out).unwrap();
+        // Frames are best-effort, but anything emitted must be well-formed.
+        for frame in events.split("\n\n").filter(|f| !f.trim().is_empty()) {
+            assert!(frame.starts_with("event: output\ndata: {"), "{frame}");
+        }
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_stream_flag_is_parsed_from_the_request() {
+        let with: ExecRequest = serde_json::from_str(r#"{"source":"1","stream":true}"#).unwrap();
+        assert_eq!(with.stream, Some(true));
+        let without: ExecRequest = serde_json::from_str(r#"{"source":"1"}"#).unwrap();
+        assert_eq!(without.stream, None, "buffered stays the default");
+    }
+
+    #[test]
+    fn test_list_sessions() {
+        let server = test_server();
+        assert_eq!(server.handle_list_sessions(None).unwrap().count, 0);
+
+        let a = server.handle_create_session().unwrap().session_id;
+        let b = server.handle_create_session().unwrap().session_id;
+        let listed = server.handle_list_sessions(None).unwrap();
+        assert_eq!(listed.count, 2);
+        let ids: Vec<&str> = listed
+            .sessions
+            .iter()
+            .map(|s| s.session_id.as_str())
+            .collect();
+        assert!(ids.contains(&a.as_str()) && ids.contains(&b.as_str()));
+        assert!(listed.sessions.iter().all(|s| s.state == "active"));
+
+        server.handle_delete_session(&a, None).unwrap();
+        let listed = server.handle_list_sessions(None).unwrap();
+        assert_eq!(listed.count, 1);
+        assert_eq!(listed.sessions[0].session_id, b);
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_list_sessions_is_tenant_scoped() {
+        let server = test_server();
+        let mine = server
+            .handle_create_session_with_body("{}", Some("tenant-a"))
+            .unwrap()
+            .session_id;
+        server
+            .handle_create_session_with_body("{}", Some("tenant-b"))
+            .unwrap();
+
+        // A tenant must not learn that another tenant's sessions exist.
+        let listed = server.handle_list_sessions(Some("tenant-a")).unwrap();
+        assert_eq!(listed.count, 1);
+        assert_eq!(listed.sessions[0].session_id, mine);
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    #[test]
+    fn test_resolve_exec_deps_from_package_json() {
+        let work_dir = tempfile::tempdir().unwrap();
+        let parse = |body: &str| -> ExecRequest { serde_json::from_str(body).unwrap() };
+
+        // Without the flag an uploaded package.json is inert.
+        let req = parse(
+            r#"{"source":"1","files":{"package.json":"{\"dependencies\":{\"lodash\":\"^4.0.0\"}}"}}"#,
+        );
+        assert!(resolve_exec_deps(&req, work_dir.path()).unwrap().is_none());
+
+        let req = parse(
+            r#"{"source":"1","install_package_json":true,"files":{"package.json":"{\"dependencies\":{\"lodash\":\"^4.0.0\"},\"devDependencies\":{\"jest\":\"^29\"}}"}}"#,
+        );
+        let deps = resolve_exec_deps(&req, work_dir.path()).unwrap().unwrap();
+        assert_eq!(deps.get("lodash").map(String::as_str), Some("^4.0.0"));
+        assert!(!deps.contains_key("jest"), "devDependencies are ignored");
+
+        // The explicit map wins over the file.
+        let req = parse(
+            r#"{"source":"1","install_package_json":true,"dependencies":{"lodash":"4.17.21"},"files":{"package.json":"{\"dependencies\":{\"lodash\":\"^4.0.0\"}}"}}"#,
+        );
+        let deps = resolve_exec_deps(&req, work_dir.path()).unwrap().unwrap();
+        assert_eq!(deps.get("lodash").map(String::as_str), Some("4.17.21"));
+
+        // Falls back to a package.json already in the session.
+        std::fs::write(
+            work_dir.path().join("package.json"),
+            r#"{"dependencies":{"greet":"^1.0.0"}}"#,
+        )
+        .unwrap();
+        let req = parse(r#"{"source":"1","install_package_json":true}"#);
+        let deps = resolve_exec_deps(&req, work_dir.path()).unwrap().unwrap();
+        assert_eq!(deps.get("greet").map(String::as_str), Some("^1.0.0"));
+    }
+
+    #[test]
+    fn test_resolve_exec_deps_package_json_errors() {
+        let work_dir = tempfile::tempdir().unwrap();
+        let parse = |body: &str| -> ExecRequest { serde_json::from_str(body).unwrap() };
+
+        let req = parse(r#"{"source":"1","install_package_json":true}"#);
+        let err = resolve_exec_deps(&req, work_dir.path()).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("no package.json"));
+
+        let req = parse(
+            r#"{"source":"1","install_package_json":true,"files":{"package.json":"{not json"}}"#,
+        );
+        let err = resolve_exec_deps(&req, work_dir.path()).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("Invalid package.json"));
+
+        let req = parse(
+            r#"{"source":"1","install_package_json":true,"files":{"package.json":"{\"dependencies\":{\"lodash\":5}}"}}"#,
+        );
+        let err = resolve_exec_deps(&req, work_dir.path()).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+
+        // Bad names from a package.json are validated like any other.
+        let req = parse(
+            r#"{"source":"1","install_package_json":true,"files":{"package.json":"{\"dependencies\":{\"../evil\":\"*\"}}"}}"#,
+        );
+        let err = resolve_exec_deps(&req, work_dir.path()).unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("Invalid package name"));
     }
 
     /// Integration test: the 0.21.3 exit criteria — a project depending on a
@@ -2842,7 +3341,7 @@ mod tests {
         let server = test_server();
         let result = server.handle_get_tools("openai").unwrap();
         let tools = result.as_array().unwrap();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
         assert_eq!(tools[0]["type"], "function");
         assert!(tools[0]["function"]["name"].is_string());
         assert!(tools[0]["function"]["parameters"].is_object());
@@ -2853,7 +3352,7 @@ mod tests {
         let server = test_server();
         let result = server.handle_get_tools("anthropic").unwrap();
         let tools = result.as_array().unwrap();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
         assert!(tools[0]["input_schema"].is_object());
         // Anthropic format has no "function" wrapper
         assert!(tools[0].get("function").is_none());

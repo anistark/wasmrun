@@ -444,23 +444,6 @@ impl SessionManager {
         }
     }
 
-    /// List all active (non-expired) session IDs.
-    #[allow(dead_code)] // TODO: Used by agent list sessions endpoint
-    pub fn list_sessions(&self) -> Result<Vec<SessionInfo>, SessionError> {
-        let sessions = self.sessions.read().map_err(|_| SessionError::LockError)?;
-        Ok(sessions
-            .values()
-            .filter(|s| !s.is_expired())
-            .map(|s| SessionInfo {
-                id: s.id().to_string(),
-                state: s.state(),
-                created_at_elapsed: s.created_at().elapsed(),
-                last_accessed_elapsed: s.last_accessed().elapsed(),
-                timeout: s.timeout(),
-            })
-            .collect())
-    }
-
     /// Remove all expired sessions and clean up their resources.
     ///
     /// Returns the number of sessions removed.
@@ -492,6 +475,28 @@ impl SessionManager {
     /// Get the total number of sessions (including expired ones not yet cleaned up).
     pub fn total_count(&self) -> usize {
         self.sessions.read().map(|s| s.len()).unwrap_or(0)
+    }
+
+    /// Status of every active session, newest first.
+    ///
+    /// `caller` scopes the listing exactly as `get_session` does: a tenant
+    /// sees only its own sessions and must not learn that any others exist.
+    /// Expired sessions are omitted even before the cleanup thread collects
+    /// them, so the listing never advertises a session that cannot be used.
+    pub fn list_sessions<F, R>(&self, caller: Option<&str>, f: F) -> Vec<R>
+    where
+        F: Fn(&Session) -> R,
+    {
+        let Ok(sessions) = self.sessions.read() else {
+            return Vec::new();
+        };
+        let mut rows: Vec<(std::time::Instant, R)> = sessions
+            .values()
+            .filter(|s| !s.is_expired() && s.owner() == caller)
+            .map(|s| (s.created_at(), f(s)))
+            .collect();
+        rows.sort_by_key(|(created, _)| std::cmp::Reverse(*created));
+        rows.into_iter().map(|(_, r)| r).collect()
     }
 
     /// Per-session resource report (id, disk footprint, configured memory cap)
@@ -578,19 +583,6 @@ impl Default for SessionManager {
     fn default() -> Self {
         Self::new()
     }
-}
-
-// ── Session Info (for listing) ────────────────────────────────────────
-
-/// Summary information about a session (safe to serialize/return via API).
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // TODO: Used by agent list sessions endpoint
-pub struct SessionInfo {
-    pub id: String,
-    pub state: SessionState,
-    pub created_at_elapsed: Duration,
-    pub last_accessed_elapsed: Duration,
-    pub timeout: Duration,
 }
 
 /// Per-session resource footprint, produced by
@@ -943,15 +935,15 @@ mod tests {
         let id1 = manager.create_session().unwrap();
         let id2 = manager.create_session().unwrap();
 
-        let list = manager.list_sessions().unwrap();
+        let list = manager.list_sessions(None, |s| (s.id().to_string(), s.state()));
         assert_eq!(list.len(), 2);
 
-        let listed_ids: Vec<&str> = list.iter().map(|i| i.id.as_str()).collect();
+        let listed_ids: Vec<&str> = list.iter().map(|(id, _)| id.as_str()).collect();
         assert!(listed_ids.contains(&id1.as_str()));
         assert!(listed_ids.contains(&id2.as_str()));
 
         // All are active
-        assert!(list.iter().all(|i| i.state == SessionState::Active));
+        assert!(list.iter().all(|(_, state)| *state == SessionState::Active));
 
         // Cleanup
         manager.destroy_session(&id1, None).unwrap();
@@ -973,9 +965,9 @@ mod tests {
             .create_session_with_timeout(Duration::from_secs(60))
             .unwrap();
 
-        let list = manager.list_sessions().unwrap();
+        let list = manager.list_sessions(None, |s| s.id().to_string());
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].id, id2);
+        assert_eq!(list[0], id2);
 
         // Cleanup
         manager.destroy_all().unwrap();
