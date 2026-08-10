@@ -100,12 +100,120 @@ pub fn validate_deps(deps: &HashMap<String, String>) -> std::result::Result<(), 
     Ok(())
 }
 
+/// Root of the per-`name@version` package cache (`~/.wasmrun/npm`).
+pub fn default_cache_dir() -> Option<PathBuf> {
+    Some(dirs::home_dir()?.join(".wasmrun").join("npm"))
+}
+
+/// Cache entry holding the CommonJS-lowered form, beside the `<version>`
+/// directory holding what the tarball shipped.
+fn lowered_dir(cache_dir: &Path, name: &str, version: &str) -> PathBuf {
+    cache_dir.join(name).join(format!("{version}.cjs"))
+}
+
+/// Whether the package body at `dir` is byte-identical to what the registry
+/// shipped for `name@version`.
+///
+/// Gates writes to the lowering cache, which is shared across sessions and
+/// tenants: an uploaded `node_modules` tree can claim any `name@version`, and
+/// caching a lowered form of one would poison it for everyone after.
+pub fn body_matches_registry_copy(name: &str, version: &str, dir: &Path) -> bool {
+    let Some(cache_dir) = default_cache_dir() else {
+        return false;
+    };
+    let raw = cache_dir.join(name).join(version);
+    if !raw.join("package.json").exists() {
+        return false;
+    }
+    let (Some(a), Some(b)) = (package_files(&raw), package_files(dir)) else {
+        return false;
+    };
+    if a != b {
+        return false;
+    }
+    a.iter().all(
+        |rel| match (std::fs::read(raw.join(rel)), std::fs::read(dir.join(rel))) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => false,
+        },
+    )
+}
+
+/// Sorted file paths of a package body, excluding nested `node_modules`.
+fn package_files(dir: &Path) -> Option<Vec<PathBuf>> {
+    fn walk(base: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Option<()> {
+        for entry in std::fs::read_dir(dir).ok()? {
+            let path = entry.ok()?.path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n == "node_modules") {
+                    continue;
+                }
+                walk(base, &path, out)?;
+            } else {
+                out.push(path.strip_prefix(base).ok()?.to_path_buf());
+            }
+        }
+        Some(())
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out)?;
+    out.sort();
+    Some(out)
+}
+
+/// Store `dir` as the CommonJS-lowered form of `name@version`, so later
+/// installs skip the transform. Callers must have checked
+/// [`body_matches_registry_copy`] *before* lowering. Best-effort: a failed
+/// write costs a repeat transform, not the request.
+pub fn store_lowered(name: &str, version: &str, dir: &Path) {
+    let Some(cache_dir) = default_cache_dir() else {
+        return;
+    };
+    let dest = lowered_dir(&cache_dir, name, version);
+    if dest.join("package.json").exists() {
+        return;
+    }
+    // Populate a temp sibling and rename, so a crash mid-copy never leaves a
+    // half-written entry that a later install would trust.
+    let tmp = cache_dir
+        .join(name)
+        .join(format!(".tmp-cjs-{}-{}", version, std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    if copy_dir_excluding_nested(dir, &tmp).is_err() {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return;
+    }
+    if std::fs::rename(&tmp, &dest).is_err() {
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+/// `copy_dir`, minus nested `node_modules` (separate packages, installed on
+/// their own). No size checks: this writes to the host cache, and every file
+/// was already installed into the session under its limits.
+fn copy_dir_excluding_nested(src: &Path, dest: &Path) -> std::result::Result<(), ApiError> {
+    std::fs::create_dir_all(dest).map_err(|e| ApiError::Internal(format!("vendor copy: {e}")))?;
+    let entries =
+        std::fs::read_dir(src).map_err(|e| ApiError::Internal(format!("vendor copy: {e}")))?;
+    for entry in entries.flatten() {
+        let from = entry.path();
+        if from.is_dir() {
+            if entry.file_name() == "node_modules" {
+                continue;
+            }
+            copy_dir_excluding_nested(&from, &dest.join(entry.file_name()))?;
+        } else {
+            std::fs::copy(&from, dest.join(entry.file_name()))
+                .map_err(|e| ApiError::Internal(format!("vendor copy: {e}")))?;
+        }
+    }
+    Ok(())
+}
+
 impl Vendor {
     pub fn new(registry: &str) -> std::result::Result<Self, ApiError> {
-        let cache_dir = dirs::home_dir()
-            .ok_or_else(|| ApiError::Internal("Could not determine home directory".into()))?
-            .join(".wasmrun")
-            .join("npm");
+        let cache_dir = default_cache_dir()
+            .ok_or_else(|| ApiError::Internal("Could not determine home directory".into()))?;
         Ok(Self {
             registry: registry.trim_end_matches('/').to_string(),
             cache_dir,
@@ -216,13 +324,29 @@ impl Vendor {
             ))
         })?;
 
+        // A dist-tag names whatever the registry points at right now, which
+        // no installed version can be checked against. Pin it to that concrete
+        // version first and it dedupes and locks like any written-out version;
+        // the registry document is fetched once per request, so this is free.
+        let parsed_range = match &parsed_range {
+            Range::Tag(tag) => {
+                let version = self.resolve_tag(name, tag, ctx)?;
+                Range::parse(&version).map_err(|e| {
+                    ApiError::Internal(format!(
+                        "dist-tag '{tag}' for '{name}' resolved to unparseable version '{version}': {e}"
+                    ))
+                })?
+            }
+            _ => parsed_range,
+        };
+
         // Walk-up dedupe: if any ancestor node_modules already provides a
         // satisfying version, node's resolver will find it — skip. This is
         // also what terminates dependency cycles.
         for nm in chain.iter().rev() {
             if let Some(existing) = installed_version(&nm.join(name)) {
                 if let Ok(v) = SemVer::parse(&existing) {
-                    if parsed_range.matches_or_any_tag(&v, &existing) {
+                    if parsed_range.matches(&v) {
                         return Ok(());
                     }
                 }
@@ -294,6 +418,42 @@ impl Vendor {
         result
     }
 
+    /// Fetch the registry document for `name` into `ctx`, once per request.
+    fn ensure_doc(&self, name: &str, ctx: &mut Ctx) -> std::result::Result<(), ApiError> {
+        if ctx.docs.contains_key(name) {
+            return Ok(());
+        }
+        let url = format!("{}/{}", self.registry, urlencode_name(name));
+        let body = http_get_string(&url).map_err(|e| {
+            ApiError::Internal(format!("npm registry request failed for '{name}': {e}"))
+        })?;
+        let doc: PackageDoc = serde_json::from_str(&body).map_err(|e| {
+            ApiError::Internal(format!("Invalid registry metadata for '{name}': {e}"))
+        })?;
+        ctx.docs.insert(name.to_string(), doc);
+        Ok(())
+    }
+
+    /// The concrete version a dist-tag ("latest", "next") currently points at.
+    fn resolve_tag(
+        &self,
+        name: &str,
+        tag: &str,
+        ctx: &mut Ctx,
+    ) -> std::result::Result<String, ApiError> {
+        self.ensure_doc(name, ctx)?;
+        let doc = &ctx.docs[name];
+        let ver = doc.dist_tags.get(tag).ok_or_else(|| {
+            ApiError::BadRequest(format!("Unknown dist-tag '{tag}' for package '{name}'"))
+        })?;
+        if !doc.versions.contains_key(ver) {
+            return Err(ApiError::Internal(format!(
+                "dist-tag '{tag}' points at missing version {ver} for '{name}'"
+            )));
+        }
+        Ok(ver.clone())
+    }
+
     /// Resolve `range` against the registry document for `name`.
     fn resolve(
         &self,
@@ -301,30 +461,15 @@ impl Vendor {
         range: &Range,
         ctx: &mut Ctx,
     ) -> std::result::Result<VersionDoc, ApiError> {
-        if !ctx.docs.contains_key(name) {
-            let url = format!("{}/{}", self.registry, urlencode_name(name));
-            let body = http_get_string(&url).map_err(|e| {
-                ApiError::Internal(format!("npm registry request failed for '{name}': {e}"))
-            })?;
-            let doc: PackageDoc = serde_json::from_str(&body).map_err(|e| {
-                ApiError::Internal(format!("Invalid registry metadata for '{name}': {e}"))
-            })?;
-            ctx.docs.insert(name.to_string(), doc);
-        }
-        let doc = &ctx.docs[name];
-
-        // A dist-tag range ("latest", "next", ...) resolves through dist-tags.
+        // Callers pin dist-tags before they get here; handled anyway rather
+        // than leaving the method partial on part of its own input type.
         if let Range::Tag(tag) = range {
-            let ver = doc.dist_tags.get(tag).ok_or_else(|| {
-                ApiError::BadRequest(format!("Unknown dist-tag '{tag}' for package '{name}'"))
-            })?;
-            return doc.versions.get(ver).cloned().ok_or_else(|| {
-                ApiError::Internal(format!(
-                    "dist-tag '{tag}' points at missing version {ver} for '{name}'"
-                ))
-            });
+            let ver = self.resolve_tag(name, tag, ctx)?;
+            return Ok(ctx.docs[name].versions[&ver].clone());
         }
 
+        self.ensure_doc(name, ctx)?;
+        let doc = &ctx.docs[name];
         let mut best: Option<(SemVer, &VersionDoc)> = None;
         for (ver_str, vdoc) in &doc.versions {
             let Ok(ver) = SemVer::parse(ver_str) else {
@@ -351,6 +496,13 @@ impl Vendor {
         tarball_url: &str,
         integrity: &str,
     ) -> std::result::Result<PathBuf, ApiError> {
+        // A cached lowered form is the same package with its ES modules
+        // already converted, so installing it skips the transform.
+        let lowered = lowered_dir(&self.cache_dir, name, version);
+        if lowered.join("package.json").exists() {
+            return Ok(lowered);
+        }
+
         let pkg_cache = self.cache_dir.join(name).join(version);
         if pkg_cache.join("package.json").exists() {
             return Ok(pkg_cache);
@@ -852,18 +1004,6 @@ impl Range {
             Range::Any => v.pre.is_none(),
             Range::Tag(_) => false, // resolved via dist-tags, not matching
             Range::Set { alts, .. } => alts.iter().any(|alt| set_matches(alt, v)),
-        }
-    }
-
-    /// `matches`, but a dist-tag range accepts the exact version string the
-    /// tag resolved to (used by the walk-up dedupe check).
-    fn matches_or_any_tag(&self, v: &SemVer, _raw: &str) -> bool {
-        match self {
-            // For dedupe purposes any installed version satisfies a tag range
-            // only if it is what the tag currently resolves to — we can't
-            // know that offline, so be conservative and never dedupe tags.
-            Range::Tag(_) => false,
-            _ => self.matches(v),
         }
     }
 
@@ -1633,6 +1773,160 @@ mod tests {
             .vendor(&deps, session.path(), &ResourceLimits::default())
             .unwrap();
         assert!(marker.exists());
+    }
+
+    #[test]
+    fn test_vendor_dist_tag_skips_already_satisfied() {
+        let (_reg, _cache, vendor) = simple_registry();
+        let session = tempfile::tempdir().unwrap();
+        let deps = HashMap::from([("greet".to_string(), "latest".to_string())]);
+        vendor
+            .vendor(&deps, session.path(), &ResourceLimits::default())
+            .unwrap();
+
+        // A tag resolves to a concrete version, so the second request must
+        // dedupe against the installed copy exactly like a version range
+        // would. Before the tag was pinned first, this reinstalled every time.
+        let marker = session.path().join("node_modules/greet/marker.txt");
+        std::fs::write(&marker, "kept").unwrap();
+        vendor
+            .vendor(&deps, session.path(), &ResourceLimits::default())
+            .unwrap();
+        assert!(
+            marker.exists(),
+            "dist-tag request reinstalled over a copy it already had"
+        );
+    }
+
+    #[test]
+    fn test_vendor_dist_tag_dedupes_against_range_install() {
+        let (_reg, _cache, vendor) = simple_registry();
+        let session = tempfile::tempdir().unwrap();
+
+        // Installed by range, then requested by tag: the tag points at the
+        // same version, so nothing should be re-fetched.
+        vendor
+            .vendor(
+                &HashMap::from([("greet".to_string(), "^1.0.0".to_string())]),
+                session.path(),
+                &ResourceLimits::default(),
+            )
+            .unwrap();
+        let marker = session.path().join("node_modules/greet/marker.txt");
+        std::fs::write(&marker, "kept").unwrap();
+        vendor
+            .vendor(
+                &HashMap::from([("greet".to_string(), "latest".to_string())]),
+                session.path(),
+                &ResourceLimits::default(),
+            )
+            .unwrap();
+        assert!(marker.exists());
+    }
+
+    #[test]
+    fn test_vendor_dist_tag_dedupes_transitively() {
+        // app@1.0.0 depends on greet@latest, and the root already has a
+        // satisfying greet: walk-up dedupe must find it rather than nesting a
+        // second copy under app.
+        let greet_tb = pkg_tarball("greet", "1.4.2", "module.exports = 1;");
+        let app_tb = pkg_tarball("app", "1.0.0", "module.exports = require('greet');");
+
+        let server = std::sync::Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
+        let url = format!("http://{}", server.server_addr());
+        let mut docs = HashMap::new();
+        docs.insert(
+            "app".to_string(),
+            serde_json::json!({
+                "dist-tags": {"latest": "1.0.0"},
+                "versions": {"1.0.0": version_doc("app", "1.0.0", &url, &app_tb, &[("greet", "latest")], false)},
+            })
+            .to_string()
+            .into_bytes(),
+        );
+        docs.insert(
+            "greet".to_string(),
+            serde_json::json!({
+                "dist-tags": {"latest": "1.4.2"},
+                "versions": {"1.4.2": version_doc("greet", "1.4.2", &url, &greet_tb, &[], false)},
+            })
+            .to_string()
+            .into_bytes(),
+        );
+        docs.insert("tarballs/app-1.0.0.tgz".to_string(), app_tb);
+        docs.insert("tarballs/greet-1.4.2.tgz".to_string(), greet_tb);
+        let _reg = serve_docs(server, url.clone(), docs);
+
+        let cache = tempfile::tempdir().unwrap();
+        let vendor = Vendor::with_cache_dir(&url, cache.path().join("npm"));
+        let session = tempfile::tempdir().unwrap();
+
+        // greet at the root first, then app: installation is depth-first over
+        // sorted names, so this is what puts a candidate above app's own
+        // dependency for the walk-up to find.
+        vendor
+            .vendor(
+                &HashMap::from([("greet".to_string(), "^1.0.0".to_string())]),
+                session.path(),
+                &ResourceLimits::default(),
+            )
+            .unwrap();
+        let lock = vendor
+            .vendor(
+                &HashMap::from([("app".to_string(), "^1.0.0".to_string())]),
+                session.path(),
+                &ResourceLimits::default(),
+            )
+            .unwrap();
+
+        assert!(
+            !session
+                .path()
+                .join("node_modules/app/node_modules/greet")
+                .exists(),
+            "transitive dist-tag dependency nested a second copy instead of deduping"
+        );
+        assert_eq!(lock.keys().collect::<Vec<_>>(), vec!["node_modules/app"]);
+    }
+
+    #[test]
+    fn test_ensure_cached_prefers_lowered_variant() {
+        // Both forms cached: the CommonJS-lowered one is what installs, so the
+        // ESM transform is not repeated. The registry is unreachable here, so
+        // reaching the network at all would fail the test.
+        let cache = tempfile::tempdir().unwrap();
+        let cache_dir = cache.path().join("npm");
+        for (dir, body) in [
+            ("1.0.0", "export const x = 1;"),
+            ("1.0.0.cjs", "exports.x = 1;"),
+        ] {
+            let pkg = cache_dir.join("dual-form").join(dir);
+            std::fs::create_dir_all(&pkg).unwrap();
+            std::fs::write(
+                pkg.join("package.json"),
+                r#"{"name":"dual-form","version":"1.0.0"}"#,
+            )
+            .unwrap();
+            std::fs::write(pkg.join("index.js"), body).unwrap();
+        }
+
+        let vendor = Vendor::with_cache_dir("http://127.0.0.1:1", cache_dir.clone());
+        let resolved = vendor
+            .ensure_cached("dual-form", "1.0.0", "http://127.0.0.1:1/t.tgz", "sha512-x")
+            .unwrap();
+        assert_eq!(resolved, cache_dir.join("dual-form").join("1.0.0.cjs"));
+    }
+
+    #[test]
+    fn test_vendor_unknown_dist_tag_fails_clearly() {
+        let (_reg, _cache, vendor) = simple_registry();
+        let session = tempfile::tempdir().unwrap();
+        let deps = HashMap::from([("greet".to_string(), "nightly".to_string())]);
+        let err = vendor
+            .vendor(&deps, session.path(), &ResourceLimits::default())
+            .unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert!(err.to_string().contains("Unknown dist-tag 'nightly'"));
     }
 
     #[test]

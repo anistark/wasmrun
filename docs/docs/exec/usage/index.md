@@ -34,4 +34,4 @@ wasmrun exec ./module.wasm --call add 5 3
 | [Function Calling](./functions.md) | Call specific exported functions with `--call` |
 | [Argument Passing](./arguments.md) | Pass arguments to WASM programs |
 
-For HTTP-based access (AI agents, automation), see [Agent API](../agent.md).
+For HTTP-based access (AI agents, automation), see [Agent Mode](../../agent/index.md).

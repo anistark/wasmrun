@@ -67,17 +67,27 @@ const sidebars: SidebarsConfig = {
         },
         'exec/languages',
         'exec/wasi',
+      ],
+    },
+  ],
+
+  agent: [
+    {
+      type: 'category',
+      label: 'Agent Mode',
+      collapsed: false,
+      link: { type: 'doc', id: 'agent/index' },
+      items: [
         {
           type: 'category',
-          label: 'Agent API',
-          collapsed: true,
-          link: { type: 'doc', id: 'exec/agent' },
+          label: 'Usage',
+          collapsed: false,
           items: [
-            'exec/usage/agent-sessions',
-            'exec/usage/agent-exec',
-            'exec/usage/agent-files',
-            'exec/usage/agent-environment',
-            'exec/usage/agent-observability',
+            'agent/usage/sessions',
+            'agent/usage/exec',
+            'agent/usage/files',
+            'agent/usage/environment',
+            'agent/usage/observability',
           ],
         },
       ],

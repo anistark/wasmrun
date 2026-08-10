@@ -6,7 +6,7 @@ sidebar_position: 1
 
 **Wasmrun** is a WebAssembly runtime that simplifies development, compilation, and execution of WASM applications across multiple programming languages.
 
-## Three Modes
+## Four Modes
 
 ### [Server Mode](/docs/server): `wasmrun`
 
@@ -30,6 +30,14 @@ Browser-based execution environment with a WASM virtual machine, virtual filesys
 
 ```sh
 wasmrun os ./my-node-project
+```
+
+### [Agent Mode](/docs/agent): `wasmrun agent`
+
+A REST API that gives AI agents isolated sandboxes to execute code in, built on the exec-mode interpreter. No Docker, no daemon.
+
+```sh
+wasmrun agent --port 8430
 ```
 
 ## Key Features

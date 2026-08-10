@@ -51,6 +51,10 @@ pub struct ExecRequest {
     /// incremental stdout/stderr; a final `result` event carries the same
     /// object the buffered response would have returned.
     pub stream: Option<bool>,
+    /// Text the program reads from standard input; absent means immediate
+    /// EOF. Reaches programs reading fd 0 through WASI, so `wasm_path` only:
+    /// the JS runtime's `process.stdin` is still a stub.
+    pub stdin: Option<String>,
     /// Shell command line to execute via the built-in shell emulator.
     /// Supports pipes (`|`), redirection (`>`, `>>`, `<`), and sequencing
     /// (`&&`, `;`) with built-ins for common file/env operations.

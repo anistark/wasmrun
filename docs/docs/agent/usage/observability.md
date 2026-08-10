@@ -1,6 +1,6 @@
 ---
-sidebar_position: 9
-title: Agent Observability
+sidebar_position: 5
+title: Observability
 ---
 
 # Observability
@@ -76,7 +76,7 @@ Average execution duration is `exec_duration_ms_sum / exec_duration_ms_count`.
 
 ### Authentication
 
-When [`--auth`](../agent.md#authentication) is enabled, `/metrics` requires a valid API key like every other endpoint, and the scrape is limited to **global aggregates**, with no per-tenant or per-session data, so one tenant cannot infer another's activity. A missing or invalid key returns **401** (and increments `exec_rejected_total{reason="unauthorized"}`).
+When [`--auth`](../index.md#authentication) is enabled, `/metrics` requires a valid API key like every other endpoint, and the scrape is limited to **global aggregates**, with no per-tenant or per-session data, so one tenant cannot infer another's activity. A missing or invalid key returns **401** (and increments `exec_rejected_total{reason="unauthorized"}`).
 
 ### Per-session breakdown (open mode only)
 
@@ -111,7 +111,7 @@ ts=2026-06-13T11:18:55.354+00:00 id=d5aafbe6c56c32ec method=POST path=/api/v1/se
 | `dur_ms` | Handling duration in milliseconds |
 | `tenant` | Authenticated tenant id, or `-` in open mode / before auth resolves |
 
-Running with [`-v, --verbose`](../agent.md#starting-the-server) adds a request-received line (`→ METHOD url (id=...)`) ahead of each response line; the structured access line is emitted either way.
+Running with [`-v, --verbose`](../index.md#starting-the-server) adds a request-received line (`→ METHOD url (id=...)`) ahead of each response line; the structured access line is emitted either way.
 
 ### Request correlation
 

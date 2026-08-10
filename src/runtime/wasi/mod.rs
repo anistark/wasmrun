@@ -42,6 +42,12 @@ pub struct WasiEnv {
     env_vars: Vec<(String, String)>,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+    /// Input handed to the program on fd 0. Empty means an immediate EOF,
+    /// which is what a program sees when the caller supplied no stdin.
+    stdin: Vec<u8>,
+    /// How much of `stdin` has been consumed; reads resume from here so a
+    /// program can drain it across several `fd_read` calls.
+    stdin_pos: usize,
     fd_table: HashMap<u32, FdEntry>,
     next_fd: u32,
     #[allow(dead_code)]
@@ -102,6 +108,8 @@ impl WasiEnv {
             env_vars: Vec::new(),
             stdout: Vec::new(),
             stderr: Vec::new(),
+            stdin: Vec::new(),
+            stdin_pos: 0,
             fd_table,
             next_fd: WASI_FIRST_PREOPEN_FD,
             preopens: Vec::new(),
@@ -144,6 +152,21 @@ impl WasiEnv {
 
     pub fn set_args(&mut self, args: Vec<String>) {
         self.args = args;
+    }
+
+    /// Set the bytes the program reads from fd 0, rewinding to the start.
+    pub fn set_stdin(&mut self, stdin: Vec<u8>) {
+        self.stdin = stdin;
+        self.stdin_pos = 0;
+    }
+
+    /// Consume up to `max` bytes of stdin. An empty return means EOF, which is
+    /// how a program learns the input is finished rather than blocking.
+    pub fn read_stdin(&mut self, max: usize) -> Vec<u8> {
+        let end = self.stdin.len().min(self.stdin_pos.saturating_add(max));
+        let chunk = self.stdin[self.stdin_pos.min(self.stdin.len())..end].to_vec();
+        self.stdin_pos = end;
+        chunk
     }
 
     pub fn args(&self) -> &[String] {

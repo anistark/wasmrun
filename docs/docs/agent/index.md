@@ -1,6 +1,6 @@
 ---
-sidebar_position: 5
-title: Agent API
+sidebar_position: 1
+title: Agent Mode
 ---
 
 # Agent API
@@ -27,11 +27,11 @@ wasmrun agent [OPTIONS]
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
 | `--npm-registry` | `https://registry.npmjs.org` | npm registry base URL for dependency vendoring |
 | `--allow-cors` | off | Enable wildcard CORS |
-| `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted; see [Observability](./usage/agent-observability.md)) |
+| `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted; see [Observability](./usage/observability.md)) |
 | `--auth <PATH>` | off | Path to a TOML auth config; enables API-key auth & tenant isolation (omit = open) |
 | `--hash-key <KEY>` | - | Print `sha256(KEY)` for the auth config and exit (does not start the server) |
 
-For every size/count limit, `0` means **unlimited**. Memory, fuel, output, file-size, and disk caps are **per session** and can be overridden per session at creation (see [Sessions](./usage/agent-sessions.md)); body size and exec concurrency are **server-wide** ingress guards.
+For every size/count limit, `0` means **unlimited**. Memory, fuel, output, file-size, and disk caps are **per session** and can be overridden per session at creation (see [Sessions](./usage/sessions.md)); body size and exec concurrency are **server-wide** ingress guards.
 
 All endpoints are under `http://<host>:<port>/api/v1/`.
 
@@ -110,7 +110,7 @@ key_sha256 = "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"
   max_requests_per_min = 600
 ```
 
-`[tenants.limits]` sets a per-tenant resource ceiling, with the same fields as a [per-session override](./usage/agent-sessions.md#per-session-limit-overrides) (`max_memory_mb`, `max_fuel`, `max_output_mb`, `max_file_size_mb`, `max_disk_mb`). Effective session limits compose in three layers: **server defaults → tenant baseline → per-session override clamped to the tenant baseline**. The tenant ceiling is a hard cap; a per-session override may only *tighten* a dimension, never raise it above the tenant's cap (a per-session "unlimited" `0` is pulled down to the tenant's finite ceiling).
+`[tenants.limits]` sets a per-tenant resource ceiling, with the same fields as a [per-session override](./usage/sessions.md#per-session-limit-overrides) (`max_memory_mb`, `max_fuel`, `max_output_mb`, `max_file_size_mb`, `max_disk_mb`). Effective session limits compose in three layers: **server defaults → tenant baseline → per-session override clamped to the tenant baseline**. The tenant ceiling is a hard cap; a per-session override may only *tighten* a dimension, never raise it above the tenant's cap (a per-session "unlimited" `0` is pulled down to the tenant's finite ceiling).
 
 `[tenants.rate]` throttles the tenant independently so one tenant cannot exhaust the shared server: `max_sessions`, `max_concurrent_exec`, `max_requests_per_min` (each `0` or omitted inherits the server-wide default). Over any of these limits returns **429 Too Many Requests**.
 
@@ -191,7 +191,7 @@ curl http://localhost:8430/api/v1/sessions
 curl -X DELETE http://localhost:8430/api/v1/sessions/a1b2c3...
 ```
 
-See the [Agent Execution](./usage/agent-exec.md) reference for all four input modes (shell `command`, JS `source`, multi-file `files`+`entry`, `wasm_path`).
+See the [Agent Execution](./usage/exec.md) reference for all four input modes (shell `command`, JS `source`, multi-file `files`+`entry`, `wasm_path`).
 
 ## Tool Schemas for LLM Agents
 
@@ -211,7 +211,7 @@ Each tool includes a description, parameter schema with types, and required fiel
 
 ## Observability
 
-The server exposes runtime metrics at `GET /api/v1/metrics` (Prometheus text by default, JSON with `?format=json`) and writes a structured, request-id-tagged access-log line to stderr for every request. See [Observability](./usage/agent-observability.md) for the full metric set and log format.
+The server exposes runtime metrics at `GET /api/v1/metrics` (Prometheus text by default, JSON with `?format=json`) and writes a structured, request-id-tagged access-log line to stderr for every request. See [Observability](./usage/observability.md) for the full metric set and log format.
 
 ```sh
 curl http://localhost:8430/api/v1/metrics
@@ -224,8 +224,8 @@ curl http://localhost:8430/api/v1/metrics
 
 See the usage sub-pages for full endpoint documentation:
 
-- [Sessions](./usage/agent-sessions.md): create, status, destroy
-- [Execution](./usage/agent-exec.md): run WASM with timeout and structured output
-- [File Operations](./usage/agent-files.md): write, read, list, delete
-- [Environment Variables](./usage/agent-environment.md): set and get per-session env
-- [Observability](./usage/agent-observability.md): metrics endpoint and access log
+- [Sessions](./usage/sessions.md): create, status, destroy
+- [Execution](./usage/exec.md): run WASM with timeout and structured output
+- [File Operations](./usage/files.md): write, read, list, delete
+- [Environment Variables](./usage/environment.md): set and get per-session env
+- [Observability](./usage/observability.md): metrics endpoint and access log

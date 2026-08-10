@@ -1,6 +1,6 @@
 ---
-sidebar_position: 5
-title: Agent Sessions
+sidebar_position: 1
+title: Sessions
 ---
 
 # Session Management
@@ -23,7 +23,7 @@ POST /api/v1/sessions
 
 ### Per-Session Limit Overrides
 
-The body is optional. To override the server's default [resource limits](../agent.md#starting-the-server) for this session only, pass a `limits` object; any omitted field keeps the server default, and `0` disables that cap:
+The body is optional. To override the server's default [resource limits](../index.md#starting-the-server) for this session only, pass a `limits` object; any omitted field keeps the server default, and `0` disables that cap:
 
 ```json
 {
@@ -39,7 +39,7 @@ The body is optional. To override the server's default [resource limits](../agen
 
 Body size and exec concurrency are server-wide and cannot be overridden per session.
 
-When the server runs with [`--auth`](../agent.md#authentication) and the tenant has a `[tenants.limits]` baseline, a per-session override may only *tighten* a limit; it is clamped to the tenant ceiling and can never raise a cap above it.
+When the server runs with [`--auth`](../index.md#authentication) and the tenant has a `[tenants.limits]` baseline, a per-session override may only *tighten* a limit; it is clamped to the tenant ceiling and can never raise a cap above it.
 
 ## Get Session Status
 
@@ -84,7 +84,7 @@ Lists the sessions currently available, newest first, so an agent can find one t
 
 Each entry has the same shape as [Get Session Status](#get-session-status). Expired sessions are omitted even before the cleanup thread collects them, so the listing never advertises a session that cannot be used.
 
-Under [`--auth`](../agent.md#authentication) the listing is scoped to the calling tenant, matching the visibility rule everywhere else: a tenant never learns that another tenant's sessions exist.
+Under [`--auth`](../index.md#authentication) the listing is scoped to the calling tenant, matching the visibility rule everywhere else: a tenant never learns that another tenant's sessions exist.
 
 ## Destroy a Session
 
@@ -118,4 +118,4 @@ Destroys the session and cleans up its filesystem.
 | 413 | Request body exceeded the server's `--max-body` limit |
 | 429 | Maximum concurrent sessions reached: the global `--max-sessions` cap, or the tenant's own `[tenants.rate]` session cap under `--auth` |
 
-When the server is started with [`--auth`](../agent.md#authentication), each session is owned by the tenant that created it. A request for a session owned by a different tenant returns **404**, identical to a nonexistent session, so existence isn't leaked across tenants.
+When the server is started with [`--auth`](../index.md#authentication), each session is owned by the tenant that created it. A request for a session owned by a different tenant returns **404**, identical to a nonexistent session, so existence isn't leaked across tenants.

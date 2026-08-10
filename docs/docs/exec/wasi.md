@@ -101,10 +101,10 @@ match executor.execute_with_args(func_idx, args) {
 
 ## Filesystem
 
-Exec mode bridges the executor to wasmrun's `WasiFilesystem`, so modules can open, read, write, list, and delete files through the `path_*` / `fd_*` syscalls above. A host directory is mounted into the sandbox as a WASI preopen; the [agent API](./agent.md), for example, preopens each session's temp directory at `/`.
+Exec mode bridges the executor to wasmrun's `WasiFilesystem`, so modules can open, read, write, list, and delete files through the `path_*` / `fd_*` syscalls above. A host directory is mounted into the sandbox as a WASI preopen; the [agent API](../agent/index.md), for example, preopens each session's temp directory at `/`.
 
 - **Preopened directories**: host directories mounted to a virtual path, surfaced via `fd_prestat_get` / `fd_prestat_dir_name`
 - **Path traversal protection**: every guest path is resolved and confined to its mount; `..` escapes are rejected
 - **Read-only mode**: when enabled, writes and creates fail instead of mutating the host
 - **File size limit**: a write larger than the configured per-file cap is rejected with `EFBIG`
-- **Disk quota**: in the agent, a write that would push the session's total on-disk footprint past `--max-disk` is rejected with `EDQUOT` (see [Agent API](./agent.md))
+- **Disk quota**: in the agent, a write that would push the session's total on-disk footprint past `--max-disk` is rejected with `EDQUOT` (see [Agent API](../agent/index.md))

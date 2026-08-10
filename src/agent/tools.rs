@@ -45,7 +45,7 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
             r#type: "function",
             function: OpenAiFunction {
                 name: "execute_code",
-                description: "Execute code inside a sandbox session. Provide one of: 'command' (shell-style command line with pipes, redirection, and built-ins like echo/cat/ls/pwd/cd/mkdir/rm/cp/mv/env/export), 'source'+'language' (single JavaScript or TypeScript snippet), 'files'+'entry'+'language' (multi-file JS/TS project with relative require() and node_modules resolution), or 'wasm_path' (pre-compiled WASM). TypeScript is transpiled in-sandbox before execution. JS/TS code can use Node built-ins (path, fs, os, events, util, assert, stream, buffer) and standard globals (Buffer, TextEncoder/TextDecoder, URL/URLSearchParams, crypto.getRandomValues, structuredClone, timers, async/await). The sandbox has NO network access: fetch() rejects with a clear error, and npm packages must be declared via 'dependencies' (vendored host-side) or read from the project's package.json with 'install_package_json'. A project may ship a tsconfig.json; its 'paths' aliases are honored. Returns stdout, stderr, exit code, duration, and a 'lockfile' pinning any packages that were installed.",
+                description: "Execute code inside a sandbox session. Provide one of: 'command' (shell-style command line with pipes, redirection, and built-ins like echo/cat/ls/pwd/cd/mkdir/rm/cp/mv/env/export), 'source'+'language' (single JavaScript or TypeScript snippet), 'files'+'entry'+'language' (multi-file JS/TS project with relative require() and node_modules resolution), or 'wasm_path' (pre-compiled WASM). TypeScript is transpiled in-sandbox before execution. JS/TS code can use Node built-ins (path, fs, fs/promises, os, events, util, assert, stream, buffer, crypto, url, querystring, string_decoder, timers/promises, and their node: aliases) and standard globals (Buffer, TextEncoder/TextDecoder, URL/URLSearchParams, crypto.getRandomValues, structuredClone, timers, async/await). The sandbox has NO network access: fetch() rejects with a clear error, and npm packages must be declared via 'dependencies' (vendored host-side) or read from the project's package.json with 'install_package_json'. A project may ship a tsconfig.json; its 'paths' aliases are honored. Returns stdout, stderr, exit code, duration, and a 'lockfile' pinning any packages that were installed.",
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -73,7 +73,7 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                         "dependencies": {
                             "type": "object",
                             "additionalProperties": { "type": "string" },
-                            "description": "npm dependencies to install before execution, as a map of package name → version range (e.g. {\"lodash\": \"^4.17.21\"}). Full npm range syntax is supported, including unions (\"^1 || ^2\"), comparator sets (\">=1.2.0 <2.0.0\") and hyphen ranges. Only pure-JS packages work (no native bindings, no install scripts). Use with 'source' or 'files'; the code can then require() them."
+                            "description": "npm dependencies to install before execution, as a map of package name → version range (e.g. {\"lodash\": \"^4.17.21\"}). Full npm range syntax is supported, including unions (\"^1 || ^2\"), comparator sets (\">=1.2.0 <2.0.0\") and hyphen ranges. Only pure-JS packages work (no native bindings, no install scripts). ES module packages are supported: they are converted to CommonJS before execution, so require() them like any other package (a default export arrives as .default). Use with 'source' or 'files'."
                         },
                         "install_package_json": {
                             "type": "boolean",
@@ -90,6 +90,10 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                                     "integrity": { "type": "string" }
                                 }
                             }
+                        },
+                        "stdin": {
+                            "type": "string",
+                            "description": "Text the program reads from standard input; omitting it means an immediate EOF. Reaches programs that read fd 0 through WASI, which today means 'wasm_path' modules only: JavaScript and TypeScript code cannot read it yet, because the runtime's process.stdin is still a stub."
                         },
                         "stream": {
                             "type": "boolean",

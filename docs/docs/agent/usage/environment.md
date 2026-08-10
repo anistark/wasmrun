@@ -1,6 +1,6 @@
 ---
-sidebar_position: 8
-title: Agent Environment
+sidebar_position: 4
+title: Environment
 ---
 
 # Environment Variables

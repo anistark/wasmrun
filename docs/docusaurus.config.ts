@@ -130,6 +130,12 @@ const config: Config = {
         },
         {
           type: 'docSidebar',
+          sidebarId: 'agent',
+          position: 'left',
+          label: 'Agent',
+        },
+        {
+          type: 'docSidebar',
           sidebarId: 'plugins',
           position: 'left',
           label: 'Plugins',
@@ -188,6 +194,7 @@ const config: Config = {
             { label: 'Server Mode', to: '/docs/server' },
             { label: 'Exec Mode', to: '/docs/exec' },
             { label: 'OS Mode', to: '/docs/os' },
+            { label: 'Agent Mode', to: '/docs/agent' },
             { label: 'Changelog', to: '/docs/contributing/changelog' },
           ],
         },

@@ -17,9 +17,9 @@
 
 ---
 
-## ⚠️ The Three Modes: Read This First
+## ⚠️ The Four Modes: Read This First
 
-Wasmrun has **three distinct execution modes**. They are separate systems with separate philosophies. **Do not conflate them.** When working on one mode, do not break another mode's functionality.
+Wasmrun has **four distinct execution modes**. They are separate systems with separate philosophies. **Do not conflate them.** When working on one mode, do not break another mode's functionality.
 
 ### 1. Server Mode (`wasmrun` / `wasmrun run`)
 
@@ -88,20 +88,42 @@ Wasmrun has **three distinct execution modes**. They are separate systems with s
 - **Uses browser:** Yes. Full Preact UI with console, filesystem, kernel panels
 - **Docs:** `docs/docs/os/`
 
+### 4. Agent Mode (`wasmrun agent`)
+
+**Philosophy:** A REST API that gives AI agents isolated sandboxes to execute code in. Exec mode's interpreter, wrapped in a long-lived HTTP server with sessions, resource limits, and multi-tenancy. No Docker, no daemon, no browser.
+
+- **Trigger:** `wasmrun agent --port 8430`
+- **What it does:** Starts an HTTP server → creates per-session sandboxes (isolated work dir + WASI env) → accepts code (shell command, JS/TS source, multi-file project, or `.wasm`) over REST → runs it on the exec interpreter → returns structured JSON (stdout, stderr, exit code, duration)
+- **Key files:**
+  - `src/commands/agent.rs`: command handler
+  - `src/agent/server.rs`: HTTP server, routing, exec orchestration
+  - `src/agent/session.rs`: session lifecycle, isolation, expiry
+  - `src/agent/executor.rs`: source → runtime execution pipeline (JS, TS via swc)
+  - `src/agent/esm.rs`: ESM → CommonJS lowering for vendored packages
+  - `src/agent/vendor.rs`: npm dependency resolution and vendoring
+  - `src/agent/shell.rs`: shell emulation over the session filesystem
+  - `src/agent/auth.rs`, `limits.rs`, `metrics.rs`, `tools.rs`, `api.rs`
+- **Executes with:** the exec-mode interpreter (`runtime/core/` + `runtime/wasi/`). A `.wasm` behaves identically under `wasmrun exec` and `POST /exec`
+- **Uses plugins:** No
+- **Uses browser:** No
+- **Docs:** `docs/docs/agent/`
+
 ### Mode Boundaries: Critical Rules
 
-1. **Never mix mode-specific logic.** Exec mode must never start an HTTP server. Server mode must never invoke the bytecode interpreter. OS mode has its own kernel; don't route it through the server mode pipeline.
+1. **Never mix mode-specific logic.** The exec *interpreter core* (`runtime/core/`) must never start an HTTP server or know that one exists; agent mode owns that surface and calls into the interpreter from outside. Server mode must never invoke the bytecode interpreter. OS mode has its own kernel; don't route it through the server mode pipeline.
 
-2. **Shared code is encouraged, but not at the cost of mode integrity.** If a utility function is useful across modes (e.g., path resolution, error types, WASM binary analysis), keep it in shared modules (`src/utils/`, `src/error.rs`, `src/config/`). But don't bend a mode's design just to share code.
+2. **Agent mode is built on exec mode's engine, not a copy of it.** Execution, WASI syscalls, and interpreter behaviour belong in `runtime/core/` and `runtime/wasi/`, where both modes get them. Agent mode owns only what exec mode has no concept of: sessions, transport, auth, quotas, metrics. Never reimplement interpreter or syscall logic inside `src/agent/`.
 
-3. **When in doubt, ask the user.** If a change could affect multiple modes and the intent is unclear, stop and ask.
+3. **Shared code is encouraged, but not at the cost of mode integrity.** If a utility function is useful across modes (e.g., path resolution, error types, WASM binary analysis), keep it in shared modules (`src/utils/`, `src/error.rs`, `src/config/`). But don't bend a mode's design just to share code.
 
-4. **Mode-specific modules should be commented.** If a file/module belongs to a specific mode, include a comment at the top:
+4. **When in doubt, ask the user.** If a change could affect multiple modes and the intent is unclear, stop and ask.
+
+5. **Mode-specific modules should be commented.** If a file/module belongs to a specific mode, include a comment at the top:
    ```rust
    //! OS mode: Multi-language kernel for browser-based WASM execution
    ```
 
-5. **The plugin system belongs to Server Mode.** Plugins provide compilation support (Rust → WASM, Go → WASM, etc.). Exec mode does not compile; it runs pre-built `.wasm` files. OS mode uses wasmhub runtimes, not compilation plugins.
+6. **The plugin system belongs to Server Mode.** Plugins provide compilation support (Rust → WASM, Go → WASM, etc.). Exec mode does not compile; it runs pre-built `.wasm` files. OS mode uses wasmhub runtimes, not compilation plugins.
 
 ### Shared Components (used by multiple modes)
 
@@ -110,23 +132,24 @@ Wasmrun has **three distinct execution modes**. They are separate systems with s
 | `src/error.rs` | All | Unified error types |
 | `src/utils/` | All | Path resolution, WASM analysis, system utils |
 | `src/config/constants.rs` | Server, OS | Port defaults, paths |
-| `src/runtime/core/module.rs` | Exec, Verify/Inspect | WASM binary parser |
-| `src/runtime/wasi/` | Exec | WASI syscall host functions for interpreter |
+| `src/runtime/core/` | Exec, Agent | WASM interpreter engine (`module.rs` also used by Verify/Inspect) |
+| `src/runtime/wasi/` | Exec, Agent | WASI syscall host functions for interpreter |
+| `src/runtime/runtime_cache.rs` | OS, Agent | wasmhub language runtime fetching + caching |
 | `src/runtime/wasi_fs.rs` | OS, Dev Server | Virtual in-memory filesystem |
 | `src/commands/verify.rs` | Standalone (uses core module parser) | WASM verification |
 
 ### Mode Dependency Map
 
 ```
-Server Mode                     Exec Mode                OS Mode
-─────────────                   ─────────                ───────
-src/commands/run.rs             src/commands/exec.rs     src/commands/os.rs
-src/config/server.rs            src/runtime/core/*       src/runtime/os_server.rs
+Server Mode                     Exec Mode                OS Mode                          Agent Mode
+─────────────                   ─────────                ───────                          ──────────
+src/commands/run.rs             src/commands/exec.rs     src/commands/os.rs               src/commands/agent.rs
+src/config/server.rs            src/runtime/core/*       src/runtime/os_server.rs         src/agent/*
 src/server/*                    src/runtime/wasi/*       src/runtime/multilang_kernel.rs
-src/compiler/*                                           src/runtime/microkernel.rs
-src/plugin/*                                             src/runtime/dev_server.rs
-src/watcher.rs                                           src/runtime/scheduler.rs
-src/template.rs                                          src/runtime/network_namespace.rs
+src/compiler/*                                           src/runtime/microkernel.rs       ↓ executes via
+src/plugin/*                                             src/runtime/dev_server.rs        src/runtime/core/*
+src/watcher.rs                                           src/runtime/scheduler.rs         src/runtime/wasi/*
+src/template.rs                                          src/runtime/network_namespace.rs src/runtime/runtime_cache.rs
 ui/src/ (→ templates/app/)                               src/runtime/wasi_fs.rs
 ui/src/ (→ templates/console/)                           src/runtime/project_files.rs
                                                          src/runtime/runtime_cache.rs
@@ -197,10 +220,23 @@ src/
 ├── main.rs              # Entry point, command dispatch
 ├── cli.rs               # CLI argument parsing (clap)
 ├── error.rs             # Unified error types (WasmrunError)
+├── agent/                # [Agent Mode] ★ REST sandbox API for AI agents
+│   ├── server.rs        #   HTTP server, routing, exec orchestration
+│   ├── session.rs       #   Session lifecycle and isolation
+│   ├── executor.rs      #   Source → runtime execution pipeline (JS/TS)
+│   ├── esm.rs           #   ESM → CommonJS lowering for vendored packages
+│   ├── vendor.rs        #   npm resolution and vendoring
+│   ├── shell.rs         #   Shell emulation over the session filesystem
+│   ├── auth.rs          #   API keys and tenant isolation
+│   ├── limits.rs        #   Resource limits (memory, fuel, output, disk)
+│   ├── metrics.rs       #   Metrics endpoint and access log
+│   ├── tools.rs         #   LLM tool schemas
+│   └── api.rs           #   Request/response types
 ├── commands/             # Subcommand handlers
 │   ├── run.rs           #   [Server Mode] compile + serve
 │   ├── exec.rs          #   [Exec Mode] native WASM execution
 │   ├── os.rs            #   [OS Mode] browser-based kernel
+│   ├── agent.rs         #   [Agent Mode] REST sandbox server
 │   ├── compile.rs       #   [Server Mode] compile only
 │   ├── verify.rs        #   [Shared] WASM binary verification
 │   ├── stop.rs          #   [Server Mode] stop running server
@@ -213,7 +249,7 @@ src/
 ├── logging/              # [OS Mode] Structured log trail system
 ├── plugin/               # [Server Mode] Plugin system
 ├── runtime/
-│   ├── core/             # [Exec Mode] ★ WASM interpreter engine
+│   ├── core/             # [Exec, Agent] ★ WASM interpreter engine
 │   │   ├── module.rs     #   Binary parser (shared with verify/inspect)
 │   │   ├── executor.rs   #   Instruction executor (~4400 lines)
 │   │   ├── memory.rs     #   Linear memory
@@ -222,7 +258,7 @@ src/
 │   │   ├── native_executor.rs  # High-level exec API
 │   │   ├── control_flow.rs     # Control flow analysis
 │   │   └── tests.rs      #   Unit tests
-│   ├── wasi/             # [Exec Mode] WASI syscall implementations
+│   ├── wasi/             # [Exec, Agent] WASI syscall implementations
 │   │   ├── mod.rs        #   WasiEnv, linker setup
 │   │   └── syscalls.rs   #   fd_write, args_get, clock, etc.
 │   ├── os_server.rs      # [OS Mode] HTTP server + API endpoints
@@ -233,7 +269,7 @@ src/
 │   ├── network_namespace.rs # [OS Mode] Network isolation
 │   ├── wasi_fs.rs        # [OS Mode] Virtual in-memory filesystem
 │   ├── project_files.rs  # [OS Mode] Project file bundling
-│   ├── runtime_cache.rs  # [OS Mode] Wasmhub runtime caching
+│   ├── runtime_cache.rs  # [OS, Agent] Wasmhub runtime caching
 │   ├── languages/        # [OS Mode] Language runtime traits
 │   ├── tunnel/           # [OS Mode] Bore tunneling
 │   ├── registry.rs       # [OS Mode] Process/server registry
@@ -258,7 +294,7 @@ src/
 
 ## Documentation Structure
 
-The docs mirror the three-mode architecture:
+The docs mirror the four-mode architecture:
 
 ```
 docs/docs/
@@ -279,6 +315,9 @@ docs/docs/
 │   ├── port-forwarding.md
 │   ├── public-tunneling.md
 │   └── usage/            #   Running, language selection, server options
+├── agent/                # Agent Mode documentation
+│   ├── index.md          #   Overview, CLI flags, auth, tenancy
+│   └── usage/            #   Sessions, execution, files, environment, observability
 ├── plugins/              # Plugin system (Server Mode)
 ├── contributing/         # Development guides
 ├── installation.md
@@ -364,7 +403,8 @@ pnpm typecheck      # TypeScript check
 
 - **Unit tests** live alongside source code (standard Rust `#[cfg(test)]` modules).
 - **Integration tests** are in `tests/` (currently `tests/exec_integration_tests.rs`).
-- **Test count:** ~325+ tests across unit and integration suites.
+- **Test count:** ~750+ tests across unit and integration suites.
+- **Network-gated tests** are `#[ignore]`d so the suite stays offline-friendly; run them with `cargo test -- --ignored` (use `--test-threads=1` the first time, while `~/.wasmrun/runtimes` is cold).
 - Always run `cargo test` before committing.
 - The CI expects zero clippy warnings: `cargo clippy --all-targets --all-features -- -D warnings`.
 
@@ -443,6 +483,11 @@ wasmrun exec <file.wasm> --call <func> [args]  # Call specific exported function
 wasmrun os <path>                 # Run project in browser-based OS environment
 wasmrun os <path> --language python  # Force language detection
 wasmrun os <path> --watch --port 3000  # With file watching and custom port
+
+# Agent Mode
+wasmrun agent                     # Start the REST sandbox API (default port 8430)
+wasmrun agent --port 8430 --max-sessions 100  # With explicit port and session cap
+wasmrun agent --auth ./tenants.toml  # Enable API-key auth and tenant isolation
 ```
 
 ---
@@ -459,6 +504,9 @@ wasmrun os <path> --watch --port 3000  # With file watching and custom port
 | `src/commands/run.rs` | Server | Server mode entry point |
 | `src/commands/exec.rs` | Exec | Exec mode entry point |
 | `src/commands/os.rs` | OS | OS mode entry point |
+| `src/commands/agent.rs` | Agent | Agent mode entry point |
+| `src/agent/server.rs` | Agent | Agent HTTP server, routing, exec orchestration |
+| `src/agent/session.rs` | Agent | Session lifecycle and sandbox isolation |
 | `src/runtime/core/executor.rs` | Exec | The WASM interpreter (~4400 lines) |
 | `src/runtime/core/module.rs` | Exec/Shared | WASM binary parser |
 | `src/runtime/wasi/syscalls.rs` | Exec | WASI syscall implementations |
@@ -492,6 +540,7 @@ wasmrun os <path> --watch --port 3000  # With file watching and custom port
 4. Return proper WASI errno values
 5. Add unit tests
 6. Update docs in `docs/docs/exec/wasi.md`
+7. Agent mode shares this layer, so verify the syscall through `POST /exec` too
 
 ### Adding a new WASM instruction (Exec Mode)
 
@@ -499,6 +548,14 @@ wasmrun os <path> --watch --port 3000  # With file watching and custom port
 2. Add decoding logic in `decode_instruction()`
 3. Add execution logic in `dispatch_instruction()`
 4. Add unit test in `src/runtime/core/tests.rs` or inline `#[cfg(test)]`
+
+### Adding an Agent Mode API endpoint
+
+1. Add the route match in `AgentServer::handle_request()` in `src/agent/server.rs`
+2. Implement the handler as a method returning `Result<T, ApiError>` (the HTTP layer stays separate from the logic, which is what makes handlers unit-testable)
+3. Add request/response types to `src/agent/api.rs`
+4. If agents should discover it, add a tool schema in `src/agent/tools.rs`
+5. Update docs in `docs/docs/agent/`
 
 ### Adding an OS Mode API endpoint
 
@@ -532,8 +589,9 @@ wasmrun os <path> --watch --port 3000  # With file watching and custom port
 - **Division by zero** in WASM should trap (return error), not panic.
 - **clippy must pass with zero warnings**: the CI enforces `-D warnings`.
 - **Version must stay in sync** across `Cargo.toml`, `ui/package.json`, and `docs/package.json`. Use `just sync-version`.
-- **Two different WASI systems exist:** `src/runtime/wasi/` is for Exec Mode (host functions linked to interpreter). `src/runtime/wasi_fs.rs` is for OS Mode (virtual filesystem in browser). Don't confuse them.
-- **Two different "server" concepts:** Server Mode's HTTP server (`src/server/`) serves WASM files for browser execution. OS Mode's HTTP server (`src/runtime/os_server.rs`) serves the OS UI and APIs. They are independent.
+- **Two different WASI systems exist:** `src/runtime/wasi/` is for Exec and Agent Mode (host functions linked to the interpreter). `src/runtime/wasi_fs.rs` is for OS Mode (virtual filesystem in browser). Don't confuse them.
+- **Three different "server" concepts:** Server Mode's HTTP server (`src/server/`) serves WASM files for browser execution. OS Mode's HTTP server (`src/runtime/os_server.rs`) serves the OS UI and APIs. Agent Mode's HTTP server (`src/agent/server.rs`) serves the REST sandbox API. They are independent.
+- **A WASI syscall change affects two modes.** `src/runtime/wasi/` is reached by `wasmrun exec` and by every agent-mode execution, so test both when touching it.
 
 ---
 
