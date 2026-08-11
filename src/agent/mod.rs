@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod esm;
 pub mod executor;
 pub mod limits;
 pub mod metrics;

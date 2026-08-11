@@ -5,7 +5,9 @@
 //! swc transpile stage that emits JS for the same runtime.
 
 use crate::agent::api::ApiError;
+use crate::agent::esm;
 use crate::agent::limits::{dir_size, ResourceLimits};
+use crate::agent::vendor;
 use crate::runtime::core::native_executor::{execute_wasm_bytes_with_env, ExecLimits};
 use crate::runtime::runtime_cache::RuntimeCache;
 use crate::runtime::wasi::WasiEnv;
@@ -92,6 +94,8 @@ pub fn execute_source(
         script_name
     };
 
+    lower_esm_dependencies(wasi_env.clone(), work_dir, limits, cancel.clone())?;
+
     let wasm_bytes = fetch_runtime_bytes(JS_RUNTIME)?;
 
     // nodejs-runtime dispatch: "run <file>" reads the file and evals it
@@ -162,6 +166,8 @@ pub fn execute_source_project(
     } else {
         entry.to_string()
     };
+
+    lower_esm_dependencies(wasi_env.clone(), work_dir, limits, cancel.clone())?;
 
     let args = vec![
         format!("{JS_RUNTIME}-runtime"),
@@ -490,6 +496,84 @@ fn transpile_in_session(
         } else {
             format!("TypeScript transpilation failed: {detail}")
         }));
+    }
+    Ok(())
+}
+
+/// Convert every ES module under the session's `node_modules` to CommonJS,
+/// the only module system the runtime's wrapper understands.
+///
+/// Works off what is on disk, so vendored packages and `node_modules` trees
+/// uploaded through `files` are both covered; a tree with nothing to lower
+/// costs one directory walk and never starts the transpiler.
+fn lower_esm_dependencies(
+    wasi_env: Arc<Mutex<WasiEnv>>,
+    work_dir: &Path,
+    limits: &ResourceLimits,
+    cancel: Option<Arc<AtomicBool>>,
+) -> std::result::Result<(), ApiError> {
+    let packages = esm::scan(work_dir);
+    if packages.is_empty() {
+        return Ok(());
+    }
+
+    // Checked before anything is rewritten: only a package still identical to
+    // the registry copy may go back to the shared cache.
+    let cacheable: Vec<bool> = packages
+        .iter()
+        .map(|p| {
+            !p.name.is_empty()
+                && !p.version.is_empty()
+                && vendor::body_matches_registry_copy(&p.name, &p.version, &work_dir.join(&p.dir))
+        })
+        .collect();
+
+    let files: Vec<String> = packages.iter().flat_map(|p| p.files.clone()).collect();
+    let inputs = esm::stage_inputs(work_dir, &files)?;
+
+    let result = transpile_in_session(&inputs, wasi_env, limits, cancel).map_err(|e| {
+        // One invocation covers every package, so the owner comes from the
+        // path swc reports rather than from transpiling separately.
+        ApiError::BadRequest(esm::blame(&packages, &e.to_string()))
+    });
+    if result.is_err() {
+        esm::clean_staging(work_dir, &files);
+        return result;
+    }
+
+    esm::commit_outputs(work_dir, &files)?;
+    for (pkg, cacheable) in packages.iter().zip(cacheable) {
+        esm::finalize_manifest(work_dir, pkg)?;
+        write_subpath_imports(pkg, work_dir, limits)?;
+        if cacheable {
+            vendor::store_lowered(&pkg.name, &pkg.version, &work_dir.join(&pkg.dir));
+        }
+    }
+    Ok(())
+}
+
+/// Materialize a package's `#alias` subpath imports as shims the resolver can
+/// find, the same trick the tsconfig `paths` aliases use. Each goes in the
+/// package's *own* `node_modules`, so two packages cannot collide on an
+/// alias.
+fn write_subpath_imports(
+    pkg: &esm::EsmPackage,
+    work_dir: &Path,
+    limits: &ResourceLimits,
+) -> std::result::Result<(), ApiError> {
+    for (alias, target) in &pkg.imports {
+        let target = format!("{}/{}", pkg.dir, target.trim_start_matches("./"));
+        if !work_dir.join(&target).exists() {
+            continue;
+        }
+        let shim_dir = format!("{}/node_modules/{alias}", pkg.dir);
+        write_checked(
+            &work_dir.join(format!("{shim_dir}/package.json")),
+            br#"{"main":"index.js"}"#,
+            limits,
+            work_dir,
+        )?;
+        write_alias_shim(&format!("{shim_dir}/index.js"), &target, work_dir, limits)?;
     }
     Ok(())
 }

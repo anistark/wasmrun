@@ -1,6 +1,6 @@
 ---
-sidebar_position: 7
-title: Agent File Operations
+sidebar_position: 3
+title: File Operations
 ---
 
 # File Operations
@@ -30,7 +30,7 @@ Parent directories are created automatically. Paths are relative to the session 
 }
 ```
 
-A write is rejected with **400 Bad Request** if it would exceed the session's `--max-file-size` (per file) or `--max-disk` (total) quota, and the whole request is rejected with **413 Payload Too Large** if the request body exceeds the server's `--max-body` limit. See [resource limits](../agent.md#starting-the-server).
+A write is rejected with **400 Bad Request** if it would exceed the session's `--max-file-size` (per file) or `--max-disk` (total) quota, and the whole request is rejected with **413 Payload Too Large** if the request body exceeds the server's `--max-body` limit. See [resource limits](../index.md#starting-the-server).
 
 ## Read a File
 
@@ -87,4 +87,4 @@ Deletes files or directories (recursive for directories).
 
 ## Authentication & Tenant Scoping
 
-When the server runs with [`--auth`](../agent.md#authentication), every file request must carry a valid `Authorization: Bearer <key>` header; a missing, malformed, or unknown key returns **401 Unauthorized**. File operations are scoped to the calling tenant's own sessions; targeting a session owned by another tenant returns **404 Not Found**, the same as a nonexistent session.
+When the server runs with [`--auth`](../index.md#authentication), every file request must carry a valid `Authorization: Bearer <key>` header; a missing, malformed, or unknown key returns **401 Unauthorized**. File operations are scoped to the calling tenant's own sessions; targeting a session owned by another tenant returns **404 Not Found**, the same as a nonexistent session.

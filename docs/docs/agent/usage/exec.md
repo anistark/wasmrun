@@ -1,6 +1,6 @@
 ---
-sidebar_position: 6
-title: Agent Execution
+sidebar_position: 2
+title: Execution
 ---
 
 # Agent Execution
@@ -28,6 +28,7 @@ These apply to every mode:
 |-------|----------|---------|-------------|
 | `timeout` | no | `30` | Execution timeout in seconds |
 | `env` | no | `{}` | Environment variables to set before execution |
+| `stdin` | no | `""` | Text the program reads from standard input (see [Standard Input](#standard-input)) |
 | `stream` | no | `false` | Stream output as Server-Sent Events while the code runs (see [Streaming Output](#streaming-output)) |
 
 ## Common Response
@@ -167,10 +168,29 @@ Declare npm packages with the `dependencies` field (works with `source` and `fil
 
 Prereleases follow the npm rule: `1.2.3-beta` only satisfies a range that names a prerelease of `1.2.3`, so `<2.0.0` never quietly pulls in `2.0.0-rc.1`.
 
+A dist-tag is pinned to the version it points at once per request, before anything is installed, so `latest` dedupes and locks like a version you had written out yourself. Across requests it is still a moving target: pin with a [lockfile](#reproducible-installs-with-a-lockfile) if you need the same tree next time.
+
+**ES module packages work.** The runtime itself loads CommonJS only, so every ES module in `node_modules` is converted to CommonJS before your code runs, by the same in-sandbox swc transpiler the TypeScript path uses. A package is treated as ESM when it declares `"type": "module"` or ships `.mjs` files:
+
+```sh
+curl -X POST http://localhost:8430/api/v1/sessions/$SID/exec \
+  -H 'Content-Type: application/json' \
+  -d '{"source": "const { nanoid } = require(\"nanoid\"); console.log(nanoid());",
+       "dependencies": {"nanoid": "^6"}}'
+```
+
+Note the `require()`: your own code is CommonJS either way, so a default export arrives as `.default`. Details worth knowing:
+
+- An entry point declared only in an `exports` map is resolved and written to `main`, which is what the runtime reads. Conditions are tried in the order `require`, `node`, `default`, `import`; `browser` is never chosen
+- A package's own `#alias` subpath imports are resolved and materialized inside that package, so they cannot collide between packages
+- The converted form is cached per `name@version`, so later installs of the same package skip the transform. Only packages byte-identical to what the registry shipped are cached, so an uploaded `node_modules` tree can never poison the cache for anyone else
+- Conversion failures name the package rather than just the file
+
 **Limitations:**
 
 - Pure-JS packages only: anything with an install script, `binding.gyp`, or prebuilt `.node` binaries is rejected with an error naming the package (native code can't run in the sandbox)
-- CommonJS entry points work best; packages relying on ESM-only entry, `exports` maps, or `fetch`/network at import time may not load
+- A package needing a Node built-in the runtime does not implement (`node:process`, `node:tty`) still fails at `require()` time, whatever its module format. `chalk` is a current example
+- Conversion parses ESM sources as TypeScript, which is a superset of JavaScript. Sources containing JSX or Flow types are rejected
 - An uploaded `package.json` is inert unless you set `install_package_json`, so no execution turns into an unrequested network fetch. `devDependencies` are ignored: there is nothing in the sandbox to run them with yet
 
 Malformed names/ranges fail with HTTP `400` before execution; resolution or download failures surface in the response's `error` field.
@@ -267,7 +287,7 @@ Bare specifiers resolve through a `node_modules/<name>` tree, so a project can s
 
 ## JavaScript Runtime Capabilities
 
-JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/) (QuickJS-based, WASI; v0.3.2+), fetched once and cached. Supported surface:
+JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/) (QuickJS-based, WASI; v0.4.0+), fetched once and cached. Supported surface:
 
 **Module system (CommonJS):**
 - Relative and absolute `require()` (`./x`, `../x`), with `.js`/`.json` extension probing, `index.*` resolution, and `package.json` `main`
@@ -275,7 +295,13 @@ JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io
 - Node-style module wrapper: `module.exports`, `require.cache`, `require.resolve`, `require.main`, `__filename`, `__dirname`
 - JSON loading via `require('./data.json')`
 
-**Built-in modules:** `path`, `fs`, `os`, `events`, `util`, `assert`, `stream`, `buffer`.
+**Built-in modules:** `path`, `fs`, `fs/promises` (and `fs.promises`), `os`, `events`, `util`, `assert`, `stream`, `buffer`, `crypto`, `url`, `querystring`, `string_decoder`, `timers`, `timers/promises`. Every one is also reachable through its `node:` prefixed alias, so `require('node:fs/promises')` works.
+
+`zlib`, `child_process` and `worker_threads` are present but throw a named `ERR_NOT_SUPPORTED` error when used: the sandbox has no compression library, no process table, and one thread. They resolve rather than being absent so a package that merely imports one keeps loading.
+
+:::note Hashing is pure JavaScript
+`crypto.createHash`/`createHmac` are implemented in JS, with no libcrypto in the runtime, so they cost roughly 1.5 s per 64-byte block under the interpreter. Fine for a short digest, impractical for hashing a large file. `crypto.getRandomValues`/`randomUUID` are native and cheap: they go through the WASI `random_get` syscall.
+:::
 
 **Globals & event loop:** `process`, `setTimeout`/`setInterval`/`setImmediate`, `queueMicrotask`, `process.nextTick`, async/await with full Promise resolution (pending timers and microtasks are drained before exit), `Buffer`, `TextEncoder`/`TextDecoder`, `atob`/`btoa`.
 
@@ -374,6 +400,24 @@ Execute a `.wasm` file already present in the session filesystem.
 
 ---
 
+## Standard Input
+
+Send `stdin` to give the program something to read on file descriptor 0:
+
+```sh
+curl -X POST http://localhost:8430/api/v1/sessions/$SID/exec \
+  -H 'Content-Type: application/json' \
+  -d '{"wasm_path": "wc.wasm", "stdin": "one\ntwo\nthree\n"}'
+```
+
+Input belongs to a single execution: it rewinds at the start of every request, so an execution that sends no `stdin` reads end-of-file immediately rather than picking up what a previous one left. Reads never block; once the input is drained, further reads report end-of-file.
+
+:::note JavaScript cannot read stdin yet
+This reaches any program that reads fd 0 through WASI, which today means `wasm_path` modules. The JavaScript runtime's `process.stdin` is still a stub, so JS and TypeScript code cannot see the input. Pass data to JS through `env`, a file written with the [files API](./files.md), or the source itself.
+:::
+
+---
+
 ## Timeout
 
 If execution exceeds the timeout, the response includes:
@@ -392,7 +436,7 @@ Partial output captured before the timeout is still returned. The worker is then
 
 ## Limits & Errors
 
-Execution is bounded by the per-session resource limits and server-wide ingress guards configured on [`wasmrun agent`](../agent.md#starting-the-server) (and overridable per session). These surface in two ways.
+Execution is bounded by the per-session resource limits and server-wide ingress guards configured on [`wasmrun agent`](../index.md#starting-the-server) (and overridable per session). These surface in two ways.
 
 **Within a 200 response** (the execution ran but hit a soft cap):
 

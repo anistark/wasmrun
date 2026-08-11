@@ -156,6 +156,19 @@ const modes: Mode[] = [
       </svg>
     ),
   },
+  {
+    title: 'Agent Mode',
+    command: 'wasmrun agent',
+    description:
+      'A REST API giving AI agents isolated sandboxes to run code in, on the exec interpreter. No Docker, no daemon.',
+    to: '/docs/agent',
+    icon: (
+      <svg {...iconProps}>
+        <rect x="4" y="8" width="16" height="12" rx="3" />
+        <path d="M12 4v4M9 14h.01M15 14h.01" />
+      </svg>
+    ),
+  },
 ];
 
 function ModeCards() {

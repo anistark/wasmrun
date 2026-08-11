@@ -956,6 +956,9 @@ impl AgentServer {
                 .map_err(|_| ApiError::Internal("Lock".into()))?;
             env.clear_stdout();
             env.clear_stderr();
+            // Rewound every exec: a request without stdin must see EOF, not
+            // the last run's leftovers.
+            env.set_stdin(req.stdin.clone().unwrap_or_default().into_bytes());
             if let Some(ref vars) = req.env {
                 for (k, v) in vars {
                     env.add_env(k.clone(), v.clone());
@@ -2271,6 +2274,31 @@ mod tests {
         wasm
     }
 
+    // Hand-built WASM that reads up to 64 bytes from fd 0 and writes exactly
+    // what it read to fd 1. Verified against wasmtime before being pasted here.
+    fn echo_stdin_wasm() -> Vec<u8> {
+        #[rustfmt::skip]
+        let wasm: Vec<u8> = vec![
+            0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x0c, 0x02, 0x60,
+            0x04, 0x7f, 0x7f, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x00, 0x00, 0x02, 0x44,
+            0x02, 0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73,
+            0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31,
+            0x07, 0x66, 0x64, 0x5f, 0x72, 0x65, 0x61, 0x64, 0x00, 0x00, 0x16, 0x77,
+            0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74,
+            0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, 0x08, 0x66, 0x64,
+            0x5f, 0x77, 0x72, 0x69, 0x74, 0x65, 0x00, 0x00, 0x03, 0x02, 0x01, 0x01,
+            0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x13, 0x02, 0x06, 0x6d, 0x65, 0x6d,
+            0x6f, 0x72, 0x79, 0x02, 0x00, 0x06, 0x5f, 0x73, 0x74, 0x61, 0x72, 0x74,
+            0x00, 0x02, 0x0a, 0x3c, 0x01, 0x3a, 0x00, 0x41, 0x00, 0x41, 0xe4, 0x00,
+            0x36, 0x02, 0x00, 0x41, 0x04, 0x41, 0xc0, 0x00, 0x36, 0x02, 0x00, 0x41,
+            0x00, 0x41, 0x00, 0x41, 0x01, 0x41, 0x08, 0x10, 0x00, 0x1a, 0x41, 0x10,
+            0x41, 0xe4, 0x00, 0x36, 0x02, 0x00, 0x41, 0x14, 0x41, 0x08, 0x28, 0x02,
+            0x00, 0x36, 0x02, 0x00, 0x41, 0x01, 0x41, 0x10, 0x41, 0x01, 0x41, 0x18,
+            0x10, 0x01, 0x1a, 0x0b,
+        ];
+        wasm
+    }
+
     // ── Session lifecycle ─────────────────────────────────────────
 
     #[test]
@@ -2451,6 +2479,82 @@ mod tests {
         server.session_manager.destroy_all().unwrap();
     }
 
+    /// `stdin` on the request reaches a program reading fd 0.
+    #[test]
+    fn test_exec_stdin_reaches_the_program() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        let work_dir = server
+            .session_manager
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
+            .unwrap();
+        std::fs::write(work_dir.join("echo.wasm"), echo_stdin_wasm()).unwrap();
+
+        let resp = server
+            .handle_exec(
+                &id,
+                r#"{"wasm_path": "echo.wasm", "stdin": "piped input\n"}"#,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(resp.exit_code, 0, "error: {:?}", resp.error);
+        assert_eq!(resp.stdout, "piped input\n");
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Without `stdin`, fd 0 is at EOF: the program reads nothing and does
+    /// not hang.
+    #[test]
+    fn test_exec_without_stdin_reads_eof() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        let work_dir = server
+            .session_manager
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
+            .unwrap();
+        std::fs::write(work_dir.join("echo.wasm"), echo_stdin_wasm()).unwrap();
+
+        let resp = server
+            .handle_exec(&id, r#"{"wasm_path": "echo.wasm"}"#, None)
+            .unwrap();
+
+        assert_eq!(resp.exit_code, 0, "error: {:?}", resp.error);
+        assert_eq!(resp.stdout, "");
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Each exec gets its own stdin, neither inherited nor pre-consumed.
+    #[test]
+    fn test_exec_stdin_is_per_request() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        let work_dir = server
+            .session_manager
+            .get_session(&id, None, |s| s.work_dir().to_path_buf())
+            .unwrap();
+        std::fs::write(work_dir.join("echo.wasm"), echo_stdin_wasm()).unwrap();
+
+        let first = server
+            .handle_exec(&id, r#"{"wasm_path": "echo.wasm", "stdin": "one"}"#, None)
+            .unwrap();
+        assert_eq!(first.stdout, "one");
+
+        let second = server
+            .handle_exec(&id, r#"{"wasm_path": "echo.wasm", "stdin": "two"}"#, None)
+            .unwrap();
+        assert_eq!(second.stdout, "two");
+
+        let third = server
+            .handle_exec(&id, r#"{"wasm_path": "echo.wasm"}"#, None)
+            .unwrap();
+        assert_eq!(third.stdout, "");
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
     #[test]
     fn test_exec_nonexistent_wasm() {
         let server = test_server();
@@ -2542,6 +2646,11 @@ mod tests {
     /// Ignored by default so the test suite stays offline-friendly (needs
     /// network on first run to fetch the runtime; cached after). Run with:
     ///   cargo test --release multi_file_js_require_integration -- --ignored --nocapture
+    ///
+    /// On a cold `~/.wasmrun/runtimes` cache, run the ignored tests with
+    /// `--test-threads=1` the first time. The runtime fetch happens inside the
+    /// timeout-guarded exec worker, so a parallel run has every test racing to
+    /// download the same two artifacts and spending its timeout doing it.
     #[test]
     #[ignore]
     fn test_multi_file_js_require_integration() {
@@ -2929,21 +3038,24 @@ mod tests {
     }
 
     /// Integration test: the 0.21.3 exit criteria — a project depending on a
-    /// real pure-JS npm package (lodash) executes in one request, resolved
-    /// through the runtime's own `require()` from the vendored node_modules.
+    /// real pure-JS npm package executes in one request, resolved through the
+    /// runtime's own `require()` from the vendored node_modules.
     ///
     /// Needs network (npm registry + wasmhub runtime fetch on first run).
     /// Ignored by default; see test_multi_file_js_require_integration.
     #[test]
     #[ignore]
-    fn test_npm_dependency_lodash_integration() {
+    fn test_npm_dependency_integration() {
         let server = test_server();
         let id = server.handle_create_session().unwrap().session_id;
 
+        // `ms` rather than lodash: the vendoring path is what is under test
+        // and 3 KB exercises all of it, where lodash's ~540 KB bundle takes
+        // ~24 s to parse in release and past 300 s under a debug build.
         let body = r#"{
-            "source": "const _ = require('lodash'); console.log(JSON.stringify(_.chunk([1,2,3,4], 2)));",
+            "source": "const ms = require('ms'); console.log(ms('2 days') + '|' + ms(60000));",
             "language": "javascript",
-            "dependencies": {"lodash": "^4.17.21"},
+            "dependencies": {"ms": "^2.1.3"},
             "timeout": 120
         }"#;
         let resp = server.handle_exec(&id, body, None).unwrap();
@@ -2953,8 +3065,8 @@ mod tests {
             resp.stderr, resp.error
         );
         assert!(
-            resp.stdout.contains("[[1,2],[3,4]]"),
-            "lodash output missing: {:?}",
+            resp.stdout.contains("172800000|1m"),
+            "vendored package output missing: {:?}",
             resp.stdout
         );
 
@@ -3009,6 +3121,119 @@ mod tests {
             "fetch should reject with a clear network-unsupported error: {:?}",
             resp.stdout
         );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: an ESM-only package (nanoid declares `"type":
+    /// "module"` and puts its entry only in an `exports` map) installs, is
+    /// lowered to CommonJS, and loads through the runtime's own `require()`.
+    /// Needs network; ignored by default, see
+    /// test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_esm_only_package_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "source": "const { nanoid } = require('nanoid'); console.log('len=' + nanoid().length);",
+            "language": "javascript",
+            "dependencies": {"nanoid": "^6"},
+            "timeout": 240
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        assert!(
+            resp.stdout.contains("len=21"),
+            "ESM package output missing: {:?}; stderr: {}",
+            resp.stdout,
+            resp.stderr
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: an ESM package whose own dependency is also ESM-only
+    /// (p-limit → yocto-queue), so every level of the tree must be lowered.
+    /// Needs network; ignored by default, see
+    /// test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_esm_transitive_dependency_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let body = r#"{
+            "source": "const pLimit = require('p-limit').default; const limit = pLimit(2); Promise.all([limit(() => 1), limit(() => 2)]).then(r => console.log('plimit=' + JSON.stringify(r)));",
+            "language": "javascript",
+            "dependencies": {"p-limit": "^6"},
+            "timeout": 240
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        assert!(
+            resp.stdout.contains("plimit=[1,2]"),
+            "transitive ESM output missing: {:?}; stderr: {}",
+            resp.stdout,
+            resp.stderr
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: the built-in module tail added by wasmhub v0.4.0 —
+    /// `crypto`, `querystring`, `string_decoder`, `url` helpers, `fs/promises`,
+    /// `timers/promises`, `node:` aliases, and the deliberately-throwing `zlib`
+    /// stub — all reachable from agent code.
+    ///
+    /// Also the first execution `fs/promises` and `timers/promises` get:
+    /// wasmhub's node harness cannot reach them, so they shipped unverified.
+    /// Ignored by default; see test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_js_builtin_modules_tail_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // One 64-byte block on purpose: hashing is pure JS, ~1.6 s per block
+        // in release and ~27 s under the debug build tests run on. createHmac
+        // is left out for the same reason (4 blocks, same code path).
+        let body = r#"{
+            "source": "const crypto = require('node:crypto'); console.log('sha=' + crypto.createHash('sha256').update('abc').digest('hex').slice(0, 8)); console.log('qs=' + require('querystring').stringify({a: 1, b: 'x y'})); const {StringDecoder} = require('string_decoder'); const d = new StringDecoder('utf8'); console.log('sd=' + d.write(Buffer.from([0xe2, 0x82])) + d.end(Buffer.from([0xac]))); console.log('url=' + require('url').fileURLToPath('file:///tmp/a.txt')); try { require('zlib').gzipSync('x'); } catch (e) { console.log('zlib=' + (e.code === 'ERR_NOT_SUPPORTED')); } const fsp = require('node:fs/promises'); const tp = require('timers/promises'); (async () => { await fsp.writeFile('/promises.txt', 'hi'); console.log('fsp=' + (await fsp.readFile('/promises.txt', 'utf8'))); await tp.setTimeout(5); console.log('tp=ok'); })();",
+            "language": "javascript",
+            "timeout": 240
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+        assert_eq!(
+            resp.exit_code, 0,
+            "exit_code != 0; stderr: {}; error: {:?}",
+            resp.stderr, resp.error
+        );
+        for expected in [
+            "sha=ba7816bf",   // crypto.createHash, sha256("abc")
+            "qs=a=1&b=x%20y", // querystring.stringify
+            "sd=\u{20ac}",    // string_decoder holds back a split UTF-8 euro sign
+            "url=/tmp/a.txt", // url.fileURLToPath
+            "zlib=true",      // present-but-throwing stub, named error code
+            "fsp=hi",         // fs/promises write + read round-trip
+            "tp=ok",          // timers/promises setTimeout resolves
+        ] {
+            assert!(
+                resp.stdout.contains(expected),
+                "missing {expected:?} in stdout: {:?}; stderr: {}",
+                resp.stdout,
+                resp.stderr
+            );
+        }
 
         server.session_manager.destroy_all().unwrap();
     }

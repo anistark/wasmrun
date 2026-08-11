@@ -1,6 +1,6 @@
 # Agent API Example Flows
 
-Runnable end-to-end flows against the [Agent API](https://wasmrun.readthedocs.io/en/latest/docs/exec/agent): the same request sequences an LLM agent makes through the `execute_code` tool schema (`GET /api/v1/tools`).
+Runnable end-to-end flows against the [Agent API](https://wasmrun.readthedocs.io/en/latest/docs/agent): the same request sequences an LLM agent makes through the `execute_code` tool schema (`GET /api/v1/tools`).
 
 ## Prerequisites
 

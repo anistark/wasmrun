@@ -168,6 +168,53 @@ pub fn fd_write(
     WASI_ESUCCESS
 }
 
+/// Fill the iovecs from the session's stdin buffer.
+///
+/// Whatever is left is handed over in order across calls, and a read past the
+/// end reports 0 bytes: WASI has no way to block here, so an exhausted (or
+/// never-supplied) stdin is simply EOF.
+fn read_stdin_into(
+    iovs_ptr: u32,
+    iovs_len: u32,
+    nread_ptr: u32,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
+    let mut e = match env.lock() {
+        Ok(e) => e,
+        Err(_) => return WASI_EIO,
+    };
+
+    let mut total_read: u32 = 0;
+    for i in 0..iovs_len {
+        let iov_base = iovs_ptr as usize + (i as usize) * 8;
+        let buf_ptr = match memory.read_i32(iov_base) {
+            Ok(v) => v as u32 as usize,
+            Err(_) => return WASI_EINVAL,
+        };
+        let buf_len = match memory.read_i32(iov_base + 4) {
+            Ok(v) => v as u32 as usize,
+            Err(_) => return WASI_EINVAL,
+        };
+        let chunk = e.read_stdin(buf_len);
+        if chunk.is_empty() {
+            break;
+        }
+        if memory.write_bytes(buf_ptr, &chunk).is_err() {
+            return WASI_EINVAL;
+        }
+        total_read += chunk.len() as u32;
+    }
+
+    if memory
+        .write_i32(nread_ptr as usize, total_read as i32)
+        .is_err()
+    {
+        return WASI_EINVAL;
+    }
+    WASI_ESUCCESS
+}
+
 pub fn fd_read(
     fd: u32,
     iovs_ptr: u32,
@@ -177,11 +224,7 @@ pub fn fd_read(
     env: &Arc<Mutex<WasiEnv>>,
 ) -> i32 {
     if fd == WASI_STDIN_FD {
-        return if memory.write_i32(nread_ptr as usize, 0).is_ok() {
-            WASI_ESUCCESS
-        } else {
-            WASI_EINVAL
-        };
+        return read_stdin_into(iovs_ptr, iovs_len, nread_ptr, memory, env);
     }
     if fd == WASI_STDOUT_FD || fd == WASI_STDERR_FD {
         return WASI_EBADF;
@@ -1117,6 +1160,89 @@ mod tests {
         let errno = fd_read(WASI_STDIN_FD, 0, 0, 100, &mut mem, &env);
         assert_eq!(errno, WASI_ESUCCESS);
         assert_eq!(mem.read_i32(100).unwrap(), 0);
+    }
+
+    /// One iovec, enough room for everything: the whole input lands in memory.
+    #[test]
+    fn test_fd_read_stdin_fills_buffer() {
+        let env = make_env();
+        env.lock().unwrap().set_stdin(b"hello stdin".to_vec());
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        // iovec at 0: buffer at 200, length 32.
+        mem.write_i32(0, 200).unwrap();
+        mem.write_i32(4, 32).unwrap();
+
+        let errno = fd_read(WASI_STDIN_FD, 0, 1, 100, &mut mem, &env);
+        assert_eq!(errno, WASI_ESUCCESS);
+        assert_eq!(mem.read_i32(100).unwrap(), 11);
+        assert_eq!(mem.read_bytes(200, 11).unwrap(), b"hello stdin");
+    }
+
+    /// A program draining stdin in small reads gets it in order, then EOF.
+    #[test]
+    fn test_fd_read_stdin_resumes_across_calls() {
+        let env = make_env();
+        env.lock().unwrap().set_stdin(b"abcdef".to_vec());
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_i32(0, 200).unwrap();
+        mem.write_i32(4, 4).unwrap();
+
+        assert_eq!(
+            fd_read(WASI_STDIN_FD, 0, 1, 100, &mut mem, &env),
+            WASI_ESUCCESS
+        );
+        assert_eq!(mem.read_i32(100).unwrap(), 4);
+        assert_eq!(mem.read_bytes(200, 4).unwrap(), b"abcd");
+
+        assert_eq!(
+            fd_read(WASI_STDIN_FD, 0, 1, 100, &mut mem, &env),
+            WASI_ESUCCESS
+        );
+        assert_eq!(mem.read_i32(100).unwrap(), 2);
+        assert_eq!(mem.read_bytes(200, 2).unwrap(), b"ef");
+
+        // Drained: further reads are EOF, never a block.
+        assert_eq!(
+            fd_read(WASI_STDIN_FD, 0, 1, 100, &mut mem, &env),
+            WASI_ESUCCESS
+        );
+        assert_eq!(mem.read_i32(100).unwrap(), 0);
+    }
+
+    /// Multiple iovecs are filled in order, as a scatter read must.
+    #[test]
+    fn test_fd_read_stdin_across_iovecs() {
+        let env = make_env();
+        env.lock().unwrap().set_stdin(b"abcdefgh".to_vec());
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_i32(0, 200).unwrap();
+        mem.write_i32(4, 3).unwrap();
+        mem.write_i32(8, 300).unwrap();
+        mem.write_i32(12, 16).unwrap();
+
+        let errno = fd_read(WASI_STDIN_FD, 0, 2, 100, &mut mem, &env);
+        assert_eq!(errno, WASI_ESUCCESS);
+        assert_eq!(mem.read_i32(100).unwrap(), 8);
+        assert_eq!(mem.read_bytes(200, 3).unwrap(), b"abc");
+        assert_eq!(mem.read_bytes(300, 5).unwrap(), b"defgh");
+    }
+
+    /// Setting stdin again rewinds, so one exec never inherits another's
+    /// partially-consumed input.
+    #[test]
+    fn test_set_stdin_rewinds() {
+        let env = make_env();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_i32(0, 200).unwrap();
+        mem.write_i32(4, 32).unwrap();
+
+        env.lock().unwrap().set_stdin(b"first".to_vec());
+        fd_read(WASI_STDIN_FD, 0, 1, 100, &mut mem, &env);
+        env.lock().unwrap().set_stdin(b"second".to_vec());
+        fd_read(WASI_STDIN_FD, 0, 1, 100, &mut mem, &env);
+
+        assert_eq!(mem.read_i32(100).unwrap(), 6);
+        assert_eq!(mem.read_bytes(200, 6).unwrap(), b"second");
     }
 
     #[test]

@@ -26,18 +26,18 @@ wasmrun exec ./dist/output.wasm
 
 ## Source Execution (Agent API)
 
-The [Agent API](./agent.md) extends exec mode with direct source execution. Language runtimes are not compiled locally; they are WASM modules fetched from [wasmhub](https://anistark.github.io/wasmhub/) and executed inside the same sandboxed interpreter:
+The [Agent API](../agent/index.md) extends exec mode with direct source execution. Language runtimes are not compiled locally; they are WASM modules fetched from [wasmhub](https://anistark.github.io/wasmhub/) and executed inside the same sandboxed interpreter:
 
 | Language | Aliases | Runtime |
 |---|---|---|
 | JavaScript | `js`, `nodejs` | [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/) (CommonJS `require()`, Node built-ins, web globals) |
 | TypeScript | `ts`, `tsx` | Transpiled in-sandbox by the [wasmhub `swc` module](https://anistark.github.io/wasmhub/runtimes/swc/), then run on the `nodejs` runtime |
 
-See [JavaScript runtime capabilities](./usage/agent-exec.md#javascript-runtime-capabilities) for the supported built-ins and limits. Unsupported languages (for example `python`) return HTTP 400; more runtimes will arrive as they land on wasmhub.
+See [JavaScript runtime capabilities](../agent/usage/exec.md#javascript-runtime-capabilities) for the supported built-ins and limits. Unsupported languages (for example `python`) return HTTP 400; more runtimes will arrive as they land on wasmhub.
 
 ## What Goes Where
 
 - **Compile a language to WASM**: [Server Mode languages](../server/languages/rust.md), powered by [plugins](/docs/plugins)
 - **Run a `.wasm` file natively**: exec mode, this section
-- **Run JS/TS source in a sandbox**: the [Agent API](./agent.md)
+- **Run JS/TS source in a sandbox**: the [Agent API](../agent/index.md)
 - **Browser-based multi-language execution**: [OS Mode language selection](../os/usage/language.md), also powered by wasmhub runtimes

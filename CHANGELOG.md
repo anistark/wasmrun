@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Standard input**: executions accept a `stdin` field, delivered to the program on file descriptor 0. WASI `fd_read` on fd 0 previously always reported end-of-file, so there was no way to give a sandboxed program input at all
+  - Reads resume where the last one stopped and report end-of-file once the input is drained, so a program can consume it in as many reads as it likes and never blocks
+  - Input is per execution: it rewinds every request, and an execution that sends none reads end-of-file rather than inheriting the previous run's leftovers
+  - Reaches programs that read fd 0 through WASI, which today means `wasm_path` modules. JavaScript and TypeScript code cannot read it until the runtime implements `process.stdin`
+- **ES module packages**: npm dependencies that publish ES modules now install and run. The runtime loads CommonJS only, so every ES module in the session's `node_modules` is converted before execution by the same in-sandbox swc transpiler the TypeScript path uses, under the session's own limits. Packages such as `nanoid`, `p-limit` and `escape-string-regexp` previously could not load at all
+  - A package counts as ESM when it declares `"type": "module"` or ships `.mjs` files; `.mjs` sources become `.js`, which is the only extension the runtime's resolver probes
+  - An entry point declared only in an `exports` map is resolved to a file and written to `main`, so the stock resolver finds it. Conditions are tried `require`, `node`, `default`, `import`, never `browser`
+  - A package's own `#alias` subpath imports are materialized as shims inside that package, scoped so two packages using the same alias cannot collide
+  - The converted form is cached per `name@version` alongside the raw download, so repeat installs skip the transform. Only a package still byte-identical to what the registry shipped is ever cached, so an uploaded `node_modules` tree cannot poison the shared cache for other sessions or tenants
+  - A conversion failure names the offending package rather than only the file
+- **Node.js built-in module tail (wasmhub v0.4.0)**: bump the pinned wasmhub release from v0.3.2 to v0.4.0, whose nodejs runtime fills in the standard-library modules ordinary agent code reaches for. Cached runtimes from the older pin are invalidated and re-fetched automatically
+  - New built-ins: `crypto` (`createHash`/`createHmac`/`randomBytes`/`randomInt`/`randomUUID`/`timingSafeEqual`), `url` (WHATWG classes plus the legacy `parse`/`format`/`resolve` and `fileURLToPath`/`pathToFileURL`), `querystring`, and `string_decoder`
+  - Promise APIs: `fs/promises` and `fs.promises`, plus `timers/promises` including `scheduler.wait`
+  - Every module is also reachable through its `node:` prefixed alias
+  - `zlib`, `child_process` and `worker_threads` now resolve but throw a named `ERR_NOT_SUPPORTED` error when used, so a package that merely imports one keeps loading instead of dying at `require()` with "Cannot find module"
+  - Note: the hash functions are pure JavaScript (no libcrypto in the runtime), costing roughly 1.5 s per 64-byte block under the interpreter; `crypto.getRandomValues`/`randomUUID` remain native via the WASI `random_get` syscall
 - **Reproducible npm installs**: every agent execution that installs dependencies now returns a `lockfile` describing the resolved tree, including transitive packages. Send it back as the request's `lockfile` to install exactly those versions again
   - Replay walks the lockfile rather than the dependency graph, so nothing is re-resolved and no registry metadata is fetched; with a warm cache the install runs offline
   - Tarballs are still integrity-verified and scanned for native artifacts on replay
@@ -20,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Options the sandbox transpiler cannot apply (`experimentalDecorators`, `emitDecoratorMetadata`, and `jsx` modes other than the classic runtime) fail the request by name instead of silently producing broken output
 
 ### Changed
+- **Dist-tag dependencies now dedupe**: a tag such as `latest` is resolved to the concrete version it points at once per request, before anything installs, so it dedupes against an already-installed copy and locks like an explicit version. Previously a tag could never match an installed version, so every request reinstalled it and a transitive `latest` always nested a duplicate copy
 - **Full npm version-range support**: dependency ranges now accept the complete npm grammar, including comparator sets (`>=1.2.0 <2.0.0`), unions (`^1 || ^2`), hyphen ranges (`1.2.0 - 1.4.0`), and the `<`, `<=`, `>`, `=` operators. Previously these were rejected, which meant a single composite range anywhere in a transitive dependency tree failed the whole install even when every package involved was pure JavaScript
   - Partial versions widen bounds as npm specifies, so `>1.2` excludes all of `1.2.x`
   - Prereleases follow the npm rule: a prerelease only satisfies a range that names a prerelease of that same version, so `<2.0.0` no longer risks admitting `2.0.0-rc.1`
