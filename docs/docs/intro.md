@@ -53,4 +53,4 @@ wasmrun agent --port 8430
 
 1. [Install wasmrun](./installation.md)
 2. [Quick start guide](./quick-start.md)
-3. Pick a mode: [Server](/docs/server), [Exec](/docs/exec), or [OS](/docs/os)
+3. Pick a mode: [Server](/docs/server), [Exec](/docs/exec), [OS](/docs/os), or [Agent](/docs/agent)

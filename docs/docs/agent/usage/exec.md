@@ -357,7 +357,7 @@ A project may ship a `tsconfig.json`, uploaded in `files` or already in the sess
 By default a response arrives only when execution finishes, which makes a long run silent until the end. Set `stream` to receive output as it happens, as [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events):
 
 ```bash
-curl -N -X POST http://127.0.0.1:8420/api/v1/sessions/$SID/exec \
+curl -N -X POST http://127.0.0.1:8430/api/v1/sessions/$SID/exec \
   -H 'Content-Type: application/json' \
   -d '{"source": "for (let i = 0; i < 3; i++) console.log(i);", "stream": true}'
 ```
