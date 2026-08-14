@@ -544,16 +544,31 @@ impl SessionManager {
         let interval = manager.config.cleanup_interval;
         let stop_flag = manager.cleanup_stop.clone();
 
-        std::thread::spawn(move || loop {
-            std::thread::sleep(interval);
+        // Sleep in slices rather than for the whole interval, so `stop_cleanup`
+        // is noticed promptly: shutdown joins this thread, and the interval is
+        // 30s in production.
+        let tick = interval
+            .min(Duration::from_millis(200))
+            .max(Duration::from_millis(1));
 
-            if let Ok(stop) = stop_flag.lock() {
-                if *stop {
-                    break;
+        std::thread::spawn(move || {
+            let mut waited = Duration::ZERO;
+            loop {
+                std::thread::sleep(tick);
+
+                if let Ok(stop) = stop_flag.lock() {
+                    if *stop {
+                        break;
+                    }
                 }
-            }
 
-            let _ = manager.cleanup_expired();
+                waited += tick;
+                if waited < interval {
+                    continue;
+                }
+                waited = Duration::ZERO;
+                let _ = manager.cleanup_expired();
+            }
         })
     }
 

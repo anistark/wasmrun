@@ -5,6 +5,7 @@ use crate::agent::auth::{AuthConfig, TenantRate};
 use crate::agent::executor;
 use crate::agent::limits::{dir_size, LimitsOverride, ResourceLimits};
 use crate::agent::metrics::{Gauges, Metrics, SessionResourceRow};
+use crate::agent::pool::{resolve_workers, PoolStats, WorkerPool};
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::shell;
 use crate::agent::tools;
@@ -36,6 +37,10 @@ struct RunningExec {
 /// How often a streaming exec samples the session buffers. Short enough to
 /// feel live, long enough that a tight loop is not one frame per line.
 const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// How long the accept loop waits for a connection before re-checking the
+/// shutdown flag. Short enough that Ctrl+C is not held up by an idle server.
+const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// Shared by the single-session and list endpoints so they cannot disagree.
 fn session_status_row(s: &crate::agent::session::Session) -> SessionStatusResponse {
@@ -150,6 +155,10 @@ pub struct AgentConfig {
     /// sessions. `0` = unlimited. Bounds thread / stack / memory footprint
     /// independently of `max_sessions` (which only bounds session count).
     pub max_concurrent_exec: usize,
+    /// Maximum number of HTTP request-handling threads. `0` = auto, sized from
+    /// `max_concurrent_exec` (see [`resolve_workers`]). Threads are spawned on
+    /// demand, so this is a ceiling and not a startup cost.
+    pub workers: usize,
     /// API-key authentication. `None` = open mode (no auth; back-compat). When
     /// `Some`, every `/api/v1/*` request must present a valid `Bearer` key and
     /// sessions are isolated per tenant.
@@ -171,6 +180,7 @@ impl Default for AgentConfig {
             verbose: false,
             max_body_bytes: Some(DEFAULT_MAX_BODY_BYTES),
             max_concurrent_exec: DEFAULT_MAX_CONCURRENT_EXEC,
+            workers: 0,
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -356,6 +366,9 @@ pub struct AgentServer {
     exec_slots: Arc<ExecSlots>,
     tenant_limiter: Arc<TenantLimiter>,
     metrics: Arc<Metrics>,
+    /// Live request-worker counters. Owned here so `/metrics` can read them;
+    /// the pool itself only exists while `start()` is listening.
+    pool_stats: Arc<PoolStats>,
     /// Live, swappable auth config (`None` in open mode). Read on every request
     /// via a brief read lock; replaced wholesale by the reload watcher when the
     /// auth file changes. The inner `Arc` makes each request's snapshot cheap.
@@ -376,6 +389,7 @@ impl AgentServer {
             exec_slots,
             tenant_limiter: TenantLimiter::new(),
             metrics: Arc::new(Metrics::new()),
+            pool_stats: Arc::new(PoolStats::default()),
             live_auth,
             auth_path,
         }
@@ -436,7 +450,8 @@ impl AgentServer {
         let server = Server::http(&addr)
             .map_err(|e| WasmrunError::from(format!("Failed to start agent server: {e}")))?;
 
-        self.print_banner();
+        let workers = resolve_workers(self.config.workers, self.config.max_concurrent_exec);
+        self.print_banner(workers);
 
         let cleanup_handle = SessionManager::start_cleanup_thread(self.session_manager.clone());
 
@@ -460,20 +475,41 @@ impl AgentServer {
             _ => None,
         };
 
-        for request in server.incoming_requests() {
+        // Requests are handed to worker threads, so a long exec never stalls the
+        // accept loop (and with it every other session, tenant and /metrics
+        // scrape). Accepting with a timeout also makes Ctrl+C take effect
+        // without waiting for one more request to arrive.
+        let mut pool = WorkerPool::new(workers, self.pool_stats.clone());
+        let this = Arc::new(self);
+        while !shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+            let request = match server.recv_timeout(ACCEPT_POLL_INTERVAL) {
+                Ok(Some(request)) => request,
+                Ok(None) => continue,
+                Err(e) => {
+                    // Back off rather than spinning, in case the listener is
+                    // failing every call rather than just this one.
+                    eprintln!("Accept error: {e}");
+                    std::thread::sleep(ACCEPT_POLL_INTERVAL);
+                    continue;
+                }
+            };
             if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ =
                     request.respond(Response::from_string("").with_status_code(StatusCode(503)));
                 break;
             }
-            if let Err(e) = self.handle_request(request) {
-                eprintln!("Request error: {e}");
-            }
+            let srv = this.clone();
+            pool.dispatch(Box::new(move || {
+                if let Err(e) = srv.handle_request(request) {
+                    eprintln!("Request error: {e}");
+                }
+            }));
         }
 
         eprintln!("\n🛑 Shutting down...");
-        let destroyed = self.session_manager.destroy_all().unwrap_or(0);
-        self.session_manager.stop_cleanup();
+        pool.shutdown();
+        let destroyed = this.session_manager.destroy_all().unwrap_or(0);
+        this.session_manager.stop_cleanup();
         let _ = cleanup_handle.join();
         if let Some(handle) = auth_watcher {
             let _ = handle.join();
@@ -485,7 +521,7 @@ impl AgentServer {
         Ok(())
     }
 
-    fn print_banner(&self) {
+    fn print_banner(&self, workers: usize) {
         let port = self.config.port;
         let max = self.config.session_config.max_sessions;
         let timeout = self.config.session_config.default_timeout.as_secs();
@@ -524,6 +560,7 @@ impl AgentServer {
             "   Max concurrent:  {}",
             fmt_count(self.config.max_concurrent_exec, "exec(s)")
         );
+        println!("   Request workers: {workers} max");
         match &self.config.auth {
             Some(auth) => {
                 println!(
@@ -755,6 +792,8 @@ impl AgentServer {
             sessions_total: self.session_manager.total_count() as u64,
             exec_in_flight: self.exec_slots.in_flight(),
             sessions_disk_bytes: self.session_manager.total_disk_bytes(),
+            workers_live: self.pool_stats.live(),
+            requests_in_flight: self.pool_stats.busy(),
         }
     }
 
@@ -771,6 +810,8 @@ impl AgentServer {
             sessions_total: self.session_manager.total_count() as u64,
             exec_in_flight: self.exec_slots.in_flight(),
             sessions_disk_bytes: disk,
+            workers_live: self.pool_stats.live(),
+            requests_in_flight: self.pool_stats.busy(),
         };
         // Per-session rows are exposed only in open mode. In auth mode they
         // would leak one tenant's footprint to another, so the scrape stays at
@@ -1960,6 +2001,7 @@ mod tests {
             verbose: false,
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec,
+            workers: 0,
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -1986,6 +2028,11 @@ mod tests {
 
     /// An open-mode (no-auth) server bound to a specific `port`, for HTTP tests.
     fn open_server(port: u16) -> AgentServer {
+        open_server_with_concurrency(port, 100)
+    }
+
+    /// The same, with an explicit server-wide exec cap.
+    fn open_server_with_concurrency(port: u16, max_concurrent_exec: usize) -> AgentServer {
         AgentServer::new(AgentConfig {
             port,
             session_config: SessionConfig {
@@ -1997,7 +2044,8 @@ mod tests {
             allow_cors: true,
             verbose: false,
             max_body_bytes: Some(32 * 1024 * 1024),
-            max_concurrent_exec: 100,
+            max_concurrent_exec,
+            workers: 0,
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -2018,6 +2066,7 @@ mod tests {
             verbose: false,
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec: 100,
+            workers: 0,
             auth: Some(Arc::new(auth_config_for(tenants))),
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -2028,11 +2077,16 @@ mod tests {
     /// include `[tenants.rate]` sub-tables). Generous server-wide caps so the
     /// per-tenant ceilings are what's actually exercised.
     fn auth_server_from_toml(toml: &str) -> AgentServer {
+        auth_server_from_toml_on_port(0, toml)
+    }
+
+    /// The same, bound to `port` so it can be driven over HTTP.
+    fn auth_server_from_toml_on_port(port: u16, toml: &str) -> AgentServer {
         let mut f = tempfile::NamedTempFile::new().unwrap();
         std::io::Write::write_all(&mut f, toml.as_bytes()).unwrap();
         let auth = AuthConfig::load(f.path()).unwrap();
         AgentServer::new(AgentConfig {
-            port: 0,
+            port,
             session_config: SessionConfig {
                 default_timeout: Duration::from_secs(60),
                 max_sessions: 100,
@@ -2043,6 +2097,7 @@ mod tests {
             verbose: false,
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec: 100,
+            workers: 0,
             auth: Some(Arc::new(auth)),
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -4051,6 +4106,239 @@ mod tests {
             Ok(resp) => resp.status().as_u16(),
             Err(ureq::Error::StatusCode(code)) => code,
             Err(e) => panic!("transport error: {e}"),
+        }
+    }
+
+    /// A free localhost port, released immediately for a server to bind.
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    /// Run `server` on its configured port in a background thread and return
+    /// the API base URL, once the listener is accepting.
+    fn serve(server: AgentServer) -> String {
+        let base = format!("http://127.0.0.1:{}{API_PREFIX}", server.config.port);
+        std::thread::spawn(move || {
+            let _ = server.start();
+        });
+        for _ in 0..200 {
+            // Any HTTP answer means it is up — 401 included, in auth mode.
+            match ureq::get(format!("{base}/tools")).call() {
+                Err(ureq::Error::Io(_)) => std::thread::sleep(Duration::from_millis(20)),
+                _ => break,
+            }
+        }
+        base
+    }
+
+    /// Status and body of a response. 4xx/5xx come back as a status with an
+    /// empty body, which is all the assertions need.
+    fn http_result(
+        sent: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    ) -> (u16, String) {
+        match sent {
+            Ok(mut resp) => {
+                let status = resp.status().as_u16();
+                let mut out = String::new();
+                resp.body_mut()
+                    .as_reader()
+                    .read_to_string(&mut out)
+                    .unwrap();
+                (status, out)
+            }
+            Err(ureq::Error::StatusCode(code)) => (code, String::new()),
+            Err(e) => panic!("transport error: {e}"),
+        }
+    }
+
+    /// Attach the bearer key, if the server is in auth mode.
+    fn with_key(
+        builder: ureq::RequestBuilder<ureq::typestate::WithoutBody>,
+        key: Option<&str>,
+    ) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
+        match key {
+            Some(k) => builder.header("Authorization", format!("Bearer {k}")),
+            None => builder,
+        }
+    }
+
+    fn http_get(url: &str, key: Option<&str>) -> (u16, String) {
+        http_result(with_key(ureq::get(url), key).call())
+    }
+
+    fn http_delete(url: &str, key: Option<&str>) -> (u16, String) {
+        http_result(with_key(ureq::delete(url), key).call())
+    }
+
+    fn http_post(url: &str, key: Option<&str>, body: &str) -> (u16, String) {
+        let builder = ureq::post(url).header("Content-Type", "application/json");
+        let builder = match key {
+            Some(k) => builder.header("Authorization", format!("Bearer {k}")),
+            None => builder,
+        };
+        http_result(builder.send(body))
+    }
+
+    /// Create a session over HTTP and return its id.
+    fn http_create_session(base: &str, key: Option<&str>) -> String {
+        let (status, body) = http_post(&format!("{base}/sessions"), key, "");
+        assert_eq!(status, 200, "session creation failed: {body}");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        v["session_id"].as_str().unwrap().to_string()
+    }
+
+    /// The work dir `SessionManager` derives from a session id. Tests driving
+    /// the server over HTTP hold no handle to the `Session` itself, and the
+    /// file API takes text, not a WASM binary.
+    fn session_work_dir(id: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("wasmrun-session-{id}"))
+    }
+
+    /// Poll the JSON metrics until `pred` holds. `false` if it never does —
+    /// which is also what a blocked accept loop looks like, since the scrape
+    /// itself would be queued behind the running exec.
+    fn wait_for_metric(
+        base: &str,
+        key: Option<&str>,
+        pred: impl Fn(&serde_json::Value) -> bool,
+    ) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            let (status, body) = http_get(&format!("{base}/metrics?format=json"), key);
+            if status == 200 {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                    if pred(&v) {
+                        return true;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    /// Body for an exec that runs until its own wall-clock timeout stops it.
+    const SLOW_EXEC: &str = r#"{"wasm_path": "loop.wasm", "timeout": 3}"#;
+
+    /// Give a session a WASM module that never returns, for tests that need an
+    /// exec to still be running while other requests are made.
+    fn plant_slow_exec(id: &str) {
+        std::fs::write(session_work_dir(id).join("loop.wasm"), infinite_loop_wasm()).unwrap();
+    }
+
+    // ── Concurrent request handling over HTTP (0.22.7) ────────────
+
+    #[test]
+    fn test_long_exec_does_not_block_other_requests_over_http() {
+        let base = serve(open_server(free_port()));
+        let id = http_create_session(&base, None);
+        plant_slow_exec(&id);
+
+        let exec_url = format!("{base}/sessions/{id}/exec");
+        let runner = std::thread::spawn(move || http_post(&exec_url, None, SLOW_EXEC).0);
+        assert!(
+            wait_for_metric(&base, None, |v| v["exec_in_flight"] == 1),
+            "the exec never showed up in flight"
+        );
+
+        // The serial accept loop this replaces would queue this GET behind the
+        // three-second exec.
+        let start = Instant::now();
+        let (status, _) = http_get(&format!("{base}/sessions"), None);
+        assert_eq!(status, 200);
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "a plain GET waited on the running exec ({:?})",
+            start.elapsed()
+        );
+
+        assert_eq!(runner.join().unwrap(), 200);
+        http_delete(&format!("{base}/sessions/{id}"), None);
+    }
+
+    #[test]
+    fn test_global_exec_cap_binds_over_http() {
+        // One exec allowed server-wide; the cap is only meaningful once real
+        // requests can overlap, which is what 0.22.7 makes true.
+        let base = serve(open_server_with_concurrency(free_port(), 1));
+        let busy = http_create_session(&base, None);
+        let other = http_create_session(&base, None);
+        plant_slow_exec(&busy);
+        std::fs::write(session_work_dir(&other).join("hello.wasm"), hello_wasm()).unwrap();
+
+        let exec_url = format!("{base}/sessions/{busy}/exec");
+        let runner = std::thread::spawn(move || http_post(&exec_url, None, SLOW_EXEC).0);
+        assert!(
+            wait_for_metric(&base, None, |v| v["exec_in_flight"] == 1),
+            "the exec never showed up in flight"
+        );
+
+        // A second session's exec is refused while the slot is held.
+        let quick = format!("{base}/sessions/{other}/exec");
+        let (status, _) = http_post(&quick, None, r#"{"wasm_path": "hello.wasm"}"#);
+        assert_eq!(status, 429, "the global exec cap did not bind over HTTP");
+
+        // Once the slot is released the same request succeeds.
+        assert_eq!(runner.join().unwrap(), 200);
+        let (status, body) = http_post(&quick, None, r#"{"wasm_path": "hello.wasm"}"#);
+        assert_eq!(status, 200);
+        assert!(body.contains("Hello, World!"));
+
+        http_delete(&format!("{base}/sessions/{busy}"), None);
+        http_delete(&format!("{base}/sessions/{other}"), None);
+    }
+
+    #[test]
+    fn test_tenant_exec_cap_binds_over_http() {
+        use crate::agent::auth::hash_key;
+        let toml = format!(
+            "[[tenants]]\nid = \"alice\"\nkey_sha256 = \"{}\"\n[tenants.rate]\nmax_concurrent_exec = 1\n\n[[tenants]]\nid = \"bob\"\nkey_sha256 = \"{}\"\n",
+            hash_key("k_alice"),
+            hash_key("k_bob"),
+        );
+        let base = serve(auth_server_from_toml_on_port(free_port(), &toml));
+        let (alice, bob) = (Some("k_alice"), Some("k_bob"));
+
+        let busy = http_create_session(&base, alice);
+        let spare = http_create_session(&base, alice);
+        let bobs = http_create_session(&base, bob);
+        plant_slow_exec(&busy);
+        std::fs::write(session_work_dir(&bobs).join("hello.wasm"), hello_wasm()).unwrap();
+
+        let exec_url = format!("{base}/sessions/{busy}/exec");
+        let runner = std::thread::spawn(move || http_post(&exec_url, alice, SLOW_EXEC).0);
+        assert!(
+            wait_for_metric(&base, alice, |v| v["exec_in_flight"] == 1),
+            "the exec never showed up in flight"
+        );
+
+        // alice is at her per-tenant ceiling of one...
+        let (status, _) = http_post(
+            &format!("{base}/sessions/{spare}/exec"),
+            alice,
+            r#"{"wasm_path": "loop.wasm", "timeout": 1}"#,
+        );
+        assert_eq!(
+            status, 429,
+            "the per-tenant exec cap did not bind over HTTP"
+        );
+
+        // ...while bob, uncapped, runs unimpeded alongside her.
+        let (status, body) = http_post(
+            &format!("{base}/sessions/{bobs}/exec"),
+            bob,
+            r#"{"wasm_path": "hello.wasm"}"#,
+        );
+        assert_eq!(status, 200);
+        assert!(body.contains("Hello, World!"));
+
+        assert_eq!(runner.join().unwrap(), 200);
+        for (id, key) in [(&busy, alice), (&spare, alice), (&bobs, bob)] {
+            http_delete(&format!("{base}/sessions/{id}"), key);
         }
     }
 

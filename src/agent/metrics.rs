@@ -44,6 +44,11 @@ pub struct Gauges {
     pub sessions_total: u64,
     pub exec_in_flight: u64,
     pub sessions_disk_bytes: u64,
+    /// Request-worker threads currently spawned (busy or parked).
+    pub workers_live: u64,
+    /// Requests currently being handled by a worker. Reads 0 outside a running
+    /// server, where there is no pool.
+    pub requests_in_flight: u64,
 }
 
 /// Per-session resource row for the JSON metrics breakdown. Exposed in JSON
@@ -206,6 +211,20 @@ impl Metrics {
             "gauge",
             &[(&[], g.sessions_disk_bytes)],
         );
+        metric(
+            &mut out,
+            "wasmrun_agent_workers_live",
+            "Request-handling threads currently spawned.",
+            "gauge",
+            &[(&[], g.workers_live)],
+        );
+        metric(
+            &mut out,
+            "wasmrun_agent_requests_in_flight",
+            "Requests currently being handled.",
+            "gauge",
+            &[(&[], g.requests_in_flight)],
+        );
         out
     }
 
@@ -239,6 +258,8 @@ impl Metrics {
             "sessions_total": g.sessions_total,
             "exec_in_flight": g.exec_in_flight,
             "sessions_disk_bytes": g.sessions_disk_bytes,
+            "workers_live": g.workers_live,
+            "requests_in_flight": g.requests_in_flight,
         });
         if let Some(rows) = per_session {
             obj["sessions"] = serde_json::to_value(rows).unwrap_or(serde_json::Value::Null);
@@ -310,6 +331,8 @@ mod tests {
             sessions_total: 3,
             exec_in_flight: 1,
             sessions_disk_bytes: 4096,
+            workers_live: 5,
+            requests_in_flight: 2,
         }
     }
 
