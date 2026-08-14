@@ -16,6 +16,7 @@
 - 🌐 **Zero-Config Web Server** - Built-in HTTP server for WASM and web apps
 - 📦 **Smart Project Detection** - Automatically detects and configures project types
 - 🏃 **Native WASM Execution** - Run WASM files directly with argument passing
+- 🤖 **Agent Sandboxes** - A REST API that gives AI agents isolated environments to run code in, without Docker
 
 ## 📚 Documentation
 
@@ -58,6 +59,50 @@ wasmrun plugin install wasmgo
 ```
 
 See the [Quick Start Guide](https://wasmrun.readthedocs.io/en/latest/docs/quick-start) for a complete tutorial.
+
+## 🎛️ Four Modes
+
+| Mode | Command | What it does |
+|------|---------|--------------|
+| **[Server](https://wasmrun.readthedocs.io/en/latest/docs/server)** | `wasmrun ./my-project` | Compile and serve a project with a dev server, live reload, and browser-based module inspection |
+| **[Exec](https://wasmrun.readthedocs.io/en/latest/docs/exec)** | `wasmrun exec ./program.wasm` | Run a WASM file natively through the built-in interpreter with WASI. No browser, no server |
+| **[Agent](https://wasmrun.readthedocs.io/en/latest/docs/agent)** | `wasmrun agent` | A REST sandbox API for AI agents. No Docker, no daemon |
+| **[OS](https://wasmrun.readthedocs.io/en/latest/docs/os)** | `wasmrun os ./my-project` | Browser-based VM with a virtual filesystem and multi-language runtimes |
+
+### 🏃 Exec Mode
+
+Run a `.wasm` file directly. Arguments after the file go to the program, and `--call` picks an exported function instead of the entry point:
+
+```sh
+wasmrun exec ./program.wasm arg1 arg2
+wasmrun exec ./math.wasm --call add 2 3
+```
+
+The interpreter implements WASI Preview 1, so file I/O, environment variables, arguments, clocks, and randomness all work.
+
+### 🤖 Agent Mode
+
+Start a sandbox server for AI agents:
+
+```sh
+wasmrun agent --port 8430
+```
+
+Create a session, then execute code in it:
+
+```sh
+SID=$(curl -sX POST http://localhost:8430/api/v1/sessions | jq -r .session_id)
+
+curl -X POST http://localhost:8430/api/v1/sessions/$SID/exec \
+  -H 'Content-Type: application/json' \
+  -d '{"source": "const _ = require(\"lodash\"); console.log(_.chunk([1,2,3,4], 2));",
+       "dependencies": {"lodash": "^4.17.21"}}'
+```
+
+- **JavaScript and TypeScript** run from source, with npm dependencies vendored into the sandbox (it has no network of its own) and lockfiles for reproducible installs
+- **Pre-compiled `.wasm`** modules run through the same interpreter as exec mode
+- `GET /api/v1/tools` returns **OpenAI/Anthropic-compatible tool schemas**, so an LLM can drive the sandbox through function calling
+- Per-session limits on memory, fuel, output, file size, and disk; optional API-key auth with tenant isolation
 
 ## 🔌 Plugin System
 
