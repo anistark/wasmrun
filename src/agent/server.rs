@@ -5,7 +5,8 @@ use crate::agent::auth::{AuthConfig, TenantRate};
 use crate::agent::executor;
 use crate::agent::limits::{dir_size, LimitsOverride, ResourceLimits};
 use crate::agent::metrics::{Gauges, Metrics, SessionResourceRow};
-use crate::agent::pool::{resolve_workers, PoolStats, WorkerPool};
+use crate::agent::pool::{resolve_workers, PoolStats, WorkerPool, DEFAULT_SHUTDOWN_GRACE};
+use crate::agent::session;
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::shell;
 use crate::agent::tools;
@@ -147,6 +148,13 @@ const DEFAULT_MAX_CONCURRENT_EXEC: usize = 100;
 /// WASM and JavaScript on request, so reaching it from another host is opt-in
 /// (`--host`) and, without auth, needs an explicit `--insecure`.
 pub const DEFAULT_HOST: &str = "127.0.0.1";
+/// Missed heartbeats before another server's session tree is considered
+/// orphaned. Generous: sweeping a live instance's sessions is far worse than
+/// leaving a dead one's directories around for another few minutes.
+const ORPHAN_GRACE_TICKS: u32 = 10;
+/// Floor on that window, so a short `cleanup_interval` cannot shrink it to the
+/// point where a briefly stalled server looks dead.
+const MIN_ORPHAN_GRACE: Duration = Duration::from_secs(300);
 
 #[derive(Clone)]
 pub struct AgentConfig {
@@ -171,6 +179,8 @@ pub struct AgentConfig {
     /// `max_concurrent_exec` (see [`resolve_workers`]). Threads are spawned on
     /// demand, so this is a ceiling and not a startup cost.
     pub workers: usize,
+    /// How long shutdown waits for in-flight requests before abandoning them.
+    pub shutdown_grace: Duration,
     /// API-key authentication. `None` = open mode (no auth; back-compat). When
     /// `Some`, every `/api/v1/*` request must present a valid `Bearer` key and
     /// sessions are isolated per tenant.
@@ -195,6 +205,7 @@ impl Default for AgentConfig {
             max_body_bytes: Some(DEFAULT_MAX_BODY_BYTES),
             max_concurrent_exec: DEFAULT_MAX_CONCURRENT_EXEC,
             workers: 0,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -480,6 +491,19 @@ impl AgentServer {
             self.config.insecure,
         )?;
 
+        // Shut down on Ctrl+C, and on SIGTERM/SIGHUP: a container or a systemd
+        // unit is stopped with SIGTERM, and ignoring it means being SIGKILLed
+        // at the end of the stop timeout with every session directory leaked.
+        //
+        // Installed before anything is claimed on disk, so a signal arriving
+        // during startup still reaches the shutdown path rather than the
+        // default disposition, which would kill the process mid-sweep.
+        let shutdown = self.shutdown.clone();
+        let shutdown_flag = shutdown.clone();
+        let _ = ctrlc::set_handler(move || {
+            shutdown_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+
         let addr = format!("{}:{}", self.config.host, self.config.port);
         let server = Server::http(&addr)
             .map_err(|e| WasmrunError::from(format!("Failed to start agent server: {e}")))?;
@@ -487,14 +511,15 @@ impl AgentServer {
         let workers = resolve_workers(self.config.workers, self.config.max_concurrent_exec);
         print!("{}", self.banner(workers));
 
-        let cleanup_handle = SessionManager::start_cleanup_thread(self.session_manager.clone());
+        // Claim this instance's session tree before sweeping, so a server
+        // starting up alongside this one never mistakes it for an orphan.
+        session::heartbeat();
+        let swept = session::sweep_orphans(self.orphan_grace());
+        if swept > 0 {
+            println!("   Swept {swept} orphaned session tree(s) from a previous run\n");
+        }
 
-        // Graceful shutdown on Ctrl+C
-        let shutdown = self.shutdown.clone();
-        let shutdown_flag = shutdown.clone();
-        let _ = ctrlc::set_handler(move || {
-            shutdown_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-        });
+        let cleanup_handle = SessionManager::start_cleanup_thread(self.session_manager.clone());
 
         // Live auth-config reload: watch the auth file for mtime changes and
         // hot-swap the live config (auth mode only). A bad edit is logged and
@@ -540,8 +565,22 @@ impl AgentServer {
             }));
         }
 
+        // Draining: the listener is closed, `/ready` has been reporting
+        // `shutting_down` since the flag was set, and in-flight requests get
+        // `--shutdown-timeout` to finish before the process gives up on them.
+        let grace = this.config.shutdown_grace;
         eprintln!("\n🛑 Shutting down...");
-        pool.shutdown();
+        let in_flight = this.pool_stats.busy();
+        if in_flight > 0 {
+            eprintln!(
+                "   Draining {in_flight} in-flight request(s), up to {}s",
+                grace.as_secs()
+            );
+        }
+        let abandoned = pool.shutdown(grace);
+        if abandoned > 0 {
+            eprintln!("   Gave up on {abandoned} request(s) still running at the deadline");
+        }
         let destroyed = this.session_manager.destroy_all().unwrap_or(0);
         this.session_manager.stop_cleanup();
         let _ = cleanup_handle.join();
@@ -551,8 +590,18 @@ impl AgentServer {
         if destroyed > 0 {
             eprintln!("   Cleaned up {destroyed} session(s)");
         }
+        // Last, so the tree is gone only once its sessions are: a crash between
+        // the two would leave the heartbeat behind for the next sweep.
+        session::remove_instance_root();
         eprintln!("   Goodbye.");
         Ok(())
+    }
+
+    /// How stale another instance's heartbeat must be before its session tree
+    /// is swept. A comfortable multiple of the cleanup interval that refreshes
+    /// it, floored so a short interval cannot make the window jumpy.
+    fn orphan_grace(&self) -> Duration {
+        (self.config.session_config.cleanup_interval * ORPHAN_GRACE_TICKS).max(MIN_ORPHAN_GRACE)
     }
 
     /// The startup banner, built as a string so its security warnings can be
@@ -619,6 +668,11 @@ impl AgentServer {
             fmt_count(self.config.max_concurrent_exec, "exec(s)")
         );
         let _ = writeln!(b, "   Request workers: {workers} max");
+        let _ = writeln!(
+            b,
+            "   Shutdown drain:  {}s",
+            self.config.shutdown_grace.as_secs()
+        );
         match &self.config.auth {
             Some(auth) => {
                 let _ = writeln!(
@@ -2190,6 +2244,7 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec,
             workers: 0,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -2236,6 +2291,7 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec,
             workers: 0,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -2259,6 +2315,7 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec: 100,
             workers: 0,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
             auth: Some(Arc::new(auth_config_for(tenants))),
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -2292,6 +2349,7 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec: 100,
             workers: 0,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
             auth: Some(Arc::new(auth)),
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -4391,7 +4449,7 @@ mod tests {
     /// the server over HTTP hold no handle to the `Session` itself, and the
     /// file API takes text, not a WASM binary.
     fn session_work_dir(id: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("wasmrun-session-{id}"))
+        session::instance_root().join(format!("session-{id}"))
     }
 
     /// Poll the JSON metrics until `pred` holds. `false` if it never does —
@@ -4636,6 +4694,23 @@ mod tests {
         let server = test_server_with_concurrency(1);
         let _permit = server.exec_slots.try_acquire().unwrap();
         assert_eq!(server.readiness(), (false, "at_exec_capacity"));
+    }
+
+    // ── Lifecycle hygiene (0.22.9) ────────────────────────────────
+
+    #[test]
+    fn test_orphan_grace_scales_with_the_cleanup_interval_but_has_a_floor() {
+        let with_interval = |secs: u64| {
+            let mut config = AgentConfig::default();
+            config.session_config.cleanup_interval = Duration::from_secs(secs);
+            AgentServer::new(config).orphan_grace()
+        };
+        // A long interval means fewer heartbeats, so the window has to grow.
+        assert_eq!(with_interval(120), Duration::from_secs(1200));
+        // A short one must not shrink it: the floor keeps a briefly stalled
+        // server from being swept by one that starts up next to it.
+        assert_eq!(with_interval(1), MIN_ORPHAN_GRACE);
+        assert_eq!(with_interval(30), MIN_ORPHAN_GRACE);
     }
 
     #[test]

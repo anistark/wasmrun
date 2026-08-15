@@ -46,6 +46,120 @@ fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+// ── Instance directory and orphan sweeping ────────────────────────────
+
+/// Temp-dir prefix for one server process's whole session tree.
+const INSTANCE_DIR_PREFIX: &str = "wasmrun-agent-";
+/// Heartbeat file inside an instance root, refreshed by the cleanup thread.
+/// Lives one level *above* every session's preopen, so sandboxed code cannot
+/// reach it and fake its own liveness.
+const HEARTBEAT_FILE: &str = ".alive";
+/// Pre-0.22.9 layout: session dirs sat directly in the temp dir with no owner
+/// marker, so nothing can tell a live one from a leaked one.
+const LEGACY_SESSION_PREFIX: &str = "wasmrun-session-";
+/// How old a legacy directory must be before it is assumed abandoned. Long
+/// enough that a still-running older server is not swept out from under itself.
+const LEGACY_ORPHAN_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// This process's session tree: `<temp>/wasmrun-agent-<pid>-<start millis>`.
+///
+/// Every session directory lives under it, so a crashed server leaves exactly
+/// one identifiable tree behind and the next start can sweep it whole. The
+/// timestamp disambiguates a reused pid after a reboot.
+pub fn instance_root() -> &'static Path {
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        std::env::temp_dir().join(format!(
+            "{INSTANCE_DIR_PREFIX}{}-{millis}",
+            std::process::id()
+        ))
+    })
+}
+
+/// Create (or refresh) this instance's heartbeat, marking its tree as owned by
+/// a live process. Called at startup and on every cleanup tick; a tree whose
+/// heartbeat has gone stale is what another server treats as an orphan.
+pub fn heartbeat() {
+    let root = instance_root();
+    if std::fs::create_dir_all(root).is_err() {
+        return;
+    }
+    // Rewriting the file (rather than only touching it) keeps the contents
+    // useful to an operator staring at a leftover directory.
+    let _ = std::fs::write(
+        root.join(HEARTBEAT_FILE),
+        format!("pid={}\n", std::process::id()),
+    );
+}
+
+/// Remove this instance's whole tree, heartbeat included. Clean-shutdown path;
+/// a crash leaves it for the next server's sweep.
+pub fn remove_instance_root() {
+    let _ = std::fs::remove_dir_all(instance_root());
+}
+
+/// Delete session trees left behind by servers that are no longer running.
+///
+/// A crash or `SIGKILL` skips every destructor, so without this each unclean
+/// exit leaks its sessions' work directories into the temp dir forever.
+/// Returns the number of directories removed.
+pub fn sweep_orphans(grace: Duration) -> usize {
+    sweep_orphans_in(&std::env::temp_dir(), instance_root(), grace)
+}
+
+/// The testable core of [`sweep_orphans`]: sweep `tmp`, never touching `own`.
+///
+/// A tree counts as orphaned when its heartbeat is older than `grace` (or is
+/// missing, in which case the directory's own timestamp stands in). Liveness is
+/// inferred from the heartbeat rather than from the pid, because checking
+/// whether a pid is alive is not portable without another dependency, and a
+/// stale pid can be reused by an unrelated process.
+fn sweep_orphans_in(tmp: &Path, own: &Path, grace: Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(tmp) else {
+        return 0;
+    };
+    let now = SystemTime::now();
+    let mut swept = 0;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == own || !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        let (marker, threshold) = if name.starts_with(INSTANCE_DIR_PREFIX) {
+            let beat = path.join(HEARTBEAT_FILE);
+            let marker = if beat.exists() { beat } else { path.clone() };
+            (marker, grace)
+        } else if name.starts_with(LEGACY_SESSION_PREFIX) {
+            (path.clone(), LEGACY_ORPHAN_AGE)
+        } else {
+            continue;
+        };
+
+        if age_of(&marker, now).is_some_and(|age| age > threshold)
+            && std::fs::remove_dir_all(&path).is_ok()
+        {
+            swept += 1;
+        }
+    }
+    swept
+}
+
+/// How long ago `path` was last modified. `None` when that cannot be read, so
+/// an unreadable entry is never swept on a guess.
+fn age_of(path: &Path, now: SystemTime) -> Option<Duration> {
+    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    now.duration_since(modified).ok()
+}
+
 // ── Session state ─────────────────────────────────────────────────────
 
 /// Current lifecycle state of a session.
@@ -101,7 +215,7 @@ impl Session {
         owner: Option<String>,
     ) -> Result<Self, SessionError> {
         let id = generate_session_id();
-        let work_dir = std::env::temp_dir().join(format!("wasmrun-session-{id}"));
+        let work_dir = instance_root().join(format!("session-{id}"));
 
         std::fs::create_dir_all(&work_dir).map_err(|e| SessionError::IoError {
             message: format!("Failed to create session directory: {e}"),
@@ -568,6 +682,9 @@ impl SessionManager {
                 }
                 waited = Duration::ZERO;
                 let _ = manager.cleanup_expired();
+                // Same tick as the expiry sweep: says "this tree is still
+                // owned" to any server that starts up alongside this one.
+                heartbeat();
             }
         })
     }
@@ -660,6 +777,114 @@ mod tests {
             cleanup_interval: Duration::from_millis(100),
             limits: ResourceLimits::default(),
         }
+    }
+
+    // ── Instance tree and orphan sweeping (0.22.9) ────────────────
+
+    /// Backdate `path`'s mtime by `age`, so a sweep sees it as stale. Opened
+    /// read-only because `path` is a directory as often as a file.
+    fn backdate(path: &Path, age: Duration) {
+        let when = SystemTime::now() - age;
+        std::fs::File::open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    /// An instance tree under `tmp` holding one session directory.
+    fn fake_instance(tmp: &Path, name: &str) -> PathBuf {
+        let root = tmp.join(name);
+        std::fs::create_dir_all(root.join("session-abc")).unwrap();
+        std::fs::write(root.join("session-abc").join("main.js"), "1").unwrap();
+        std::fs::write(root.join(HEARTBEAT_FILE), "pid=1\n").unwrap();
+        root
+    }
+
+    #[test]
+    fn test_instance_root_is_unique_per_process_and_holds_sessions() {
+        let root = instance_root();
+        let name = root.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with(INSTANCE_DIR_PREFIX), "{name}");
+        assert!(
+            name.contains(&std::process::id().to_string()),
+            "the pid identifies the owner: {name}"
+        );
+        // Sessions live one level below, so the heartbeat is outside every
+        // sandbox's preopen and guest code cannot fake its own liveness.
+        let session = Session::new(Duration::from_secs(60), ResourceLimits::default(), None)
+            .expect("session");
+        assert_eq!(session.work_dir().parent().unwrap(), root);
+    }
+
+    #[test]
+    fn test_heartbeat_creates_and_refreshes_the_marker() {
+        heartbeat();
+        let beat = instance_root().join(HEARTBEAT_FILE);
+        assert!(beat.exists());
+        backdate(&beat, Duration::from_secs(600));
+        let stale = std::fs::metadata(&beat).unwrap().modified().unwrap();
+        heartbeat();
+        let fresh = std::fs::metadata(&beat).unwrap().modified().unwrap();
+        assert!(fresh > stale, "the heartbeat was not refreshed");
+    }
+
+    #[test]
+    fn test_sweep_removes_only_trees_whose_heartbeat_went_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        let grace = Duration::from_secs(300);
+
+        let live = fake_instance(tmp.path(), "wasmrun-agent-111-1");
+        let dead = fake_instance(tmp.path(), "wasmrun-agent-222-2");
+        let own = fake_instance(tmp.path(), "wasmrun-agent-333-3");
+        let unrelated = tmp.path().join("something-else");
+        std::fs::create_dir_all(&unrelated).unwrap();
+
+        backdate(&dead.join(HEARTBEAT_FILE), Duration::from_secs(3600));
+        // Own tree is stale too: it must still be spared, since sweeping it
+        // would delete the running server's own live sessions.
+        backdate(&own.join(HEARTBEAT_FILE), Duration::from_secs(3600));
+
+        assert_eq!(sweep_orphans_in(tmp.path(), &own, grace), 1);
+        assert!(!dead.exists(), "a dead instance's tree survived");
+        assert!(live.exists(), "a live instance's tree was swept");
+        assert!(own.exists(), "the sweeping server deleted its own tree");
+        assert!(unrelated.exists(), "an unrelated temp dir was touched");
+    }
+
+    #[test]
+    fn test_sweep_treats_a_missing_heartbeat_as_the_directory_age() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = fake_instance(tmp.path(), "wasmrun-agent-444-4");
+        std::fs::remove_file(root.join(HEARTBEAT_FILE)).unwrap();
+
+        // Freshly created, so it is assumed to be mid-startup and left alone.
+        assert_eq!(sweep_orphans_in(tmp.path(), Path::new("/nope"), grace()), 0);
+        assert!(root.exists());
+
+        backdate(&root, Duration::from_secs(3600));
+        assert_eq!(sweep_orphans_in(tmp.path(), Path::new("/nope"), grace()), 1);
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn test_sweep_collects_old_pre_0_22_9_session_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let recent = tmp.path().join("wasmrun-session-aaa");
+        let ancient = tmp.path().join("wasmrun-session-bbb");
+        std::fs::create_dir_all(&recent).unwrap();
+        std::fs::create_dir_all(&ancient).unwrap();
+        backdate(&ancient, LEGACY_ORPHAN_AGE + Duration::from_secs(60));
+
+        assert_eq!(sweep_orphans_in(tmp.path(), Path::new("/nope"), grace()), 1);
+        assert!(!ancient.exists(), "an abandoned legacy dir survived");
+        assert!(
+            recent.exists(),
+            "a legacy dir a running old server may still own was swept"
+        );
+    }
+
+    fn grace() -> Duration {
+        Duration::from_secs(300)
     }
 
     // ── Session ID generation ─────────────────────────────────────

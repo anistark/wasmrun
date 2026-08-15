@@ -28,6 +28,7 @@ wasmrun agent [OPTIONS]
 | `--max-body` | `32` | Maximum accepted request body size (MB) |
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
 | `--workers` | `0` | Maximum HTTP request-handling threads (`0` = auto, derived from `--max-concurrent-exec`) |
+| `--shutdown-timeout` | `10` | Seconds to let in-flight requests finish on shutdown before the process exits |
 | `--npm-registry` | `https://registry.npmjs.org` | npm registry base URL for dependency vendoring |
 | `--allow-cors` | off | Enable wildcard CORS |
 | `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted; see [Observability](./usage/observability.md)) |
@@ -68,6 +69,38 @@ wasmrun agent --host 0.0.0.0
 - Terminate TLS at the proxy and forward to `http://127.0.0.1:8430`
 - Keep `--auth` on, so a key is required even if the port is reached directly
 - Point liveness and readiness probes at `/health` and `/ready` (see [Observability](./usage/observability.md#health-and-readiness))
+
+## Restarts and shutdown
+
+**Sessions do not survive a restart.** They live in memory, with their files in a temp directory, and a restart destroys all of them. This is an explicit non-goal: there is no persistence, no handoff between instances, and no rolling restart that preserves work. A client should treat a 404 on a session it holds as "create a new one" (see [Sessions](./usage/sessions.md#sessions-do-not-survive-a-restart)).
+
+That fixes the supported deployment shape:
+
+- **One instance owns its sessions.** Behind a load balancer, requests for a session must reach the instance that created it, since any other instance returns 404. Route by session id, or run a single instance per pool.
+- **Scale by adding pools, not replicas.** Two instances behind a round-robin balancer will appear to lose sessions at random, which is a routing mistake rather than a bug.
+
+### Draining
+
+`SIGINT` (Ctrl+C), `SIGTERM` and `SIGHUP` all start a clean shutdown. `SIGTERM` matters most: it is what `docker stop`, Kubernetes and systemd send, and a server that ignored it would be `SIGKILL`ed at the end of the stop timeout with its session directories left behind.
+
+The sequence:
+
+1. The listener stops accepting; anything already accepted gets **503**
+2. `/ready` reports `shutting_down` (it has done so since the signal arrived)
+3. In-flight requests get up to `--shutdown-timeout` seconds to finish. A long execution can outlive that window; it is abandoned at the deadline and the count is logged
+4. Every session is destroyed and its directory removed
+
+Give the orchestrator's stop timeout more room than `--shutdown-timeout`, or it will `SIGKILL` mid-drain. To take an instance out of rotation before the signal, deregister it from the balancer first (a `preStop` hook, or waiting one probe interval after `/ready` starts failing); the agent does not delay its own shutdown to wait for probes.
+
+### Orphaned session directories
+
+A crash or `SIGKILL` runs no destructors, so the session tree survives the process. Each server owns one directory, `<temp>/wasmrun-agent-<pid>-<timestamp>/`, containing every session it created and a heartbeat file it refreshes on each cleanup tick.
+
+At startup a server sweeps the temp directory and removes any such tree whose heartbeat has gone stale, meaning no live server has touched it for ten cleanup intervals (at least five minutes). A running server's tree is never swept, because its heartbeat is current. Directories from before this scheme (`wasmrun-session-*`, one per session at the top of the temp directory) are collected once they are more than a day old. The count is reported at startup:
+
+```
+   Swept 3 orphaned session tree(s) from a previous run
+```
 
 ## Authentication
 

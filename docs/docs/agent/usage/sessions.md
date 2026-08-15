@@ -108,6 +108,15 @@ Destroys the session and cleans up its filesystem.
 3. **Expired**: after `timeout` seconds of inactivity, the session is marked expired
 4. **Cleaned up**: a background thread periodically removes expired sessions and their files
 
+### Sessions do not survive a restart
+
+Sessions live in the server's memory, with their files in a temp directory. **Restarting the server destroys every session**, and there is no persistence, handoff, or recovery: this is a deliberate non-goal, not a gap to be worked around. A sandbox is cheap to recreate and its contents are, by construction, whatever the agent just uploaded.
+
+Two consequences for a client:
+
+- **Treat 404 on a known session id as "make a new one".** It means the session is gone, whether from a restart, an idle timeout, or a tenant mismatch. An agent that recreates the session and re-uploads its files handles all three without special-casing any of them.
+- **A session is pinned to one server process.** Behind a load balancer, requests for a session must reach the instance that created it, since any other instance answers 404. Either route by session id (sticky by the `session_id` in the path) or run a single instance. See [Restarts and shutdown](../index.md#restarts-and-shutdown) for the deployment shape.
+
 ## Error Responses
 
 | Status | When |

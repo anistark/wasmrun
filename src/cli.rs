@@ -380,6 +380,15 @@ pub enum Commands {
         )]
         workers: usize,
 
+        /// How long shutdown waits for in-flight requests (default: 10)
+        #[arg(
+            long,
+            value_name = "SECS",
+            default_value_t = 10,
+            help = "Seconds to let in-flight requests finish on shutdown"
+        )]
+        shutdown_timeout: u64,
+
         /// npm registry base URL used to vendor `dependencies` requests
         #[arg(
             long,
