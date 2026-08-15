@@ -155,6 +155,14 @@ const ORPHAN_GRACE_TICKS: u32 = 10;
 /// Floor on that window, so a short `cleanup_interval` cannot shrink it to the
 /// point where a briefly stalled server looks dead.
 const MIN_ORPHAN_GRACE: Duration = Duration::from_secs(300);
+/// Default npm cache ceiling, in MB.
+pub const DEFAULT_MAX_CACHE_MB: u64 = 2048;
+/// How often the cache is trimmed while the server runs. Long, because the
+/// pass walks the whole cache and packages arrive in bursts, not steadily.
+const CACHE_SWEEP_INTERVAL: Duration = Duration::from_secs(300);
+/// How recently an entry must have been installed from to be spared. Covers
+/// any in-progress copy out of the cache by orders of magnitude.
+const CACHE_ENTRY_MIN_AGE: Duration = Duration::from_secs(600);
 
 #[derive(Clone)]
 pub struct AgentConfig {
@@ -181,6 +189,9 @@ pub struct AgentConfig {
     pub workers: usize,
     /// How long shutdown waits for in-flight requests before abandoning them.
     pub shutdown_grace: Duration,
+    /// Ceiling on the shared npm cache in bytes. `None` = unlimited, which
+    /// still clears interrupted-install debris.
+    pub max_cache_bytes: Option<u64>,
     /// API-key authentication. `None` = open mode (no auth; back-compat). When
     /// `Some`, every `/api/v1/*` request must present a valid `Bearer` key and
     /// sessions are isolated per tenant.
@@ -206,6 +217,7 @@ impl Default for AgentConfig {
             max_concurrent_exec: DEFAULT_MAX_CONCURRENT_EXEC,
             workers: 0,
             shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            max_cache_bytes: Some(DEFAULT_MAX_CACHE_MB * 1024 * 1024),
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -519,6 +531,11 @@ impl AgentServer {
             println!("   Swept {swept} orphaned session tree(s) from a previous run\n");
         }
 
+        // The npm and runtime caches are shared across sessions and outlive
+        // every one of them, so nothing else would ever bound them.
+        report_cache_sweep(sweep_caches(self.config.max_cache_bytes));
+        let cache_handle = spawn_cache_sweeper(self.config.max_cache_bytes, shutdown.clone());
+
         let cleanup_handle = SessionManager::start_cleanup_thread(self.session_manager.clone());
 
         // Live auth-config reload: watch the auth file for mtime changes and
@@ -584,6 +601,7 @@ impl AgentServer {
         let destroyed = this.session_manager.destroy_all().unwrap_or(0);
         this.session_manager.stop_cleanup();
         let _ = cleanup_handle.join();
+        let _ = cache_handle.join();
         if let Some(handle) = auth_watcher {
             let _ = handle.join();
         }
@@ -672,6 +690,14 @@ impl AgentServer {
             b,
             "   Shutdown drain:  {}s",
             self.config.shutdown_grace.as_secs()
+        );
+        let _ = writeln!(
+            b,
+            "   npm cache cap:   {}",
+            match self.config.max_cache_bytes {
+                Some(bytes) => format!("{} MB (shared, host-wide)", bytes / (1024 * 1024)),
+                None => "unlimited".to_string(),
+            }
         );
         match &self.config.auth {
             Some(auth) => {
@@ -1872,6 +1898,67 @@ impl AgentServer {
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
+/// One pass over both host-level caches: trim the npm cache to `max_bytes`
+/// (`None` = unlimited, debris only) and drop runtime artifacts left behind by
+/// an earlier wasmhub pin. Returns the npm result and the runtime file count.
+fn sweep_caches(max_bytes: Option<u64>) -> (vendor::Eviction, usize) {
+    let npm = match vendor::default_cache_dir() {
+        Some(root) => vendor::evict_npm_cache(&root, max_bytes.unwrap_or(0), CACHE_ENTRY_MIN_AGE),
+        None => vendor::Eviction::default(),
+    };
+    let runtimes = crate::runtime::runtime_cache::RuntimeCache::new()
+        .map(|c| c.prune_unreferenced())
+        .unwrap_or(0);
+    (npm, runtimes)
+}
+
+/// Log a sweep, and only a sweep that did something: a quiet cache should stay
+/// quiet in the access log.
+fn report_cache_sweep((npm, runtimes): (vendor::Eviction, usize)) {
+    if npm.removed > 0 {
+        eprintln!(
+            "Cache: evicted {} npm entr(ies), freed {}, {} in use",
+            npm.removed,
+            fmt_mb(npm.freed_bytes),
+            fmt_mb(npm.total_bytes)
+        );
+    }
+    if runtimes > 0 {
+        eprintln!("Cache: removed {runtimes} superseded runtime artifact(s)");
+    }
+    if npm.still_over {
+        eprintln!(
+            "Cache: still over the ceiling at {}; everything left was installed from too recently to evict",
+            fmt_mb(npm.total_bytes)
+        );
+    }
+}
+
+fn fmt_mb(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+}
+
+/// Trim the caches on a long interval for as long as the server runs.
+///
+/// Sleeps in slices so shutdown is not held up by a pass that is not due.
+fn spawn_cache_sweeper(
+    max_bytes: Option<u64>,
+    shutdown: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut waited = Duration::ZERO;
+        while !shutdown.load(Ordering::Relaxed) {
+            std::thread::sleep(ACCEPT_POLL_INTERVAL);
+            waited += ACCEPT_POLL_INTERVAL;
+            if waited < CACHE_SWEEP_INTERVAL {
+                continue;
+            }
+            waited = Duration::ZERO;
+            report_cache_sweep(sweep_caches(max_bytes));
+        }
+    })
+}
+
 /// Whether `host` resolves to this machine only. Conservative: a name other
 /// than `localhost` is treated as remote rather than resolved, so an unknown
 /// host never talks its way past [`validate_bind`].
@@ -2245,6 +2332,7 @@ mod tests {
             max_concurrent_exec,
             workers: 0,
             shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            max_cache_bytes: Some(DEFAULT_MAX_CACHE_MB * 1024 * 1024),
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -2292,6 +2380,7 @@ mod tests {
             max_concurrent_exec,
             workers: 0,
             shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            max_cache_bytes: Some(DEFAULT_MAX_CACHE_MB * 1024 * 1024),
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -2316,6 +2405,7 @@ mod tests {
             max_concurrent_exec: 100,
             workers: 0,
             shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            max_cache_bytes: Some(DEFAULT_MAX_CACHE_MB * 1024 * 1024),
             auth: Some(Arc::new(auth_config_for(tenants))),
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -2350,6 +2440,7 @@ mod tests {
             max_concurrent_exec: 100,
             workers: 0,
             shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            max_cache_bytes: Some(DEFAULT_MAX_CACHE_MB * 1024 * 1024),
             auth: Some(Arc::new(auth)),
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),

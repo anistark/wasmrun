@@ -380,6 +380,14 @@ pub enum Commands {
         )]
         workers: usize,
 
+        /// Ceiling on the shared npm package cache in MB (default: 2048, 0 = unlimited)
+        #[arg(
+            long,
+            default_value_t = 2048,
+            help = "Maximum size of the shared npm cache in MB (0 = unlimited)"
+        )]
+        max_cache_size: u64,
+
         /// How long shutdown waits for in-flight requests (default: 10)
         #[arg(
             long,

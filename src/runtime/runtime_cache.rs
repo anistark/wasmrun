@@ -251,6 +251,48 @@ impl RuntimeCache {
         Some(meta.version)
     }
 
+    /// Delete runtime artifacts no longer referenced by any language's
+    /// metadata, and return how many went.
+    ///
+    /// Bumping the wasmhub pin points each `<lang>.json` at a new `.wasm` and
+    /// leaves the old one behind, so without this the runtime cache grows by
+    /// one full artifact per release for as long as the host lives. Only the
+    /// current metadata is trusted: an unreferenced artifact is unreachable by
+    /// definition, since every read goes through a `<lang>.json`.
+    pub fn prune_unreferenced(&self) -> usize {
+        let Ok(entries) = fs::read_dir(&self.cache_dir) else {
+            return 0;
+        };
+        let files: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect();
+
+        let referenced: std::collections::HashSet<String> = files
+            .iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+            .filter_map(|p| fs::read_to_string(p).ok())
+            .filter_map(|body| serde_json::from_str::<CacheMetadata>(&body).ok())
+            .map(|meta| meta.filename)
+            .collect();
+
+        let mut removed = 0;
+        for path in files {
+            if path.extension().is_some_and(|e| e == "json") {
+                continue;
+            }
+            let keep = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| referenced.contains(n));
+            if !keep && fs::remove_file(&path).is_ok() {
+                removed += 1;
+            }
+        }
+        removed
+    }
+
     pub fn clear_cache(&self, language: Option<&str>) -> Result<()> {
         match language {
             Some(lang) => {
@@ -378,6 +420,37 @@ mod tests {
         assert_eq!(format_bytes(1024), "1.0 KB");
         assert_eq!(format_bytes(1536), "1.5 KB");
         assert_eq!(format_bytes(1048576), "1.0 MB");
+    }
+
+    #[test]
+    fn test_prune_drops_artifacts_no_metadata_points_at() {
+        // What a wasmhub pin bump leaves behind: the old artifact stays on
+        // disk while `<lang>.json` moves on to the new one.
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = RuntimeCache::with_cache_dir(tmp.path().to_path_buf()).unwrap();
+        let meta = CacheMetadata {
+            language: "nodejs".into(),
+            version: "0.4.0".into(),
+            filename: "nodejs-0.4.0.wasm".into(),
+            sha256: "abc".into(),
+            size: 3,
+            wasi: "preview1".into(),
+            wasmhub_release: "v0.4.0".into(),
+        };
+        fs::write(
+            tmp.path().join("nodejs.json"),
+            serde_json::to_string(&meta).unwrap(),
+        )
+        .unwrap();
+        fs::write(tmp.path().join("nodejs-0.4.0.wasm"), b"new").unwrap();
+        fs::write(tmp.path().join("nodejs-0.3.2.wasm"), b"old").unwrap();
+
+        assert_eq!(cache.prune_unreferenced(), 1);
+        assert!(tmp.path().join("nodejs-0.4.0.wasm").exists());
+        assert!(!tmp.path().join("nodejs-0.3.2.wasm").exists());
+        assert!(tmp.path().join("nodejs.json").exists());
+        // Idempotent: a pruned cache has nothing left to give.
+        assert_eq!(cache.prune_unreferenced(), 0);
     }
 
     #[test]

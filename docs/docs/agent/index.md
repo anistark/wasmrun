@@ -29,6 +29,7 @@ wasmrun agent [OPTIONS]
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
 | `--workers` | `0` | Maximum HTTP request-handling threads (`0` = auto, derived from `--max-concurrent-exec`) |
 | `--shutdown-timeout` | `10` | Seconds to let in-flight requests finish on shutdown before the process exits |
+| `--max-cache-size` | `2048` | Ceiling on the shared npm package cache in MB (`0` = unlimited) |
 | `--npm-registry` | `https://registry.npmjs.org` | npm registry base URL for dependency vendoring |
 | `--allow-cors` | off | Enable wildcard CORS |
 | `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted; see [Observability](./usage/observability.md)) |
@@ -101,6 +102,26 @@ At startup a server sweeps the temp directory and removes any such tree whose he
 ```
    Swept 3 orphaned session tree(s) from a previous run
 ```
+
+## Disk and caches
+
+Two caches live in the operator's home directory, outside any session, and are shared by every session and tenant on the host:
+
+| Path | Holds | Bounded by |
+|------|-------|-----------|
+| `~/.wasmrun/npm/` | Downloaded npm packages, per `name@version`, plus their CommonJS-lowered forms | `--max-cache-size` (default 2048 MB) |
+| `~/.wasmrun/runtimes/` | wasmhub language runtimes (`.wasm`) and their metadata | One artifact per language; superseded ones are deleted |
+
+Both are swept at startup and every five minutes after that. The npm cache is trimmed **least-recently-used first** until it fits under the ceiling, where "used" means the last time an install read the entry, not when it was downloaded. Entries installed from within the last ten minutes are never removed, so a package being copied into a session cannot be deleted mid-install. If that leaves the cache over its ceiling, the overage is logged rather than forced:
+
+```
+Cache: evicted 12 npm entr(ies), freed 340.2 MB, 1907.4 MB in use
+Cache: removed 1 superseded runtime artifact(s)
+```
+
+Directories left behind by an install that was interrupted partway are always cleared, ceiling or not. Bumping the pinned wasmhub release points each language at a new artifact and the old one is removed on the next sweep; without that, the runtime cache would grow by one full runtime per release.
+
+Setting `--max-cache-size 0` disables the size ceiling entirely, leaving only the debris and superseded-runtime cleanup. Evicting a package costs a re-download the next time it is needed, never correctness: every install verifies integrity against the registry regardless of what the cache holds.
 
 ## Authentication
 
