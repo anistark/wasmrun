@@ -356,6 +356,14 @@ pub enum Commands {
         )]
         max_concurrent_exec: usize,
 
+        /// Maximum HTTP request-handling threads (default: 0 = auto)
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Maximum concurrent HTTP request workers (0 = auto, from --max-concurrent-exec)"
+        )]
+        workers: usize,
+
         /// npm registry base URL used to vendor `dependencies` requests
         #[arg(
             long,

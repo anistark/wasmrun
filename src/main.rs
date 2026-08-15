@@ -186,6 +186,7 @@ fn main() {
             max_disk,
             max_body,
             max_concurrent_exec,
+            workers,
             npm_registry,
             allow_cors,
             verbose,
@@ -193,7 +194,7 @@ fn main() {
             hash_key,
         }) => {
             debug_println!(
-                "Processing agent command: port={}, timeout={}, max_sessions={}, max_memory={}MB, max_fuel={}, max_output={}MB, max_file_size={}MB, max_disk={}MB, max_body={}MB, max_concurrent_exec={}",
+                "Processing agent command: port={}, timeout={}, max_sessions={}, max_memory={}MB, max_fuel={}, max_output={}MB, max_file_size={}MB, max_disk={}MB, max_body={}MB, max_concurrent_exec={}, workers={}",
                 port,
                 timeout,
                 max_sessions,
@@ -203,7 +204,8 @@ fn main() {
                 max_file_size,
                 max_disk,
                 max_body,
-                max_concurrent_exec
+                max_concurrent_exec,
+                workers
             );
             commands::handle_agent_command(
                 *port,
@@ -216,6 +218,7 @@ fn main() {
                 *max_disk,
                 *max_body,
                 *max_concurrent_exec,
+                *workers,
                 npm_registry,
                 *allow_cors,
                 *verbose,

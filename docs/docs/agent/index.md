@@ -25,15 +25,24 @@ wasmrun agent [OPTIONS]
 | `--max-disk` | `100` | Maximum total disk usage per session (MB) |
 | `--max-body` | `32` | Maximum accepted request body size (MB) |
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
+| `--workers` | `0` | Maximum HTTP request-handling threads (`0` = auto, derived from `--max-concurrent-exec`) |
 | `--npm-registry` | `https://registry.npmjs.org` | npm registry base URL for dependency vendoring |
 | `--allow-cors` | off | Enable wildcard CORS |
 | `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted; see [Observability](./usage/observability.md)) |
 | `--auth <PATH>` | off | Path to a TOML auth config; enables API-key auth & tenant isolation (omit = open) |
 | `--hash-key <KEY>` | - | Print `sha256(KEY)` for the auth config and exit (does not start the server) |
 
-For every size/count limit, `0` means **unlimited**. Memory, fuel, output, file-size, and disk caps are **per session** and can be overridden per session at creation (see [Sessions](./usage/sessions.md)); body size and exec concurrency are **server-wide** ingress guards.
+For every size/count limit, `0` means **unlimited** (`--workers` is the exception: `0` means auto). Memory, fuel, output, file-size, and disk caps are **per session** and can be overridden per session at creation (see [Sessions](./usage/sessions.md)); body size and exec concurrency are **server-wide** ingress guards.
 
 All endpoints are under `http://<host>:<port>/api/v1/`.
+
+## Request concurrency
+
+Requests are handled on a pool of worker threads, so a long execution never blocks anything else: other sessions, other tenants, file writes, and `/metrics` all stay responsive while an exec runs to its timeout.
+
+Threads are spawned **on demand** and capped at `--workers`, so an idle server holds none of them. When every worker is busy the server stops accepting until one frees up, leaving the excess queued in the TCP backlog rather than growing threads without limit.
+
+`--workers 0` (the default) sizes the pool from the exec cap: `--max-concurrent-exec` plus 16 spare workers for requests that do not execute anything, or 512 when execution concurrency is unlimited. A request that starts an execution is occupied for its whole duration, so a pool smaller than `--max-concurrent-exec` becomes the real ceiling on concurrent executions. Set `--workers` explicitly to bound memory on a small host, and watch `wasmrun_agent_workers_live` and `wasmrun_agent_requests_in_flight` in [the metrics](./usage/observability.md) to see how much of the pool is actually in use.
 
 ## Authentication
 

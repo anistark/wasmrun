@@ -53,7 +53,9 @@ wasmrun_agent_sessions_active 3
   "sessions_active": 3,
   "sessions_total": 3,
   "exec_in_flight": 1,
-  "sessions_disk_bytes": 16384
+  "sessions_disk_bytes": 16384,
+  "workers_live": 4,
+  "requests_in_flight": 2
 }
 ```
 
@@ -71,6 +73,8 @@ wasmrun_agent_sessions_active 3
 | `wasmrun_agent_sessions_total` | gauge | Sessions tracked, including expired-but-not-yet-cleaned |
 | `wasmrun_agent_exec_in_flight` | gauge | Exec workers currently running |
 | `wasmrun_agent_sessions_disk_bytes` | gauge | Total on-disk footprint across active sessions (bytes) |
+| `wasmrun_agent_workers_live` | gauge | Request-handling threads currently spawned (see [`--workers`](../index.md#request-concurrency)) |
+| `wasmrun_agent_requests_in_flight` | gauge | Requests currently being handled |
 
 Average execution duration is `exec_duration_ms_sum / exec_duration_ms_count`.
 

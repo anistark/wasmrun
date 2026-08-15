@@ -10,6 +10,7 @@ pub mod esm;
 pub mod executor;
 pub mod limits;
 pub mod metrics;
+pub mod pool;
 pub mod server;
 pub mod session;
 pub mod shell;

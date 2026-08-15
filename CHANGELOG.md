@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Concurrent request handling in the agent server**: requests are handled on a pool of worker threads instead of one at a time on the accept loop. A running execution no longer blocks every other request on the server, so session creation, file writes, `/metrics` and other tenants stay responsive while code runs to its timeout
+  - This is what makes `--max-concurrent-exec` and the per-tenant `max_concurrent_exec` cap mean anything over HTTP. Real concurrency used to be 1, so neither cap could ever be reached by an actual client
+  - New `--workers` flag caps the pool. The default (`0`) sizes it from `--max-concurrent-exec` with headroom for requests that do not execute anything; threads are spawned on demand, so an idle server holds none
+  - New `wasmrun_agent_workers_live` and `wasmrun_agent_requests_in_flight` gauges report pool usage
+  - A panicking request handler is now contained to its own worker instead of taking the server down with it
 - **Standard input**: executions accept a `stdin` field, delivered to the program on file descriptor 0. WASI `fd_read` on fd 0 previously always reported end-of-file, so there was no way to give a sandboxed program input at all
   - Reads resume where the last one stopped and report end-of-file once the input is drained, so a program can consume it in as many reads as it likes and never blocks
   - Input is per execution: it rewinds every request, and an execution that sends none reads end-of-file rather than inheriting the previous run's leftovers
@@ -36,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Options the sandbox transpiler cannot apply (`experimentalDecorators`, `emitDecoratorMetadata`, and `jsx` modes other than the classic runtime) fail the request by name instead of silently producing broken output
 
 ### Changed
+- **Ctrl+C stops the agent server promptly**: shutdown no longer waits for the next request to arrive, or for the session-cleanup thread to finish its 30-second sleep. In-flight requests get a short grace period to finish first
 - **Dist-tag dependencies now dedupe**: a tag such as `latest` is resolved to the concrete version it points at once per request, before anything installs, so it dedupes against an already-installed copy and locks like an explicit version. Previously a tag could never match an installed version, so every request reinstalled it and a transitive `latest` always nested a duplicate copy
 - **Full npm version-range support**: dependency ranges now accept the complete npm grammar, including comparator sets (`>=1.2.0 <2.0.0`), unions (`^1 || ^2`), hyphen ranges (`1.2.0 - 1.4.0`), and the `<`, `<=`, `>`, `=` operators. Previously these were rejected, which meant a single composite range anywhere in a transitive dependency tree failed the whole install even when every package involved was pure JavaScript
   - Partial versions widen bounds as npm specifies, so `>1.2` excludes all of `1.2.x`
