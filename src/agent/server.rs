@@ -143,9 +143,21 @@ const EXEC_THREAD_STACK_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 /// Default ceiling on concurrent exec workers when none is configured.
 const DEFAULT_MAX_CONCURRENT_EXEC: usize = 100;
+/// Default bind address. Loopback, not `0.0.0.0`: the server runs arbitrary
+/// WASM and JavaScript on request, so reaching it from another host is opt-in
+/// (`--host`) and, without auth, needs an explicit `--insecure`.
+pub const DEFAULT_HOST: &str = "127.0.0.1";
 
+#[derive(Clone)]
 pub struct AgentConfig {
     pub port: u16,
+    /// Address to bind. Defaults to [`DEFAULT_HOST`] (loopback); `0.0.0.0`
+    /// exposes the server on every interface, which [`validate_bind`] only
+    /// allows with auth or `insecure`.
+    pub host: String,
+    /// Bind a non-loopback address even with auth disabled. The escape hatch
+    /// for a genuinely trusted network; never a good default.
+    pub insecure: bool,
     pub session_config: SessionConfig,
     pub allow_cors: bool,
     pub verbose: bool,
@@ -175,6 +187,8 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             port: 8430,
+            host: DEFAULT_HOST.to_string(),
+            insecure: false,
             session_config: SessionConfig::default(),
             allow_cors: false,
             verbose: false,
@@ -213,6 +227,12 @@ impl ExecSlots {
     /// `exec_in_flight` metrics gauge.
     fn in_flight(&self) -> u64 {
         self.in_flight.load(Ordering::Acquire) as u64
+    }
+
+    /// Whether every slot is taken, so the next exec would be refused. Always
+    /// `false` when unlimited.
+    fn saturated(&self) -> bool {
+        self.max != 0 && self.in_flight.load(Ordering::Acquire) >= self.max
     }
 
     /// Try to take a slot. Returns `None` when saturated (caller → 429).
@@ -375,6 +395,12 @@ pub struct AgentServer {
     live_auth: Option<Arc<RwLock<Arc<AuthConfig>>>>,
     /// The auth file to watch for live reloads (`None` if `--auth` was not set).
     auth_path: Option<PathBuf>,
+    /// When the process started serving, for `/health`'s uptime.
+    started: Instant,
+    /// Set by Ctrl+C. Owned here rather than by `start()` so `/ready` can fail
+    /// the probe as soon as shutdown begins, which is what lets a load balancer
+    /// take the instance out before the listener stops.
+    shutdown: Arc<AtomicBool>,
 }
 
 impl AgentServer {
@@ -392,6 +418,8 @@ impl AgentServer {
             pool_stats: Arc::new(PoolStats::default()),
             live_auth,
             auth_path,
+            started: Instant::now(),
+            shutdown: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -446,17 +474,23 @@ impl AgentServer {
     }
 
     pub fn start(self) -> Result<()> {
-        let addr = format!("0.0.0.0:{}", self.config.port);
+        validate_bind(
+            &self.config.host,
+            self.config.auth.is_some(),
+            self.config.insecure,
+        )?;
+
+        let addr = format!("{}:{}", self.config.host, self.config.port);
         let server = Server::http(&addr)
             .map_err(|e| WasmrunError::from(format!("Failed to start agent server: {e}")))?;
 
         let workers = resolve_workers(self.config.workers, self.config.max_concurrent_exec);
-        self.print_banner(workers);
+        print!("{}", self.banner(workers));
 
         let cleanup_handle = SessionManager::start_cleanup_thread(self.session_manager.clone());
 
         // Graceful shutdown on Ctrl+C
-        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let shutdown = self.shutdown.clone();
         let shutdown_flag = shutdown.clone();
         let _ = ctrlc::set_handler(move || {
             shutdown_flag.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -521,7 +555,12 @@ impl AgentServer {
         Ok(())
     }
 
-    fn print_banner(&self, workers: usize) {
+    /// The startup banner, built as a string so its security warnings can be
+    /// asserted on in tests rather than only read by eye.
+    fn banner(&self, workers: usize) -> String {
+        use std::fmt::Write as _;
+
+        let host = &self.config.host;
         let port = self.config.port;
         let max = self.config.session_config.max_sessions;
         let timeout = self.config.session_config.default_timeout.as_secs();
@@ -531,63 +570,122 @@ impl AgentServer {
         } else {
             "restricted"
         };
-        println!("\n🤖 Wasmrun Agent Server");
-        println!("   Endpoint:        http://0.0.0.0:{port}{API_PREFIX}");
-        println!("   Max sessions:    {max}");
-        println!("   Session timeout: {timeout}s");
-        println!(
+        let exposed = !is_loopback_host(host);
+        let reach = if exposed {
+            "reachable from other hosts"
+        } else {
+            "loopback only"
+        };
+
+        let mut b = String::new();
+        let _ = writeln!(b, "\n🤖 Wasmrun Agent Server");
+        let _ = writeln!(b, "   Endpoint:        http://{host}:{port}{API_PREFIX}");
+        let _ = writeln!(b, "   Bind:            {host} ({reach}), plaintext HTTP");
+        let _ = writeln!(b, "   Max sessions:    {max}");
+        let _ = writeln!(b, "   Session timeout: {timeout}s");
+        let _ = writeln!(
+            b,
             "   Memory limit:    {}",
             fmt_pages_mb(limits.max_memory_pages)
         );
-        println!(
+        let _ = writeln!(
+            b,
             "   Fuel limit:      {}",
             fmt_opt_u64(limits.max_fuel, "instructions")
         );
-        println!(
+        let _ = writeln!(
+            b,
             "   Output limit:    {}",
             fmt_bytes_mb(limits.max_output_bytes.map(|b| b as u64))
         );
-        println!("   File size limit: {}", fmt_bytes_mb(limits.max_file_size));
-        println!(
+        let _ = writeln!(
+            b,
+            "   File size limit: {}",
+            fmt_bytes_mb(limits.max_file_size)
+        );
+        let _ = writeln!(
+            b,
             "   Disk limit:      {}",
             fmt_bytes_mb(limits.max_disk_bytes)
         );
-        println!(
+        let _ = writeln!(
+            b,
             "   Max body size:   {}",
             fmt_bytes_mb(self.config.max_body_bytes.map(|b| b as u64))
         );
-        println!(
+        let _ = writeln!(
+            b,
             "   Max concurrent:  {}",
             fmt_count(self.config.max_concurrent_exec, "exec(s)")
         );
-        println!("   Request workers: {workers} max");
+        let _ = writeln!(b, "   Request workers: {workers} max");
         match &self.config.auth {
             Some(auth) => {
-                println!(
+                let _ = writeln!(
+                    b,
                     "   Auth:            enabled ({} tenants)",
                     auth.tenant_count()
                 );
                 if let Some(path) = &self.auth_path {
-                    println!("   Auth reload:     watching {}", path.display());
+                    let _ = writeln!(b, "   Auth reload:     watching {}", path.display());
                 }
             }
-            None => println!("   Auth:            disabled (open)"),
+            None => {
+                let _ = writeln!(b, "   Auth:            disabled (open)");
+            }
         }
-        println!("   CORS:            {cors}");
-        println!();
-        println!("   Endpoints:");
-        println!("     POST   /sessions              create session");
-        println!("     GET    /sessions/:id           session status");
-        println!("     DELETE /sessions/:id           destroy session");
-        println!("     POST   /sessions/:id/exec      execute WASM");
-        println!("     POST   /sessions/:id/files     write file");
-        println!("     GET    /sessions/:id/files     read / list files");
-        println!("     DELETE /sessions/:id/files     delete file");
-        println!("     POST   /sessions/:id/env       set env vars");
-        println!("     GET    /sessions/:id/env       get env vars");
-        println!("     GET    /tools                  LLM tool schemas");
-        println!("     GET    /metrics                metrics (Prometheus | ?format=json)");
-        println!();
+        let _ = writeln!(b, "   CORS:            {cors}");
+
+        // Deployment warnings. Loud on purpose: an exec API on a routable
+        // address is a remote-code-execution endpoint for whoever can reach it,
+        // and nothing else in the output says so.
+        if exposed {
+            let _ = writeln!(b);
+            if self.config.auth.is_none() {
+                let _ = writeln!(
+                    b,
+                    "   ⚠️  WARNING: AUTH IS DISABLED on a non-loopback bind (--insecure)."
+                );
+                let _ = writeln!(
+                    b,
+                    "       Anyone who can reach {host}:{port} can run arbitrary code here."
+                );
+            }
+            let _ = writeln!(
+                b,
+                "   ⚠️  Traffic is plaintext, including API keys. Terminate TLS at a"
+            );
+            let _ = writeln!(
+                b,
+                "       reverse proxy and let it be the only thing reaching this port."
+            );
+        }
+        let _ = writeln!(b);
+        let _ = writeln!(b, "   Endpoints:");
+        let _ = writeln!(b, "     POST   /sessions              create session");
+        let _ = writeln!(b, "     GET    /sessions/:id           session status");
+        let _ = writeln!(b, "     DELETE /sessions/:id           destroy session");
+        let _ = writeln!(b, "     POST   /sessions/:id/exec      execute WASM");
+        let _ = writeln!(b, "     POST   /sessions/:id/files     write file");
+        let _ = writeln!(b, "     GET    /sessions/:id/files     read / list files");
+        let _ = writeln!(b, "     DELETE /sessions/:id/files     delete file");
+        let _ = writeln!(b, "     POST   /sessions/:id/env       set env vars");
+        let _ = writeln!(b, "     GET    /sessions/:id/env       get env vars");
+        let _ = writeln!(b, "     GET    /tools                  LLM tool schemas");
+        let _ = writeln!(
+            b,
+            "     GET    /metrics                metrics (Prometheus | ?format=json)"
+        );
+        let _ = writeln!(
+            b,
+            "     GET    /health                 liveness (unauthenticated)"
+        );
+        let _ = writeln!(
+            b,
+            "     GET    /ready                  readiness (unauthenticated)"
+        );
+        let _ = writeln!(b);
+        b
     }
 
     /// CORS headers shared by every response. The `Content-Type` is added
@@ -638,6 +736,40 @@ impl AgentServer {
             return self.respond_empty(request, 204, &log);
         }
 
+        let segments: Vec<&str> = path
+            .trim_start_matches(API_PREFIX)
+            .trim_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        // Probe endpoints, answered before the auth gate: a liveness check that
+        // needs a credential is not a liveness check, and `/metrics` is
+        // auth-gated so it cannot stand in for one. Both are deliberately
+        // uninteresting to an anonymous caller — status, version and uptime,
+        // with the load figures left to `/metrics`.
+        match (&method, segments.as_slice()) {
+            (Method::Get, ["health"]) => {
+                return self.respond_json(request, Ok::<_, ApiError>(self.health_json()), &log)
+            }
+            (Method::Get, ["ready"]) => {
+                let (ready, reason) = self.readiness();
+                let body = serde_json::json!({
+                    "status": if ready { "ready" } else { "unready" },
+                    "reason": reason,
+                });
+                let status = if ready { 200 } else { 503 };
+                return self.send(
+                    request,
+                    status,
+                    serde_json::to_string(&body).unwrap_or_default(),
+                    "application/json",
+                    &log,
+                );
+            }
+            _ => {}
+        }
+
         // Authentication gate. Resolved once here — after the OPTIONS
         // short-circuit, before routing — so every handler receives an
         // already-validated caller. `None` means open mode (no auth config);
@@ -679,13 +811,6 @@ impl AgentServer {
             let err = ApiError::RateLimited("requests-per-minute exceeded".into());
             return self.respond_json(request, Err::<serde_json::Value, _>(err), &log);
         }
-
-        let segments: Vec<&str> = path
-            .trim_start_matches(API_PREFIX)
-            .trim_matches('/')
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
 
         // Read the request body once, up front, for methods that carry one.
         // Oversize bodies are rejected (413) before they are fully buffered, so
@@ -783,6 +908,33 @@ impl AgentServer {
                 self.respond_json(request, Err::<serde_json::Value, _>(err), &log)
             }
         }
+    }
+
+    /// `/health`: the process is alive and serving. Never reports a problem —
+    /// anything that makes this fail to answer (deadlock, OOM, a dead listener)
+    /// is exactly what a liveness probe is meant to catch.
+    fn health_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "status": "ok",
+            "version": env!("CARGO_PKG_VERSION"),
+            "uptime_seconds": self.started.elapsed().as_secs(),
+        })
+    }
+
+    /// `/ready`: whether this instance can take new work. Unready is a signal
+    /// to route elsewhere, not a fault: a saturated server still serves the
+    /// sessions it already has.
+    fn readiness(&self) -> (bool, &'static str) {
+        if self.shutdown.load(Ordering::Relaxed) {
+            return (false, "shutting_down");
+        }
+        if self.session_manager.active_count() >= self.config.session_config.max_sessions {
+            return (false, "at_session_capacity");
+        }
+        if self.exec_slots.saturated() {
+            return (false, "at_exec_capacity");
+        }
+        (true, "ok")
     }
 
     /// Sample the live gauge values at scrape time.
@@ -1666,6 +1818,42 @@ impl AgentServer {
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
+/// Whether `host` resolves to this machine only. Conservative: a name other
+/// than `localhost` is treated as remote rather than resolved, so an unknown
+/// host never talks its way past [`validate_bind`].
+fn is_loopback_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    // v6 literals are written `[::1]` in URLs and `::1` on the command line.
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
+/// Refuse to serve an unauthenticated exec API to the network.
+///
+/// The agent runs arbitrary WASM and JavaScript on request, so an open server
+/// on a routable address is a remote-code-execution endpoint for anyone who can
+/// reach it. Loopback is the default; going wider needs either auth or a
+/// deliberate `--insecure`.
+pub fn validate_bind(host: &str, auth_enabled: bool, insecure: bool) -> Result<()> {
+    if auth_enabled || insecure || is_loopback_host(host) {
+        return Ok(());
+    }
+    Err(WasmrunError::from(format!(
+        "refusing to bind {host} with authentication disabled.\n\
+         \x20  The agent server executes arbitrary code, so an open listener on a\n\
+         \x20  non-loopback address lets anyone who can reach it run code on this machine.\n\
+         \x20  Pick one:\n\
+         \x20    --auth <PATH>      enable API-key auth (keys: wasmrun agent --hash-key <key>)\n\
+         \x20    --host {DEFAULT_HOST}   keep the server on loopback (the default)\n\
+         \x20    --insecure         bind anyway; only on a network you control"
+    )))
+}
+
 /// Per-request context for the always-on structured access log and the
 /// `X-Request-Id` response header. One is built at the top of every request
 /// and carried through to whichever response path runs.
@@ -2005,6 +2193,8 @@ mod tests {
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
+            host: DEFAULT_HOST.to_string(),
+            insecure: false,
         })
     }
 
@@ -2049,6 +2239,8 @@ mod tests {
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
+            host: DEFAULT_HOST.to_string(),
+            insecure: false,
         })
     }
 
@@ -2070,6 +2262,8 @@ mod tests {
             auth: Some(Arc::new(auth_config_for(tenants))),
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
+            host: DEFAULT_HOST.to_string(),
+            insecure: false,
         })
     }
 
@@ -2101,6 +2295,8 @@ mod tests {
             auth: Some(Arc::new(auth)),
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
+            host: DEFAULT_HOST.to_string(),
+            insecure: false,
         })
     }
 
@@ -4340,6 +4536,106 @@ mod tests {
         for (id, key) in [(&busy, alice), (&spare, alice), (&bobs, bob)] {
             http_delete(&format!("{base}/sessions/{id}"), key);
         }
+    }
+
+    // ── Deployment posture (0.22.8) ───────────────────────────────
+
+    #[test]
+    fn test_validate_bind_allows_loopback_spellings() {
+        for host in ["127.0.0.1", "localhost", "LOCALHOST", "::1", "[::1]"] {
+            assert!(
+                validate_bind(host, false, false).is_ok(),
+                "{host} should be treated as loopback"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_bind_refuses_open_non_loopback() {
+        for host in ["0.0.0.0", "::", "192.168.1.10", "example.internal"] {
+            let err = validate_bind(host, false, false).unwrap_err().to_string();
+            assert!(
+                err.contains("refusing to bind") && err.contains("--auth"),
+                "{host} was allowed, or the error does not say how to fix it: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_bind_accepts_auth_or_insecure() {
+        assert!(validate_bind("0.0.0.0", true, false).is_ok());
+        assert!(validate_bind("0.0.0.0", false, true).is_ok());
+    }
+
+    #[test]
+    fn test_banner_warns_only_when_exposed() {
+        let mut config = AgentConfig {
+            host: "0.0.0.0".to_string(),
+            insecure: true,
+            ..Default::default()
+        };
+        let exposed = AgentServer::new(config.clone()).banner(8);
+        assert!(exposed.contains("AUTH IS DISABLED"), "{exposed}");
+        assert!(exposed.contains("Terminate TLS"), "{exposed}");
+
+        config.host = DEFAULT_HOST.to_string();
+        let local = AgentServer::new(config).banner(8);
+        assert!(!local.contains("AUTH IS DISABLED"), "{local}");
+        assert!(local.contains("loopback only"), "{local}");
+    }
+
+    #[test]
+    fn test_probes_answer_without_a_key() {
+        let base = serve(auth_server(free_port(), &[("k_alice", "alice")]));
+
+        // /metrics is auth-gated, which is why it cannot double as a probe.
+        assert_eq!(http_get(&format!("{base}/metrics"), None).0, 401);
+
+        let (status, body) = http_get(&format!("{base}/health"), None);
+        assert_eq!(status, 200, "/health demanded a key: {body}");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+        assert!(v["uptime_seconds"].is_number());
+
+        let (status, body) = http_get(&format!("{base}/ready"), None);
+        assert_eq!(status, 200, "/ready demanded a key: {body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["status"],
+            "ready"
+        );
+    }
+
+    #[test]
+    fn test_ready_turns_503_at_session_capacity() {
+        let mut config = AgentConfig {
+            port: free_port(),
+            ..Default::default()
+        };
+        config.session_config.max_sessions = 1;
+        let server = AgentServer::new(config);
+        assert_eq!(server.readiness(), (true, "ok"));
+
+        let id = server.handle_create_session().unwrap().session_id;
+        assert_eq!(server.readiness(), (false, "at_session_capacity"));
+
+        server.handle_delete_session(&id, None).unwrap();
+        assert_eq!(server.readiness(), (true, "ok"));
+    }
+
+    #[test]
+    fn test_ready_turns_503_once_shutdown_starts() {
+        let server = test_server();
+        assert_eq!(server.readiness(), (true, "ok"));
+        server.shutdown.store(true, Ordering::Relaxed);
+        assert_eq!(server.readiness(), (false, "shutting_down"));
+    }
+
+    #[test]
+    fn test_ready_turns_503_when_exec_slots_are_full() {
+        let server = test_server_with_concurrency(1);
+        let _permit = server.exec_slots.try_acquire().unwrap();
+        assert_eq!(server.readiness(), (false, "at_exec_capacity"));
     }
 
     #[test]

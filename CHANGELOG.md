@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Health and readiness endpoints**: `GET /health` and `GET /ready` on the agent server, answered before the auth gate so an orchestrator can probe an authenticated deployment. `/metrics` is auth-gated and could not stand in for either
+  - `/health` reports liveness with the running version and uptime, and is always 200 while the process serves
+  - `/ready` reports whether the instance can take new work: 200, or 503 with a `reason` of `shutting_down`, `at_session_capacity` or `at_exec_capacity`, so a load balancer can route around a saturated or draining instance instead of restarting it
+- **`--host` and `--insecure` flags** for the agent server, controlling which address it binds
 - **Concurrent request handling in the agent server**: requests are handled on a pool of worker threads instead of one at a time on the accept loop. A running execution no longer blocks every other request on the server, so session creation, file writes, `/metrics` and other tenants stay responsive while code runs to its timeout
   - This is what makes `--max-concurrent-exec` and the per-tenant `max_concurrent_exec` cap mean anything over HTTP. Real concurrency used to be 1, so neither cap could ever be reached by an actual client
   - New `--workers` flag caps the pool. The default (`0`) sizes it from `--max-concurrent-exec` with headroom for requests that do not execute anything; threads are spawned on demand, so an idle server holds none
@@ -41,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Options the sandbox transpiler cannot apply (`experimentalDecorators`, `emitDecoratorMetadata`, and `jsx` modes other than the classic runtime) fail the request by name instead of silently producing broken output
 
 ### Changed
+- **The agent server binds loopback by default**, where it previously listened on `0.0.0.0` on every interface. The exec endpoint runs arbitrary code, so reaching it from another machine is now opt-in via `--host`. Deployments that need a wider bind should pass `--host 0.0.0.0` explicitly
+  - Binding a non-loopback address **with authentication disabled now refuses to start**, naming the three ways forward (`--auth`, keep loopback, or `--insecure`). `--insecure` binds anyway for a network you control, with a warning banner
+  - The startup banner reports the bind address, whether it is reachable from other hosts, and that traffic is plaintext. TLS is not terminated in-process: anything beyond loopback belongs behind a reverse proxy, which the agent docs now describe
 - **Ctrl+C stops the agent server promptly**: shutdown no longer waits for the next request to arrive, or for the session-cleanup thread to finish its 30-second sleep. In-flight requests get a short grace period to finish first
 - **Dist-tag dependencies now dedupe**: a tag such as `latest` is resolved to the concrete version it points at once per request, before anything installs, so it dedupes against an already-installed copy and locks like an explicit version. Previously a tag could never match an installed version, so every request reinstalled it and a transitive `latest` always nested a duplicate copy
 - **Full npm version-range support**: dependency ranges now accept the complete npm grammar, including comparator sets (`>=1.2.0 <2.0.0`), unions (`^1 || ^2`), hyphen ranges (`1.2.0 - 1.4.0`), and the `<`, `<=`, `>`, `=` operators. Previously these were rejected, which meant a single composite range anywhere in a transitive dependency tree failed the whole install even when every package involved was pure JavaScript

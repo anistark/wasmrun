@@ -16,6 +16,8 @@ wasmrun agent [OPTIONS]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-P, --port` | `8430` | Server port |
+| `--host` | `127.0.0.1` | Address to bind. Loopback only by default; `0.0.0.0` exposes the server on every interface |
+| `--insecure` | off | Allow a non-loopback bind with auth disabled. Startup is refused otherwise |
 | `-t, --timeout` | `300` | Default session idle timeout (seconds) |
 | `-m, --max-sessions` | `100` | Maximum concurrent sessions |
 | `--max-memory` | `256` | Maximum linear memory per session (MB) |
@@ -43,6 +45,29 @@ Requests are handled on a pool of worker threads, so a long execution never bloc
 Threads are spawned **on demand** and capped at `--workers`, so an idle server holds none of them. When every worker is busy the server stops accepting until one frees up, leaving the excess queued in the TCP backlog rather than growing threads without limit.
 
 `--workers 0` (the default) sizes the pool from the exec cap: `--max-concurrent-exec` plus 16 spare workers for requests that do not execute anything, or 512 when execution concurrency is unlimited. A request that starts an execution is occupied for its whole duration, so a pool smaller than `--max-concurrent-exec` becomes the real ceiling on concurrent executions. Set `--workers` explicitly to bound memory on a small host, and watch `wasmrun_agent_workers_live` and `wasmrun_agent_requests_in_flight` in [the metrics](./usage/observability.md) to see how much of the pool is actually in use.
+
+## Network exposure and TLS
+
+The server binds **`127.0.0.1` by default**, so a fresh `wasmrun agent` is reachable only from the machine it runs on. That is deliberate: the exec endpoint runs arbitrary code, so a server anyone can reach is a server anyone can run code on.
+
+To serve other hosts, pass `--host 0.0.0.0` (or a specific interface address). Without `--auth`, that combination **refuses to start**:
+
+```sh
+wasmrun agent --host 0.0.0.0
+# ❌ refusing to bind 0.0.0.0 with authentication disabled.
+#      --auth <PATH>      enable API-key auth
+#      --host 127.0.0.1   keep the server on loopback (the default)
+#      --insecure         bind anyway; only on a network you control
+```
+
+`--insecure` is the escape hatch for a network you fully control, such as a private container network. It prints a warning banner at startup and is never the right choice on anything an untrusted client can reach.
+
+**TLS is not terminated in-process.** Traffic is plaintext HTTP, API keys included, so anything beyond loopback belongs behind a reverse proxy (nginx, Caddy, a cloud load balancer) that terminates TLS and forwards to the agent. The recommended shape:
+
+- Bind the agent to loopback, or to a private interface the proxy alone can reach
+- Terminate TLS at the proxy and forward to `http://127.0.0.1:8430`
+- Keep `--auth` on, so a key is required even if the port is reached directly
+- Point liveness and readiness probes at `/health` and `/ready` (see [Observability](./usage/observability.md#health-and-readiness))
 
 ## Authentication
 
@@ -220,7 +245,7 @@ Each tool includes a description, parameter schema with types, and required fiel
 
 ## Observability
 
-The server exposes runtime metrics at `GET /api/v1/metrics` (Prometheus text by default, JSON with `?format=json`) and writes a structured, request-id-tagged access-log line to stderr for every request. See [Observability](./usage/observability.md) for the full metric set and log format.
+The server exposes runtime metrics at `GET /api/v1/metrics` (Prometheus text by default, JSON with `?format=json`) and writes a structured, request-id-tagged access-log line to stderr for every request. `GET /health` and `GET /ready` are unauthenticated probes for orchestrators. See [Observability](./usage/observability.md) for the full metric set, the probe semantics, and the log format.
 
 ```sh
 curl http://localhost:8430/api/v1/metrics

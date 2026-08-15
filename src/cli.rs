@@ -282,6 +282,22 @@ pub enum Commands {
         )]
         port: u16,
 
+        /// Address to bind (default: 127.0.0.1, loopback only)
+        #[arg(
+            long,
+            value_name = "ADDR",
+            default_value = "127.0.0.1",
+            help = "Address to bind (0.0.0.0 exposes the server on every interface)"
+        )]
+        host: String,
+
+        /// Bind a non-loopback address with auth disabled
+        #[arg(
+            long,
+            help = "Allow a non-loopback bind without --auth (trusted networks only)"
+        )]
+        insecure: bool,
+
         /// Default session timeout in seconds (default: 300)
         #[arg(
             short = 't',

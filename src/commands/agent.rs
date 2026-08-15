@@ -12,6 +12,8 @@ use std::time::Duration;
 #[allow(clippy::too_many_arguments)]
 pub fn handle_agent_command(
     port: u16,
+    host: &str,
+    insecure: bool,
     timeout: u64,
     max_sessions: usize,
     max_memory: u32,
@@ -52,6 +54,8 @@ pub fn handle_agent_command(
 
     let config = AgentConfig {
         port,
+        host: host.to_string(),
+        insecure,
         session_config: SessionConfig {
             default_timeout: Duration::from_secs(timeout),
             max_sessions,

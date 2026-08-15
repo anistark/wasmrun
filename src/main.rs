@@ -177,6 +177,8 @@ fn main() {
 
         Some(Commands::Agent {
             port,
+            host,
+            insecure,
             timeout,
             max_sessions,
             max_memory,
@@ -194,7 +196,8 @@ fn main() {
             hash_key,
         }) => {
             debug_println!(
-                "Processing agent command: port={}, timeout={}, max_sessions={}, max_memory={}MB, max_fuel={}, max_output={}MB, max_file_size={}MB, max_disk={}MB, max_body={}MB, max_concurrent_exec={}, workers={}",
+                "Processing agent command: host={}, port={}, timeout={}, max_sessions={}, max_memory={}MB, max_fuel={}, max_output={}MB, max_file_size={}MB, max_disk={}MB, max_body={}MB, max_concurrent_exec={}, workers={}",
+                host,
                 port,
                 timeout,
                 max_sessions,
@@ -209,6 +212,8 @@ fn main() {
             );
             commands::handle_agent_command(
                 *port,
+                host,
+                *insecure,
                 *timeout,
                 *max_sessions,
                 *max_memory,
