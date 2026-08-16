@@ -103,6 +103,143 @@ lint-fix:
 check: lint docs-check
     @echo "✅ All checks passed!"
 
+# ─── CI parity ────────────────────────────────────────────────────────────
+# These mirror .github/workflows/ so a green `just ci` predicts a green push.
+# Kept in sync by hand: when a workflow changes, change the matching recipe.
+#
+# Differences from `just check`, all deliberate, all matching CI:
+#   - no SKIP_UI_BUILD for fmt/clippy, so build.rs really builds the UI
+#   - `cargo test --all-features`, which `just test` does not pass
+#   - `pnpm install --frozen-lockfile` under CI=true, so a stale lockfile fails
+#     here too and pnpm never stops to ask about purging node_modules
+#   - no `pnpm lint` / `pnpm format:check`; CI does not run them (`just lint` does)
+
+# Toolchain versions the workflows pin
+ci_node := "22"
+ci_pnpm := "10"
+ci_runner := "x86_64-unknown-linux-gnu"
+
+# Compare the toolchain CI will use against what is installed here
+ci-versions:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    printf '%-7s %-24s %s\n' "" "here" "CI (.github/workflows)"
+    printf '%-7s %-24s %s\n' "rust" "$(rustc --version 2>/dev/null | cut -d' ' -f2 || echo missing)" "dtolnay/rust-toolchain@stable, newest stable at run time"
+    printf '%-7s %-24s %s\n' "node" "$(node --version 2>/dev/null | tr -d v || echo missing)" "setup-node {{ci_node}} → newest {{ci_node}}.x"
+    printf '%-7s %-24s %s\n' "pnpm" "$(pnpm --version 2>/dev/null || echo missing)" "action-setup {{ci_pnpm}} → newest {{ci_pnpm}}.x"
+    printf '%-7s %-24s %s\n' "host" "$(rustc -vV 2>/dev/null | awk '/^host:/{print $2}')" "{{ci_runner}} (ubuntu-latest)"
+    echo
+    DRIFT=0
+    if rustup check 2>/dev/null | grep -q 'Update available'; then
+        echo "⚠️  rust: a newer stable exists. CI installs it, you do not have it: rustup update stable"
+        DRIFT=1
+    fi
+    NODE_MAJOR=$(node --version 2>/dev/null | tr -d v | cut -d. -f1)
+    if [ -n "$NODE_MAJOR" ] && [ "$NODE_MAJOR" != "{{ci_node}}" ]; then
+        echo "⚠️  node: local major $NODE_MAJOR, CI uses {{ci_node}}.x"
+        DRIFT=1
+    fi
+    PNPM_MAJOR=$(pnpm --version 2>/dev/null | cut -d. -f1)
+    if [ -n "$PNPM_MAJOR" ] && [ "$PNPM_MAJOR" != "{{ci_pnpm}}" ]; then
+        echo "⚠️  pnpm: local major $PNPM_MAJOR, CI uses {{ci_pnpm}}.x"
+        DRIFT=1
+    fi
+    echo "ℹ️  Minor versions of node and pnpm always drift: CI resolves the newest"
+    echo "   in the major on every run. Only the majors above are pinned."
+    echo "ℹ️  The host triple differs, so anything platform-gated is untested here."
+    [ "$DRIFT" -eq 0 ] && echo "✓ No major-version drift"
+    exit 0
+
+# ci.yml "Format and Lint" job
+ci-lint:
+    @echo "── ci.yml: Format and Lint ──"
+    cd ui && CI=true pnpm install --frozen-lockfile
+    cargo fmt --all -- --check
+    cargo clippy --all-targets --all-features -- -D warnings
+
+# ci.yml "Docs Build" job
+ci-docs:
+    @echo "── ci.yml: Docs Build ──"
+    cd docs && CI=true pnpm install --frozen-lockfile
+    cd docs && pnpm run build
+
+# test.yml "Run Tests" job
+ci-test:
+    @echo "── test.yml: Run Tests ──"
+    SKIP_UI_BUILD=1 cargo test --all-features --verbose
+
+# examples.yml, for whichever example toolchains are installed here
+ci-examples:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "── examples.yml: Test Examples ──"
+    SKIP_UI_BUILD=1 cargo build --release || exit 1
+
+    # name|requirement|how-to-install, where a requirement is either a command
+    # on PATH or plugin:<name>. CI installs every one of these; a dev machine
+    # rarely has them all, so a missing one is a skip, never a failure.
+    EXAMPLES=(
+        "rust-hello|wasm-bindgen|cargo install wasm-bindgen-cli"
+        "go-hello|tinygo|brew install tinygo"
+        "c-hello|emcc|https://emscripten.org/docs/getting_started"
+        "asc-hello|asc|npm install -g assemblyscript"
+        "python-hello|plugin:waspy|wasmrun plugin install waspy"
+        "web-asc|asc|npm install -g assemblyscript"
+        "web-leptos|wasm-bindgen|cargo install wasm-bindgen-cli"
+    )
+    RUN=0; SKIPPED=(); FAILED=()
+    for ENTRY in "${EXAMPLES[@]}"; do
+        IFS='|' read -r NAME REQ HINT <<< "$ENTRY"
+        case "$REQ" in
+            plugin:*)
+                PLUGIN="${REQ#plugin:}"
+                if ! ./target/release/wasmrun plugin list 2>/dev/null | grep -q "$PLUGIN"; then
+                    SKIPPED+=("$NAME (no $PLUGIN plugin: $HINT)")
+                    continue
+                fi
+                ;;
+            *)
+                if ! command -v "$REQ" >/dev/null 2>&1; then
+                    SKIPPED+=("$NAME (no $REQ: $HINT)")
+                    continue
+                fi
+                ;;
+        esac
+        OUT="${TMPDIR:-/tmp}/wasmrun_test_$NAME"
+        rm -rf "$OUT"
+        echo "→ $NAME"
+        if command -v timeout >/dev/null 2>&1; then TO="timeout 120"; else TO=""; fi
+        if ! $TO ./target/release/wasmrun compile "examples/$NAME" -o "$OUT" -v; then
+            FAILED+=("$NAME"); continue
+        fi
+        if [ "$(find "$OUT" -name '*.wasm' 2>/dev/null | wc -l)" -eq 0 ]; then
+            echo "  ✗ compiled but produced no .wasm"
+            FAILED+=("$NAME"); continue
+        fi
+        RUN=$((RUN + 1))
+    done
+    echo
+    echo "Examples: $RUN passed, ${#FAILED[@]} failed, ${#SKIPPED[@]} skipped"
+    for S in "${SKIPPED[@]:-}"; do [ -n "$S" ] && echo "  skipped: $S"; done
+    if [ "${#FAILED[@]}" -gt 0 ]; then
+        for F in "${FAILED[@]}"; do echo "  FAILED: $F"; done
+        exit 1
+    fi
+
+# Everything a push runs, in the order GitHub runs it
+ci: ci-versions ci-lint ci-docs ci-test
+    #!/usr/bin/env bash
+    set -uo pipefail
+    just ci-examples
+    STATUS=$?
+    echo
+    if [ "$STATUS" -ne 0 ]; then
+        echo "❌ Examples failed. Fix before pushing."
+        exit 1
+    fi
+    echo "✅ ci.yml and test.yml reproduced locally and green."
+    echo "   Anything reported as skipped above still runs on GitHub."
+
 # Build Rust API documentation
 docs:
     cargo doc --no-deps --open

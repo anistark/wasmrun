@@ -6,6 +6,11 @@ fn main() {
     println!("cargo:rerun-if-changed=ui/src");
     println!("cargo:rerun-if-changed=ui/package.json");
     println!("cargo:rerun-if-changed=ui/vite.config.ts");
+    // Without this, a target directory last built with SKIP_UI_BUILD keeps its
+    // stub templates when the variable is dropped: cargo has no reason to rerun
+    // this script, so the real UI is never built. CI never sets the variable for
+    // fmt/clippy, so a local run without it has to actually match.
+    println!("cargo:rerun-if-env-changed=SKIP_UI_BUILD");
 
     let templates_dir = Path::new("templates");
 

@@ -17,7 +17,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
@@ -233,17 +233,32 @@ impl Default for AgentConfig {
 /// the exec worker thread, release happens on *worker completion*, not when the
 /// HTTP response returns. This keeps a slot held by a timed-out-but-still-running
 /// worker until cooperative cancellation actually stops it.
+///
+/// The ceiling is atomic rather than fixed so a per-tenant instance can be
+/// resized in place when the auth config is reloaded (see
+/// [`TenantLimiter::reconcile`]). The global instance is never resized.
 struct ExecSlots {
     in_flight: AtomicUsize,
-    max: usize,
+    max: AtomicUsize,
 }
 
 impl ExecSlots {
     fn new(max: usize) -> Arc<Self> {
         Arc::new(Self {
             in_flight: AtomicUsize::new(0),
-            max,
+            max: AtomicUsize::new(max),
         })
+    }
+
+    fn max(&self) -> usize {
+        self.max.load(Ordering::Acquire)
+    }
+
+    /// Change the ceiling. Lowering it below the current in-flight count does
+    /// not cancel anything: existing workers run to completion and the next
+    /// acquire is refused until the count falls back under the new ceiling.
+    fn set_max(&self, max: usize) {
+        self.max.store(max, Ordering::Release);
     }
 
     /// Current number of exec workers holding a slot. Read live for the
@@ -255,17 +270,19 @@ impl ExecSlots {
     /// Whether every slot is taken, so the next exec would be refused. Always
     /// `false` when unlimited.
     fn saturated(&self) -> bool {
-        self.max != 0 && self.in_flight.load(Ordering::Acquire) >= self.max
+        let max = self.max();
+        max != 0 && self.in_flight.load(Ordering::Acquire) >= max
     }
 
     /// Try to take a slot. Returns `None` when saturated (caller → 429).
     fn try_acquire(self: &Arc<Self>) -> Option<ExecPermit> {
-        if self.max == 0 {
+        let max = self.max();
+        if max == 0 {
             return Some(ExecPermit { slots: None });
         }
         let mut cur = self.in_flight.load(Ordering::Acquire);
         loop {
-            if cur >= self.max {
+            if cur >= max {
                 return None;
             }
             match self.in_flight.compare_exchange_weak(
@@ -306,63 +323,95 @@ struct HeldPermits {
     _tenant: ExecPermit,
 }
 
-/// Fixed-window per-tenant request counter for the requests/min cap.
+/// Per-tenant token bucket for the requests/min cap.
 ///
-/// `max_per_min == 0` means unlimited. The window is a simple fixed interval
-/// reset when a minute elapses — cheap and dependency-free. A burst can straddle
-/// a window boundary (up to ~2× the cap across two adjacent windows); a smoothing
-/// token-bucket is left as a later refinement.
-struct RateWindow {
-    max_per_min: u64,
-    state: Mutex<(Instant, u64)>,
+/// `max_per_min == 0` means unlimited. Otherwise the bucket holds one minute's
+/// allowance and refills continuously at `max_per_min / 60` tokens per second,
+/// so the sustained rate is exactly the configured cap and an idle tenant can
+/// still spend its whole minute at once.
+///
+/// This replaced a fixed window that reset on a minute boundary, where a burst
+/// straddling the boundary passed at up to twice the nominal rate with no
+/// spacing at all between the two halves. A bucket bounds the instantaneous
+/// burst at its capacity and never hands out a free reset.
+struct TokenBucket {
+    /// Capacity and per-minute refill, resized in place by an auth reload.
+    max_per_min: AtomicU64,
+    state: Mutex<BucketState>,
 }
 
-impl RateWindow {
+struct BucketState {
+    tokens: f64,
+    last: Instant,
+}
+
+impl TokenBucket {
     fn new(max_per_min: u64) -> Self {
         Self {
-            max_per_min,
-            state: Mutex::new((Instant::now(), 0)),
+            max_per_min: AtomicU64::new(max_per_min),
+            // Start full: a tenant's first minute is not penalized for the
+            // server having just come up.
+            state: Mutex::new(BucketState {
+                tokens: max_per_min as f64,
+                last: Instant::now(),
+            }),
         }
     }
 
-    /// Record one request. Returns `false` when it exceeds the window cap.
+    /// Resize the bucket, spilling any tokens above the new capacity so a
+    /// lowered cap takes effect immediately rather than after the old surplus
+    /// has been spent.
+    fn set_max(&self, max_per_min: u64) {
+        self.max_per_min.store(max_per_min, Ordering::Release);
+        let mut g = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        g.tokens = g.tokens.min(max_per_min as f64);
+    }
+
+    /// Record one request. Returns `false` when the tenant is out of tokens.
     fn allow(&self) -> bool {
-        if self.max_per_min == 0 {
+        self.allow_at(Instant::now())
+    }
+
+    /// [`allow`](Self::allow) with an injected clock, so refill is testable
+    /// without sleeping through a real minute.
+    fn allow_at(&self, now: Instant) -> bool {
+        let max = self.max_per_min.load(Ordering::Acquire);
+        if max == 0 {
             return true;
         }
+        let capacity = max as f64;
         // Recover the guard even if poisoned: never fail-closed on a panic
         // elsewhere (throttling is best-effort, not a correctness invariant).
         let mut g = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let (start, count) = &mut *g;
-        if start.elapsed() >= Duration::from_secs(60) {
-            *start = Instant::now();
-            *count = 0;
-        }
-        if *count >= self.max_per_min {
+        // `saturating_duration_since` because callers on other threads can
+        // observe a marginally earlier `now` than the one already recorded.
+        let elapsed = now.saturating_duration_since(g.last).as_secs_f64();
+        g.last = now;
+        g.tokens = (g.tokens + elapsed * capacity / 60.0).min(capacity);
+        if g.tokens < 1.0 {
             return false;
         }
-        *count += 1;
+        g.tokens -= 1.0;
         true
     }
 }
 
 /// Per-tenant concurrency + request-rate limiter.
 ///
-/// Lazily creates a sized [`ExecSlots`] and [`RateWindow`] per tenant on first
+/// Lazily creates a sized [`ExecSlots`] and [`TokenBucket`] per tenant on first
 /// use; only consulted in auth mode (open mode has no tenant). Ceilings come from
-/// the tenant's `[tenants.rate]` table. Note: an entry is sized at first use, so
-/// a live config reload (0.20.6c) does not resize an already-created entry — a
-/// known, acceptable limitation revisited there.
+/// the tenant's `[tenants.rate]` table, and [`reconcile`](Self::reconcile) resizes
+/// live entries whenever that table is reloaded.
 struct TenantLimiter {
     exec: RwLock<HashMap<String, Arc<ExecSlots>>>,
-    windows: RwLock<HashMap<String, Arc<RateWindow>>>,
+    buckets: RwLock<HashMap<String, Arc<TokenBucket>>>,
 }
 
 impl TenantLimiter {
     fn new() -> Arc<Self> {
         Arc::new(Self {
             exec: RwLock::new(HashMap::new()),
-            windows: RwLock::new(HashMap::new()),
+            buckets: RwLock::new(HashMap::new()),
         })
     }
 
@@ -384,22 +433,55 @@ impl TenantLimiter {
             .clone()
     }
 
-    /// Get-or-create the tenant's request-rate window (`max` req/min; `0` = off).
-    fn window(&self, tenant: &str, max: u64) -> Arc<RateWindow> {
-        if let Some(w) = self
-            .windows
+    /// Get-or-create the tenant's request-rate bucket (`max` req/min; `0` = off).
+    fn bucket(&self, tenant: &str, max: u64) -> Arc<TokenBucket> {
+        if let Some(b) = self
+            .buckets
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .get(tenant)
         {
-            return w.clone();
+            return b.clone();
         }
-        self.windows
+        self.buckets
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .entry(tenant.to_string())
-            .or_insert_with(|| Arc::new(RateWindow::new(max)))
+            .or_insert_with(|| Arc::new(TokenBucket::new(max)))
             .clone()
+    }
+
+    /// Bring live entries in line with a freshly loaded auth config.
+    ///
+    /// Entries are created sized to whatever the config said at first use, so
+    /// without this an operator raising or lowering a tenant's ceilings only
+    /// affected tenants that had never been seen. Called on every successful
+    /// reload, before the new config starts serving requests.
+    ///
+    /// A tenant that is gone from the config, or whose cap is now `0`
+    /// (unlimited), has its entry dropped: the request path skips the limiter
+    /// entirely for both cases, so keeping the entry only leaks memory across
+    /// config churn. In-flight execs still hold their `Arc`, so their slots are
+    /// accounted against the dropped entry and released normally.
+    fn reconcile(&self, cfg: &AuthConfig) {
+        let mut exec = self.exec.write().unwrap_or_else(|e| e.into_inner());
+        exec.retain(|tenant, slots| match cfg.rate(tenant) {
+            Some(rate) if rate.max_concurrent_exec != 0 => {
+                slots.set_max(rate.max_concurrent_exec as usize);
+                true
+            }
+            _ => false,
+        });
+        drop(exec);
+
+        let mut buckets = self.buckets.write().unwrap_or_else(|e| e.into_inner());
+        buckets.retain(|tenant, bucket| match cfg.rate(tenant) {
+            Some(rate) if rate.max_requests_per_min != 0 => {
+                bucket.set_max(rate.max_requests_per_min as u64);
+                true
+            }
+            _ => false,
+        });
     }
 }
 
@@ -479,7 +561,7 @@ impl AgentServer {
             Some(m) if m != 0 => m as u64,
             _ => return true,
         };
-        self.tenant_limiter.window(tenant, max).allow()
+        self.tenant_limiter.bucket(tenant, max).allow()
     }
 
     /// Acquire a per-tenant exec slot. Returns a no-op permit in open mode or
@@ -545,6 +627,7 @@ impl AgentServer {
             (Some(path), Some(cell)) => Some(spawn_auth_watcher(
                 path.clone(),
                 cell.clone(),
+                self.tenant_limiter.clone(),
                 self.config.session_config.cleanup_interval,
                 shutdown.clone(),
             )),
@@ -2106,13 +2189,18 @@ fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
 /// parse/validation error the previous config is **kept** and the error string
 /// is returned — a bad edit must never crash the server or silently open it.
 /// Factored out of the watcher thread so it can be unit-tested directly.
+///
+/// Live limiter entries are resized before the swap, so no request is ever
+/// admitted against the new config while the old ceilings are still in force.
 fn reload_auth(
     path: &Path,
     cell: &Arc<RwLock<Arc<AuthConfig>>>,
+    limiter: &TenantLimiter,
 ) -> std::result::Result<usize, String> {
     match AuthConfig::load(path) {
         Ok(new_cfg) => {
             let n = new_cfg.tenant_count();
+            limiter.reconcile(&new_cfg);
             *cell.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(new_cfg);
             Ok(n)
         }
@@ -2126,6 +2214,7 @@ fn reload_auth(
 fn spawn_auth_watcher(
     path: PathBuf,
     cell: Arc<RwLock<Arc<AuthConfig>>>,
+    limiter: Arc<TenantLimiter>,
     interval: Duration,
     shutdown: Arc<AtomicBool>,
 ) -> std::thread::JoinHandle<()> {
@@ -2151,7 +2240,7 @@ fn spawn_auth_watcher(
                 continue;
             }
             last_mtime = cur;
-            match reload_auth(&path, &cell) {
+            match reload_auth(&path, &cell, &limiter) {
                 Ok(n) => eprintln!("auth: reloaded {} ({n} tenants)", path.display()),
                 Err(e) => eprintln!(
                     "auth: reload of {} failed, keeping previous config: {e}",
@@ -2515,30 +2604,71 @@ mod tests {
 
         assert!(server.allow_request_rate(Some("alice")));
         assert!(server.allow_request_rate(Some("alice")));
-        assert!(!server.allow_request_rate(Some("alice"))); // 3rd within the window
+        assert!(!server.allow_request_rate(Some("alice"))); // 3rd within the minute
                                                             // Open-mode caller is never throttled.
         assert!(server.allow_request_rate(None));
     }
 
     #[test]
-    fn test_rate_window_basic_and_reset() {
-        let w = RateWindow::new(1);
-        assert!(w.allow());
-        assert!(!w.allow());
-        // Rewind the window start so the next call sees a fresh minute.
-        {
-            let mut g = w.state.lock().unwrap();
-            g.0 = Instant::now() - Duration::from_secs(61);
-        }
-        assert!(w.allow());
+    fn test_token_bucket_spends_its_capacity_then_refuses() {
+        let b = TokenBucket::new(3);
+        // A full bucket is one minute's allowance, spendable at once.
+        assert!(b.allow());
+        assert!(b.allow());
+        assert!(b.allow());
+        assert!(!b.allow());
     }
 
     #[test]
-    fn test_rate_window_unlimited() {
-        let w = RateWindow::new(0);
-        for _ in 0..1000 {
-            assert!(w.allow());
+    fn test_token_bucket_refills_continuously() {
+        let b = TokenBucket::new(60); // one token per second
+        let t0 = Instant::now();
+        for _ in 0..60 {
+            assert!(b.allow_at(t0));
         }
+        assert!(!b.allow_at(t0));
+
+        // Half a second buys nothing; a full one buys exactly one request.
+        assert!(!b.allow_at(t0 + Duration::from_millis(500)));
+        assert!(b.allow_at(t0 + Duration::from_millis(1500)));
+        assert!(!b.allow_at(t0 + Duration::from_millis(1500)));
+    }
+
+    #[test]
+    fn test_token_bucket_has_no_boundary_burst() {
+        // The fixed window this replaced let 2N requests through back to back
+        // across a boundary: N just before the reset and N just after, with no
+        // spacing. A bucket refills to its capacity and no further, so the
+        // instantaneous burst is bounded by the cap however long it sat idle.
+        let b = TokenBucket::new(10);
+        let t0 = Instant::now();
+        for _ in 0..10 {
+            assert!(b.allow_at(t0));
+        }
+        // Half a minute of idling refills half the capacity.
+        let mid = t0 + Duration::from_secs(30);
+        assert_eq!((0..10).filter(|_| b.allow_at(mid)).count(), 5);
+        // A further ten minutes idle refills to the cap, not past it.
+        let later = mid + Duration::from_secs(600);
+        assert_eq!((0..30).filter(|_| b.allow_at(later)).count(), 10);
+    }
+
+    #[test]
+    fn test_token_bucket_unlimited() {
+        let b = TokenBucket::new(0);
+        for _ in 0..1000 {
+            assert!(b.allow());
+        }
+    }
+
+    #[test]
+    fn test_token_bucket_resize_spills_surplus() {
+        let b = TokenBucket::new(100);
+        b.set_max(2);
+        // The 100 tokens the bucket was holding do not survive the shrink.
+        assert!(b.allow());
+        assert!(b.allow());
+        assert!(!b.allow());
     }
 
     #[test]
@@ -2612,7 +2742,10 @@ mod tests {
         );
         std::fs::write(f.path(), v2).unwrap();
 
-        assert_eq!(reload_auth(f.path(), &cell).unwrap(), 1);
+        assert_eq!(
+            reload_auth(f.path(), &cell, &TenantLimiter::new()).unwrap(),
+            1
+        );
 
         // The new config is live: alice's key is gone, bob resolves with its rate.
         let live = cell.read().unwrap().clone();
@@ -2634,10 +2767,90 @@ mod tests {
 
         // A malformed edit must not swap in a broken config.
         std::fs::write(f.path(), "this is not valid toml = = =").unwrap();
-        assert!(reload_auth(f.path(), &cell).is_err());
+        assert!(reload_auth(f.path(), &cell, &TenantLimiter::new()).is_err());
 
         // The previous config is retained — alice still resolves.
         assert_eq!(cell.read().unwrap().resolve("ka"), Some("alice"));
+    }
+
+    /// Write `body` to a temp file and load it as the initial live auth config.
+    fn live_auth_from(body: &str) -> (tempfile::NamedTempFile, Arc<RwLock<Arc<AuthConfig>>>) {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(&mut f, body.as_bytes()).unwrap();
+        let cell = Arc::new(RwLock::new(Arc::new(AuthConfig::load(f.path()).unwrap())));
+        (f, cell)
+    }
+
+    fn tenant_toml(rate: &str) -> String {
+        format!(
+            "[[tenants]]\nid = \"alice\"\nkey_sha256 = \"{}\"\n[tenants.rate]\n{rate}\n",
+            crate::agent::auth::hash_key("ka")
+        )
+    }
+
+    #[test]
+    fn test_reload_resizes_live_exec_slots() {
+        let (f, cell) = live_auth_from(&tenant_toml("max_concurrent_exec = 1"));
+        let limiter = TenantLimiter::new();
+
+        // Size the entry at the old ceiling by using it, as a live server would.
+        let held = limiter.exec_slots("alice", 1).try_acquire();
+        assert!(held.is_some());
+        assert!(limiter.exec_slots("alice", 1).try_acquire().is_none());
+
+        std::fs::write(f.path(), tenant_toml("max_concurrent_exec = 3")).unwrap();
+        reload_auth(f.path(), &cell, &limiter).unwrap();
+
+        // The raise reaches the existing entry, and the permit taken under the
+        // old ceiling still counts against the new one.
+        assert_eq!(limiter.exec_slots("alice", 3).max(), 3);
+        let p2 = limiter.exec_slots("alice", 3).try_acquire();
+        let p3 = limiter.exec_slots("alice", 3).try_acquire();
+        assert!(p2.is_some() && p3.is_some());
+        assert!(limiter.exec_slots("alice", 3).try_acquire().is_none());
+    }
+
+    #[test]
+    fn test_reload_resizes_live_rate_bucket() {
+        let (f, cell) = live_auth_from(&tenant_toml("max_requests_per_min = 100"));
+        let limiter = TenantLimiter::new();
+        assert!(limiter.bucket("alice", 100).allow());
+
+        std::fs::write(f.path(), tenant_toml("max_requests_per_min = 2")).unwrap();
+        reload_auth(f.path(), &cell, &limiter).unwrap();
+
+        // Tightened to 2/min, with the surplus from the old ceiling spilled.
+        let b = limiter.bucket("alice", 2);
+        assert!(b.allow());
+        assert!(b.allow());
+        assert!(!b.allow());
+    }
+
+    #[test]
+    fn test_reload_drops_entries_the_limiter_no_longer_consults() {
+        let (f, cell) = live_auth_from(&tenant_toml(
+            "max_concurrent_exec = 1\nmax_requests_per_min = 1",
+        ));
+        let limiter = TenantLimiter::new();
+        limiter.exec_slots("alice", 1);
+        limiter.bucket("alice", 1);
+
+        // Both caps lifted: the request path stops consulting the limiter, so
+        // holding the entries would only leak across config churn.
+        std::fs::write(f.path(), tenant_toml("max_sessions = 4")).unwrap();
+        reload_auth(f.path(), &cell, &limiter).unwrap();
+        assert!(limiter.exec.read().unwrap().is_empty());
+        assert!(limiter.buckets.read().unwrap().is_empty());
+
+        // Same for a tenant removed from the config outright.
+        limiter.exec_slots("alice", 1);
+        let gone = format!(
+            "[[tenants]]\nid = \"bob\"\nkey_sha256 = \"{}\"\n",
+            crate::agent::auth::hash_key("kb")
+        );
+        std::fs::write(f.path(), gone).unwrap();
+        reload_auth(f.path(), &cell, &limiter).unwrap();
+        assert!(limiter.exec.read().unwrap().is_empty());
     }
 
     // Hand-built WASM that calls fd_write to print "Hello, World!\n"

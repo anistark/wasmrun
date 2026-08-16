@@ -15,6 +15,8 @@ _tests
 examples/*/target
 examples/*/debug
 examples/*/dist/*
+# AssemblyScript writes here, so compiling asc-hello or web-asc dirties the tree
+examples/*/build
 
 # UI build dependencies
 ui/node_modules

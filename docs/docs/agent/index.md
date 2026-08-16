@@ -7,6 +7,8 @@ title: Agent Mode
 
 The agent API wraps exec mode in an HTTP server, letting AI agents create isolated WASM sandboxes, upload files, execute code, and retrieve structured output, all via REST.
 
+This page covers the server itself: flags, network exposure, authentication, and lifecycle. To run it as a service other people depend on, go to [Deployment](./deployment.md).
+
 ## Starting the Server
 
 ```sh
@@ -70,6 +72,8 @@ wasmrun agent --host 0.0.0.0
 - Terminate TLS at the proxy and forward to `http://127.0.0.1:8430`
 - Keep `--auth` on, so a key is required even if the port is reached directly
 - Point liveness and readiness probes at `/health` and `/ready` (see [Observability](./usage/observability.md#health-and-readiness))
+
+Working nginx and Caddy configuration, along with systemd and container units, is on the [Deployment](./deployment.md) page.
 
 ## Restarts and shutdown
 
@@ -202,11 +206,15 @@ key_sha256 = "60303ae22b998861bce3b28f33eec1be758a213c86c93c076dbe9f558c11c752"
 
 `[tenants.rate]` throttles the tenant independently so one tenant cannot exhaust the shared server: `max_sessions`, `max_concurrent_exec`, `max_requests_per_min` (each `0` or omitted inherits the server-wide default). Over any of these limits returns **429 Too Many Requests**.
 
+`max_requests_per_min` is a token bucket, not a per-minute counter. The bucket holds one minute's allowance and refills continuously at `max_requests_per_min / 60` per second, so an idle tenant can spend its whole minute at once and a busy one settles at exactly the configured rate. There is no clock boundary to wait for and none to exploit: a tenant that has just drained its bucket gets tokens back as time passes, rather than a full refund the instant a minute ticks over.
+
 In open mode (no `--auth`) there is no tenant baseline: a per-session override applies un-clamped and only the global limits apply, exactly as before.
 
 ### Live config reload
 
 The `--auth` file is watched for modification and reloaded **without a restart**; edit the config and the new tenants, keys, limits, and rates take effect for subsequent key resolution and newly created sessions. In-flight sessions keep their original owner and limits. A malformed or invalid edit is **logged and ignored**, keeping the previous config, so a bad edit never drops auth or crashes the server. The banner shows the watched path.
+
+A reload also resizes the live `max_concurrent_exec` and `max_requests_per_min` enforcement for tenants that are already active, before the new config starts serving requests. Raising a ceiling frees capacity immediately. Lowering one applies to the next request: executions already running are never cancelled, and they count against the new ceiling as they finish. Tightening `max_requests_per_min` also spills whatever the tenant had banked above the new bucket size, so the lower rate is in force at once rather than after the old surplus has been spent.
 
 ## How It Works
 
