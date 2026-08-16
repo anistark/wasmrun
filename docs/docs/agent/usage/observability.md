@@ -97,6 +97,39 @@ In open mode (no `--auth`), the JSON format adds a `sessions` array with each ac
 
 `memory_cap_pages` is in WASM pages (64 KiB each); `null` means unlimited. This breakdown is **not** emitted in the Prometheus format (session ids would be unbounded-cardinality labels) and is withheld entirely when auth is enabled, leaving only the aggregate `sessions_disk_bytes` gauge.
 
+## Health and readiness
+
+```
+GET /health
+GET /ready
+```
+
+Two probe endpoints for orchestrators and load balancers. Both are answered **before the auth gate**, so they work unchanged with `--auth` enabled: a liveness check that needs a credential is not a liveness check, and `/metrics` is auth-gated and cannot stand in for one. Both are also reachable under the API prefix (`/api/v1/health`).
+
+**`/health`** is liveness. It always returns **200** while the process is serving; anything that stops it answering (a deadlock, a wedged listener, a dead process) is precisely what a liveness probe should catch. Restart the instance when it stops responding.
+
+```sh
+curl http://localhost:8430/health
+# {"status":"ok","version":"0.22.0","uptime_seconds":3841}
+```
+
+**`/ready`** is readiness: whether this instance can take **new** work. **200** when it can, **503** when it cannot, with a machine-readable `reason`. Unready is a routing signal, not a fault; a saturated server keeps serving the sessions it already has, so pull it out of the pool rather than restarting it.
+
+```sh
+curl -i http://localhost:8430/ready
+# HTTP/1.1 503 Service Unavailable
+# {"status":"unready","reason":"at_session_capacity"}
+```
+
+| `reason` | Meaning |
+|----------|---------|
+| `ok` | Ready; accepting new sessions and executions |
+| `shutting_down` | Ctrl+C received; the server is draining and will stop accepting |
+| `at_session_capacity` | Active sessions have reached `--max-sessions` |
+| `at_exec_capacity` | Executions in flight have reached `--max-concurrent-exec` |
+
+Both responses are deliberately uninteresting to an anonymous caller: status, version, uptime and a reason slug, with every load figure left to the auth-gated `/metrics`. Note that `/health` does disclose the wasmrun version, which is the usual tradeoff for a probe an orchestrator can reach without credentials.
+
 ## Access Log
 
 The server writes one structured `key=value` line to **stderr** for every request, always on:

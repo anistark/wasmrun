@@ -12,6 +12,8 @@ use std::time::Duration;
 #[allow(clippy::too_many_arguments)]
 pub fn handle_agent_command(
     port: u16,
+    host: &str,
+    insecure: bool,
     timeout: u64,
     max_sessions: usize,
     max_memory: u32,
@@ -22,6 +24,8 @@ pub fn handle_agent_command(
     max_body: u32,
     max_concurrent_exec: usize,
     workers: usize,
+    shutdown_timeout: u64,
+    max_cache_size: u64,
     npm_registry: &str,
     allow_cors: bool,
     verbose: bool,
@@ -52,6 +56,8 @@ pub fn handle_agent_command(
 
     let config = AgentConfig {
         port,
+        host: host.to_string(),
+        insecure,
         session_config: SessionConfig {
             default_timeout: Duration::from_secs(timeout),
             max_sessions,
@@ -63,6 +69,8 @@ pub fn handle_agent_command(
         max_body_bytes,
         max_concurrent_exec,
         workers,
+        shutdown_grace: Duration::from_secs(shutdown_timeout),
+        max_cache_bytes: (max_cache_size != 0).then(|| max_cache_size * 1024 * 1024),
         auth,
         auth_path,
         npm_registry: npm_registry.to_string(),

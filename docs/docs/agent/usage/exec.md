@@ -160,7 +160,7 @@ Declare npm packages with the `dependencies` field (works with `source` and `fil
 
 - No `npm` binary involved; wasmrun talks to the registry directly, and package lifecycle scripts are **never** executed
 - Transitive (production) dependencies are installed npm2-style: each package's deps live in its own nested `node_modules`, deduped against ancestors exactly the way node resolves; always correct, at the cost of some duplication
-- Downloads are cached per `name@version` under `~/.wasmrun/npm/`, so repeat runs skip the network; a dependency already present in the session at a satisfying version is skipped entirely
+- Downloads are cached per `name@version` under `~/.wasmrun/npm/`, so repeat runs skip the network; a dependency already present in the session at a satisfying version is skipped entirely. The cache is bounded and evicted least-recently-used first (see [Disk and caches](../index.md#disk-and-caches)); an evicted package is simply downloaded again
 - Vendored files count against the session's disk and file-size limits
 - The registry defaults to `https://registry.npmjs.org` and is configurable with `wasmrun agent --npm-registry <URL>` (private registries, mirrors)
 

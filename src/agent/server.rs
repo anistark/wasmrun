@@ -5,7 +5,8 @@ use crate::agent::auth::{AuthConfig, TenantRate};
 use crate::agent::executor;
 use crate::agent::limits::{dir_size, LimitsOverride, ResourceLimits};
 use crate::agent::metrics::{Gauges, Metrics, SessionResourceRow};
-use crate::agent::pool::{resolve_workers, PoolStats, WorkerPool};
+use crate::agent::pool::{resolve_workers, PoolStats, WorkerPool, DEFAULT_SHUTDOWN_GRACE};
+use crate::agent::session;
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::shell;
 use crate::agent::tools;
@@ -143,9 +144,36 @@ const EXEC_THREAD_STACK_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 /// Default ceiling on concurrent exec workers when none is configured.
 const DEFAULT_MAX_CONCURRENT_EXEC: usize = 100;
+/// Default bind address. Loopback, not `0.0.0.0`: the server runs arbitrary
+/// WASM and JavaScript on request, so reaching it from another host is opt-in
+/// (`--host`) and, without auth, needs an explicit `--insecure`.
+pub const DEFAULT_HOST: &str = "127.0.0.1";
+/// Missed heartbeats before another server's session tree is considered
+/// orphaned. Generous: sweeping a live instance's sessions is far worse than
+/// leaving a dead one's directories around for another few minutes.
+const ORPHAN_GRACE_TICKS: u32 = 10;
+/// Floor on that window, so a short `cleanup_interval` cannot shrink it to the
+/// point where a briefly stalled server looks dead.
+const MIN_ORPHAN_GRACE: Duration = Duration::from_secs(300);
+/// Default npm cache ceiling, in MB.
+pub const DEFAULT_MAX_CACHE_MB: u64 = 2048;
+/// How often the cache is trimmed while the server runs. Long, because the
+/// pass walks the whole cache and packages arrive in bursts, not steadily.
+const CACHE_SWEEP_INTERVAL: Duration = Duration::from_secs(300);
+/// How recently an entry must have been installed from to be spared. Covers
+/// any in-progress copy out of the cache by orders of magnitude.
+const CACHE_ENTRY_MIN_AGE: Duration = Duration::from_secs(600);
 
+#[derive(Clone)]
 pub struct AgentConfig {
     pub port: u16,
+    /// Address to bind. Defaults to [`DEFAULT_HOST`] (loopback); `0.0.0.0`
+    /// exposes the server on every interface, which [`validate_bind`] only
+    /// allows with auth or `insecure`.
+    pub host: String,
+    /// Bind a non-loopback address even with auth disabled. The escape hatch
+    /// for a genuinely trusted network; never a good default.
+    pub insecure: bool,
     pub session_config: SessionConfig,
     pub allow_cors: bool,
     pub verbose: bool,
@@ -159,6 +187,11 @@ pub struct AgentConfig {
     /// `max_concurrent_exec` (see [`resolve_workers`]). Threads are spawned on
     /// demand, so this is a ceiling and not a startup cost.
     pub workers: usize,
+    /// How long shutdown waits for in-flight requests before abandoning them.
+    pub shutdown_grace: Duration,
+    /// Ceiling on the shared npm cache in bytes. `None` = unlimited, which
+    /// still clears interrupted-install debris.
+    pub max_cache_bytes: Option<u64>,
     /// API-key authentication. `None` = open mode (no auth; back-compat). When
     /// `Some`, every `/api/v1/*` request must present a valid `Bearer` key and
     /// sessions are isolated per tenant.
@@ -175,12 +208,16 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             port: 8430,
+            host: DEFAULT_HOST.to_string(),
+            insecure: false,
             session_config: SessionConfig::default(),
             allow_cors: false,
             verbose: false,
             max_body_bytes: Some(DEFAULT_MAX_BODY_BYTES),
             max_concurrent_exec: DEFAULT_MAX_CONCURRENT_EXEC,
             workers: 0,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            max_cache_bytes: Some(DEFAULT_MAX_CACHE_MB * 1024 * 1024),
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
@@ -213,6 +250,12 @@ impl ExecSlots {
     /// `exec_in_flight` metrics gauge.
     fn in_flight(&self) -> u64 {
         self.in_flight.load(Ordering::Acquire) as u64
+    }
+
+    /// Whether every slot is taken, so the next exec would be refused. Always
+    /// `false` when unlimited.
+    fn saturated(&self) -> bool {
+        self.max != 0 && self.in_flight.load(Ordering::Acquire) >= self.max
     }
 
     /// Try to take a slot. Returns `None` when saturated (caller → 429).
@@ -375,6 +418,12 @@ pub struct AgentServer {
     live_auth: Option<Arc<RwLock<Arc<AuthConfig>>>>,
     /// The auth file to watch for live reloads (`None` if `--auth` was not set).
     auth_path: Option<PathBuf>,
+    /// When the process started serving, for `/health`'s uptime.
+    started: Instant,
+    /// Set by Ctrl+C. Owned here rather than by `start()` so `/ready` can fail
+    /// the probe as soon as shutdown begins, which is what lets a load balancer
+    /// take the instance out before the listener stops.
+    shutdown: Arc<AtomicBool>,
 }
 
 impl AgentServer {
@@ -392,6 +441,8 @@ impl AgentServer {
             pool_stats: Arc::new(PoolStats::default()),
             live_auth,
             auth_path,
+            started: Instant::now(),
+            shutdown: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -446,21 +497,46 @@ impl AgentServer {
     }
 
     pub fn start(self) -> Result<()> {
-        let addr = format!("0.0.0.0:{}", self.config.port);
-        let server = Server::http(&addr)
-            .map_err(|e| WasmrunError::from(format!("Failed to start agent server: {e}")))?;
+        validate_bind(
+            &self.config.host,
+            self.config.auth.is_some(),
+            self.config.insecure,
+        )?;
 
-        let workers = resolve_workers(self.config.workers, self.config.max_concurrent_exec);
-        self.print_banner(workers);
-
-        let cleanup_handle = SessionManager::start_cleanup_thread(self.session_manager.clone());
-
-        // Graceful shutdown on Ctrl+C
-        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Shut down on Ctrl+C, and on SIGTERM/SIGHUP: a container or a systemd
+        // unit is stopped with SIGTERM, and ignoring it means being SIGKILLed
+        // at the end of the stop timeout with every session directory leaked.
+        //
+        // Installed before anything is claimed on disk, so a signal arriving
+        // during startup still reaches the shutdown path rather than the
+        // default disposition, which would kill the process mid-sweep.
+        let shutdown = self.shutdown.clone();
         let shutdown_flag = shutdown.clone();
         let _ = ctrlc::set_handler(move || {
             shutdown_flag.store(true, std::sync::atomic::Ordering::Relaxed);
         });
+
+        let addr = format!("{}:{}", self.config.host, self.config.port);
+        let server = Server::http(&addr)
+            .map_err(|e| WasmrunError::from(format!("Failed to start agent server: {e}")))?;
+
+        let workers = resolve_workers(self.config.workers, self.config.max_concurrent_exec);
+        print!("{}", self.banner(workers));
+
+        // Claim this instance's session tree before sweeping, so a server
+        // starting up alongside this one never mistakes it for an orphan.
+        session::heartbeat();
+        let swept = session::sweep_orphans(self.orphan_grace());
+        if swept > 0 {
+            println!("   Swept {swept} orphaned session tree(s) from a previous run\n");
+        }
+
+        // The npm and runtime caches are shared across sessions and outlive
+        // every one of them, so nothing else would ever bound them.
+        report_cache_sweep(sweep_caches(self.config.max_cache_bytes));
+        let cache_handle = spawn_cache_sweeper(self.config.max_cache_bytes, shutdown.clone());
+
+        let cleanup_handle = SessionManager::start_cleanup_thread(self.session_manager.clone());
 
         // Live auth-config reload: watch the auth file for mtime changes and
         // hot-swap the live config (auth mode only). A bad edit is logged and
@@ -506,22 +582,52 @@ impl AgentServer {
             }));
         }
 
+        // Draining: the listener is closed, `/ready` has been reporting
+        // `shutting_down` since the flag was set, and in-flight requests get
+        // `--shutdown-timeout` to finish before the process gives up on them.
+        let grace = this.config.shutdown_grace;
         eprintln!("\n🛑 Shutting down...");
-        pool.shutdown();
+        let in_flight = this.pool_stats.busy();
+        if in_flight > 0 {
+            eprintln!(
+                "   Draining {in_flight} in-flight request(s), up to {}s",
+                grace.as_secs()
+            );
+        }
+        let abandoned = pool.shutdown(grace);
+        if abandoned > 0 {
+            eprintln!("   Gave up on {abandoned} request(s) still running at the deadline");
+        }
         let destroyed = this.session_manager.destroy_all().unwrap_or(0);
         this.session_manager.stop_cleanup();
         let _ = cleanup_handle.join();
+        let _ = cache_handle.join();
         if let Some(handle) = auth_watcher {
             let _ = handle.join();
         }
         if destroyed > 0 {
             eprintln!("   Cleaned up {destroyed} session(s)");
         }
+        // Last, so the tree is gone only once its sessions are: a crash between
+        // the two would leave the heartbeat behind for the next sweep.
+        session::remove_instance_root();
         eprintln!("   Goodbye.");
         Ok(())
     }
 
-    fn print_banner(&self, workers: usize) {
+    /// How stale another instance's heartbeat must be before its session tree
+    /// is swept. A comfortable multiple of the cleanup interval that refreshes
+    /// it, floored so a short interval cannot make the window jumpy.
+    fn orphan_grace(&self) -> Duration {
+        (self.config.session_config.cleanup_interval * ORPHAN_GRACE_TICKS).max(MIN_ORPHAN_GRACE)
+    }
+
+    /// The startup banner, built as a string so its security warnings can be
+    /// asserted on in tests rather than only read by eye.
+    fn banner(&self, workers: usize) -> String {
+        use std::fmt::Write as _;
+
+        let host = &self.config.host;
         let port = self.config.port;
         let max = self.config.session_config.max_sessions;
         let timeout = self.config.session_config.default_timeout.as_secs();
@@ -531,63 +637,135 @@ impl AgentServer {
         } else {
             "restricted"
         };
-        println!("\n🤖 Wasmrun Agent Server");
-        println!("   Endpoint:        http://0.0.0.0:{port}{API_PREFIX}");
-        println!("   Max sessions:    {max}");
-        println!("   Session timeout: {timeout}s");
-        println!(
+        let exposed = !is_loopback_host(host);
+        let reach = if exposed {
+            "reachable from other hosts"
+        } else {
+            "loopback only"
+        };
+
+        let mut b = String::new();
+        let _ = writeln!(b, "\n🤖 Wasmrun Agent Server");
+        let _ = writeln!(b, "   Endpoint:        http://{host}:{port}{API_PREFIX}");
+        let _ = writeln!(b, "   Bind:            {host} ({reach}), plaintext HTTP");
+        let _ = writeln!(b, "   Max sessions:    {max}");
+        let _ = writeln!(b, "   Session timeout: {timeout}s");
+        let _ = writeln!(
+            b,
             "   Memory limit:    {}",
             fmt_pages_mb(limits.max_memory_pages)
         );
-        println!(
+        let _ = writeln!(
+            b,
             "   Fuel limit:      {}",
             fmt_opt_u64(limits.max_fuel, "instructions")
         );
-        println!(
+        let _ = writeln!(
+            b,
             "   Output limit:    {}",
             fmt_bytes_mb(limits.max_output_bytes.map(|b| b as u64))
         );
-        println!("   File size limit: {}", fmt_bytes_mb(limits.max_file_size));
-        println!(
+        let _ = writeln!(
+            b,
+            "   File size limit: {}",
+            fmt_bytes_mb(limits.max_file_size)
+        );
+        let _ = writeln!(
+            b,
             "   Disk limit:      {}",
             fmt_bytes_mb(limits.max_disk_bytes)
         );
-        println!(
+        let _ = writeln!(
+            b,
             "   Max body size:   {}",
             fmt_bytes_mb(self.config.max_body_bytes.map(|b| b as u64))
         );
-        println!(
+        let _ = writeln!(
+            b,
             "   Max concurrent:  {}",
             fmt_count(self.config.max_concurrent_exec, "exec(s)")
         );
-        println!("   Request workers: {workers} max");
+        let _ = writeln!(b, "   Request workers: {workers} max");
+        let _ = writeln!(
+            b,
+            "   Shutdown drain:  {}s",
+            self.config.shutdown_grace.as_secs()
+        );
+        let _ = writeln!(
+            b,
+            "   npm cache cap:   {}",
+            match self.config.max_cache_bytes {
+                Some(bytes) => format!("{} MB (shared, host-wide)", bytes / (1024 * 1024)),
+                None => "unlimited".to_string(),
+            }
+        );
         match &self.config.auth {
             Some(auth) => {
-                println!(
+                let _ = writeln!(
+                    b,
                     "   Auth:            enabled ({} tenants)",
                     auth.tenant_count()
                 );
                 if let Some(path) = &self.auth_path {
-                    println!("   Auth reload:     watching {}", path.display());
+                    let _ = writeln!(b, "   Auth reload:     watching {}", path.display());
                 }
             }
-            None => println!("   Auth:            disabled (open)"),
+            None => {
+                let _ = writeln!(b, "   Auth:            disabled (open)");
+            }
         }
-        println!("   CORS:            {cors}");
-        println!();
-        println!("   Endpoints:");
-        println!("     POST   /sessions              create session");
-        println!("     GET    /sessions/:id           session status");
-        println!("     DELETE /sessions/:id           destroy session");
-        println!("     POST   /sessions/:id/exec      execute WASM");
-        println!("     POST   /sessions/:id/files     write file");
-        println!("     GET    /sessions/:id/files     read / list files");
-        println!("     DELETE /sessions/:id/files     delete file");
-        println!("     POST   /sessions/:id/env       set env vars");
-        println!("     GET    /sessions/:id/env       get env vars");
-        println!("     GET    /tools                  LLM tool schemas");
-        println!("     GET    /metrics                metrics (Prometheus | ?format=json)");
-        println!();
+        let _ = writeln!(b, "   CORS:            {cors}");
+
+        // Deployment warnings. Loud on purpose: an exec API on a routable
+        // address is a remote-code-execution endpoint for whoever can reach it,
+        // and nothing else in the output says so.
+        if exposed {
+            let _ = writeln!(b);
+            if self.config.auth.is_none() {
+                let _ = writeln!(
+                    b,
+                    "   ⚠️  WARNING: AUTH IS DISABLED on a non-loopback bind (--insecure)."
+                );
+                let _ = writeln!(
+                    b,
+                    "       Anyone who can reach {host}:{port} can run arbitrary code here."
+                );
+            }
+            let _ = writeln!(
+                b,
+                "   ⚠️  Traffic is plaintext, including API keys. Terminate TLS at a"
+            );
+            let _ = writeln!(
+                b,
+                "       reverse proxy and let it be the only thing reaching this port."
+            );
+        }
+        let _ = writeln!(b);
+        let _ = writeln!(b, "   Endpoints:");
+        let _ = writeln!(b, "     POST   /sessions              create session");
+        let _ = writeln!(b, "     GET    /sessions/:id           session status");
+        let _ = writeln!(b, "     DELETE /sessions/:id           destroy session");
+        let _ = writeln!(b, "     POST   /sessions/:id/exec      execute WASM");
+        let _ = writeln!(b, "     POST   /sessions/:id/files     write file");
+        let _ = writeln!(b, "     GET    /sessions/:id/files     read / list files");
+        let _ = writeln!(b, "     DELETE /sessions/:id/files     delete file");
+        let _ = writeln!(b, "     POST   /sessions/:id/env       set env vars");
+        let _ = writeln!(b, "     GET    /sessions/:id/env       get env vars");
+        let _ = writeln!(b, "     GET    /tools                  LLM tool schemas");
+        let _ = writeln!(
+            b,
+            "     GET    /metrics                metrics (Prometheus | ?format=json)"
+        );
+        let _ = writeln!(
+            b,
+            "     GET    /health                 liveness (unauthenticated)"
+        );
+        let _ = writeln!(
+            b,
+            "     GET    /ready                  readiness (unauthenticated)"
+        );
+        let _ = writeln!(b);
+        b
     }
 
     /// CORS headers shared by every response. The `Content-Type` is added
@@ -638,6 +816,40 @@ impl AgentServer {
             return self.respond_empty(request, 204, &log);
         }
 
+        let segments: Vec<&str> = path
+            .trim_start_matches(API_PREFIX)
+            .trim_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        // Probe endpoints, answered before the auth gate: a liveness check that
+        // needs a credential is not a liveness check, and `/metrics` is
+        // auth-gated so it cannot stand in for one. Both are deliberately
+        // uninteresting to an anonymous caller — status, version and uptime,
+        // with the load figures left to `/metrics`.
+        match (&method, segments.as_slice()) {
+            (Method::Get, ["health"]) => {
+                return self.respond_json(request, Ok::<_, ApiError>(self.health_json()), &log)
+            }
+            (Method::Get, ["ready"]) => {
+                let (ready, reason) = self.readiness();
+                let body = serde_json::json!({
+                    "status": if ready { "ready" } else { "unready" },
+                    "reason": reason,
+                });
+                let status = if ready { 200 } else { 503 };
+                return self.send(
+                    request,
+                    status,
+                    serde_json::to_string(&body).unwrap_or_default(),
+                    "application/json",
+                    &log,
+                );
+            }
+            _ => {}
+        }
+
         // Authentication gate. Resolved once here — after the OPTIONS
         // short-circuit, before routing — so every handler receives an
         // already-validated caller. `None` means open mode (no auth config);
@@ -679,13 +891,6 @@ impl AgentServer {
             let err = ApiError::RateLimited("requests-per-minute exceeded".into());
             return self.respond_json(request, Err::<serde_json::Value, _>(err), &log);
         }
-
-        let segments: Vec<&str> = path
-            .trim_start_matches(API_PREFIX)
-            .trim_matches('/')
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
 
         // Read the request body once, up front, for methods that carry one.
         // Oversize bodies are rejected (413) before they are fully buffered, so
@@ -783,6 +988,33 @@ impl AgentServer {
                 self.respond_json(request, Err::<serde_json::Value, _>(err), &log)
             }
         }
+    }
+
+    /// `/health`: the process is alive and serving. Never reports a problem —
+    /// anything that makes this fail to answer (deadlock, OOM, a dead listener)
+    /// is exactly what a liveness probe is meant to catch.
+    fn health_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "status": "ok",
+            "version": env!("CARGO_PKG_VERSION"),
+            "uptime_seconds": self.started.elapsed().as_secs(),
+        })
+    }
+
+    /// `/ready`: whether this instance can take new work. Unready is a signal
+    /// to route elsewhere, not a fault: a saturated server still serves the
+    /// sessions it already has.
+    fn readiness(&self) -> (bool, &'static str) {
+        if self.shutdown.load(Ordering::Relaxed) {
+            return (false, "shutting_down");
+        }
+        if self.session_manager.active_count() >= self.config.session_config.max_sessions {
+            return (false, "at_session_capacity");
+        }
+        if self.exec_slots.saturated() {
+            return (false, "at_exec_capacity");
+        }
+        (true, "ok")
     }
 
     /// Sample the live gauge values at scrape time.
@@ -1666,6 +1898,103 @@ impl AgentServer {
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
+/// One pass over both host-level caches: trim the npm cache to `max_bytes`
+/// (`None` = unlimited, debris only) and drop runtime artifacts left behind by
+/// an earlier wasmhub pin. Returns the npm result and the runtime file count.
+fn sweep_caches(max_bytes: Option<u64>) -> (vendor::Eviction, usize) {
+    let npm = match vendor::default_cache_dir() {
+        Some(root) => vendor::evict_npm_cache(&root, max_bytes.unwrap_or(0), CACHE_ENTRY_MIN_AGE),
+        None => vendor::Eviction::default(),
+    };
+    let runtimes = crate::runtime::runtime_cache::RuntimeCache::new()
+        .map(|c| c.prune_unreferenced())
+        .unwrap_or(0);
+    (npm, runtimes)
+}
+
+/// Log a sweep, and only a sweep that did something: a quiet cache should stay
+/// quiet in the access log.
+fn report_cache_sweep((npm, runtimes): (vendor::Eviction, usize)) {
+    if npm.removed > 0 {
+        eprintln!(
+            "Cache: evicted {} npm entr(ies), freed {}, {} in use",
+            npm.removed,
+            fmt_mb(npm.freed_bytes),
+            fmt_mb(npm.total_bytes)
+        );
+    }
+    if runtimes > 0 {
+        eprintln!("Cache: removed {runtimes} superseded runtime artifact(s)");
+    }
+    if npm.still_over {
+        eprintln!(
+            "Cache: still over the ceiling at {}; everything left was installed from too recently to evict",
+            fmt_mb(npm.total_bytes)
+        );
+    }
+}
+
+fn fmt_mb(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+}
+
+/// Trim the caches on a long interval for as long as the server runs.
+///
+/// Sleeps in slices so shutdown is not held up by a pass that is not due.
+fn spawn_cache_sweeper(
+    max_bytes: Option<u64>,
+    shutdown: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut waited = Duration::ZERO;
+        while !shutdown.load(Ordering::Relaxed) {
+            std::thread::sleep(ACCEPT_POLL_INTERVAL);
+            waited += ACCEPT_POLL_INTERVAL;
+            if waited < CACHE_SWEEP_INTERVAL {
+                continue;
+            }
+            waited = Duration::ZERO;
+            report_cache_sweep(sweep_caches(max_bytes));
+        }
+    })
+}
+
+/// Whether `host` resolves to this machine only. Conservative: a name other
+/// than `localhost` is treated as remote rather than resolved, so an unknown
+/// host never talks its way past [`validate_bind`].
+fn is_loopback_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    // v6 literals are written `[::1]` in URLs and `::1` on the command line.
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
+/// Refuse to serve an unauthenticated exec API to the network.
+///
+/// The agent runs arbitrary WASM and JavaScript on request, so an open server
+/// on a routable address is a remote-code-execution endpoint for anyone who can
+/// reach it. Loopback is the default; going wider needs either auth or a
+/// deliberate `--insecure`.
+pub fn validate_bind(host: &str, auth_enabled: bool, insecure: bool) -> Result<()> {
+    if auth_enabled || insecure || is_loopback_host(host) {
+        return Ok(());
+    }
+    Err(WasmrunError::from(format!(
+        "refusing to bind {host} with authentication disabled.\n\
+         \x20  The agent server executes arbitrary code, so an open listener on a\n\
+         \x20  non-loopback address lets anyone who can reach it run code on this machine.\n\
+         \x20  Pick one:\n\
+         \x20    --auth <PATH>      enable API-key auth (keys: wasmrun agent --hash-key <key>)\n\
+         \x20    --host {DEFAULT_HOST}   keep the server on loopback (the default)\n\
+         \x20    --insecure         bind anyway; only on a network you control"
+    )))
+}
+
 /// Per-request context for the always-on structured access log and the
 /// `X-Request-Id` response header. One is built at the top of every request
 /// and carried through to whichever response path runs.
@@ -2002,9 +2331,13 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec,
             workers: 0,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            max_cache_bytes: Some(DEFAULT_MAX_CACHE_MB * 1024 * 1024),
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
+            host: DEFAULT_HOST.to_string(),
+            insecure: false,
         })
     }
 
@@ -2046,9 +2379,13 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec,
             workers: 0,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            max_cache_bytes: Some(DEFAULT_MAX_CACHE_MB * 1024 * 1024),
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
+            host: DEFAULT_HOST.to_string(),
+            insecure: false,
         })
     }
 
@@ -2067,9 +2404,13 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec: 100,
             workers: 0,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            max_cache_bytes: Some(DEFAULT_MAX_CACHE_MB * 1024 * 1024),
             auth: Some(Arc::new(auth_config_for(tenants))),
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
+            host: DEFAULT_HOST.to_string(),
+            insecure: false,
         })
     }
 
@@ -2098,9 +2439,13 @@ mod tests {
             max_body_bytes: Some(32 * 1024 * 1024),
             max_concurrent_exec: 100,
             workers: 0,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
+            max_cache_bytes: Some(DEFAULT_MAX_CACHE_MB * 1024 * 1024),
             auth: Some(Arc::new(auth)),
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
+            host: DEFAULT_HOST.to_string(),
+            insecure: false,
         })
     }
 
@@ -4195,7 +4540,7 @@ mod tests {
     /// the server over HTTP hold no handle to the `Session` itself, and the
     /// file API takes text, not a WASM binary.
     fn session_work_dir(id: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("wasmrun-session-{id}"))
+        session::instance_root().join(format!("session-{id}"))
     }
 
     /// Poll the JSON metrics until `pred` holds. `false` if it never does —
@@ -4340,6 +4685,123 @@ mod tests {
         for (id, key) in [(&busy, alice), (&spare, alice), (&bobs, bob)] {
             http_delete(&format!("{base}/sessions/{id}"), key);
         }
+    }
+
+    // ── Deployment posture (0.22.8) ───────────────────────────────
+
+    #[test]
+    fn test_validate_bind_allows_loopback_spellings() {
+        for host in ["127.0.0.1", "localhost", "LOCALHOST", "::1", "[::1]"] {
+            assert!(
+                validate_bind(host, false, false).is_ok(),
+                "{host} should be treated as loopback"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_bind_refuses_open_non_loopback() {
+        for host in ["0.0.0.0", "::", "192.168.1.10", "example.internal"] {
+            let err = validate_bind(host, false, false).unwrap_err().to_string();
+            assert!(
+                err.contains("refusing to bind") && err.contains("--auth"),
+                "{host} was allowed, or the error does not say how to fix it: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_bind_accepts_auth_or_insecure() {
+        assert!(validate_bind("0.0.0.0", true, false).is_ok());
+        assert!(validate_bind("0.0.0.0", false, true).is_ok());
+    }
+
+    #[test]
+    fn test_banner_warns_only_when_exposed() {
+        let mut config = AgentConfig {
+            host: "0.0.0.0".to_string(),
+            insecure: true,
+            ..Default::default()
+        };
+        let exposed = AgentServer::new(config.clone()).banner(8);
+        assert!(exposed.contains("AUTH IS DISABLED"), "{exposed}");
+        assert!(exposed.contains("Terminate TLS"), "{exposed}");
+
+        config.host = DEFAULT_HOST.to_string();
+        let local = AgentServer::new(config).banner(8);
+        assert!(!local.contains("AUTH IS DISABLED"), "{local}");
+        assert!(local.contains("loopback only"), "{local}");
+    }
+
+    #[test]
+    fn test_probes_answer_without_a_key() {
+        let base = serve(auth_server(free_port(), &[("k_alice", "alice")]));
+
+        // /metrics is auth-gated, which is why it cannot double as a probe.
+        assert_eq!(http_get(&format!("{base}/metrics"), None).0, 401);
+
+        let (status, body) = http_get(&format!("{base}/health"), None);
+        assert_eq!(status, 200, "/health demanded a key: {body}");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["status"], "ok");
+        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+        assert!(v["uptime_seconds"].is_number());
+
+        let (status, body) = http_get(&format!("{base}/ready"), None);
+        assert_eq!(status, 200, "/ready demanded a key: {body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["status"],
+            "ready"
+        );
+    }
+
+    #[test]
+    fn test_ready_turns_503_at_session_capacity() {
+        let mut config = AgentConfig {
+            port: free_port(),
+            ..Default::default()
+        };
+        config.session_config.max_sessions = 1;
+        let server = AgentServer::new(config);
+        assert_eq!(server.readiness(), (true, "ok"));
+
+        let id = server.handle_create_session().unwrap().session_id;
+        assert_eq!(server.readiness(), (false, "at_session_capacity"));
+
+        server.handle_delete_session(&id, None).unwrap();
+        assert_eq!(server.readiness(), (true, "ok"));
+    }
+
+    #[test]
+    fn test_ready_turns_503_once_shutdown_starts() {
+        let server = test_server();
+        assert_eq!(server.readiness(), (true, "ok"));
+        server.shutdown.store(true, Ordering::Relaxed);
+        assert_eq!(server.readiness(), (false, "shutting_down"));
+    }
+
+    #[test]
+    fn test_ready_turns_503_when_exec_slots_are_full() {
+        let server = test_server_with_concurrency(1);
+        let _permit = server.exec_slots.try_acquire().unwrap();
+        assert_eq!(server.readiness(), (false, "at_exec_capacity"));
+    }
+
+    // ── Lifecycle hygiene (0.22.9) ────────────────────────────────
+
+    #[test]
+    fn test_orphan_grace_scales_with_the_cleanup_interval_but_has_a_floor() {
+        let with_interval = |secs: u64| {
+            let mut config = AgentConfig::default();
+            config.session_config.cleanup_interval = Duration::from_secs(secs);
+            AgentServer::new(config).orphan_grace()
+        };
+        // A long interval means fewer heartbeats, so the window has to grow.
+        assert_eq!(with_interval(120), Duration::from_secs(1200));
+        // A short one must not shrink it: the floor keeps a briefly stalled
+        // server from being swept by one that starts up next to it.
+        assert_eq!(with_interval(1), MIN_ORPHAN_GRACE);
+        assert_eq!(with_interval(30), MIN_ORPHAN_GRACE);
     }
 
     #[test]

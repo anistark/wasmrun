@@ -24,10 +24,11 @@ const WORKER_HEADROOM: usize = 16;
 /// mean unlimited threads: a client could otherwise spawn one per connection.
 const UNLIMITED_EXEC_WORKERS: usize = 512;
 
-/// How long [`WorkerPool::shutdown`] waits for in-flight requests before
-/// leaving them to die with the process. Bounded because a request can be
-/// blocked on an exec running to its own (much longer) timeout.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+/// Default drain window: how long [`WorkerPool::shutdown`] waits for in-flight
+/// requests before leaving them to die with the process. Bounded because a
+/// request can be blocked on an exec running to its own (much longer) timeout.
+/// Operators override it with `--shutdown-timeout`.
+pub const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
@@ -204,27 +205,30 @@ impl WorkerPool {
         }
     }
 
-    /// Stop accepting work and wait up to [`SHUTDOWN_GRACE`] for in-flight
-    /// requests to finish.
+    /// Stop accepting work and wait up to `grace` for in-flight requests to
+    /// finish. Returns how many were still running when the wait ended.
     ///
     /// Best-effort: a request still running at the deadline is left to die with
     /// the process, since it may be blocked on an exec with a far longer
-    /// timeout of its own.
-    pub fn shutdown(mut self) {
+    /// timeout of its own. The count is what the shutdown path reports, so an
+    /// operator can tell a clean drain from a truncated one.
+    pub fn shutdown(mut self, grace: Duration) -> u64 {
         // Closing every job channel ends each worker loop once it goes idle.
         for worker in self.workers.iter_mut().flatten() {
             worker.tx = None;
         }
-        let deadline = Instant::now() + SHUTDOWN_GRACE;
+        let deadline = Instant::now() + grace;
         while self.stats.busy() > 0 && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
-        if self.stats.busy() > 0 {
-            return;
+        let abandoned = self.stats.busy();
+        if abandoned > 0 {
+            return abandoned;
         }
         for worker in self.workers.drain(..).flatten() {
             let _ = worker.handle.join();
         }
+        0
     }
 }
 
@@ -295,7 +299,7 @@ mod tests {
             assert!(wait_for(|| stats.busy() == 0));
         }
         assert_eq!(stats.live(), 1, "sequential work needs one thread");
-        pool.shutdown();
+        pool.shutdown(DEFAULT_SHUTDOWN_GRACE);
     }
 
     #[test]
@@ -322,7 +326,7 @@ mod tests {
         pool.dispatch(Box::new(|| {}));
         assert!(wait_for(|| stats.busy() == 0));
         assert_eq!(stats.live(), 3);
-        pool.shutdown();
+        pool.shutdown(DEFAULT_SHUTDOWN_GRACE);
     }
 
     #[test]
@@ -354,7 +358,7 @@ mod tests {
         );
         done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(stats.live(), 2, "the pool never exceeds its ceiling");
-        pool.shutdown();
+        pool.shutdown(DEFAULT_SHUTDOWN_GRACE);
     }
 
     #[test]
@@ -371,7 +375,7 @@ mod tests {
         pool.dispatch(Box::new(move || tx.send(7).unwrap()));
         assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), 7);
         assert_eq!(stats.live(), 1);
-        pool.shutdown();
+        pool.shutdown(DEFAULT_SHUTDOWN_GRACE);
     }
 
     #[test]
@@ -383,22 +387,24 @@ mod tests {
         assert!(wait_for(|| stats.busy() == 0));
         // Returns once the workers have exited, not after the grace period.
         let start = Instant::now();
-        pool.shutdown();
-        assert!(start.elapsed() < SHUTDOWN_GRACE);
+        assert_eq!(pool.shutdown(DEFAULT_SHUTDOWN_GRACE), 0);
+        assert!(start.elapsed() < DEFAULT_SHUTDOWN_GRACE);
     }
 
     #[test]
     fn test_shutdown_gives_up_on_a_stuck_request() {
+        // A short grace: the point is the deadline, not how long it is.
+        const GRACE: Duration = Duration::from_millis(300);
         let (mut pool, _stats) = pool(2);
         let (block_tx, block_rx) = channel::<()>();
         pool.dispatch(Box::new(move || {
             let _ = block_rx.recv();
         }));
         let start = Instant::now();
-        pool.shutdown();
-        assert!(start.elapsed() >= SHUTDOWN_GRACE, "waited for the deadline");
+        assert_eq!(pool.shutdown(GRACE), 1, "the stuck request is reported");
+        assert!(start.elapsed() >= GRACE, "waited for the deadline");
         assert!(
-            start.elapsed() < SHUTDOWN_GRACE * 4,
+            start.elapsed() < GRACE * 4,
             "but did not wait for the request"
         );
         drop(block_tx);

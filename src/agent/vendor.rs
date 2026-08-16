@@ -111,6 +111,181 @@ fn lowered_dir(cache_dir: &Path, name: &str, version: &str) -> PathBuf {
     cache_dir.join(name).join(format!("{version}.cjs"))
 }
 
+// ── Cache eviction ────────────────────────────────────────────────────
+
+/// Prefix of a half-written entry: an extract or lowering that was interrupted
+/// before its atomic rename. Debris, never a cache hit.
+const TMP_ENTRY_PREFIX: &str = ".tmp-";
+
+/// One evictable directory: an extracted `<version>`, a lowered `<version>.cjs`,
+/// or leftover `.tmp-` debris.
+pub struct CacheEntry {
+    pub path: PathBuf,
+    pub bytes: u64,
+    /// Last install that read this entry, or its creation if never re-used.
+    pub last_used: std::time::SystemTime,
+    /// Debris is deleted on age alone, without counting against the ceiling.
+    scrap: bool,
+}
+
+/// What one eviction pass did, for the operator-facing log line.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Eviction {
+    pub removed: usize,
+    pub freed_bytes: u64,
+    /// Cache size once the pass finished.
+    pub total_bytes: u64,
+    /// True when the cache is still over its ceiling because everything left
+    /// is too recently used to touch.
+    pub still_over: bool,
+}
+
+/// Where an entry's last-use time is recorded.
+///
+/// A sibling file, never a file inside the entry: [`body_matches_registry_copy`]
+/// compares the entry's contents against the session's copy file by file, so a
+/// marker within it would make every package look modified and silently disable
+/// the lowering cache.
+fn used_marker(entry: &Path) -> Option<PathBuf> {
+    let name = entry.file_name()?.to_str()?;
+    Some(entry.with_file_name(format!("{name}.used")))
+}
+
+/// Record that `entry` was just installed from, so eviction sees it as recent.
+/// Best-effort: a failed write costs the entry some of its lifetime, nothing more.
+pub fn touch_entry(entry: &Path) {
+    if let Some(marker) = used_marker(entry) {
+        let _ = std::fs::write(marker, b"");
+    }
+}
+
+/// Every evictable directory under `root`, with its size and last-use time.
+///
+/// A directory holding a `package.json` *is* an entry, and is never descended
+/// into: a package body can contain its own nested `node_modules`, and those
+/// are part of the entry rather than entries of their own.
+pub fn cache_entries(root: &Path) -> Vec<CacheEntry> {
+    fn walk(dir: &Path, out: &mut Vec<CacheEntry>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let scrap = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(TMP_ENTRY_PREFIX));
+            if !scrap && !path.join("package.json").exists() {
+                // A scope (`@scope`) or package-name level: keep descending.
+                walk(&path, out);
+                continue;
+            }
+            let last_used = used_marker(&path)
+                .and_then(|m| std::fs::metadata(m).ok())
+                .or_else(|| std::fs::metadata(&path).ok())
+                .and_then(|m| m.modified().ok())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            out.push(CacheEntry {
+                bytes: dir_size(&path),
+                path,
+                last_used,
+                scrap,
+            });
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, &mut out);
+    out
+}
+
+/// Remove the `<name>` and `@scope` directories left empty by eviction.
+///
+/// Only the levels *above* an entry: a directory holding a `package.json` is a
+/// cached package body and is never reorganized, empty subdirectories included.
+/// Returns whether `dir` itself is now empty.
+fn prune_empty_dirs(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let mut empty = true;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+            || path.join("package.json").exists()
+        {
+            empty = false;
+            continue;
+        }
+        if !(prune_empty_dirs(&path) && std::fs::remove_dir(&path).is_ok()) {
+            empty = false;
+        }
+    }
+    empty
+}
+
+/// Trim the npm cache to `max_bytes`, least-recently-used first.
+///
+/// Entries used within `min_age` are never removed, so a package being copied
+/// into a session right now cannot be deleted out from under the install. That
+/// can leave the cache over its ceiling, which is reported rather than forced:
+/// overshooting a disk budget briefly beats breaking a running request.
+///
+/// `max_bytes == 0` means unlimited, and only clears interrupted-install debris.
+pub fn evict_npm_cache(root: &Path, max_bytes: u64, min_age: std::time::Duration) -> Eviction {
+    let mut entries = cache_entries(root);
+    let now = std::time::SystemTime::now();
+    let old_enough = |e: &CacheEntry| {
+        now.duration_since(e.last_used)
+            .map(|age| age >= min_age)
+            .unwrap_or(false)
+    };
+
+    let mut out = Eviction::default();
+    // Debris first: it is pure loss, and freeing it may be enough on its own.
+    entries.retain(|e| {
+        if e.scrap && old_enough(e) {
+            if std::fs::remove_dir_all(&e.path).is_ok() {
+                out.removed += 1;
+                out.freed_bytes += e.bytes;
+            }
+            return false;
+        }
+        !e.scrap
+    });
+
+    let mut total: u64 = entries.iter().map(|e| e.bytes).sum();
+    if max_bytes == 0 || total <= max_bytes {
+        out.total_bytes = total;
+        prune_empty_dirs(root);
+        return out;
+    }
+
+    entries.sort_by_key(|e| e.last_used);
+    for entry in entries.iter() {
+        if total <= max_bytes {
+            break;
+        }
+        if !old_enough(entry) {
+            continue;
+        }
+        if std::fs::remove_dir_all(&entry.path).is_ok() {
+            if let Some(marker) = used_marker(&entry.path) {
+                let _ = std::fs::remove_file(marker);
+            }
+            total -= entry.bytes;
+            out.removed += 1;
+            out.freed_bytes += entry.bytes;
+        }
+    }
+    out.total_bytes = total;
+    out.still_over = total > max_bytes;
+    prune_empty_dirs(root);
+    out
+}
+
 /// Whether the package body at `dir` is byte-identical to what the registry
 /// shipped for `name@version`.
 ///
@@ -185,7 +360,9 @@ pub fn store_lowered(name: &str, version: &str, dir: &Path) {
     }
     if std::fs::rename(&tmp, &dest).is_err() {
         let _ = std::fs::remove_dir_all(&tmp);
+        return;
     }
+    touch_entry(&dest);
 }
 
 /// `copy_dir`, minus nested `node_modules` (separate packages, installed on
@@ -500,11 +677,13 @@ impl Vendor {
         // already converted, so installing it skips the transform.
         let lowered = lowered_dir(&self.cache_dir, name, version);
         if lowered.join("package.json").exists() {
+            touch_entry(&lowered);
             return Ok(lowered);
         }
 
         let pkg_cache = self.cache_dir.join(name).join(version);
         if pkg_cache.join("package.json").exists() {
+            touch_entry(&pkg_cache);
             return Ok(pkg_cache);
         }
 
@@ -546,6 +725,7 @@ impl Vendor {
                 return Err(ApiError::Internal(format!("npm cache rename: {e}")));
             }
         }
+        touch_entry(&pkg_cache);
         Ok(pkg_cache)
     }
 }
@@ -1302,6 +1482,122 @@ mod tests {
 
     fn v(s: &str) -> SemVer {
         SemVer::parse(s).unwrap()
+    }
+
+    // ── Cache eviction (0.22.10) ──────────────────────────────────
+
+    /// A cache entry of roughly `kb` kilobytes at `<root>/<name>/<version>`.
+    fn plant(root: &Path, name: &str, version: &str, kb: usize) -> PathBuf {
+        let dir = root.join(name).join(version);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), r#"{"name":"x"}"#).unwrap();
+        std::fs::write(dir.join("index.js"), "x".repeat(kb * 1024)).unwrap();
+        dir
+    }
+
+    /// Backdate an entry's last-use marker so eviction sees it as cold.
+    fn age(entry: &Path, by: std::time::Duration) {
+        touch_entry(entry);
+        let marker = used_marker(entry).unwrap();
+        let when = std::time::SystemTime::now() - by;
+        std::fs::File::open(&marker)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    const HOUR: std::time::Duration = std::time::Duration::from_secs(3600);
+    const MIN_AGE: std::time::Duration = std::time::Duration::from_secs(600);
+
+    #[test]
+    fn test_eviction_removes_the_least_recently_used_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let cold = plant(root, "cold", "1.0.0", 200);
+        let warm = plant(root, "warm", "1.0.0", 200);
+        let coldest = plant(root, "coldest", "1.0.0", 200);
+        age(&cold, HOUR * 2);
+        age(&coldest, HOUR * 5);
+        age(&warm, HOUR);
+
+        // Room for two of the three entries.
+        let out = evict_npm_cache(root, 450 * 1024, MIN_AGE);
+        assert_eq!(out.removed, 1);
+        assert!(!coldest.exists(), "the oldest entry survived");
+        assert!(
+            !root.join("coldest").exists(),
+            "the emptied package directory was left behind"
+        );
+        assert!(cold.exists() && warm.exists());
+        assert!(!out.still_over, "one eviction was enough: {out:?}");
+        assert!(
+            !used_marker(&coldest).unwrap().exists(),
+            "the marker outlived its entry"
+        );
+    }
+
+    #[test]
+    fn test_eviction_spares_entries_still_in_use() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // Both are far over the ceiling, but both were just installed from:
+        // deleting one mid-install would break a running request.
+        let a = plant(root, "a", "1.0.0", 200);
+        let b = plant(root, "b", "1.0.0", 200);
+        touch_entry(&a);
+        touch_entry(&b);
+
+        let out = evict_npm_cache(root, 1024, MIN_AGE);
+        assert_eq!(out.removed, 0);
+        assert!(a.exists() && b.exists());
+        assert!(out.still_over, "an unresolvable overage must be reported");
+    }
+
+    #[test]
+    fn test_eviction_clears_interrupted_install_debris_regardless_of_ceiling() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let scrap = plant(root, "pkg", ".tmp-1.0.0-4242", 100);
+        let kept = plant(root, "pkg", "1.0.0", 100);
+        age(&scrap, HOUR);
+        age(&kept, HOUR);
+
+        // Unlimited: nothing is evicted for size, but debris is never wanted.
+        let out = evict_npm_cache(root, 0, MIN_AGE);
+        assert_eq!(out.removed, 1);
+        assert!(!scrap.exists(), "a dead temp entry was kept");
+        assert!(kept.exists(), "a real entry was swept as debris");
+    }
+
+    #[test]
+    fn test_cache_entries_finds_scoped_and_lowered_entries_without_descending() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        plant(root, "@scope/pkg", "1.0.0", 1);
+        plant(root, "plain", "2.0.0", 1);
+        let lowered = plant(root, "plain", "2.0.0.cjs", 1);
+        // A package body may carry its own node_modules; it is part of the
+        // entry, not an entry of its own.
+        let nested = lowered.join("node_modules").join("dep");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("package.json"), "{}").unwrap();
+
+        let found = cache_entries(root);
+        let paths: Vec<_> = found.iter().map(|e| e.path.clone()).collect();
+        assert_eq!(found.len(), 3, "{paths:?}");
+        assert!(found.iter().all(|e| !e.path.ends_with("dep")));
+    }
+
+    #[test]
+    fn test_use_marker_lives_outside_the_entry() {
+        // A marker inside the entry would make every cached package differ
+        // from the session's copy, silently disabling the lowering cache.
+        let tmp = tempfile::tempdir().unwrap();
+        let entry = plant(tmp.path(), "pkg", "1.0.0", 1);
+        let before = package_files(&entry).unwrap();
+        touch_entry(&entry);
+        assert_eq!(package_files(&entry).unwrap(), before);
+        assert!(used_marker(&entry).unwrap().exists());
     }
 
     #[test]

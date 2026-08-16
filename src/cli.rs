@@ -282,6 +282,22 @@ pub enum Commands {
         )]
         port: u16,
 
+        /// Address to bind (default: 127.0.0.1, loopback only)
+        #[arg(
+            long,
+            value_name = "ADDR",
+            default_value = "127.0.0.1",
+            help = "Address to bind (0.0.0.0 exposes the server on every interface)"
+        )]
+        host: String,
+
+        /// Bind a non-loopback address with auth disabled
+        #[arg(
+            long,
+            help = "Allow a non-loopback bind without --auth (trusted networks only)"
+        )]
+        insecure: bool,
+
         /// Default session timeout in seconds (default: 300)
         #[arg(
             short = 't',
@@ -363,6 +379,23 @@ pub enum Commands {
             help = "Maximum concurrent HTTP request workers (0 = auto, from --max-concurrent-exec)"
         )]
         workers: usize,
+
+        /// Ceiling on the shared npm package cache in MB (default: 2048, 0 = unlimited)
+        #[arg(
+            long,
+            default_value_t = 2048,
+            help = "Maximum size of the shared npm cache in MB (0 = unlimited)"
+        )]
+        max_cache_size: u64,
+
+        /// How long shutdown waits for in-flight requests (default: 10)
+        #[arg(
+            long,
+            value_name = "SECS",
+            default_value_t = 10,
+            help = "Seconds to let in-flight requests finish on shutdown"
+        )]
+        shutdown_timeout: u64,
 
         /// npm registry base URL used to vendor `dependencies` requests
         #[arg(

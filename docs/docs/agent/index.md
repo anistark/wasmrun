@@ -16,6 +16,8 @@ wasmrun agent [OPTIONS]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-P, --port` | `8430` | Server port |
+| `--host` | `127.0.0.1` | Address to bind. Loopback only by default; `0.0.0.0` exposes the server on every interface |
+| `--insecure` | off | Allow a non-loopback bind with auth disabled. Startup is refused otherwise |
 | `-t, --timeout` | `300` | Default session idle timeout (seconds) |
 | `-m, --max-sessions` | `100` | Maximum concurrent sessions |
 | `--max-memory` | `256` | Maximum linear memory per session (MB) |
@@ -26,6 +28,8 @@ wasmrun agent [OPTIONS]
 | `--max-body` | `32` | Maximum accepted request body size (MB) |
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
 | `--workers` | `0` | Maximum HTTP request-handling threads (`0` = auto, derived from `--max-concurrent-exec`) |
+| `--shutdown-timeout` | `10` | Seconds to let in-flight requests finish on shutdown before the process exits |
+| `--max-cache-size` | `2048` | Ceiling on the shared npm package cache in MB (`0` = unlimited) |
 | `--npm-registry` | `https://registry.npmjs.org` | npm registry base URL for dependency vendoring |
 | `--allow-cors` | off | Enable wildcard CORS |
 | `-v, --verbose` | off | Add a request-received line per request (a structured access log is always emitted; see [Observability](./usage/observability.md)) |
@@ -43,6 +47,81 @@ Requests are handled on a pool of worker threads, so a long execution never bloc
 Threads are spawned **on demand** and capped at `--workers`, so an idle server holds none of them. When every worker is busy the server stops accepting until one frees up, leaving the excess queued in the TCP backlog rather than growing threads without limit.
 
 `--workers 0` (the default) sizes the pool from the exec cap: `--max-concurrent-exec` plus 16 spare workers for requests that do not execute anything, or 512 when execution concurrency is unlimited. A request that starts an execution is occupied for its whole duration, so a pool smaller than `--max-concurrent-exec` becomes the real ceiling on concurrent executions. Set `--workers` explicitly to bound memory on a small host, and watch `wasmrun_agent_workers_live` and `wasmrun_agent_requests_in_flight` in [the metrics](./usage/observability.md) to see how much of the pool is actually in use.
+
+## Network exposure and TLS
+
+The server binds **`127.0.0.1` by default**, so a fresh `wasmrun agent` is reachable only from the machine it runs on. That is deliberate: the exec endpoint runs arbitrary code, so a server anyone can reach is a server anyone can run code on.
+
+To serve other hosts, pass `--host 0.0.0.0` (or a specific interface address). Without `--auth`, that combination **refuses to start**:
+
+```sh
+wasmrun agent --host 0.0.0.0
+# ❌ refusing to bind 0.0.0.0 with authentication disabled.
+#      --auth <PATH>      enable API-key auth
+#      --host 127.0.0.1   keep the server on loopback (the default)
+#      --insecure         bind anyway; only on a network you control
+```
+
+`--insecure` is the escape hatch for a network you fully control, such as a private container network. It prints a warning banner at startup and is never the right choice on anything an untrusted client can reach.
+
+**TLS is not terminated in-process.** Traffic is plaintext HTTP, API keys included, so anything beyond loopback belongs behind a reverse proxy (nginx, Caddy, a cloud load balancer) that terminates TLS and forwards to the agent. The recommended shape:
+
+- Bind the agent to loopback, or to a private interface the proxy alone can reach
+- Terminate TLS at the proxy and forward to `http://127.0.0.1:8430`
+- Keep `--auth` on, so a key is required even if the port is reached directly
+- Point liveness and readiness probes at `/health` and `/ready` (see [Observability](./usage/observability.md#health-and-readiness))
+
+## Restarts and shutdown
+
+**Sessions do not survive a restart.** They live in memory, with their files in a temp directory, and a restart destroys all of them. This is an explicit non-goal: there is no persistence, no handoff between instances, and no rolling restart that preserves work. A client should treat a 404 on a session it holds as "create a new one" (see [Sessions](./usage/sessions.md#sessions-do-not-survive-a-restart)).
+
+That fixes the supported deployment shape:
+
+- **One instance owns its sessions.** Behind a load balancer, requests for a session must reach the instance that created it, since any other instance returns 404. Route by session id, or run a single instance per pool.
+- **Scale by adding pools, not replicas.** Two instances behind a round-robin balancer will appear to lose sessions at random, which is a routing mistake rather than a bug.
+
+### Draining
+
+`SIGINT` (Ctrl+C), `SIGTERM` and `SIGHUP` all start a clean shutdown. `SIGTERM` matters most: it is what `docker stop`, Kubernetes and systemd send, and a server that ignored it would be `SIGKILL`ed at the end of the stop timeout with its session directories left behind.
+
+The sequence:
+
+1. The listener stops accepting; anything already accepted gets **503**
+2. `/ready` reports `shutting_down` (it has done so since the signal arrived)
+3. In-flight requests get up to `--shutdown-timeout` seconds to finish. A long execution can outlive that window; it is abandoned at the deadline and the count is logged
+4. Every session is destroyed and its directory removed
+
+Give the orchestrator's stop timeout more room than `--shutdown-timeout`, or it will `SIGKILL` mid-drain. To take an instance out of rotation before the signal, deregister it from the balancer first (a `preStop` hook, or waiting one probe interval after `/ready` starts failing); the agent does not delay its own shutdown to wait for probes.
+
+### Orphaned session directories
+
+A crash or `SIGKILL` runs no destructors, so the session tree survives the process. Each server owns one directory, `<temp>/wasmrun-agent-<pid>-<timestamp>/`, containing every session it created and a heartbeat file it refreshes on each cleanup tick.
+
+At startup a server sweeps the temp directory and removes any such tree whose heartbeat has gone stale, meaning no live server has touched it for ten cleanup intervals (at least five minutes). A running server's tree is never swept, because its heartbeat is current. Directories from before this scheme (`wasmrun-session-*`, one per session at the top of the temp directory) are collected once they are more than a day old. The count is reported at startup:
+
+```
+   Swept 3 orphaned session tree(s) from a previous run
+```
+
+## Disk and caches
+
+Two caches live in the operator's home directory, outside any session, and are shared by every session and tenant on the host:
+
+| Path | Holds | Bounded by |
+|------|-------|-----------|
+| `~/.wasmrun/npm/` | Downloaded npm packages, per `name@version`, plus their CommonJS-lowered forms | `--max-cache-size` (default 2048 MB) |
+| `~/.wasmrun/runtimes/` | wasmhub language runtimes (`.wasm`) and their metadata | One artifact per language; superseded ones are deleted |
+
+Both are swept at startup and every five minutes after that. The npm cache is trimmed **least-recently-used first** until it fits under the ceiling, where "used" means the last time an install read the entry, not when it was downloaded. Entries installed from within the last ten minutes are never removed, so a package being copied into a session cannot be deleted mid-install. If that leaves the cache over its ceiling, the overage is logged rather than forced:
+
+```
+Cache: evicted 12 npm entr(ies), freed 340.2 MB, 1907.4 MB in use
+Cache: removed 1 superseded runtime artifact(s)
+```
+
+Directories left behind by an install that was interrupted partway are always cleared, ceiling or not. Bumping the pinned wasmhub release points each language at a new artifact and the old one is removed on the next sweep; without that, the runtime cache would grow by one full runtime per release.
+
+Setting `--max-cache-size 0` disables the size ceiling entirely, leaving only the debris and superseded-runtime cleanup. Evicting a package costs a re-download the next time it is needed, never correctness: every install verifies integrity against the registry regardless of what the cache holds.
 
 ## Authentication
 
@@ -220,7 +299,7 @@ Each tool includes a description, parameter schema with types, and required fiel
 
 ## Observability
 
-The server exposes runtime metrics at `GET /api/v1/metrics` (Prometheus text by default, JSON with `?format=json`) and writes a structured, request-id-tagged access-log line to stderr for every request. See [Observability](./usage/observability.md) for the full metric set and log format.
+The server exposes runtime metrics at `GET /api/v1/metrics` (Prometheus text by default, JSON with `?format=json`) and writes a structured, request-id-tagged access-log line to stderr for every request. `GET /health` and `GET /ready` are unauthenticated probes for orchestrators. See [Observability](./usage/observability.md) for the full metric set, the probe semantics, and the log format.
 
 ```sh
 curl http://localhost:8430/api/v1/metrics
