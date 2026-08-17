@@ -104,6 +104,7 @@ curl -X POST http://localhost:8430/api/v1/sessions/$SID/exec \
 - `GET /api/v1/tools` returns **OpenAI/Anthropic-compatible tool schemas**, so an LLM can drive the sandbox through function calling
 - Per-session limits on memory, fuel, output, file size, and disk; optional API-key auth with tenant isolation
 - Binds **loopback only** by default; `GET /health` and `GET /ready` are unauthenticated probes for orchestrators
+- Running it for other people: the [deployment guide](https://wasmrun.readthedocs.io/en/latest/docs/agent/deployment) covers the reverse proxy, systemd and container units, sizing, and monitoring
 
 ## 🔌 Plugin System
 

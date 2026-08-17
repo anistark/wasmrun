@@ -90,6 +90,7 @@ const sidebars: SidebarsConfig = {
             'agent/usage/observability',
           ],
         },
+        'agent/deployment',
       ],
     },
   ],
