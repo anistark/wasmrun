@@ -377,6 +377,7 @@ data: {"stdout":"0\n1\n2\n","stderr":"","exit_code":0,"duration_ms":412}
 - The final `result` event carries the same object the buffered response would have returned, including the complete output, so a client can ignore the intermediate events entirely
 - Errors that prevent execution from starting (unknown session, bad request) are returned as an ordinary JSON error response, not as an event stream
 - Disconnecting cancels the execution, so an abandoned run does not keep burning a worker
+- The response is chunk-encoded, so a client reaches the end of the stream at the `result` event rather than waiting for a timeout. The server asks the client to close the connection afterwards: it terminates the body but does not close the socket itself
 
 ---
 

@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Dependencies not covered by the lockfile resolve normally on top of it, so adding one package to a pinned tree does not unpin the rest
 - **Install from `package.json`**: set `install_package_json` on an execution to install the project's declared dependencies, from an uploaded `package.json` or one already in the session. Off by default, so an uploaded `package.json` never triggers an unrequested install. `devDependencies` are ignored
 - **Streaming execution output**: set `stream` on an execution to receive Server-Sent Events as the code runs, instead of waiting for the full response. `output` events carry incremental stdout/stderr and a final `result` event carries the usual response object, so long-running code is no longer silent until it finishes
+  - The event stream is chunk-encoded, so a client sees the response end at the `result` event instead of holding the connection open until its own read timeout expires
 - **Session listing**: `GET /api/v1/sessions` lists the available sessions, newest first, so an agent can reuse one instead of creating another. Scoped to the calling tenant when authentication is enabled. Exposed to LLM agents as a new `list_sessions` tool
 - **TypeScript project configuration**: a project may now ship a `tsconfig.json`, parsed as JSONC so comments and trailing commas are accepted
   - `paths` aliases are honored, materialized so the runtime's own module resolver handles them with no rewriting of your imports

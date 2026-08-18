@@ -15,7 +15,7 @@ use crate::error::{Result, WasmrunError};
 use crate::runtime::core::native_executor::{execute_wasm_bytes_with_env, ExecLimits};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -42,6 +42,56 @@ const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// How long the accept loop waits for a connection before re-checking the
 /// shutdown flag. Short enough that Ctrl+C is not held up by an idle server.
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+/// The body writer for a streaming exec, framing each SSE event as one HTTP
+/// chunk when the client speaks HTTP/1.1.
+///
+/// Framing is what tells a client the response ended. The socket is not ours
+/// to close: `Request::into_writer` hands out a writer that shares the
+/// connection through tiny_http's own handle, so dropping it shuts nothing
+/// down, and an unframed body ends only when the client gives up waiting.
+/// An HTTP/1.0 client does not understand chunks, but tiny_http closes its
+/// connection after the response, so there the raw body is already delimited.
+struct StreamWriter<W: Write> {
+    inner: W,
+    chunked: bool,
+}
+
+impl<W: Write> StreamWriter<W> {
+    fn new(inner: W, chunked: bool) -> Self {
+        Self { inner, chunked }
+    }
+
+    /// Close the body with the terminating zero-length chunk.
+    fn finish(&mut self) -> std::io::Result<()> {
+        if self.chunked {
+            self.inner.write_all(b"0\r\n\r\n")?;
+        }
+        self.inner.flush()
+    }
+}
+
+impl<W: Write> Write for StreamWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if !self.chunked {
+            return self.inner.write(buf);
+        }
+        // A zero-length chunk is the end-of-body marker, so an empty write
+        // must never reach the wire as one.
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        self.inner
+            .write_all(format!("{:x}\r\n", buf.len()).as_bytes())?;
+        self.inner.write_all(buf)?;
+        self.inner.write_all(b"\r\n")?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
 
 /// Shared by the single-session and list endpoints so they cannot disagree.
 fn session_status_row(s: &crate::agent::session::Session) -> SessionStatusResponse {
@@ -1546,21 +1596,30 @@ impl AgentServer {
             }
         };
 
-        let mut out = request.into_writer();
-        let headers = "HTTP/1.1 200 OK\r\n\
+        // Chunked framing needs an HTTP/1.1 client; see `StreamWriter`.
+        let chunked = *request.http_version() >= tiny_http::HTTPVersion(1, 1);
+        let mut raw = request.into_writer();
+        let mut headers = String::from(
+            "HTTP/1.1 200 OK\r\n\
              Content-Type: text/event-stream\r\n\
              Cache-Control: no-cache\r\n\
-             Connection: close\r\n\r\n";
-        if out.write_all(headers.as_bytes()).is_err() {
+             Connection: close\r\n",
+        );
+        if chunked {
+            headers.push_str("Transfer-Encoding: chunked\r\n");
+        }
+        headers.push_str("\r\n");
+        if raw.write_all(headers.as_bytes()).is_err() {
             run.cancel.store(true, Ordering::Relaxed);
             return;
         }
 
+        let mut out = StreamWriter::new(raw, chunked);
         let response = self.stream_exec(run, &mut out);
         let event = serde_json::to_string(&response)
             .unwrap_or_else(|e| format!(r#"{{"error":"failed to serialize result: {e}"}}"#));
         let _ = out.write_all(format!("event: result\ndata: {event}\n\n").as_bytes());
-        let _ = out.flush();
+        let _ = out.finish();
         log.emit(200);
     }
 
@@ -3531,6 +3590,38 @@ mod tests {
     }
 
     #[test]
+    fn test_stream_writer_frames_each_write_as_one_chunk() {
+        let mut sink: Vec<u8> = Vec::new();
+        let mut out = StreamWriter::new(&mut sink, true);
+        out.write_all(b"event: output\ndata: {}\n\n").unwrap();
+        // An empty write must not emit the zero chunk, which would end the
+        // body early and swallow the result event.
+        out.write_all(b"").unwrap();
+        out.write_all(b"event: result\ndata: {}\n\n").unwrap();
+        out.finish().unwrap();
+
+        assert_eq!(
+            String::from_utf8(sink).unwrap(),
+            "18\r\nevent: output\ndata: {}\n\n\r\n\
+             18\r\nevent: result\ndata: {}\n\n\r\n\
+             0\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn test_stream_writer_passes_through_unframed() {
+        let mut sink: Vec<u8> = Vec::new();
+        let mut out = StreamWriter::new(&mut sink, false);
+        out.write_all(b"event: result\ndata: {}\n\n").unwrap();
+        out.finish().unwrap();
+        assert_eq!(
+            String::from_utf8(sink).unwrap(),
+            "event: result\ndata: {}\n\n",
+            "an HTTP/1.0 body carries no chunk framing at all"
+        );
+    }
+
+    #[test]
     fn test_stream_flag_is_parsed_from_the_request() {
         let with: ExecRequest = serde_json::from_str(r#"{"source":"1","stream":true}"#).unwrap();
         assert_eq!(with.stream, Some(true));
@@ -5133,6 +5224,113 @@ mod tests {
             ),
             200
         );
+    }
+
+    // ── Streaming response framing (0.22.13) ──────────────────────
+
+    /// Drive a streaming exec over a raw socket, so the assertions see the
+    /// wire bytes rather than a client library's decoding of them. Returns the
+    /// header block, the body, and whether the server closed the connection.
+    ///
+    /// Reading stops at the terminating chunk, at end of file, or at the read
+    /// timeout, which is the case a regression would land in.
+    fn raw_stream_exec(port: u16, id: &str, version: &str) -> (String, Vec<u8>, bool) {
+        let mut sock = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let body = r#"{"command": "echo streamed", "stream": true}"#;
+        let request = format!(
+            "POST {API_PREFIX}/sessions/{id}/exec {version}\r\n\
+             Host: 127.0.0.1\r\n\
+             Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        sock.write_all(request.as_bytes()).unwrap();
+        sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        let closed = loop {
+            match sock.read(&mut buf) {
+                Ok(0) => break true,
+                Ok(n) => {
+                    raw.extend_from_slice(&buf[..n]);
+                    if raw.ends_with(b"0\r\n\r\n") {
+                        break false;
+                    }
+                }
+                Err(_) => break false,
+            }
+        };
+
+        let split = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("no header terminator");
+        let headers = String::from_utf8_lossy(&raw[..split]).into_owned();
+        (headers, raw[split + 4..].to_vec(), closed)
+    }
+
+    #[test]
+    fn test_stream_response_is_chunk_framed() {
+        let port = free_port();
+        let base = serve(open_server(port));
+        let id = http_create_session(&base, None);
+
+        let (headers, body, _) = raw_stream_exec(port, &id, "HTTP/1.1");
+        assert!(
+            headers.contains("Transfer-Encoding: chunked"),
+            "unframed: nothing in the response says where it ends\n{headers}"
+        );
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            body.ends_with(b"0\r\n\r\n"),
+            "the body never reached its terminating chunk\n{text}"
+        );
+        assert!(text.contains("event: output") && text.contains("event: result"));
+
+        http_delete(&format!("{base}/sessions/{id}"), None);
+    }
+
+    #[test]
+    fn test_stream_response_stays_unframed_for_an_http_1_0_client() {
+        let port = free_port();
+        let base = serve(open_server(port));
+        let id = http_create_session(&base, None);
+
+        // An HTTP/1.0 client does not understand chunks, and does not need to:
+        // tiny_http closes its connection after the response, which delimits
+        // the body on its own.
+        let (headers, body, closed) = raw_stream_exec(port, &id, "HTTP/1.0");
+        assert!(!headers.contains("Transfer-Encoding"), "{headers}");
+        assert!(
+            closed,
+            "the connection outlived a response only it delimits"
+        );
+        assert!(String::from_utf8_lossy(&body).contains("event: result"));
+
+        http_delete(&format!("{base}/sessions/{id}"), None);
+    }
+
+    #[test]
+    fn test_a_streaming_client_reaches_the_end_of_the_stream() {
+        let base = serve(open_server(free_port()));
+        let id = http_create_session(&base, None);
+
+        // The global timeout is what makes this a failure rather than a hang:
+        // an unframed response leaves the client reading until it gives up.
+        let sent = ureq::post(format!("{base}/sessions/{id}/exec"))
+            .config()
+            .timeout_global(Some(Duration::from_secs(15)))
+            .build()
+            .header("Content-Type", "application/json")
+            .send(r#"{"command": "echo streamed", "stream": true}"#);
+
+        let (status, body) = http_result(sent);
+        assert_eq!(status, 200);
+        assert!(body.contains("event: output") && body.contains("event: result"));
+        assert!(body.contains("streamed"));
+
+        http_delete(&format!("{base}/sessions/{id}"), None);
     }
 
     // ── Observability / metrics (0.20.5) ──────────────────────────
