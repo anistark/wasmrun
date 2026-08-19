@@ -348,7 +348,7 @@ mod tests {
         let tools = get_recommended_tools(&ProjectLanguage::C, &OperatingSystem::Linux);
         assert!(tools
             .iter()
-            .any(|t| t.contains("emscripten") || t.contains("clang") || t.contains("gcc")));
+            .all(|t| t.contains("emscripten") || t.contains("clang") || t.contains("gcc")));
     }
 
     #[test]
@@ -356,15 +356,18 @@ mod tests {
         let tools = get_recommended_tools(&ProjectLanguage::C, &OperatingSystem::Windows);
         assert!(tools
             .iter()
-            .any(|t| t.contains("emscripten") || t.contains("mingw") || t.contains("msvc")));
+            .all(|t| t.contains("emscripten") || t.contains("mingw") || t.contains("msvc")));
     }
 
     #[test]
     fn test_get_recommended_tools_asc() {
+        // asc is the only candidate, so the list is empty once it is installed
         let tools = get_recommended_tools(&ProjectLanguage::Asc, &OperatingSystem::Linux);
-        assert!(tools
-            .iter()
-            .any(|t| t.contains("node") || t.contains("npm") || t.contains("asc")));
+        if is_tool_installed("asc") {
+            assert!(tools.is_empty());
+        } else {
+            assert!(tools.iter().any(|t| t.contains("asc")));
+        }
     }
 
     #[test]

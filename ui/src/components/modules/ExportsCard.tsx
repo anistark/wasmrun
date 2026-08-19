@@ -29,7 +29,7 @@ export function ExportsCard({ moduleInfo }: ExportsCardProps) {
                 key={idx}
                 class="flex items-center p-2 bg-light-surface3 dark:bg-dark-surface3 rounded-lg"
               >
-                <span class="w-2 h-2 bg-green-400 rounded-full mr-3 flex-shrink-0"></span>
+                <span class="w-2 h-2 bg-green-400 rounded-full mr-3 shrink-0"></span>
                 <code class="font-mono text-sm text-light-textPrimary dark:text-dark-textPrimary">
                   {exp}
                 </code>

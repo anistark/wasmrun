@@ -230,21 +230,17 @@ export default function LogsPanel(_props: LogsPanelProps) {
               key={idx}
               className={`flex gap-3 p-2 text-sm border-l-4 ${getSourceBorderColor(log.source)} hover:bg-white/5 transition-colors`}
             >
-              <div className="text-gray-500 font-mono text-xs min-w-fit flex-shrink-0">
+              <div className="text-gray-500 font-mono text-xs min-w-fit shrink-0">
                 {formatTimestamp(log.timestamp)}
               </div>
-              <div
-                className={`font-bold text-xs min-w-fit flex-shrink-0 ${getLevelColor(log.level)}`}
-              >
+              <div className={`font-bold text-xs min-w-fit shrink-0 ${getLevelColor(log.level)}`}>
                 [{log.level}]
               </div>
-              <div
-                className={`font-bold text-xs min-w-fit flex-shrink-0 ${getSourceColor(log.source)}`}
-              >
+              <div className={`font-bold text-xs min-w-fit shrink-0 ${getSourceColor(log.source)}`}>
                 [{log.source}]
               </div>
               {log.pid && (
-                <div className="text-gray-500 text-xs min-w-fit flex-shrink-0">PID:{log.pid}</div>
+                <div className="text-gray-500 text-xs min-w-fit shrink-0">PID:{log.pid}</div>
               )}
               <div className="text-white/90 font-mono text-xs break-words flex-1">
                 {log.message}

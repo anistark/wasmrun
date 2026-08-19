@@ -124,7 +124,7 @@ export function LogContainer({
               value={currentCommand}
               onInput={e => setCurrentCommand((e.target as HTMLInputElement).value)}
               onKeyDown={handleKeyDown}
-              class="flex-1 bg-transparent text-light-textMuted dark:text-dark-textMuted border-none outline-none font-mono text-sm"
+              class="flex-1 bg-transparent text-light-textMuted dark:text-dark-textMuted border-none outline-hidden font-mono text-sm"
               autoFocus
             />
           </div>

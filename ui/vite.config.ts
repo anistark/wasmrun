@@ -9,16 +9,16 @@ export default defineConfig(() => {
     plugins: [preact()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, './src'),
+        '@': path.resolve(import.meta.dirname, './src'),
       }
     },
     build: {
       outDir: `../templates-temp/${template}`,
       emptyOutDir: true,
+      codeSplitting: false,
       rollupOptions: {
         input: `./src/${template}/index.html`,
         output: {
-          inlineDynamicImports: true,
           entryFileNames: `${template}.js`,
           chunkFileNames: `${template}.js`,
           assetFileNames: '[name].[ext]'
