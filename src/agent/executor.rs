@@ -83,8 +83,13 @@ pub fn execute_source(
     )?;
 
     let run_target = if lang.is_typescript() {
+        // A `source` exec has no files of its own to carry a tsconfig, but the
+        // session can hold one written earlier through the files API, and an
+        // agent that configured the project expects it to apply either way.
+        let tsconfig = TsConfig::load(&HashMap::new(), work_dir)?;
         transpile_in_session(
             &[script_name.to_string()],
+            &tsconfig.transpile_flags(),
             wasi_env.clone(),
             limits,
             cancel.clone(),
@@ -159,7 +164,13 @@ pub fn execute_source_project(
         let mut ts_files: Vec<String> = files.keys().filter(|p| is_ts_path(p)).cloned().collect();
         ts_files.sort(); // deterministic transpile order
         if !ts_files.is_empty() {
-            transpile_in_session(&ts_files, wasi_env.clone(), limits, cancel.clone())?;
+            transpile_in_session(
+                &ts_files,
+                &tsconfig.transpile_flags(),
+                wasi_env.clone(),
+                limits,
+                cancel.clone(),
+            )?;
         }
         tsconfig.write_path_aliases(files, work_dir, limits)?;
         js_output_path(entry)
@@ -185,17 +196,28 @@ pub fn execute_source_project(
     .map_err(|e| ApiError::Internal(e.to_string()))
 }
 
+/// ECMAScript versions the transpiler can down-level to, as its `--target`
+/// spells them. `tsconfig.json` is case-insensitive here and has its own
+/// aliases, so what the user wrote is normalized before the lookup.
+const TS_TARGETS: [&str; 13] = [
+    "es3", "es5", "es2015", "es2016", "es2017", "es2018", "es2019", "es2020", "es2021", "es2022",
+    "es2023", "es2024", "esnext",
+];
+
 /// The parts of a project's `tsconfig.json` that reach the sandbox.
 ///
-/// The transpiler takes file paths and no options, so most compiler options
-/// cannot be honored here. The ones whose absence breaks the output are
-/// refused by name; `paths` is the one this side can deliver.
+/// `paths` is delivered on this side, as shims under `node_modules`. The rest
+/// become transpiler flags, which the swc CLI has accepted since wasmhub
+/// v0.4.1. What it still cannot apply is refused by name rather than dropped:
+/// silently emitting JSX for the wrong runtime fails far less legibly.
 #[derive(Debug, Default)]
 struct TsConfig {
     /// Alias pattern → first target, both as written.
     paths: Vec<(String, String)>,
     /// `baseUrl`, normalized to a project-relative prefix ("" for the root).
     base_url: String,
+    /// Transpiler flags built from `compilerOptions`, in CLI order.
+    flags: Vec<String>,
 }
 
 impl TsConfig {
@@ -216,38 +238,68 @@ impl TsConfig {
             return Ok(Self::default());
         };
 
-        // Refused rather than dropped: the failure otherwise (decorator syntax
-        // QuickJS rejects, JSX for the wrong runtime) is far harder to read.
+        // Refused rather than dropped: emitting JSX for a runtime the project
+        // does not use fails far less legibly than saying so here.
         let unsupported = |opt: &str, why: &str| {
             Err(ApiError::BadRequest(format!(
-                "tsconfig.json sets '{opt}', which the sandbox transpiler cannot apply yet: {why}"
+                "tsconfig.json sets '{opt}', which the sandbox transpiler cannot apply: {why}"
             )))
         };
-        if opts.get("experimentalDecorators") == Some(&serde_json::Value::Bool(true)) {
-            return unsupported(
-                "experimentalDecorators",
-                "decorators would be emitted as-is and the runtime cannot execute them",
-            );
-        }
-        if opts.get("emitDecoratorMetadata") == Some(&serde_json::Value::Bool(true)) {
-            return unsupported(
-                "emitDecoratorMetadata",
-                "no decorator transform is available",
-            );
-        }
-        if let Some(jsx) = opts.get("jsx").and_then(|j| j.as_str()) {
-            if jsx != "react" {
+
+        let mut flags = Vec::new();
+
+        if let Some(raw) = opts.get("target").and_then(|t| t.as_str()) {
+            // `latest` is TypeScript's own alias for the newest target, and
+            // `es6` its alias for es2015, which the CLI already accepts.
+            let normalized = match raw.to_ascii_lowercase().as_str() {
+                "latest" => "esnext".to_string(),
+                other => other.to_string(),
+            };
+            if !TS_TARGETS.contains(&normalized.as_str()) && normalized != "es6" {
                 return unsupported(
-                    "jsx",
-                    &format!(
-                        "only the classic 'react' runtime is available, not '{jsx}'; \
-                         JSX compiles to React.createElement calls"
-                    ),
+                    "target",
+                    &format!("'{raw}' is not a version it can emit; supported: {}", {
+                        TS_TARGETS.join(", ")
+                    }),
                 );
             }
+            flags.push("--target".into());
+            flags.push(normalized);
         }
-        // `target` is not refused: with no down-level pass the source syntax
-        // reaches the runtime either way, so it is a no-op, not a wrong answer.
+
+        if let Some(jsx) = opts.get("jsx").and_then(|j| j.as_str()) {
+            match jsx {
+                // Classic is the transpiler's default, so it needs no flag.
+                "react" => {}
+                // The dev runtime only adds debug arguments to the same calls,
+                // so the non-dev automatic transform is the honest match.
+                "react-jsx" | "react-jsxdev" => {
+                    flags.push("--jsx".into());
+                    flags.push("automatic".into());
+                }
+                other => {
+                    return unsupported(
+                        "jsx",
+                        &format!(
+                            "'{other}' leaves JSX in the output, and the runtime cannot execute \
+                             it; use 'react' or 'react-jsx'"
+                        ),
+                    );
+                }
+            }
+        }
+        if let Some(source) = opts.get("jsxImportSource").and_then(|s| s.as_str()) {
+            flags.push("--jsx-import-source".into());
+            flags.push(source.to_string());
+        }
+
+        if opts.get("experimentalDecorators") == Some(&serde_json::Value::Bool(true)) {
+            flags.push("--decorators".into());
+        }
+        if opts.get("emitDecoratorMetadata") == Some(&serde_json::Value::Bool(true)) {
+            // Implies --decorators in the CLI, so it stands alone.
+            flags.push("--decorator-metadata".into());
+        }
 
         let base_url = opts
             .get("baseUrl")
@@ -284,7 +336,22 @@ impl TsConfig {
             }
             paths.sort();
         }
-        Ok(Self { paths, base_url })
+        Ok(Self {
+            paths,
+            base_url,
+            flags,
+        })
+    }
+
+    /// The full option list for a project transpile.
+    ///
+    /// `--source-map` is always on, whatever the project's `sourceMap` says:
+    /// the map is not an output anyone asked for, it is what lets a frame in
+    /// the emitted `.js` be reported against the `.ts` line actually written.
+    fn transpile_flags(&self) -> Vec<String> {
+        let mut flags = vec!["--source-map".to_string()];
+        flags.extend(self.flags.iter().cloned());
+        flags
     }
 
     /// Materialize `paths` aliases as CommonJS shims under `node_modules`, so
@@ -453,6 +520,11 @@ fn js_output_path(path: &str) -> String {
 /// Run the swc transpiler WASM inside the session sandbox over `ts_files`
 /// (paths relative to the session root). Each input emits a sibling `.js`.
 ///
+/// `flags` are the CLI options built from the project's `tsconfig.json`, and
+/// must precede the inputs: the transpiler stops reading options at the first
+/// path. ESM lowering passes none, since a vendored package's output is not
+/// the project's to configure.
+///
 /// The transpiler shares the session's WASI environment, so its output lands
 /// in the session buffers; those are snapshotted and cleared here so
 /// transpiler noise never leaks into the program's captured output. A
@@ -460,6 +532,7 @@ fn js_output_path(path: &str) -> String {
 /// the original `.ts` file names).
 fn transpile_in_session(
     ts_files: &[String],
+    flags: &[String],
     wasi_env: Arc<Mutex<WasiEnv>>,
     limits: &ResourceLimits,
     cancel: Option<Arc<AtomicBool>>,
@@ -467,6 +540,7 @@ fn transpile_in_session(
     let transpiler = fetch_runtime_bytes(TS_TRANSPILER)?;
 
     let mut args = vec![TS_TRANSPILER.to_string()];
+    args.extend(flags.iter().cloned());
     args.extend(ts_files.iter().cloned());
 
     let exit = execute_wasm_bytes_with_env(
@@ -531,7 +605,7 @@ fn lower_esm_dependencies(
     let files: Vec<String> = packages.iter().flat_map(|p| p.files.clone()).collect();
     let inputs = esm::stage_inputs(work_dir, &files)?;
 
-    let result = transpile_in_session(&inputs, wasi_env, limits, cancel).map_err(|e| {
+    let result = transpile_in_session(&inputs, &[], wasi_env, limits, cancel).map_err(|e| {
         // One invocation covers every package, so the owner comes from the
         // path swc reports rather than from transpiling separately.
         ApiError::BadRequest(esm::blame(&packages, &e.to_string()))
@@ -880,15 +954,11 @@ mod tests {
     #[test]
     fn test_tsconfig_refuses_options_it_cannot_apply() {
         for (json, named) in [
-            (
-                r#"{"compilerOptions":{"experimentalDecorators":true}}"#,
-                "experimentalDecorators",
-            ),
-            (
-                r#"{"compilerOptions":{"emitDecoratorMetadata":true}}"#,
-                "emitDecoratorMetadata",
-            ),
-            (r#"{"compilerOptions":{"jsx":"react-jsx"}}"#, "jsx"),
+            // Leaves JSX in the output, which the runtime cannot execute.
+            (r#"{"compilerOptions":{"jsx":"preserve"}}"#, "jsx"),
+            (r#"{"compilerOptions":{"jsx":"react-native"}}"#, "jsx"),
+            // Not a version the transpiler can emit.
+            (r#"{"compilerOptions":{"target":"ES2043"}}"#, "target"),
         ] {
             let err = tsconfig_from(json).unwrap_err();
             assert_eq!(err.status_code(), 400);
@@ -897,11 +967,64 @@ mod tests {
                 "error should name '{named}': {err}"
             );
         }
+    }
 
-        // `target` is a no-op rather than a failure: with no down-level pass
-        // the source syntax reaches the runtime either way.
-        assert!(tsconfig_from(r#"{"compilerOptions":{"target":"ES5"}}"#).is_ok());
-        assert!(tsconfig_from(r#"{"compilerOptions":{"jsx":"react"}}"#).is_ok());
+    #[test]
+    fn test_tsconfig_compiler_options_become_transpiler_flags() {
+        // Classic JSX is the transpiler's default, so it earns no flag.
+        assert!(tsconfig_from(r#"{"compilerOptions":{"jsx":"react"}}"#)
+            .unwrap()
+            .flags
+            .is_empty());
+
+        for (json, expected) in [
+            (
+                r#"{"compilerOptions":{"target":"ES5"}}"#,
+                vec!["--target", "es5"],
+            ),
+            // TypeScript's own aliases for the newest and for es2015.
+            (
+                r#"{"compilerOptions":{"target":"Latest"}}"#,
+                vec!["--target", "esnext"],
+            ),
+            (
+                r#"{"compilerOptions":{"target":"ES6"}}"#,
+                vec!["--target", "es6"],
+            ),
+            (
+                r#"{"compilerOptions":{"jsx":"react-jsx"}}"#,
+                vec!["--jsx", "automatic"],
+            ),
+            (
+                r#"{"compilerOptions":{"jsx":"react-jsxdev"}}"#,
+                vec!["--jsx", "automatic"],
+            ),
+            (
+                r#"{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"preact"}}"#,
+                vec!["--jsx", "automatic", "--jsx-import-source", "preact"],
+            ),
+            (
+                r#"{"compilerOptions":{"experimentalDecorators":true}}"#,
+                vec!["--decorators"],
+            ),
+            (
+                r#"{"compilerOptions":{"emitDecoratorMetadata":true}}"#,
+                vec!["--decorator-metadata"],
+            ),
+        ] {
+            assert_eq!(tsconfig_from(json).unwrap().flags, expected, "for {json}");
+        }
+    }
+
+    #[test]
+    fn test_tsconfig_flags_precede_the_inputs() {
+        // The transpiler stops reading options at the first path, so a flag
+        // ordered after one would be treated as a file to transpile.
+        let cfg = tsconfig_from(
+            r#"{"compilerOptions":{"target":"ES2020","experimentalDecorators":true}}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.flags, ["--target", "es2020", "--decorators"]);
     }
 
     #[test]

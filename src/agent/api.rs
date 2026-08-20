@@ -44,8 +44,13 @@ pub struct ExecRequest {
     /// `files`, or already in the session root) in addition to any listed in
     /// `dependencies`. Off by default: an uploaded package.json stays inert
     /// unless asked for, so no exec turns into an unrequested network fetch.
-    /// `devDependencies` are ignored.
+    /// `devDependencies` need [`Self::install_dev_dependencies`].
     pub install_package_json: Option<bool>,
+    /// Also install the package.json's `devDependencies`, which is what a test
+    /// run needs. Implies [`Self::install_package_json`], since dev
+    /// dependencies without the runtime ones cannot run anything. Off by
+    /// default: they are usually the larger and less useful half of a tree.
+    pub install_dev_dependencies: Option<bool>,
     /// Stream output as Server-Sent Events while the code runs, instead of
     /// waiting for the buffered JSON response. `output` events carry
     /// incremental stdout/stderr; a final `result` event carries the same

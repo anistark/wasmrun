@@ -7,8 +7,8 @@ use std::path::PathBuf;
 /// The wasmhub release wasmrun is pinned to. Must match the tag in
 /// `WASMHUB_BASE_URL`; cached runtimes downloaded from a different release
 /// are invalidated and re-fetched.
-const WASMHUB_RELEASE: &str = "v0.4.0";
-const WASMHUB_BASE_URL: &str = "https://github.com/anistark/wasmhub/releases/download/v0.4.0";
+const WASMHUB_RELEASE: &str = "v0.4.2";
+const WASMHUB_BASE_URL: &str = "https://github.com/anistark/wasmhub/releases/download/v0.4.2";
 /// Development/testing override: point runtime fetches at an alternate
 /// wasmhub-shaped host (e.g. a local HTTP server serving unreleased
 /// artifacts). When set, it also becomes the cache's release identity so
@@ -339,7 +339,8 @@ struct CacheMetadata {
 }
 
 fn http_get_string(url: &str) -> Result<String> {
-    let mut body = ureq::get(url)
+    let mut body = crate::utils::http::agent()
+        .get(url)
         .call()
         .map_err(|e| WasmrunError::from(format!("HTTP request failed for {url}: {e}")))?
         .into_body();
@@ -351,7 +352,8 @@ fn http_get_string(url: &str) -> Result<String> {
 }
 
 fn http_get_bytes(url: &str) -> Result<Vec<u8>> {
-    let body = ureq::get(url)
+    let body = crate::utils::http::agent()
+        .get(url)
         .call()
         .map_err(|e| WasmrunError::from(format!("HTTP request failed for {url}: {e}")))?
         .into_body();

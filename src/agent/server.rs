@@ -9,6 +9,7 @@ use crate::agent::pool::{resolve_workers, PoolStats, WorkerPool, DEFAULT_SHUTDOW
 use crate::agent::session;
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::shell;
+use crate::agent::sourcemap;
 use crate::agent::tools;
 use crate::agent::vendor;
 use crate::error::{Result, WasmrunError};
@@ -29,6 +30,9 @@ struct RunningExec {
     rx: std::sync::mpsc::Receiver<std::result::Result<i32, ApiError>>,
     cancel: Arc<AtomicBool>,
     wasi_env: Arc<Mutex<crate::runtime::wasi::WasiEnv>>,
+    /// The session root, for resolving the `.js.map` beside a stack frame's
+    /// file when the captured stderr is turned into a response.
+    work_dir: std::path::PathBuf,
     lock_slot: Arc<Mutex<Option<vendor::Lockfile>>>,
     start: Instant,
     timeout: Duration,
@@ -118,7 +122,10 @@ fn resolve_exec_deps(
 ) -> std::result::Result<Option<HashMap<String, String>>, ApiError> {
     let mut deps = HashMap::new();
 
-    if req.install_package_json.unwrap_or(false) {
+    // Dev dependencies imply the runtime ones: a test runner alone cannot run
+    // the code under test.
+    let with_dev = req.install_dev_dependencies.unwrap_or(false);
+    if req.install_package_json.unwrap_or(false) || with_dev {
         let raw = match req.files.as_ref().and_then(|f| f.get("package.json")) {
             Some(uploaded) => Some(uploaded.clone()),
             None => std::fs::read_to_string(work_dir.join("package.json")).ok(),
@@ -130,12 +137,21 @@ fn resolve_exec_deps(
         })?;
         let parsed: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|e| ApiError::BadRequest(format!("Invalid package.json: {e}")))?;
-        // devDependencies: nothing in the sandbox runs them yet.
-        if let Some(map) = parsed.get("dependencies").and_then(|d| d.as_object()) {
+        // Runtime deps first, so a package pinned differently in both fields
+        // resolves to the dev range, which is the one a test run wants.
+        let fields: &[&str] = if with_dev {
+            &["dependencies", "devDependencies"]
+        } else {
+            &["dependencies"]
+        };
+        for field in fields {
+            let Some(map) = parsed.get(field).and_then(|d| d.as_object()) else {
+                continue;
+            };
             for (name, range) in map {
                 let range = range.as_str().ok_or_else(|| {
                     ApiError::BadRequest(format!(
-                        "package.json dependency '{name}' must map to a version range string"
+                        "package.json {field} entry '{name}' must map to a version range string"
                     ))
                 })?;
                 deps.insert(name.clone(), range.to_string());
@@ -1565,6 +1581,7 @@ impl AgentServer {
             rx,
             cancel,
             wasi_env,
+            work_dir,
             lock_slot,
             start,
             timeout,
@@ -1630,6 +1647,7 @@ impl AgentServer {
             rx,
             cancel,
             wasi_env,
+            work_dir,
             lock_slot,
             start,
             timeout,
@@ -1646,6 +1664,9 @@ impl AgentServer {
                 ),
                 Err(_) => return true,
             };
+            // Best effort per chunk: a frame split across two samples stays
+            // unmapped here, and the final `result` event carries it mapped.
+            let stderr = sourcemap::remap_stack(&stderr, &work_dir);
             if stdout.is_empty() && stderr.is_empty() {
                 return true;
             }
@@ -1679,7 +1700,10 @@ impl AgentServer {
         let lockfile = lock_slot.lock().ok().and_then(|mut l| l.take());
 
         // Repeat the full output so a client that dropped a frame still has it.
-        let (stdout, stderr) = (read_env_stdout(&wasi_env), read_env_stderr(&wasi_env));
+        let (stdout, stderr) = (
+            read_env_stdout(&wasi_env),
+            read_env_stderr_mapped(&wasi_env, &work_dir),
+        );
         match exec_result {
             Some(Ok(exit_code)) => {
                 self.metrics.record_exec_success(duration_ms);
@@ -1726,6 +1750,7 @@ impl AgentServer {
             rx,
             cancel,
             wasi_env,
+            work_dir,
             lock_slot,
             start,
             timeout,
@@ -1752,7 +1777,7 @@ impl AgentServer {
                 }
                 return Ok(ExecResponse {
                     stdout: read_env_stdout(&wasi_env),
-                    stderr: read_env_stderr(&wasi_env),
+                    stderr: read_env_stderr_mapped(&wasi_env, &work_dir),
                     exit_code: -1,
                     duration_ms,
                     output_truncated: truncated,
@@ -1784,7 +1809,7 @@ impl AgentServer {
                 self.metrics.record_exec_success(duration_ms);
                 Ok(ExecResponse {
                     stdout: read_env_stdout(&wasi_env),
-                    stderr: read_env_stderr(&wasi_env),
+                    stderr: read_env_stderr_mapped(&wasi_env, &work_dir),
                     exit_code,
                     duration_ms,
                     output_truncated: truncated,
@@ -1796,7 +1821,7 @@ impl AgentServer {
                 self.metrics.record_exec_error(duration_ms);
                 Ok(ExecResponse {
                     stdout: read_env_stdout(&wasi_env),
-                    stderr: read_env_stderr(&wasi_env),
+                    stderr: read_env_stderr_mapped(&wasi_env, &work_dir),
                     exit_code: -1,
                     duration_ms,
                     output_truncated: truncated,
@@ -2430,6 +2455,18 @@ fn read_env_stderr(
     env.lock()
         .map(|e| String::from_utf8_lossy(&e.get_stderr()).into_owned())
         .unwrap_or_default()
+}
+
+/// The session's captured stderr, with TypeScript stack frames pointed back at
+/// the sources they were transpiled from.
+///
+/// A run with no source maps beside its files (plain JavaScript, a `.wasm`
+/// module, a shell command) is returned unchanged.
+fn read_env_stderr_mapped(
+    env: &std::sync::Arc<std::sync::Mutex<crate::runtime::wasi::WasiEnv>>,
+    work_dir: &Path,
+) -> String {
+    sourcemap::remap_stack(&read_env_stderr(env), work_dir)
 }
 
 /// Bytes appended to a session buffer since `seen`, advancing `seen`.
@@ -3689,7 +3726,27 @@ mod tests {
         );
         let deps = resolve_exec_deps(&req, work_dir.path()).unwrap().unwrap();
         assert_eq!(deps.get("lodash").map(String::as_str), Some("^4.0.0"));
-        assert!(!deps.contains_key("jest"), "devDependencies are ignored");
+        assert!(
+            !deps.contains_key("jest"),
+            "devDependencies stay out without their own flag"
+        );
+
+        // install_dev_dependencies brings both halves, and implies the other
+        // flag: dev dependencies alone cannot run the code under test.
+        let req = parse(
+            r#"{"source":"1","install_dev_dependencies":true,"files":{"package.json":"{\"dependencies\":{\"lodash\":\"^4.0.0\"},\"devDependencies\":{\"jest\":\"^29\"}}"}}"#,
+        );
+        let deps = resolve_exec_deps(&req, work_dir.path()).unwrap().unwrap();
+        assert_eq!(deps.get("lodash").map(String::as_str), Some("^4.0.0"));
+        assert_eq!(deps.get("jest").map(String::as_str), Some("^29"));
+
+        // A package in both fields takes the dev range, which is the one a
+        // test run is asking for.
+        let req = parse(
+            r#"{"source":"1","install_dev_dependencies":true,"files":{"package.json":"{\"dependencies\":{\"tap\":\"^1.0.0\"},\"devDependencies\":{\"tap\":\"^2.0.0\"}}"}}"#,
+        );
+        let deps = resolve_exec_deps(&req, work_dir.path()).unwrap().unwrap();
+        assert_eq!(deps.get("tap").map(String::as_str), Some("^2.0.0"));
 
         // The explicit map wins over the file.
         let req = parse(
@@ -3889,6 +3946,105 @@ mod tests {
             "transitive ESM output missing: {:?}; stderr: {}",
             resp.stdout,
             resp.stderr
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: a thrown error reports the `.ts` line that threw, not
+    /// the line of the `.js` the transpiler emitted.
+    ///
+    /// Needs wasmhub >= v0.4.2 on both halves: swc's `--source-map` for the
+    /// map, and the nodejs runtime naming modules in its frames so there is a
+    /// file to look the map up by.
+    /// Ignored by default; see test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_typescript_error_reports_the_original_line_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // `throw` is on line 4 of thrower.ts, the call on line 3 of main.ts.
+        let body = r#"{
+            "files": {
+                "main.ts": "import { boom } from './lib/thrower';\n\nboom('world');\n",
+                "lib/thrower.ts": "// a comment on line 1\nexport function boom(name: string): never {\n  const label: string = 'kaboom for ' + name;\n  throw new Error(label);\n}\n"
+            },
+            "entry": "main.ts",
+            "language": "typescript",
+            "timeout": 300
+        }"#;
+        let resp = server.handle_exec(&id, body, None).unwrap();
+
+        assert_eq!(
+            resp.exit_code, 1,
+            "an uncaught error must exit non-zero; stderr: {}",
+            resp.stderr
+        );
+        for expected in ["lib/thrower.ts:4", "main.ts:3"] {
+            assert!(
+                resp.stderr.contains(expected),
+                "missing remapped frame {expected:?} in stderr: {}",
+                resp.stderr
+            );
+        }
+        assert!(
+            !resp.stderr.contains("main.ts.js") && !resp.stderr.contains("thrower.js"),
+            "frames should not name the emitted .js: {}",
+            resp.stderr
+        );
+        // The runtime's own frames have no map and stay as they are.
+        assert!(
+            resp.stderr.contains("runtimes/nodejs/main.js"),
+            "runtime frames should be left alone: {}",
+            resp.stderr
+        );
+
+        server.session_manager.destroy_all().unwrap();
+    }
+
+    /// Integration test: a failing `node:test` run is visible through the exit
+    /// code, which is the only thing distinguishing it from a passing one.
+    ///
+    /// Needs wasmhub >= v0.4.2: before it, `os.exit` did not exist and every
+    /// run reported 0.
+    /// Ignored by default; see test_multi_file_js_require_integration.
+    #[test]
+    #[ignore]
+    fn test_node_test_failure_sets_exit_code_integration() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        let run = |source: &str| {
+            let body = serde_json::json!({
+                "source": source,
+                "language": "javascript",
+                "timeout": 300,
+            });
+            server.handle_exec(&id, &body.to_string(), None).unwrap()
+        };
+
+        let failing = run(
+            "const {test} = require('node:test'); const assert = require('assert'); \
+             test('passes', () => assert.equal(1, 1)); \
+             test('fails', () => assert.equal(1, 2));",
+        );
+        assert_eq!(
+            failing.exit_code, 1,
+            "a failing run must exit non-zero; stdout: {}",
+            failing.stdout
+        );
+        assert!(
+            failing.stdout.contains("not ok 2 - fails") && failing.stdout.contains("# fail 1"),
+            "TAP should still report the failure: {}",
+            failing.stdout
+        );
+
+        let passing = run("const {test} = require('node:test'); test('ok', () => {});");
+        assert_eq!(
+            passing.exit_code, 0,
+            "a passing run must exit zero; stdout: {}",
+            passing.stdout
         );
 
         server.session_manager.destroy_all().unwrap();

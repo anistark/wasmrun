@@ -716,24 +716,22 @@ fn read_limits<T: Read>(cursor: &mut T) -> Result<(u32, Option<u32>), String> {
     Ok((initial, max))
 }
 
-/// Safely parse an expression with bounds checking
-/// Expressions are terminated by 0x0b (END opcode)
+/// Safely parse a constant expression with bounds checking, returning its
+/// bytes including the terminating 0x0b (END opcode).
+///
+/// Each instruction's immediates are decoded rather than scanned past. 0x0b is
+/// the END opcode, but it is also an ordinary final byte of a LEB128 constant:
+/// any `i32.const` in 180224..=196607 encodes as `0x.. 0x.. 0x0b`, for one.
+/// Searching byte-wise for 0x0b stops mid-instruction there and leaves the real
+/// END to be read as the next field, desynchronizing every segment that
+/// follows. wasmhub's nodejs runtime hit exactly this at v0.4.1, when its data
+/// grew enough to push two segment offsets into that range.
 fn parse_expression(cursor: &mut Cursor<Vec<u8>>, section_end: usize) -> Result<Vec<u8>, String> {
     let mut expr = Vec::new();
     const MAX_EXPR_SIZE: usize = 16384; // Reasonable limit for expressions
 
     loop {
-        let current_pos = cursor.position() as usize;
-
-        // Check if we've hit the section boundary
-        if current_pos >= section_end {
-            return Err(
-                "Expression parsing exceeded section boundary - missing END marker (0x0b)"
-                    .to_string(),
-            );
-        }
-
-        // Check if expression is getting too large (likely infinite loop)
+        // Check if expression is getting too large (likely a malformed module)
         if expr.len() > MAX_EXPR_SIZE {
             return Err(format!(
                 "Expression too large ({} bytes) - likely missing END marker (0x0b)",
@@ -741,16 +739,71 @@ fn parse_expression(cursor: &mut Cursor<Vec<u8>>, section_end: usize) -> Result<
             ));
         }
 
-        let byte = read_u8(cursor)?;
-        expr.push(byte);
-
-        // 0x0b is the END opcode that terminates all expressions
-        if byte == 0x0b {
-            break;
+        let opcode = read_expr_byte(cursor, section_end, &mut expr)?;
+        match opcode {
+            0x0b => break,                                               // end
+            0x41 | 0x42 => copy_leb128(cursor, section_end, &mut expr)?, // i32.const, i64.const
+            0x43 => copy_bytes(cursor, section_end, &mut expr, 4)?,      // f32.const
+            0x44 => copy_bytes(cursor, section_end, &mut expr, 8)?,      // f64.const
+            0x23 => copy_leb128(cursor, section_end, &mut expr)?,        // global.get
+            0xd0 => copy_leb128(cursor, section_end, &mut expr)?,        // ref.null <heaptype>
+            0xd2 => copy_leb128(cursor, section_end, &mut expr)?,        // ref.func <funcidx>
+            // Extended-const arithmetic: i32/i64 add, sub, mul. No immediates.
+            0x6a..=0x6c | 0x7c..=0x7e => {}
+            other => {
+                return Err(format!(
+                    "Unsupported opcode 0x{other:02x} in constant expression"
+                ))
+            }
         }
     }
 
     Ok(expr)
+}
+
+/// Read one byte of an expression, appending it to `expr`.
+fn read_expr_byte(
+    cursor: &mut Cursor<Vec<u8>>,
+    section_end: usize,
+    expr: &mut Vec<u8>,
+) -> Result<u8, String> {
+    if cursor.position() as usize >= section_end {
+        return Err(
+            "Expression parsing exceeded section boundary - missing END marker (0x0b)".to_string(),
+        );
+    }
+    let byte = read_u8(cursor)?;
+    expr.push(byte);
+    Ok(byte)
+}
+
+/// Copy one LEB128 immediate. Signed and unsigned share a continuation-bit
+/// encoding, so the same walk covers both.
+fn copy_leb128(
+    cursor: &mut Cursor<Vec<u8>>,
+    section_end: usize,
+    expr: &mut Vec<u8>,
+) -> Result<(), String> {
+    // 10 bytes is the widest legal 64-bit LEB128.
+    for _ in 0..10 {
+        if read_expr_byte(cursor, section_end, expr)? & 0x80 == 0 {
+            return Ok(());
+        }
+    }
+    Err("LEB128 immediate in constant expression is too long".to_string())
+}
+
+/// Copy `count` fixed-width immediate bytes.
+fn copy_bytes(
+    cursor: &mut Cursor<Vec<u8>>,
+    section_end: usize,
+    expr: &mut Vec<u8>,
+    count: usize,
+) -> Result<(), String> {
+    for _ in 0..count {
+        read_expr_byte(cursor, section_end, expr)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

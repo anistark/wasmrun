@@ -296,10 +296,12 @@ pub fn clean_staging(work_dir: &Path, files: &[String]) {
 
 /// Bring a lowered package's `package.json` in line with what it now holds,
 /// preserving every other field: `"type": "module"` is dropped (true
-/// afterwards, and what stops [`scan`] re-lowering it next run) and `main` is
-/// written when the entry needed one.
+/// afterwards, and what stops [`scan`] re-lowering it next run), `main` is
+/// written when the entry needed one, and `exports`/`imports` targets are
+/// pointed at the files lowering left behind.
 pub fn finalize_manifest(work_dir: &Path, pkg: &EsmPackage) -> std::result::Result<(), ApiError> {
-    let path = work_dir.join(&pkg.dir).join("package.json");
+    let pkg_dir = work_dir.join(&pkg.dir);
+    let path = pkg_dir.join("package.json");
     let text = std::fs::read_to_string(&path)
         .map_err(|e| ApiError::Internal(format!("Failed to read {}: {e}", path.display())))?;
     let mut json: serde_json::Value = serde_json::from_str(&text)
@@ -313,10 +315,46 @@ pub fn finalize_manifest(work_dir: &Path, pkg: &EsmPackage) -> std::result::Resu
     if let Some(main) = &pkg.main {
         map.insert("main".into(), serde_json::Value::String(main.clone()));
     }
+    for field in ["exports", "imports"] {
+        if let Some(value) = map.get_mut(field) {
+            relink_lowered_targets(value, &pkg_dir);
+        }
+    }
     let rendered = serde_json::to_string_pretty(&json)
         .map_err(|e| ApiError::Internal(format!("Failed to render package.json: {e}")))?;
     std::fs::write(&path, rendered)
         .map_err(|e| ApiError::Internal(format!("Failed to write {}: {e}", path.display())))
+}
+
+/// Point every `.mjs` target in an `exports`/`imports` map at the `.js` that
+/// lowering produced, at any depth: condition objects, subpath maps and
+/// alternatives arrays all hold targets as plain strings.
+///
+/// The runtime's resolver consults `exports` before `main` and probes only
+/// `.js`/`.json`, so a map left pointing at a `.mjs` sends it at a file
+/// lowering renamed away, and `main` never gets its turn. Only targets whose
+/// lowered sibling is actually on disk are rewritten, so an entry this pass
+/// never touched stays exactly as the package wrote it.
+fn relink_lowered_targets(value: &mut serde_json::Value, pkg_dir: &Path) {
+    match value {
+        serde_json::Value::String(target) => {
+            let lowered = lowered_name(target);
+            if lowered != *target && pkg_dir.join(strip_dot_slash(&lowered)).exists() {
+                *target = lowered;
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for nested in map.values_mut() {
+                relink_lowered_targets(nested, pkg_dir);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for nested in items.iter_mut() {
+                relink_lowered_targets(nested, pkg_dir);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Attribute a transpiler error to the package owning the offending file.

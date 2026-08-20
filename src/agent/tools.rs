@@ -77,7 +77,11 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                         },
                         "install_package_json": {
                             "type": "boolean",
-                            "description": "Also install the dependencies listed in the project's package.json (uploaded in 'files', or already in the session). Off by default so an uploaded package.json never triggers an unrequested install. devDependencies are ignored."
+                            "description": "Also install the dependencies listed in the project's package.json (uploaded in 'files', or already in the session). Off by default so an uploaded package.json never triggers an unrequested install. devDependencies need 'install_dev_dependencies'."
+                        },
+                        "install_dev_dependencies": {
+                            "type": "boolean",
+                            "description": "Also install the package.json's devDependencies, which is what running the project's tests usually needs. Implies 'install_package_json'. Off by default: they are typically the larger half of a dependency tree and most runs do not need them."
                         },
                         "lockfile": {
                             "type": "object",
@@ -93,7 +97,7 @@ pub fn openai_tools() -> Vec<OpenAiTool> {
                         },
                         "stdin": {
                             "type": "string",
-                            "description": "Text the program reads from standard input; omitting it means an immediate EOF. Reaches programs that read fd 0 through WASI, which today means 'wasm_path' modules only: JavaScript and TypeScript code cannot read it yet, because the runtime's process.stdin is still a stub."
+                            "description": "Text the program reads from standard input; omitting it means an immediate EOF. JavaScript and TypeScript read it through process.stdin (a readable stream: 'data'/'end' events, read(), pipe(), setEncoding, and for await) or fs.readFileSync(0) / fs.readFileSync('/dev/stdin'), which see the same bytes. It reaches 'wasm_path' modules on fd 0 through WASI. Input can only be drained once per execution."
                         },
                         "stream": {
                             "type": "boolean",

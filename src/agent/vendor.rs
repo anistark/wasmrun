@@ -980,7 +980,8 @@ fn copy_dir(src: &Path, dest: &Path, limits: &ResourceLimits) -> std::result::Re
 // ── HTTP helpers ────────────────────────────────────────────────────
 
 fn http_get_string(url: &str) -> std::result::Result<String, String> {
-    let mut body = ureq::get(url)
+    let mut body = crate::utils::http::agent()
+        .get(url)
         .header("Accept", "application/vnd.npm.install-v1+json")
         .call()
         .map_err(|e| format!("HTTP request failed for {url}: {e}"))?
@@ -993,7 +994,8 @@ fn http_get_string(url: &str) -> std::result::Result<String, String> {
 }
 
 fn http_get_bytes(url: &str, max_bytes: u64) -> std::result::Result<Vec<u8>, String> {
-    let body = ureq::get(url)
+    let body = crate::utils::http::agent()
+        .get(url)
         .call()
         .map_err(|e| format!("HTTP request failed for {url}: {e}"))?
         .into_body();

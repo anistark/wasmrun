@@ -133,7 +133,7 @@ curl http://localhost:8420/api/runtimes
   "wasmhub_runtime": "nodejs",
   "cached": true,
   "cached_version": "0.1.4",
-  "wasmhub_version": "0.4.0",
+  "wasmhub_version": "0.4.2",
   "available_languages": ["nodejs", "rustpython"]
 }
 ```

@@ -14,5 +14,6 @@ pub mod pool;
 pub mod server;
 pub mod session;
 pub mod shell;
+pub mod sourcemap;
 pub mod tools;
 pub mod vendor;
