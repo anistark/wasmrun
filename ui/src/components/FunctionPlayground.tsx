@@ -119,7 +119,7 @@ export function FunctionPlayground({ functions, onFunctionCall }: FunctionPlaygr
                   data-function={func.name}
                   data-param={param.name}
                   defaultValue={param.value || ''}
-                  class="w-full px-3 py-2 bg-light-bg dark:bg-dark-bg text-light-textMuted dark:text-dark-textMuted border border-light-surface3 dark:border-dark-surface3 rounded focus:outline-none focus:border-light-accent dark:focus:border-dark-accent font-mono text-sm"
+                  class="w-full px-3 py-2 bg-light-bg dark:bg-dark-bg text-light-textMuted dark:text-dark-textMuted border border-light-surface3 dark:border-dark-surface3 rounded focus:outline-hidden focus:border-light-accent dark:focus:border-dark-accent font-mono text-sm"
                   placeholder={
                     param.type === 'array'
                       ? 'e.g., [1, 2, 3]'

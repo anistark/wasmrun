@@ -4931,8 +4931,16 @@ mod tests {
         let (status, _) = http_post(&quick, None, r#"{"wasm_path": "hello.wasm"}"#);
         assert_eq!(status, 429, "the global exec cap did not bind over HTTP");
 
-        // Once the slot is released the same request succeeds.
+        // Once the slot is released the same request succeeds. SLOW_EXEC ends on
+        // its own timeout, and that response is sent the moment the deadline
+        // passes: the detached worker only drops its permit once the interpreter
+        // notices the cancel flag, a little later. So wait for the slot itself
+        // rather than treating the 200 as proof it is free.
         assert_eq!(runner.join().unwrap(), 200);
+        assert!(
+            wait_for_metric(&base, None, |v| v["exec_in_flight"] == 0),
+            "the exec slot was never released"
+        );
         let (status, body) = http_post(&quick, None, r#"{"wasm_path": "hello.wasm"}"#);
         assert_eq!(status, 200);
         assert!(body.contains("Hello, World!"));

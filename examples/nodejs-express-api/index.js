@@ -197,8 +197,9 @@ app.get('/api/stats', (req, res) => {
   res.json(stats);
 });
 
-// 404 handler
-app.use('*', (req, res) => {
+// 404 handler. Express 5 routes through path-to-regexp v8, where a bare '*' is
+// no longer a valid path, so the catch-all is mounted without one.
+app.use((req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
     message: `${req.method} ${req.originalUrl} is not a valid endpoint`,

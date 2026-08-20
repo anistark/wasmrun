@@ -161,7 +161,7 @@ export default function FilesystemPanel({
                     <textarea
                       value={fileContent}
                       onChange={e => onContentChange(e.currentTarget.value)}
-                      className="w-full h-full bg-transparent text-white font-mono text-sm p-4 resize-none focus:outline-none"
+                      className="w-full h-full bg-transparent text-white font-mono text-sm p-4 resize-none focus:outline-hidden"
                     />
                   ) : (
                     <pre className="w-full h-full text-white font-mono text-sm p-4 overflow-auto">

@@ -6,7 +6,7 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggleTheme}
-      class="p-2 rounded-lg transition-colors duration-200 hover:bg-black/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-light-accent2 dark:focus:ring-dark-accent2"
+      class="p-2 rounded-lg transition-colors duration-200 hover:bg-black/10 dark:hover:bg-white/10 focus:outline-hidden focus:ring-2 focus:ring-light-accent2 dark:focus:ring-dark-accent2"
       title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
     >
       {theme === 'dark' ? (

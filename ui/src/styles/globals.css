@@ -1,8 +1,27 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@config '../../tailwind.config.js';
+@source '../**/*.{js,ts,jsx,tsx,html}';
 
 @layer base {
+  /* Tailwind v4 dropped three Preflight defaults this UI relied on: a gray
+     border color, a pointer cursor on buttons, and a gray placeholder. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::placeholder {
+    color: var(--color-gray-400);
+  }
+
   html {
     @apply h-full;
   }
@@ -18,15 +37,15 @@
 
 @layer components {
   .btn {
-    @apply px-4 py-2 rounded font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-opacity-50;
+    @apply px-4 py-2 rounded font-medium transition-colors duration-200 focus:outline-hidden focus:ring-2;
   }
 
   .btn-primary {
-    @apply bg-dark-accent2 text-dark-bg hover:bg-opacity-90 focus:ring-dark-accent2;
+    @apply bg-dark-accent2 text-dark-bg hover:bg-dark-accent2/90 focus:ring-dark-accent2/50;
   }
 
   .btn-secondary {
-    @apply bg-dark-surface3 text-dark-textMuted hover:bg-opacity-80 focus:ring-dark-surface3;
+    @apply bg-dark-surface3 text-dark-textMuted hover:bg-dark-surface3/80 focus:ring-dark-surface3/50;
   }
 
   .status-success {

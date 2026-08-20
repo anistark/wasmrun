@@ -10,10 +10,10 @@
     "dev": "npm run build && npm run serve"
   },
   "devDependencies": {
-    "assemblyscript": "^0.27.0",
+    "assemblyscript": "^0.28.20",
     "serve": "^14.2.0"
   },
   "dependencies": {
-    "@assemblyscript/loader": "^0.27.0"
+    "@assemblyscript/loader": "^0.28.20"
   }
 }

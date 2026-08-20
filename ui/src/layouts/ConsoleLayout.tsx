@@ -23,7 +23,7 @@ export function ConsoleLayout({
 
   return (
     <div class="h-screen flex flex-col bg-light-bg dark:bg-dark-bg text-light-text dark:text-dark-text overflow-hidden">
-      <header class="bg-light-surface dark:bg-dark-surface shadow-lg flex-shrink-0">
+      <header class="bg-light-surface dark:bg-dark-surface shadow-lg shrink-0">
         <div class="flex items-center justify-between px-8 py-4">
           <div class="flex items-center">
             <div class="flex items-center justify-center">
@@ -129,7 +129,7 @@ export function ConsoleLayout({
 
       <main class="flex-1 flex flex-col min-h-0">{children}</main>
 
-      <footer class="bg-light-surface dark:bg-dark-surface py-2 flex-shrink-0">
+      <footer class="bg-light-surface dark:bg-dark-surface py-2 shrink-0">
         <div class="px-8">
           <div class="flex justify-center items-center">
             <p class="text-xs font-semibold text-light-textDim dark:text-dark-textDim">

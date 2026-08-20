@@ -10,7 +10,7 @@
     "build": "npm run asbuild"
   },
   "devDependencies": {
-    "assemblyscript": "^0.27.0"
+    "assemblyscript": "^0.28.20"
   },
   "dependencies": {}
 }
