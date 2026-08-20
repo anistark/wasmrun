@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0](https://github.com/anistark/wasmrun/releases/tag/v0.22.0) - 2026-08-20
+
 ### Added
 - **TypeScript stack traces point at your source.** A thrown error used to report a line in the `.js` the transpiler emitted, which an agent then had to map back by hand. The transpiler now emits a source map and frames are remapped before the response, so a `throw` on line 4 of `lib/thrower.ts` reports `at boom (lib/thrower.ts:4)`
   - Line-accurate, not column-accurate: the runtime's frames carry no column
@@ -698,5 +700,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **v0.15.x**: Native WASM execution with exec command, complete runtime implementation
 - **v0.19.x**: Agent REST API server with sandbox sessions, WASI filesystem syscalls, LLM tool schemas
 - **v0.20.x**: Multi-tenant agent serving with API-key auth, per-tenant limits and rate limiting, observability, shell emulation, JavaScript source and multi-file execution
+- **v0.21.x**: TypeScript execution in the agent sandbox, npm dependency vendoring, and reference types in the interpreter
+- **v0.22.x**: Agent mode made deployable: concurrent request handling, health probes, clean shutdown, bounded caches, and the JS/TS tail (ES module packages, `node:test`, source-mapped stack traces, stdin)
 
 Checkout all [releases](https://github.com/anistark/wasmrun/releases) and [tags](https://github.com/anistark/wasmrun/tags).
