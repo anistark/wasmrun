@@ -348,6 +348,33 @@ mod tests {
     }
 
     #[test]
+    fn test_remaps_a_frame_inside_tap_output() {
+        // node:test reports a failing assertion's stack on stdout, indented
+        // inside the TAP `stack:` block. That is the trace an agent reads.
+        let tmp = tempfile::tempdir().unwrap();
+        write_map(
+            tmp.path(),
+            "sum.test.js",
+            r#"{"version":3,"sources":["sum.test.ts"],"mappings":"AAAA;AACA;AACA"}"#,
+        );
+
+        let tap = "  stack: |-\n        at <anonymous> (/sum.test.js:3)\n";
+        assert_eq!(
+            remap_stack(tap, tmp.path()),
+            "  stack: |-\n        at <anonymous> (sum.test.ts:3)\n"
+        );
+    }
+
+    #[test]
+    fn test_program_output_that_merely_looks_like_a_frame_is_left_alone() {
+        // Rewriting is gated on a source map existing for that exact path, so
+        // ordinary stdout mentioning a `.js:line` is not caught by it.
+        let tmp = tempfile::tempdir().unwrap();
+        let text = "checked vendor/thing.js:42 and moved on\n";
+        assert_eq!(remap_stack(text, tmp.path()), text);
+    }
+
+    #[test]
     fn test_output_without_a_js_frame_is_untouched() {
         let tmp = tempfile::tempdir().unwrap();
         let text = "plain stderr with no frames at all\n";

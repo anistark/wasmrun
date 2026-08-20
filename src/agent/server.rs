@@ -1666,6 +1666,7 @@ impl AgentServer {
             };
             // Best effort per chunk: a frame split across two samples stays
             // unmapped here, and the final `result` event carries it mapped.
+            let stdout = sourcemap::remap_stack(&stdout, &work_dir);
             let stderr = sourcemap::remap_stack(&stderr, &work_dir);
             if stdout.is_empty() && stderr.is_empty() {
                 return true;
@@ -1701,7 +1702,7 @@ impl AgentServer {
 
         // Repeat the full output so a client that dropped a frame still has it.
         let (stdout, stderr) = (
-            read_env_stdout(&wasi_env),
+            read_env_stdout_mapped(&wasi_env, &work_dir),
             read_env_stderr_mapped(&wasi_env, &work_dir),
         );
         match exec_result {
@@ -1776,7 +1777,7 @@ impl AgentServer {
                     self.metrics.record_output_truncated();
                 }
                 return Ok(ExecResponse {
-                    stdout: read_env_stdout(&wasi_env),
+                    stdout: read_env_stdout_mapped(&wasi_env, &work_dir),
                     stderr: read_env_stderr_mapped(&wasi_env, &work_dir),
                     exit_code: -1,
                     duration_ms,
@@ -1808,7 +1809,7 @@ impl AgentServer {
             Ok(exit_code) => {
                 self.metrics.record_exec_success(duration_ms);
                 Ok(ExecResponse {
-                    stdout: read_env_stdout(&wasi_env),
+                    stdout: read_env_stdout_mapped(&wasi_env, &work_dir),
                     stderr: read_env_stderr_mapped(&wasi_env, &work_dir),
                     exit_code,
                     duration_ms,
@@ -1820,7 +1821,7 @@ impl AgentServer {
             Err(e) => {
                 self.metrics.record_exec_error(duration_ms);
                 Ok(ExecResponse {
-                    stdout: read_env_stdout(&wasi_env),
+                    stdout: read_env_stdout_mapped(&wasi_env, &work_dir),
                     stderr: read_env_stderr_mapped(&wasi_env, &work_dir),
                     exit_code: -1,
                     duration_ms,
@@ -2467,6 +2468,19 @@ fn read_env_stderr_mapped(
     work_dir: &Path,
 ) -> String {
     sourcemap::remap_stack(&read_env_stderr(env), work_dir)
+}
+
+/// The session's captured stdout, mapped the same way as stderr.
+///
+/// Frames reach stdout too: `node:test` reports a failing assertion's stack
+/// inside its TAP output, which is the trace an agent running tests actually
+/// reads. Rewriting stays confined to paths that have a source map of their own
+/// in the session, so ordinary program output cannot be caught by it.
+fn read_env_stdout_mapped(
+    env: &std::sync::Arc<std::sync::Mutex<crate::runtime::wasi::WasiEnv>>,
+    work_dir: &Path,
+) -> String {
+    sourcemap::remap_stack(&read_env_stdout(env), work_dir)
 }
 
 /// Bytes appended to a session buffer since `seen`, advancing `seen`.
