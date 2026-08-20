@@ -325,8 +325,43 @@ prepare-publish: format lint test build
     @echo "✓ Project is ready for publishing"
 
 # Publish to crates.io (requires cargo login)
+#
+# The docs/ and ui/ node_modules are moved aside for the packaging step. Cargo
+# force-includes every LICENSE and README in the tree whatever `include` says,
+# and those two dependency trees hold ~14k of them: 46 MiB against 3 MiB of
+# actual crate, which is 94% of the archive. That pushed 0.22.0 past the 10 MiB
+# crates.io limit, where the upload is cut off mid-body and surfaces as a bare
+# 503 or an HTTP/2 STREAM_CLOSED rather than a readable error.
+#
+# `prepare-publish` has already built the UI into templates/ by this point, and
+# templates/ is what `include` ships, so packaging does not need node_modules
+# present. They are staged under target/, which cargo never packages and which
+# is on the same filesystem, so the moves are renames rather than copies. The
+# trap restores them however the recipe exits.
 publish-crates: prepare-publish
-    @echo "Publishing version {{version}} to crates.io..."
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Publishing version {{version}} to crates.io..."
+
+    STAGE="target/publish-node-modules"
+    mkdir -p "$STAGE"
+
+    restore() {
+        for dir in ui docs; do
+            if [ -d "$STAGE/$dir" ]; then
+                rm -rf "$dir/node_modules"
+                mv "$STAGE/$dir" "$dir/node_modules"
+            fi
+        done
+    }
+    trap restore EXIT
+
+    for dir in ui docs; do
+        if [ -d "$dir/node_modules" ]; then
+            mv "$dir/node_modules" "$STAGE/$dir"
+        fi
+    done
+
     cargo publish --allow-dirty
 
 # Generate an example WASM file using Emscripten
