@@ -141,7 +141,27 @@ What the transpile stage does:
 - **TSX**: `.tsx` files (or `language: "tsx"` for a single `source` snippet) get JSX lowered to `React.createElement` calls; provide your own `React` implementation (e.g. vendored via `node_modules`)
 - In `files` mode every `.ts`/`.tsx` file is transpiled in place to a sibling `.js`; other files (`.js`, `.json`, `node_modules/**`) pass through untouched, and a `.ts` entry runs as its emitted `.js`
 
-Malformed TypeScript fails the request with `error: "TypeScript transpilation failed: <file>:<line>:<col>: <message>"` referencing the original `.ts` source. Runtime errors reference the emitted `.js` files (source maps are not yet applied).
+Malformed TypeScript fails the request with `error: "TypeScript transpilation failed: <file>:<line>:<col>: <message>"` referencing the original `.ts` source.
+
+### Stack traces
+
+Runtime errors reference the original `.ts` source too. The transpiler emits a source map beside each file it converts, and stack frames are remapped against it before the response, so a failure reads against the code you sent rather than the JavaScript it became:
+
+```
+Error: kaboom for world
+    at boom (lib/thrower.ts:4)
+    at <anonymous> (main.ts:3)
+    at call (native)
+    at runFile (/workspace/runtimes/nodejs/main.js:3524)
+```
+
+Line 4 of `lib/thrower.ts` is the `throw`; line 3 of `main.ts` is the call that reached it.
+
+Three things worth knowing:
+
+- **Line-accurate, not column-accurate.** The runtime's frames carry a file and a line but no column, so there is no column to map.
+- **Unmapped frames are left alone.** A vendored package, or the runtime's own internals as in the last frame above, keeps its real path. So does a generated line the map does not cover.
+- **Maps are always emitted**, whatever the project's `sourceMap` setting says. They are not an output you asked for; they are what makes the trace readable. They land in the session as `.js.map` files beside the emitted `.js`, so the [files API](./files.md) can see them.
 
 ---
 
@@ -189,9 +209,9 @@ Note the `require()`: your own code is CommonJS either way, so a default export 
 **Limitations:**
 
 - Pure-JS packages only: anything with an install script, `binding.gyp`, or prebuilt `.node` binaries is rejected with an error naming the package (native code can't run in the sandbox)
-- A package needing a Node built-in the runtime does not implement (`node:process`, `node:tty`) still fails at `require()` time, whatever its module format. `chalk` is a current example
+- A package needing a Node built-in the runtime does not implement still fails at `require()` time, whatever its module format. `http`, `https` and `net` are the notable absences; `zlib`, `child_process` and `worker_threads` resolve but throw `ERR_NOT_SUPPORTED` when actually called
 - Conversion parses ESM sources as TypeScript, which is a superset of JavaScript. Sources containing JSX or Flow types are rejected
-- An uploaded `package.json` is inert unless you set `install_package_json`, so no execution turns into an unrequested network fetch. `devDependencies` are ignored: there is nothing in the sandbox to run them with yet
+- An uploaded `package.json` is inert unless you set `install_package_json`, so no execution turns into an unrequested network fetch. `devDependencies` need `install_dev_dependencies`, which implies `install_package_json`: dev dependencies without the runtime ones cannot run anything. A package listed in both fields resolves to the dev range
 
 Malformed names/ranges fail with HTTP `400` before execution; resolution or download failures surface in the response's `error` field.
 
@@ -287,7 +307,7 @@ Bare specifiers resolve through a `node_modules/<name>` tree, so a project can s
 
 ## JavaScript Runtime Capabilities
 
-JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/) (QuickJS-based, WASI; v0.4.0+), fetched once and cached. Supported surface:
+JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/) (QuickJS-based, WASI; v0.4.2+), fetched once and cached. Supported surface:
 
 **Module system (CommonJS):**
 - Relative and absolute `require()` (`./x`, `../x`), with `.js`/`.json` extension probing, `index.*` resolution, and `package.json` `main`
@@ -295,7 +315,9 @@ JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io
 - Node-style module wrapper: `module.exports`, `require.cache`, `require.resolve`, `require.main`, `__filename`, `__dirname`
 - JSON loading via `require('./data.json')`
 
-**Built-in modules:** `path`, `fs`, `fs/promises` (and `fs.promises`), `os`, `events`, `util`, `assert`, `stream`, `buffer`, `crypto`, `url`, `querystring`, `string_decoder`, `timers`, `timers/promises`. Every one is also reachable through its `node:` prefixed alias, so `require('node:fs/promises')` works.
+**Built-in modules:** `path`, `fs`, `fs/promises` (and `fs.promises`), `os`, `events`, `util`, `assert`, `stream`, `buffer`, `crypto`, `url`, `querystring`, `string_decoder`, `timers`, `timers/promises`, `process`, `tty`. Every one is also reachable through its `node:` prefixed alias, so `require('node:fs/promises')` works. `require('node:process')` hands back the same object as the `process` global, so the two cannot drift apart.
+
+`node:test` is the built-in test runner, and is reachable under that name only: a bare `require('test')` still resolves to an npm package called `test`. See [Running tests](#running-tests).
 
 `zlib`, `child_process` and `worker_threads` are present but throw a named `ERR_NOT_SUPPORTED` error when used: the sandbox has no compression library, no process table, and one thread. They resolve rather than being absent so a package that merely imports one keeps loading.
 
@@ -342,15 +364,47 @@ A project may ship a `tsconfig.json`, uploaded in `files` or already in the sess
 
 | Option | Why |
 |--------|-----|
-| `experimentalDecorators` | The transpiler has no decorator transform, so decorators would be emitted as-is and the runtime cannot execute them |
-| `emitDecoratorMetadata` | Same |
-| `jsx` other than `"react"` | Only the classic runtime is available; JSX compiles to `React.createElement` calls |
+| `jsx: "preserve"` or `"react-native"` | Both leave JSX in the output, and the runtime cannot execute it. Use `"react"` or `"react-jsx"` |
+| `target` naming a version the transpiler cannot emit | Anything outside `es3`, `es5`, `es2015` through `es2024`, and `esnext`. TypeScript's own `es6` and `latest` aliases are accepted |
 
-**`target` is accepted and ignored.** There is no down-level pass, so the source syntax reaches the runtime either way. It is a no-op rather than a wrong answer.
+**Options that are applied.** These reach the transpiler as flags:
+
+| Option | Effect |
+|--------|--------|
+| `target` | Down-levels the output. `es5` turns arrow functions into `function` expressions, and so on |
+| `jsx` | `"react"` compiles to `React.createElement` calls (the default), `"react-jsx"` and `"react-jsxdev"` to the automatic runtime's `jsx()` imports |
+| `jsxImportSource` | The package the automatic runtime imports from, so `"preact"` pulls `preact/jsx-runtime`. Vendor it like any other dependency |
+| `experimentalDecorators` | Applies the legacy decorator transform |
+| `emitDecoratorMetadata` | Emits `design:type` metadata, and implies the decorator transform |
 
 **Types are stripped, not checked.** A project with type errors still runs. Run `tsc` yourself if you need type checking.
 
 ---
+
+## Running tests
+
+The runtime ships Node's built-in test runner, so a project's tests run in the sandbox with nothing vendored. Make the test file the entry and `require('node:test')`:
+
+```json
+{
+  "files": {
+    "sum.js": "module.exports = (a, b) => a + b;",
+    "sum.test.js": "const { test } = require('node:test');\nconst assert = require('node:assert');\nconst sum = require('./sum.js');\n\ntest('adds', () => assert.equal(sum(2, 2), 4));\n"
+  },
+  "entry": "sum.test.js"
+}
+```
+
+`test`/`it` take sync, async, promise and callback bodies; `describe`/`suite` nest; `before`/`after`/`beforeEach`/`afterEach` all run, with nested `beforeEach` running outermost first; and `skip`/`todo` work as methods, options, or context calls. Output is TAP 13 on stdout.
+
+**Read the exit code, not the output.** A run with any failure exits `1`, a clean run exits `0`. That is the reliable signal: the TAP body reports `# fail 1` too, but parsing it is unnecessary.
+
+There is no test-file discovery: one entry runs, so a suite spread across files needs an entry that requires them.
+
+To run a project's own test dependencies, set `install_dev_dependencies` so `devDependencies` are installed alongside `dependencies`.
+
+---
+
 
 ## Streaming Output
 
@@ -413,8 +467,10 @@ curl -X POST http://localhost:8430/api/v1/sessions/$SID/exec \
 
 Input belongs to a single execution: it rewinds at the start of every request, so an execution that sends no `stdin` reads end-of-file immediately rather than picking up what a previous one left. Reads never block; once the input is drained, further reads report end-of-file.
 
-:::note JavaScript cannot read stdin yet
-This reaches any program that reads fd 0 through WASI, which today means `wasm_path` modules. The JavaScript runtime's `process.stdin` is still a stub, so JS and TypeScript code cannot see the input. Pass data to JS through `env`, a file written with the [files API](./files.md), or the source itself.
+JavaScript and TypeScript read it through `process.stdin`, a readable stream supporting `data`/`end` events, `read()`, `pipe()`, `setEncoding` and `for await`. `fs.readFileSync(0)` and `fs.readFileSync('/dev/stdin')` read the same bytes. `wasm_path` modules read it on fd 0 through WASI.
+
+:::note Input is drained once
+fd 0 cannot be rewound, so the first reader consumes it and the rest share what it read. Reading it twice from scratch within one execution is not possible.
 :::
 
 ---

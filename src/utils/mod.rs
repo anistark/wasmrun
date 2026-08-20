@@ -1,4 +1,5 @@
 mod command;
+pub mod http;
 mod path;
 mod plugin_utils;
 mod system;

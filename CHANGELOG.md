@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0](https://github.com/anistark/wasmrun/releases/tag/v0.22.0) - 2026-08-20
+
 ### Added
+- **TypeScript stack traces point at your source.** A thrown error used to report a line in the `.js` the transpiler emitted, which an agent then had to map back by hand. The transpiler now emits a source map and frames are remapped before the response, so a `throw` on line 4 of `lib/thrower.ts` reports `at boom (lib/thrower.ts:4)`
+  - Line-accurate, not column-accurate: the runtime's frames carry no column
+  - Applied to stdout as well as stderr, because `node:test` reports a failing assertion's stack inside its TAP output, which is the trace an agent running tests reads. Rewriting is confined to paths that have a source map of their own in the session, so ordinary program output is never caught by it
+  - Frames with no source map behind them (a vendored package, the runtime's own internals) are left exactly as they are, as is a line the map does not cover
+- **`node:test` runs in the sandbox** ([docs](https://wasmrun.readthedocs.io/en/latest/docs/agent/usage/exec#running-tests)). Agents can write tests and run them: `test`/`it` with sync, async, promise and callback bodies, `describe`/`suite` nesting, the four hooks, `skip`/`todo`, and TAP 13 on stdout. A run with any failure exits `1` and a clean run exits `0`, so the exit code is the signal rather than the TAP body
+- **Example agent flow for a TypeScript test suite**: `examples/agent-flows/typescript-tests.sh` joins the two existing flows, running a project the way an agent would in a single request. A tsconfig with `target` and a `@app/*` path alias, an ESM-only npm dependency converted to CommonJS on the way in, and the project's tests under `node:test`, one passing and one failing on purpose. The failing assertion reports `tests/search.test.ts:11` and the run exits `1`, which is the whole JS/TS surface working together
+- **`install_dev_dependencies`** installs a project's `devDependencies` alongside its `dependencies`, which is what running its tests needs. Implies `install_package_json`; off by default, since dev dependencies are usually the larger and less useful half of a tree. A package pinned in both fields resolves to the dev range
+- **JavaScript and TypeScript can read standard input.** `stdin` previously reached only `wasm_path` modules, because the runtime's `process.stdin` was a stub. It is now a real readable stream (`data`/`end` events, `read()`, `pipe()`, `setEncoding`, `for await`), and `fs.readFileSync(0)` / `fs.readFileSync('/dev/stdin')` read the same bytes
+- **`process` and `tty` as modules**: `require('node:process')` returns the same object as the global rather than failing, which unblocks packages reaching for it. `tty.isatty()` answers honestly instead of pretending
 - **Agent deployment guide** ([docs](https://wasmrun.readthedocs.io/en/latest/docs/agent/deployment)): running the agent server as a service other people depend on. Reverse proxy configuration for nginx and Caddy, a systemd unit, a Dockerfile and Compose file, a Kubernetes deployment with probes and drain settings, sizing guidance per host, and what to scrape and alert on. Everything the reference docs said should be true of a deployment, as configuration you can copy
 - **Health and readiness endpoints**: `GET /health` and `GET /ready` on the agent server, answered before the auth gate so an orchestrator can probe an authenticated deployment. `/metrics` is auth-gated and could not stand in for either
   - `/health` reports liveness with the running version and uptime, and is always 200 while the process serves
@@ -50,9 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Session listing**: `GET /api/v1/sessions` lists the available sessions, newest first, so an agent can reuse one instead of creating another. Scoped to the calling tenant when authentication is enabled. Exposed to LLM agents as a new `list_sessions` tool
 - **TypeScript project configuration**: a project may now ship a `tsconfig.json`, parsed as JSONC so comments and trailing commas are accepted
   - `paths` aliases are honored, materialized so the runtime's own module resolver handles them with no rewriting of your imports
-  - Options the sandbox transpiler cannot apply (`experimentalDecorators`, `emitDecoratorMetadata`, and `jsx` modes other than the classic runtime) fail the request by name instead of silently producing broken output
+  - `target`, `jsx`, `jsxImportSource`, `experimentalDecorators` and `emitDecoratorMetadata` are applied. What the transpiler still cannot do (`jsx: "preserve"` or `"react-native"`, a `target` it cannot emit) fails the request by name instead of silently producing broken output
 
 ### Changed
+- **The pinned wasmhub release moves to v0.4.2**, which is what carries the runtime half of the entries above. Cached runtimes from an older pin are invalidated and re-fetched automatically
 - **Per-tenant `max_requests_per_min` is now a token bucket** instead of a counter reset every minute. The old fixed window let a tenant spend a full minute's budget just before the reset and another immediately after, passing at twice the configured rate with no spacing between the two halves. The bucket refills continuously, so an idle tenant can still spend its whole allowance at once but a sustained sender settles at exactly the configured rate, with no clock boundary to wait for or exploit
 - **A live auth reload now resizes limits for tenants that are already active.** Per-tenant `max_concurrent_exec` and `max_requests_per_min` were applied at the ceiling in force the first time a tenant was seen, so editing either for a tenant already using the server had no effect until a restart, while the same edit for an unseen tenant took effect at once. Both are now applied to live enforcement before the new config starts serving requests. Raising a ceiling frees capacity immediately; lowering one applies to the next request without cancelling anything already running, and drops any request budget banked above the new limit
 - **The agent server shuts down cleanly on `SIGTERM` and `SIGHUP`**, not only on Ctrl+C. `SIGTERM` is what `docker stop`, Kubernetes and systemd send, so the previous behavior was to be killed outright at the end of the stop timeout, leaking every session directory. The handler is also installed before the server claims anything on disk, so a signal arriving during startup no longer kills the process mid-sweep
@@ -65,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Partial versions widen bounds as npm specifies, so `>1.2` excludes all of `1.2.x`
   - Prereleases follow the npm rule: a prerelease only satisfies a range that names a prerelease of that same version, so `<2.0.0` no longer risks admitting `2.0.0-rc.1`
   - Prerelease identifiers compare numerically, so `alpha.2` sorts below `alpha.10`
+
+### Fixed
+- **Outbound HTTP requests now time out** instead of hanging indefinitely. Every ureq timeout defaults to `None`, so a connection that never completed hung until something further out gave up: an npm install against an unreachable registry burned the execution's entire timeout and reported `Execution timed out after 120s` with an empty stderr, blaming the code rather than the network. Runtime and package fetches now bound the connect, request, response and body phases, and report what actually failed (`HTTP request failed for <url>: timeout: connect`)
+  - One shared agent also pools connections across a vendored dependency tree
+  - This bounds and explains such a failure; it does not route around it. A host whose IPv6 addresses are unreachable still fails, because the addresses are tried in the order the resolver returns them and the budget is divided among them
+- **Modules with a data segment in a particular address range failed to load.** The parser found the end of a constant expression by scanning bytes for `0x0b`, the `end` opcode. But `0x0b` is also an ordinary final byte of a LEB128 constant: any `i32.const` from 180224 to 196607 encodes with one. The scan stopped mid-instruction there and the real `end` was read as the next field, desynchronizing every segment after it and rejecting the module with a nonsense size. Each instruction's operands are now decoded rather than scanned past
+  - This affected exec mode, agent mode, and `verify`/`inspect` alike, for any module that happened to land in that range. It surfaced when a wasmhub runtime grew by 11 KB and two of its segments crossed the threshold
+- **ES module packages whose `exports` map pointed at a `.mjs` file stopped resolving.** Lowering rewrites `.mjs` sources onto `.js` and rewrote the package's `main` to match, but left `exports` alone. Once the runtime's resolver learned to read `exports` (which it consults before `main`), it was sent at a file that lowering had renamed away. `.mjs` targets throughout `exports` and `imports` are now relinked onto the lowered file, at any depth, and only where that file is actually present
+  - Subpath exports resolve as a result, so `require('pkg/sub')` works where the map points somewhere other than a matching file path
 
 ## [0.21.0](https://github.com/anistark/wasmrun/releases/tag/v0.21.0) - 2026-07-20
 
@@ -679,5 +700,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **v0.15.x**: Native WASM execution with exec command, complete runtime implementation
 - **v0.19.x**: Agent REST API server with sandbox sessions, WASI filesystem syscalls, LLM tool schemas
 - **v0.20.x**: Multi-tenant agent serving with API-key auth, per-tenant limits and rate limiting, observability, shell emulation, JavaScript source and multi-file execution
+- **v0.21.x**: TypeScript execution in the agent sandbox, npm dependency vendoring, and reference types in the interpreter
+- **v0.22.x**: Agent mode made deployable: concurrent request handling, health probes, clean shutdown, bounded caches, and the JS/TS tail (ES module packages, `node:test`, source-mapped stack traces, stdin)
 
 Checkout all [releases](https://github.com/anistark/wasmrun/releases) and [tags](https://github.com/anistark/wasmrun/tags).

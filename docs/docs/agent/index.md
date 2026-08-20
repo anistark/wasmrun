@@ -225,7 +225,7 @@ The agent API manages **sessions**. Each session is an isolated exec mode sandbo
 - **Output buffers**: stdout/stderr captured per execution
 - **Timeout**: auto-cleanup after idle expiry
 
-The exec endpoint accepts four input modes (a shell command line, a JavaScript or TypeScript source snippet, a multi-file JS/TS project, or a pre-compiled `.wasm` file) and returns captured stdout/stderr/exit code as JSON. JavaScript runs through the [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/); TypeScript is first transpiled to JavaScript by the [wasmhub `swc` module](https://anistark.github.io/wasmhub/runtimes/swc/) running inside the same sandbox; WASM modules run through the same interpreter used by `wasmrun exec`. Shell commands are handled by an in-process built-in shell with no subprocess or host shell access.
+The exec endpoint accepts four input modes (a shell command line, a JavaScript or TypeScript source snippet, a multi-file JS/TS project, or a pre-compiled `.wasm` file) and returns captured stdout/stderr/exit code as JSON. JavaScript runs through the [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/); TypeScript is first transpiled to JavaScript by the [wasmhub `swc` module](https://anistark.github.io/wasmhub/runtimes/swc/) running inside the same sandbox, with stack traces mapped back to the original `.ts` lines; WASM modules run through the same interpreter used by `wasmrun exec`. Shell commands are handled by an in-process built-in shell with no subprocess or host shell access.
 
 ```
 ┌─ wasmrun agent ─────────────────────────────────────────┐
