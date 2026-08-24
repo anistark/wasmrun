@@ -15,6 +15,26 @@ pub const WASI_PROC_EXIT_PREFIX: &str = "__wasi_proc_exit:";
 /// ("fuel"). Callers can detect this to surface a clear resource-limit error.
 pub const FUEL_EXHAUSTED_ERROR: &str = "__wasmrun_fuel_exhausted__";
 
+/// Default ceiling on how deeply guest code may nest calls.
+///
+/// The interpreter runs each guest call on a host stack frame of its own, so
+/// unbounded guest recursion overflows the *host* stack. That is not a
+/// catchable panic: the process aborts, which in agent mode takes the server
+/// down for every tenant rather than failing the one request.
+///
+/// The number is calibrated for a release build, where a guest frame costs
+/// about 1.1 KB of host stack: 1024 of them fit inside the 2 MB a spawned
+/// worker thread gets, with room to spare. An unoptimized build is a different
+/// machine entirely, with frames around 70 KB, so only a few dozen fit and this
+/// ceiling is far too high to catch anything there. Code that deliberately
+/// recurses under `cargo test` should set its own limit with
+/// [`Executor::set_max_call_depth`] rather than rely on this one.
+pub const DEFAULT_MAX_CALL_DEPTH: usize = 1024;
+
+/// Sentinel error returned when an execution exceeds its call-depth ceiling.
+/// The spec calls this "call stack exhausted"; it is a trap, not a crash.
+pub const CALL_DEPTH_EXCEEDED_ERROR: &str = "call stack exhausted";
+
 /// Sentinel error returned when an execution is cancelled via its cancel token
 /// (e.g. the agent server tripping it on wall-clock timeout). Callers detect
 /// this to distinguish a deliberate halt from a program error.
@@ -890,6 +910,133 @@ impl BlockArity {
     }
 }
 
+/// WASM's `min`/`max` are not Rust's. Rust returns the non-NaN operand when one
+/// side is NaN; WASM propagates the NaN. Rust also leaves the sign of a zero
+/// result unspecified when both operands are zero, where WASM pins it: `min`
+/// gives -0 and `max` gives +0.
+fn nan_result_f32(x: f32, y: f32) -> f32 {
+    // Any NaN satisfies `nan:arithmetic`, but `nan:canonical` requires a
+    // payload of zero, so a NaN carrying one has to be propagated rather than
+    // flattened into the canonical value.
+    for v in [x, y] {
+        if v.is_nan() && v.to_bits() & 0x003f_ffff != 0 {
+            return v;
+        }
+    }
+    f32::NAN
+}
+
+fn nan_result_f64(x: f64, y: f64) -> f64 {
+    for v in [x, y] {
+        if v.is_nan() && v.to_bits() & 0x0007_ffff_ffff_ffff != 0 {
+            return v;
+        }
+    }
+    f64::NAN
+}
+
+fn wasm_min_f32(x: f32, y: f32) -> f32 {
+    if x.is_nan() || y.is_nan() {
+        nan_result_f32(x, y)
+    } else if x == 0.0 && y == 0.0 {
+        if x.is_sign_negative() {
+            x
+        } else {
+            y
+        }
+    } else if x < y {
+        x
+    } else {
+        y
+    }
+}
+
+fn wasm_max_f32(x: f32, y: f32) -> f32 {
+    if x.is_nan() || y.is_nan() {
+        nan_result_f32(x, y)
+    } else if x == 0.0 && y == 0.0 {
+        if x.is_sign_positive() {
+            x
+        } else {
+            y
+        }
+    } else if x > y {
+        x
+    } else {
+        y
+    }
+}
+
+fn wasm_min_f64(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y.is_nan() {
+        nan_result_f64(x, y)
+    } else if x == 0.0 && y == 0.0 {
+        if x.is_sign_negative() {
+            x
+        } else {
+            y
+        }
+    } else if x < y {
+        x
+    } else {
+        y
+    }
+}
+
+fn wasm_max_f64(x: f64, y: f64) -> f64 {
+    if x.is_nan() || y.is_nan() {
+        nan_result_f64(x, y)
+    } else if x == 0.0 && y == 0.0 {
+        if x.is_sign_positive() {
+            x
+        } else {
+            y
+        }
+    } else if x > y {
+        x
+    } else {
+        y
+    }
+}
+
+/// Check that `start .. start + n` lies inside something of length `len`.
+///
+/// The bulk table and memory operations are all-or-nothing: the spec has them
+/// trap before any element is written, not partway through. Writing as you go
+/// and trapping on the first bad index leaves the prefix modified, which a
+/// program that catches the trap can then observe.
+fn check_bulk_range(start: u32, n: u32, len: u32, what: &str) -> Result<(), String> {
+    let end = start
+        .checked_add(n)
+        .ok_or_else(|| format!("{what}: range {start}+{n} overflows"))?;
+    if end > len {
+        return Err(format!(
+            "{what}: out of bounds access at {start}..{end} (size {len})"
+        ));
+    }
+    Ok(())
+}
+
+/// Range check for the trapping float-to-int conversions.
+///
+/// The operand traps only when its *truncated* value falls outside the target,
+/// so a fractional part reaching past a bound is still fine: `i32.trunc_f64_s`
+/// of -2147483648.9 is `i32::MIN`, not a trap. Comparing the raw operand
+/// against `MIN`/`MAX` cast to the float type gets both ends wrong, because
+/// neither bound is always representable: `i32::MAX as f32` rounds *up* to
+/// 2^31. Truncating first and widening to f64 makes the comparison exact for
+/// f32 operands and unchanged for f64 ones.
+fn trunc_in_range(x: f64, low: f64, high_exclusive: f64) -> Result<f64, String> {
+    if x.is_nan() {
+        return Err("Invalid conversion to integer: NaN".to_string());
+    }
+    let t = x.trunc();
+    if t < low || t >= high_exclusive {
+        return Err("Integer overflow in truncation".to_string());
+    }
+    Ok(t)
+}
+
 /// Represents a single function call frame on the call stack
 /// Control flow block state for branching
 #[derive(Debug, Clone)]
@@ -1198,8 +1345,16 @@ impl TableInstance {
 /// Runtime state of an element segment, used by `table.init` / `elem.drop`.
 /// Active segments are applied at instantiation and start out dropped.
 #[derive(Debug, Clone)]
+/// A data segment's runtime state. `memory.init` reads through this rather
+/// than the module, so that `data.drop` can take a segment out of service.
+struct DataSegmentState {
+    data: Vec<u8>,
+    dropped: bool,
+}
+
 struct ElemSegmentState {
-    func_indices: Vec<u32>,
+    /// One entry per element; `None` is a null reference.
+    func_indices: Vec<Option<u32>>,
     dropped: bool,
 }
 
@@ -1215,6 +1370,7 @@ pub struct Executor {
     tables: Vec<TableInstance>,
     /// Per-element-segment state for `table.init` / `elem.drop`.
     elem_segments: Vec<ElemSegmentState>,
+    data_segments: Vec<DataSegmentState>,
     /// Remaining instruction budget ("fuel"). `None` = unlimited. When `Some`,
     /// each dispatched instruction decrements it; reaching zero aborts
     /// execution with `FUEL_EXHAUSTED_ERROR`.
@@ -1223,6 +1379,7 @@ pub struct Executor {
     /// instruction loop aborts with `EXECUTION_CANCELLED_ERROR` at the next
     /// check. `None` = not cancellable. Shared (`Arc`) so an outside thread —
     /// e.g. the agent server on wall-clock timeout — can trip it while we run.
+    max_call_depth: usize,
     cancel: Option<Arc<AtomicBool>>,
 }
 
@@ -1256,6 +1413,23 @@ impl Executor {
         };
 
         let mut context = ExecutionContext::new(initial, max)?;
+
+        // Imported globals come first in the global index space. wasmrun does
+        // not resolve them from a host module, but they still have to occupy
+        // their slots or every module-defined global sits at the wrong index
+        // and `global.get` reads a neighbour.
+        for import in &module.imports {
+            if let ImportKind::Global(gt) = &import.kind {
+                context.globals.push(match gt.value_type {
+                    ValueType::I64 => Value::I64(0),
+                    ValueType::F32 => Value::F32(0.0),
+                    ValueType::F64 => Value::F64(0.0),
+                    ValueType::FuncRef => Value::FuncRef(None),
+                    ValueType::ExternRef => Value::ExternRef(None),
+                    _ => Value::I32(0),
+                });
+            }
+        }
 
         for global in &module.globals {
             let init_val = if global.init_expr.is_empty() {
@@ -1291,6 +1465,21 @@ impl Executor {
             context.memory.write_bytes(offset, &segment.data)?;
         }
 
+        // Passive data segments stay available to `memory.init` until
+        // `data.drop`; active ones were written above and start out dropped.
+        let data_segments: Vec<DataSegmentState> = module
+            .data
+            .iter()
+            .map(|seg| DataSegmentState {
+                data: if seg.offset_expr.is_empty() {
+                    seg.data.clone()
+                } else {
+                    Vec::new()
+                },
+                dropped: !seg.offset_expr.is_empty(),
+            })
+            .collect();
+
         // Build table instances spanning the module's table index space:
         // imported tables first, then module-defined tables. Each is sized to
         // its declared initial length and filled with null references.
@@ -1309,8 +1498,18 @@ impl Executor {
         // dropped; passive/declarative segments remain available to table.init.
         let mut elem_segments: Vec<ElemSegmentState> = Vec::with_capacity(module.elements.len());
         for seg in &module.elements {
+            if seg.declarative {
+                // Declarative segments only forward-declare functions for
+                // `ref.func`. Nothing is written and `table.init` may not name
+                // one, which is the same as starting out dropped.
+                elem_segments.push(ElemSegmentState {
+                    func_indices: Vec::new(),
+                    dropped: true,
+                });
+                continue;
+            }
             if seg.offset_expr.is_empty() {
-                // Passive or declarative segment — filled lazily via table.init.
+                // Passive segment: filled lazily via table.init.
                 elem_segments.push(ElemSegmentState {
                     func_indices: seg.function_indices.clone(),
                     dropped: false,
@@ -1319,18 +1518,26 @@ impl Executor {
             }
             let offset = evaluate_const_expr(&seg.offset_expr)?;
             let end = offset + seg.function_indices.len();
-            // Active segments target table 0 (the only table the parser records
-            // an offset for). Synthesize a funcref table 0 if none was declared.
+            // Synthesize a funcref table 0 if none was declared, so a module
+            // whose only table comes from an element segment still works.
             if tables.is_empty() {
                 tables.push(TableInstance::new(ValueType::FuncRef, 0, None));
             }
-            let table0 = &mut tables[0];
-            if end > table0.elements.len() {
-                let null = TableInstance::null_value(table0.element_type);
-                table0.elements.resize(end, null);
+            let table = tables.get_mut(seg.table_index as usize).ok_or_else(|| {
+                format!(
+                    "Element segment targets table {} which does not exist",
+                    seg.table_index
+                )
+            })?;
+            if end > table.elements.len() {
+                let null = TableInstance::null_value(table.element_type);
+                table.elements.resize(end, null);
             }
-            for (i, &func_idx) in seg.function_indices.iter().enumerate() {
-                table0.elements[offset + i] = Value::FuncRef(Some(func_idx));
+            for (i, func_idx) in seg.function_indices.iter().enumerate() {
+                table.elements[offset + i] = match func_idx {
+                    Some(f) => Value::FuncRef(Some(*f)),
+                    None => TableInstance::null_value(table.element_type),
+                };
             }
             elem_segments.push(ElemSegmentState {
                 func_indices: Vec::new(),
@@ -1345,7 +1552,9 @@ impl Executor {
             import_func_count,
             tables,
             elem_segments,
+            data_segments,
             fuel: None,
+            max_call_depth: DEFAULT_MAX_CALL_DEPTH,
             cancel: None,
         })
     }
@@ -1368,6 +1577,11 @@ impl Executor {
     /// When the shared flag is flipped to `true`, the instruction loop aborts
     /// with `EXECUTION_CANCELLED_ERROR` at the next check. `None` disables
     /// cancellation (the default).
+    /// Set how deeply guest code may nest calls before the execution traps.
+    pub fn set_max_call_depth(&mut self, depth: usize) {
+        self.max_call_depth = depth;
+    }
+
     pub fn set_cancel_token(&mut self, token: Option<Arc<AtomicBool>>) {
         self.cancel = token;
     }
@@ -1461,6 +1675,17 @@ impl Executor {
         let mut cursor = Cursor::new(code.as_slice());
         let result = self.execute_bytecode(&mut cursor);
         self.context.block_stack.truncate(block_depth_before);
+        if result.is_err() {
+            // A trap leaves the machine wherever it stopped: frames from the
+            // aborted call tree still on the call stack, operands still on the
+            // value stack. An `Executor` outlives the call, so without this
+            // every later execution starts from that wreckage. Runaway
+            // recursion was the clearest case: the trap left 1024 frames
+            // behind, and the next call hit the depth ceiling immediately.
+            self.context.call_stack.clear();
+            self.context.operand_stack.clear();
+            self.context.block_stack.clear();
+        }
         result?;
 
         // Pop frame and collect return values
@@ -1663,6 +1888,12 @@ impl Executor {
     fn call_function(&mut self, func_idx: u32) -> Result<(), String> {
         if (func_idx as usize) < self.import_func_count {
             return self.call_host_function(func_idx);
+        }
+
+        // Each guest call consumes a host stack frame, so this ceiling is what
+        // stands between runaway guest recursion and a process abort.
+        if self.context.call_stack.len() >= self.max_call_depth {
+            return Err(CALL_DEPTH_EXCEEDED_ERROR.to_string());
         }
 
         let defined_idx = func_idx as usize - self.import_func_count;
@@ -2068,7 +2299,10 @@ impl Executor {
                         if y == 0 {
                             return Err("Integer division by zero".to_string());
                         }
-                        self.context.push(Value::I32(x % y));
+                        // i32::MIN % -1 has no representable quotient, so Rust
+                        // panics on it. The spec defines the remainder as 0,
+                        // which is what wrapping_rem returns.
+                        self.context.push(Value::I32(x.wrapping_rem(y)));
                     }
                     _ => return Err("Type mismatch for i32.rem_s".to_string()),
                 }
@@ -2359,7 +2593,8 @@ impl Executor {
                         if y == 0 {
                             return Err("Integer division by zero".to_string());
                         }
-                        self.context.push(Value::I64(x % y));
+                        // Same as i32.rem_s: i64::MIN % -1 is 0, not a panic.
+                        self.context.push(Value::I64(x.wrapping_rem(y)));
                     }
                     _ => return Err("Type mismatch for i64.rem_s".to_string()),
                 }
@@ -2608,7 +2843,9 @@ impl Executor {
                 let b = self.context.pop()?;
                 let a = self.context.pop()?;
                 match (a, b) {
-                    (Value::F32(x), Value::F32(y)) => self.context.push(Value::F32(x.min(y))),
+                    (Value::F32(x), Value::F32(y)) => {
+                        self.context.push(Value::F32(wasm_min_f32(x, y)))
+                    }
                     _ => return Err("Type mismatch for f32.min".to_string()),
                 }
             }
@@ -2616,7 +2853,9 @@ impl Executor {
                 let b = self.context.pop()?;
                 let a = self.context.pop()?;
                 match (a, b) {
-                    (Value::F32(x), Value::F32(y)) => self.context.push(Value::F32(x.max(y))),
+                    (Value::F32(x), Value::F32(y)) => {
+                        self.context.push(Value::F32(wasm_max_f32(x, y)))
+                    }
                     _ => return Err("Type mismatch for f32.max".to_string()),
                 }
             }
@@ -2644,7 +2883,10 @@ impl Executor {
             Instruction::F32Nearest => {
                 let a = self.context.pop()?;
                 match a {
-                    Value::F32(x) => self.context.push(Value::F32(x.round())),
+                    // `nearest` rounds halfway cases to even; Rust's `round`
+                    // rounds them away from zero, so nearest(-0.5) came out as
+                    // -1.0 where the spec says -0.0.
+                    Value::F32(x) => self.context.push(Value::F32(x.round_ties_even())),
                     _ => return Err("Type mismatch for f32.nearest".to_string()),
                 }
             }
@@ -2777,7 +3019,9 @@ impl Executor {
                 let b = self.context.pop()?;
                 let a = self.context.pop()?;
                 match (a, b) {
-                    (Value::F64(x), Value::F64(y)) => self.context.push(Value::F64(x.min(y))),
+                    (Value::F64(x), Value::F64(y)) => {
+                        self.context.push(Value::F64(wasm_min_f64(x, y)))
+                    }
                     _ => return Err("Type mismatch for f64.min".to_string()),
                 }
             }
@@ -2785,7 +3029,9 @@ impl Executor {
                 let b = self.context.pop()?;
                 let a = self.context.pop()?;
                 match (a, b) {
-                    (Value::F64(x), Value::F64(y)) => self.context.push(Value::F64(x.max(y))),
+                    (Value::F64(x), Value::F64(y)) => {
+                        self.context.push(Value::F64(wasm_max_f64(x, y)))
+                    }
                     _ => return Err("Type mismatch for f64.max".to_string()),
                 }
             }
@@ -2813,7 +3059,10 @@ impl Executor {
             Instruction::F64Nearest => {
                 let a = self.context.pop()?;
                 match a {
-                    Value::F64(x) => self.context.push(Value::F64(x.round())),
+                    // `nearest` rounds halfway cases to even; Rust's `round`
+                    // rounds them away from zero, so nearest(-0.5) came out as
+                    // -1.0 where the spec says -0.0.
+                    Value::F64(x) => self.context.push(Value::F64(x.round_ties_even())),
                     _ => return Err("Type mismatch for f64.nearest".to_string()),
                 }
             }
@@ -3032,6 +3281,7 @@ impl Executor {
                     _ => return Err("table.fill index must be i32".to_string()),
                 };
                 let table = self.table_mut(table_idx)?;
+                check_bulk_range(start, n, table.size(), "table.fill")?;
                 for i in 0..n {
                     table.set(start + i, val)?;
                 }
@@ -3051,6 +3301,8 @@ impl Executor {
                 };
                 // Snapshot the source range first so an overlapping in-table
                 // copy (dst_table == src_table) reads pre-copy values.
+                check_bulk_range(src, n, self.table(src_table)?.size(), "table.copy")?;
+                check_bulk_range(dst, n, self.table(dst_table)?.size(), "table.copy")?;
                 let mut buf = Vec::with_capacity(n as usize);
                 {
                     let src_t = self.table(src_table)?;
@@ -3079,11 +3331,13 @@ impl Executor {
                 let seg = self.elem_segments.get(elem_idx as usize).ok_or_else(|| {
                     format!("table.init: element segment {elem_idx} out of bounds")
                 })?;
-                if seg.dropped {
-                    return Err(format!(
-                        "table.init: element segment {elem_idx} already dropped"
-                    ));
-                }
+                // As with memory.init, dropping empties the segment rather
+                // than poisoning it, so a zero-length init still succeeds.
+                check_bulk_range(src, n, seg.func_indices.len() as u32, "table.init")?;
+                check_bulk_range(dst, n, self.table(table_idx)?.size(), "table.init")?;
+                let seg = self.elem_segments.get(elem_idx as usize).ok_or_else(|| {
+                    format!("table.init: element segment {elem_idx} out of bounds")
+                })?;
                 // Resolve the funcrefs first to avoid holding a borrow on
                 // self.elem_segments while mutating self.tables.
                 let mut refs = Vec::with_capacity(n as usize);
@@ -3091,7 +3345,10 @@ impl Executor {
                     let f = seg.func_indices.get((src + i) as usize).ok_or_else(|| {
                         format!("table.init: source index {} out of bounds", src + i)
                     })?;
-                    refs.push(Value::FuncRef(Some(*f)));
+                    refs.push(match f {
+                        Some(idx) => Value::FuncRef(Some(*idx)),
+                        None => Value::FuncRef(None),
+                    });
                 }
                 let table = self.table_mut(table_idx)?;
                 for (i, v) in refs.into_iter().enumerate() {
@@ -3110,9 +3367,13 @@ impl Executor {
             }
 
             // Memory load operations — effective address = stack_val + offset
+            // Effective address is base + offset in wider-than-32-bit
+            // arithmetic. Wrapping it into u32 let an address near 4 GiB land
+            // back at the bottom of memory and read a valid byte where the spec
+            // requires a trap.
             Instruction::I32Load(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i32(addr)?;
@@ -3120,7 +3381,7 @@ impl Executor {
             }
             Instruction::I64Load(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i64(addr)?;
@@ -3128,7 +3389,7 @@ impl Executor {
             }
             Instruction::F32Load(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_f32(addr)?;
@@ -3136,7 +3397,7 @@ impl Executor {
             }
             Instruction::F64Load(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_f64(addr)?;
@@ -3144,7 +3405,7 @@ impl Executor {
             }
             Instruction::I32Load8S(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i8(addr)? as i32;
@@ -3152,7 +3413,7 @@ impl Executor {
             }
             Instruction::I32Load8U(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = (self.context.memory.read_u8(addr)? as u32) as i32;
@@ -3160,7 +3421,7 @@ impl Executor {
             }
             Instruction::I32Load16S(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i16(addr)? as i32;
@@ -3168,7 +3429,7 @@ impl Executor {
             }
             Instruction::I32Load16U(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = (self.context.memory.read_u16(addr)? as u32) as i32;
@@ -3176,7 +3437,7 @@ impl Executor {
             }
             Instruction::I64Load8S(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i8(addr)? as i64;
@@ -3184,7 +3445,7 @@ impl Executor {
             }
             Instruction::I64Load8U(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_u8(addr)? as i64;
@@ -3192,7 +3453,7 @@ impl Executor {
             }
             Instruction::I64Load16S(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i16(addr)? as i64;
@@ -3200,7 +3461,7 @@ impl Executor {
             }
             Instruction::I64Load16U(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_u16(addr)? as i64;
@@ -3208,7 +3469,7 @@ impl Executor {
             }
             Instruction::I64Load32S(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = self.context.memory.read_i32(addr)? as i64;
@@ -3216,7 +3477,7 @@ impl Executor {
             }
             Instruction::I64Load32U(offset) => {
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 let val = (self.context.memory.read_i32(addr)? as u32) as i64;
@@ -3230,7 +3491,7 @@ impl Executor {
                     _ => return Err("Value must be i32".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_i32(addr, val)?;
@@ -3241,7 +3502,7 @@ impl Executor {
                     _ => return Err("Value must be i64".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_i64(addr, val)?;
@@ -3252,7 +3513,7 @@ impl Executor {
                     _ => return Err("Value must be f32".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_f32(addr, val)?;
@@ -3263,7 +3524,7 @@ impl Executor {
                     _ => return Err("Value must be f64".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_f64(addr, val)?;
@@ -3274,7 +3535,7 @@ impl Executor {
                     _ => return Err("Value must be i32".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_u8(addr, val)?;
@@ -3285,7 +3546,7 @@ impl Executor {
                     _ => return Err("Value must be i32".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_u16(addr, val)?;
@@ -3296,7 +3557,7 @@ impl Executor {
                     _ => return Err("Value must be i64".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_u8(addr, val)?;
@@ -3307,7 +3568,7 @@ impl Executor {
                     _ => return Err("Value must be i64".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_u16(addr, val)?;
@@ -3318,7 +3579,7 @@ impl Executor {
                     _ => return Err("Value must be i64".to_string()),
                 };
                 let addr = match self.context.pop()? {
-                    Value::I32(a) => (a as u32).wrapping_add(offset) as usize,
+                    Value::I32(a) => a as u32 as usize + offset as usize,
                     _ => return Err("Address must be i32".to_string()),
                 };
                 self.context.memory.write_i32(addr, val)?;
@@ -3350,8 +3611,11 @@ impl Executor {
             // Bulk-memory: memory.fill — memset equivalent
             // Stack: [dest: i32, val: i32, len: i32]
             Instruction::MemoryFill => {
+                // Every bulk-memory operand is an unsigned i32. Casting
+                // straight to usize sign-extends a negative one into a huge
+                // length, which then sails past the bounds check.
                 let len = match self.context.pop()? {
-                    Value::I32(n) => n as usize,
+                    Value::I32(n) => n as u32 as usize,
                     _ => return Err("memory.fill len must be i32".to_string()),
                 };
                 let val = match self.context.pop()? {
@@ -3362,6 +3626,15 @@ impl Executor {
                     Value::I32(a) => a as u32 as usize,
                     _ => return Err("memory.fill dest must be i32".to_string()),
                 };
+                let end = dest
+                    .checked_add(len)
+                    .ok_or_else(|| format!("memory.fill: range {dest}+{len} overflows"))?;
+                if end > self.context.memory.size_bytes() {
+                    return Err(format!(
+                        "Memory access out of bounds: fill {len} bytes at {dest} (size: {} bytes)",
+                        self.context.memory.size_bytes()
+                    ));
+                }
                 for i in 0..len {
                     self.context.memory.write_u8(dest + i, val)?;
                 }
@@ -3371,7 +3644,7 @@ impl Executor {
             // Stack: [dst: i32, src: i32, len: i32]
             Instruction::MemoryCopy => {
                 let len = match self.context.pop()? {
-                    Value::I32(n) => n as usize,
+                    Value::I32(n) => n as u32 as usize,
                     _ => return Err("memory.copy len must be i32".to_string()),
                 };
                 let src = match self.context.pop()? {
@@ -3382,6 +3655,18 @@ impl Executor {
                     Value::I32(a) => a as u32 as usize,
                     _ => return Err("memory.copy dst must be i32".to_string()),
                 };
+                // Both ends are checked before either is touched.
+                let size = self.context.memory.size_bytes();
+                for (start, what) in [(src, "memory.copy src"), (dst, "memory.copy dst")] {
+                    let end = start
+                        .checked_add(len)
+                        .ok_or_else(|| format!("{what}: range {start}+{len} overflows"))?;
+                    if end > size {
+                        return Err(format!(
+                            "Memory access out of bounds: {what} {start}..{end} (size: {size} bytes)"
+                        ));
+                    }
+                }
                 let bytes = self.context.memory.read_bytes(src, len)?;
                 self.context.memory.write_bytes(dst, &bytes)?;
             }
@@ -3390,34 +3675,56 @@ impl Executor {
             // Stack: [dst: i32, src_offset: i32, len: i32]
             Instruction::MemoryInit(seg_idx) => {
                 let len = match self.context.pop()? {
-                    Value::I32(n) => n as usize,
+                    Value::I32(n) => n as u32 as usize,
                     _ => return Err("memory.init len must be i32".to_string()),
                 };
                 let src_off = match self.context.pop()? {
-                    Value::I32(a) => a as usize,
+                    Value::I32(a) => a as u32 as usize,
                     _ => return Err("memory.init src_offset must be i32".to_string()),
                 };
                 let dst = match self.context.pop()? {
                     Value::I32(a) => a as u32 as usize,
                     _ => return Err("memory.init dst must be i32".to_string()),
                 };
-                let seg =
-                    self.module.data.get(seg_idx as usize).ok_or_else(|| {
-                        format!("memory.init: data segment {seg_idx} out of bounds")
-                    })?;
-                let src_end = src_off + len;
+                let seg = self
+                    .data_segments
+                    .get(seg_idx as usize)
+                    .ok_or_else(|| format!("memory.init: data segment {seg_idx} out of bounds"))?;
+                // A dropped segment is empty rather than unusable: the range
+                // check below still lets a zero-length init through, which is
+                // what the spec asks for.
+                let src_end = src_off
+                    .checked_add(len)
+                    .ok_or_else(|| format!("memory.init: src range {src_off}+{len} overflows"))?;
                 if src_end > seg.data.len() {
                     return Err(format!(
                         "memory.init: src range {src_off}..{src_end} out of segment bounds ({})",
                         seg.data.len()
                     ));
                 }
+                let mem_size = self.context.memory.size_bytes();
+                let dst_end = dst
+                    .checked_add(len)
+                    .ok_or_else(|| format!("memory.init: dst range {dst}+{len} overflows"))?;
+                if dst_end > mem_size {
+                    return Err(format!(
+                        "Memory access out of bounds: memory.init {dst}..{dst_end} (size: {mem_size} bytes)"
+                    ));
+                }
                 let bytes = seg.data[src_off..src_end].to_vec();
                 self.context.memory.write_bytes(dst, &bytes)?;
             }
 
-            // Bulk-memory: data.drop — discard a data segment (no-op for us)
-            Instruction::DataDrop(_seg_idx) => {}
+            // Bulk-memory: data.drop takes a data segment out of service, so
+            // a later memory.init naming it traps instead of copying again.
+            Instruction::DataDrop(seg_idx) => {
+                let seg = self
+                    .data_segments
+                    .get_mut(seg_idx as usize)
+                    .ok_or_else(|| format!("data.drop: data segment {seg_idx} out of bounds"))?;
+                seg.data = Vec::new();
+                seg.dropped = true;
+            }
 
             // Control flow - proper implementation
             Instruction::Block(block_type) => {
@@ -3509,13 +3816,8 @@ impl Executor {
                 let a = self.context.pop()?;
                 match a {
                     Value::F32(x) => {
-                        if x.is_nan() {
-                            return Err("Invalid conversion to integer: NaN".to_string());
-                        }
-                        if x >= (i32::MAX as f32 + 1.0) || x < (i32::MIN as f32) {
-                            return Err("Integer overflow in truncation".to_string());
-                        }
-                        self.context.push(Value::I32(x as i32));
+                        let t = trunc_in_range(x as f64, -2147483648.0, 2147483648.0)?;
+                        self.context.push(Value::I32(t as i32));
                     }
                     _ => return Err("Type mismatch for i32.trunc_f32_s".to_string()),
                 }
@@ -3524,13 +3826,8 @@ impl Executor {
                 let a = self.context.pop()?;
                 match a {
                     Value::F32(x) => {
-                        if x.is_nan() {
-                            return Err("Invalid conversion to integer: NaN".to_string());
-                        }
-                        if x >= (u32::MAX as f32 + 1.0) || x < 0.0 {
-                            return Err("Integer overflow in truncation".to_string());
-                        }
-                        self.context.push(Value::I32(x as u32 as i32));
+                        let t = trunc_in_range(x as f64, 0.0, 4294967296.0)?;
+                        self.context.push(Value::I32(t as u32 as i32));
                     }
                     _ => return Err("Type mismatch for i32.trunc_f32_u".to_string()),
                 }
@@ -3539,13 +3836,8 @@ impl Executor {
                 let a = self.context.pop()?;
                 match a {
                     Value::F64(x) => {
-                        if x.is_nan() {
-                            return Err("Invalid conversion to integer: NaN".to_string());
-                        }
-                        if x >= (i32::MAX as f64 + 1.0) || x < (i32::MIN as f64) {
-                            return Err("Integer overflow in truncation".to_string());
-                        }
-                        self.context.push(Value::I32(x as i32));
+                        let t = trunc_in_range(x, -2147483648.0, 2147483648.0)?;
+                        self.context.push(Value::I32(t as i32));
                     }
                     _ => return Err("Type mismatch for i32.trunc_f64_s".to_string()),
                 }
@@ -3554,13 +3846,8 @@ impl Executor {
                 let a = self.context.pop()?;
                 match a {
                     Value::F64(x) => {
-                        if x.is_nan() {
-                            return Err("Invalid conversion to integer: NaN".to_string());
-                        }
-                        if x >= (u32::MAX as f64 + 1.0) || x < 0.0 {
-                            return Err("Integer overflow in truncation".to_string());
-                        }
-                        self.context.push(Value::I32(x as u32 as i32));
+                        let t = trunc_in_range(x, 0.0, 4294967296.0)?;
+                        self.context.push(Value::I32(t as u32 as i32));
                     }
                     _ => return Err("Type mismatch for i32.trunc_f64_u".to_string()),
                 }
@@ -3583,13 +3870,12 @@ impl Executor {
                 let a = self.context.pop()?;
                 match a {
                     Value::F32(x) => {
-                        if x.is_nan() {
-                            return Err("Invalid conversion to integer: NaN".to_string());
-                        }
-                        if x >= (i64::MAX as f32) || x < (i64::MIN as f32) {
-                            return Err("Integer overflow in truncation".to_string());
-                        }
-                        self.context.push(Value::I64(x as i64));
+                        let t = trunc_in_range(
+                            x as f64,
+                            -9223372036854775808.0,
+                            9223372036854775808.0,
+                        )?;
+                        self.context.push(Value::I64(t as i64));
                     }
                     _ => return Err("Type mismatch for i64.trunc_f32_s".to_string()),
                 }
@@ -3598,13 +3884,8 @@ impl Executor {
                 let a = self.context.pop()?;
                 match a {
                     Value::F32(x) => {
-                        if x.is_nan() {
-                            return Err("Invalid conversion to integer: NaN".to_string());
-                        }
-                        if x >= (u64::MAX as f32) || x < 0.0 {
-                            return Err("Integer overflow in truncation".to_string());
-                        }
-                        self.context.push(Value::I64(x as u64 as i64));
+                        let t = trunc_in_range(x as f64, 0.0, 18446744073709551616.0)?;
+                        self.context.push(Value::I64(t as u64 as i64));
                     }
                     _ => return Err("Type mismatch for i64.trunc_f32_u".to_string()),
                 }
@@ -3613,13 +3894,8 @@ impl Executor {
                 let a = self.context.pop()?;
                 match a {
                     Value::F64(x) => {
-                        if x.is_nan() {
-                            return Err("Invalid conversion to integer: NaN".to_string());
-                        }
-                        if x >= (i64::MAX as f64) || x < (i64::MIN as f64) {
-                            return Err("Integer overflow in truncation".to_string());
-                        }
-                        self.context.push(Value::I64(x as i64));
+                        let t = trunc_in_range(x, -9223372036854775808.0, 9223372036854775808.0)?;
+                        self.context.push(Value::I64(t as i64));
                     }
                     _ => return Err("Type mismatch for i64.trunc_f64_s".to_string()),
                 }
@@ -3628,13 +3904,8 @@ impl Executor {
                 let a = self.context.pop()?;
                 match a {
                     Value::F64(x) => {
-                        if x.is_nan() {
-                            return Err("Invalid conversion to integer: NaN".to_string());
-                        }
-                        if x >= (u64::MAX as f64) || x < 0.0 {
-                            return Err("Integer overflow in truncation".to_string());
-                        }
-                        self.context.push(Value::I64(x as u64 as i64));
+                        let t = trunc_in_range(x, 0.0, 18446744073709551616.0)?;
+                        self.context.push(Value::I64(t as u64 as i64));
                     }
                     _ => return Err("Type mismatch for i64.trunc_f64_u".to_string()),
                 }
@@ -5730,7 +6001,9 @@ mod tests {
             start: None,
             elements: vec![ElementSegment {
                 offset_expr: vec![0x41, 0x00, 0x0b], // i32.const 0
-                function_indices: vec![0, 1],
+                table_index: 0,
+                declarative: false,
+                function_indices: vec![Some(0), Some(1)],
             }],
             data: vec![],
         };
@@ -5808,7 +6081,9 @@ mod tests {
             // Passive segment: empty offset_expr.
             elements: vec![ElementSegment {
                 offset_expr: vec![],
-                function_indices: vec![0],
+                table_index: 0,
+                declarative: false,
+                function_indices: vec![Some(0)],
             }],
             data: vec![],
         };
@@ -5816,11 +6091,14 @@ mod tests {
         let results = executor.execute(0).unwrap();
         assert_eq!(results, vec![Value::I32(0)]);
 
-        // The segment is still usable until elem.drop; re-running table.init
-        // would succeed again. Confirm a dropped segment is rejected.
+        // Dropping empties the segment rather than poisoning it, so a
+        // non-zero table.init out of it now reads past its end. (A zero-length
+        // init out of a dropped segment stays legal, which is why this is a
+        // range error rather than a "segment dropped" one.)
+        executor.elem_segments[0].func_indices.clear();
         executor.elem_segments[0].dropped = true;
         let err = executor.execute(0).unwrap_err();
-        assert!(err.contains("already dropped"), "got: {err}");
+        assert!(err.contains("out of bounds"), "got: {err}");
     }
 
     // ---- Multi-value blocks (0.23.1) ----
@@ -5854,6 +6132,289 @@ mod tests {
             elements: vec![],
             data: vec![],
         }
+    }
+
+    // ---- Conformance fixes surfaced by the spec suite (0.23.3) ----
+
+    #[test]
+    fn test_runaway_recursion_traps_instead_of_aborting() {
+        // Unbounded guest recursion used to overflow the host stack, which is
+        // a process abort rather than a catchable panic: in agent mode that
+        // takes the server down for every tenant, not just the one request.
+        //
+        // () -> (): call 0 ;; itself, forever
+        let module = multivalue_module(vec![], vec![], vec![], vec![], vec![0x10, 0x00, 0x0b]);
+        let mut executor = Executor::new(module).unwrap();
+        // Far under the default: these tests run unoptimized on a 2 MB test
+        // thread, where a guest frame costs about 70 KB of host stack.
+        executor.set_max_call_depth(16);
+        let err = executor.execute(0).unwrap_err();
+        assert!(err.contains("call stack exhausted"), "got: {err}");
+    }
+
+    #[test]
+    fn test_a_trap_does_not_poison_the_next_execution() {
+        // The trap above leaves a full call stack behind. An Executor outlives
+        // the call, so anything reusing one has to see a clean machine.
+        let module = Module {
+            version: 1,
+            types: vec![
+                FunctionType {
+                    params: vec![],
+                    results: vec![],
+                },
+                FunctionType {
+                    params: vec![],
+                    results: vec![ValueType::I32],
+                },
+            ],
+            imports: vec![],
+            functions: vec![
+                Function {
+                    type_index: 0,
+                    locals: vec![],
+                    code: vec![0x10, 0x00, 0x0b], // call 0, forever
+                },
+                Function {
+                    type_index: 1,
+                    locals: vec![],
+                    code: vec![0x41, 0x07, 0x0b], // i32.const 7
+                },
+            ],
+            tables: vec![],
+            memory: None,
+            globals: vec![],
+            exports: HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+        let mut executor = Executor::new(module).unwrap();
+        executor.set_max_call_depth(16);
+        assert!(executor.execute(0).is_err());
+        assert_eq!(executor.execute(1).unwrap(), vec![Value::I32(7)]);
+    }
+
+    #[test]
+    fn test_rem_s_of_min_by_minus_one_is_zero() {
+        // i32::MIN % -1 has no representable quotient and panics in Rust. The
+        // spec defines the remainder as 0.
+        let module = multivalue_module(
+            vec![ValueType::I32, ValueType::I32],
+            vec![ValueType::I32],
+            vec![],
+            vec![],
+            vec![0x20, 0x00, 0x20, 0x01, 0x6f, 0x0b], // local.get 0/1; i32.rem_s
+        );
+        let mut executor = Executor::new(module).unwrap();
+        assert_eq!(
+            executor
+                .execute_with_args(0, vec![Value::I32(i32::MIN), Value::I32(-1)])
+                .unwrap(),
+            vec![Value::I32(0)]
+        );
+        // div_s on the same operands still traps, which is what the spec says.
+        let div = multivalue_module(
+            vec![ValueType::I32, ValueType::I32],
+            vec![ValueType::I32],
+            vec![],
+            vec![],
+            vec![0x20, 0x00, 0x20, 0x01, 0x6d, 0x0b],
+        );
+        let mut executor = Executor::new(div).unwrap();
+        assert!(executor
+            .execute_with_args(0, vec![Value::I32(i32::MIN), Value::I32(-1)])
+            .is_err());
+    }
+
+    #[test]
+    fn test_effective_address_does_not_wrap_into_memory() {
+        // base + offset is computed in wider-than-32-bit arithmetic. Wrapping
+        // it let an address just under 4 GiB land back at the bottom of memory
+        // and read a valid byte where the spec requires a trap.
+        let mut module = multivalue_module(
+            vec![ValueType::I32],
+            vec![ValueType::I32],
+            vec![],
+            vec![],
+            // local.get 0; i32.load8_u offset=1
+            vec![0x20, 0x00, 0x2d, 0x00, 0x01, 0x0b],
+        );
+        module.memory = Some(super::super::module::MemoryType {
+            initial: 1,
+            max: None,
+        });
+        let mut executor = Executor::new(module).unwrap();
+        // 0xFFFFFFFF + 1 wraps to 0, which is in bounds. It must still trap.
+        let err = executor
+            .execute_with_args(0, vec![Value::I32(-1)])
+            .unwrap_err();
+        assert!(err.contains("out of bounds"), "got: {err}");
+        // An ordinary address still works.
+        assert_eq!(
+            executor.execute_with_args(0, vec![Value::I32(0)]).unwrap(),
+            vec![Value::I32(0)]
+        );
+    }
+
+    #[test]
+    fn test_bulk_memory_lengths_are_unsigned() {
+        // A negative length used to sign-extend into a usize near 2^64, which
+        // sailed past the bounds check and reached an allocation.
+        let mut module = multivalue_module(
+            vec![ValueType::I32],
+            vec![],
+            vec![],
+            vec![],
+            // i32.const 0 (dst); i32.const 0 (src); local.get 0 (len); memory.copy
+            vec![
+                0x41, 0x00, 0x41, 0x00, 0x20, 0x00, 0xFC, 0x0A, 0x00, 0x00, 0x0b,
+            ],
+        );
+        module.memory = Some(super::super::module::MemoryType {
+            initial: 1,
+            max: None,
+        });
+        let mut executor = Executor::new(module).unwrap();
+        let err = executor
+            .execute_with_args(0, vec![Value::I32(-1)])
+            .unwrap_err();
+        assert!(err.contains("out of bounds"), "got: {err}");
+    }
+
+    #[test]
+    fn test_min_max_propagate_nan_and_pin_zero_signs() {
+        // Rust's min/max return the non-NaN operand and leave the sign of a
+        // zero result unspecified; WASM propagates the NaN and pins the sign.
+        assert!(wasm_min_f32(f32::NAN, 1.0).is_nan());
+        assert!(wasm_max_f32(1.0, f32::NAN).is_nan());
+        assert!(wasm_min_f64(f64::NAN, 1.0).is_nan());
+        assert!(wasm_max_f64(1.0, f64::NAN).is_nan());
+
+        assert!(wasm_min_f32(0.0, -0.0).is_sign_negative());
+        assert!(wasm_min_f32(-0.0, 0.0).is_sign_negative());
+        assert!(wasm_max_f32(0.0, -0.0).is_sign_positive());
+        assert!(wasm_max_f32(-0.0, 0.0).is_sign_positive());
+
+        // A NaN carrying a payload is propagated rather than flattened, since
+        // a canonical input must not produce an arithmetic result.
+        let payload = f32::from_bits(0x7fc0_0001);
+        assert_eq!(wasm_min_f32(payload, 1.0).to_bits(), payload.to_bits());
+        // Two canonical NaNs give a canonical NaN.
+        assert_eq!(wasm_min_f32(f32::NAN, f32::NAN).to_bits() & 0x003f_ffff, 0);
+    }
+
+    #[test]
+    fn test_trunc_range_is_exact_at_the_boundaries() {
+        // The trap boundary is where the *truncated* value leaves range, so a
+        // fractional part reaching past a bound is still fine.
+        assert_eq!(
+            trunc_in_range(-2147483648.9, -2147483648.0, 2147483648.0).unwrap() as i32,
+            i32::MIN
+        );
+        assert_eq!(
+            trunc_in_range(2147483647.9, -2147483648.0, 2147483648.0).unwrap() as i32,
+            i32::MAX
+        );
+        // -0.9 truncates to zero, which is in range for an unsigned target.
+        assert_eq!(trunc_in_range(-0.9, 0.0, 4294967296.0).unwrap() as u32, 0);
+        // A whole step past the bound does trap.
+        assert!(trunc_in_range(-2147483649.0, -2147483648.0, 2147483648.0).is_err());
+        assert!(trunc_in_range(2147483648.0, -2147483648.0, 2147483648.0).is_err());
+        assert!(trunc_in_range(-1.0, 0.0, 4294967296.0).is_err());
+        assert!(trunc_in_range(f64::NAN, 0.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn test_nearest_rounds_halves_to_even() {
+        // Rust's `round` rounds halves away from zero; `nearest` rounds to even,
+        // so nearest(-0.5) is -0.0 and nearest(2.5) is 2.0.
+        let module = multivalue_module(
+            vec![ValueType::F64],
+            vec![ValueType::F64],
+            vec![],
+            vec![],
+            vec![0x20, 0x00, 0x9e, 0x0b], // local.get 0; f64.nearest
+        );
+        let mut executor = Executor::new(module).unwrap();
+        let run = |e: &mut Executor, v: f64| match e
+            .execute_with_args(0, vec![Value::F64(v)])
+            .unwrap()[0]
+        {
+            Value::F64(r) => r,
+            other => panic!("expected f64, got {other:?}"),
+        };
+        assert_eq!(run(&mut executor, 2.5), 2.0);
+        assert_eq!(run(&mut executor, 3.5), 4.0);
+        assert_eq!(run(&mut executor, 1.5), 2.0);
+        let neg_half = run(&mut executor, -0.5);
+        assert_eq!(neg_half, 0.0);
+        assert!(
+            neg_half.is_sign_negative(),
+            "nearest(-0.5) must keep its sign"
+        );
+    }
+
+    #[test]
+    fn test_bulk_range_check_is_all_or_nothing() {
+        assert!(check_bulk_range(8, 3, 10, "table.fill").is_err());
+        assert!(check_bulk_range(8, 2, 10, "table.fill").is_ok());
+        // A zero-length operation past the end still traps.
+        assert!(check_bulk_range(11, 0, 10, "table.fill").is_err());
+        assert!(check_bulk_range(10, 0, 10, "table.fill").is_ok());
+        // The sum is checked rather than wrapped.
+        assert!(check_bulk_range(u32::MAX, 2, 10, "table.fill").is_err());
+    }
+
+    #[test]
+    fn test_memory_grow_stops_at_the_four_gigabyte_limit() {
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        // 0x10001 pages past the first would exceed the 65536-page ceiling.
+        assert!(mem.grow(0x10001).is_err());
+        assert_eq!(mem.size(), 1);
+        assert!(mem.grow(1).is_ok());
+        assert_eq!(mem.size(), 2);
+    }
+
+    #[test]
+    fn test_imported_globals_take_their_index_slots() {
+        // Imported globals come first in the index space. Skipping them shifted
+        // every module-defined global, so `global.get` read a neighbour.
+        use crate::runtime::core::module::{GlobalType, GlobalValue, ImportDesc};
+        let module = Module {
+            version: 1,
+            types: vec![FunctionType {
+                params: vec![],
+                results: vec![ValueType::I32],
+            }],
+            imports: vec![ImportDesc {
+                module: "env".to_string(),
+                name: "imported".to_string(),
+                kind: ImportKind::Global(GlobalType {
+                    value_type: ValueType::I32,
+                    mutable: false,
+                }),
+            }],
+            functions: vec![Function {
+                type_index: 0,
+                locals: vec![],
+                code: vec![0x23, 0x01, 0x0b], // global.get 1
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![GlobalValue {
+                value_type: ValueType::I32,
+                mutable: false,
+                init_expr: vec![0x41, 0x2a, 0x0b], // i32.const 42
+            }],
+            exports: HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        };
+        let mut executor = Executor::new(module).unwrap();
+        // Global 1 is the module's own; global 0 belongs to the import.
+        assert_eq!(executor.execute(0).unwrap(), vec![Value::I32(42)]);
     }
 
     #[test]
@@ -6245,7 +6806,9 @@ mod tests {
             // Active segment placing function 1 in slot 0.
             elements: vec![ElementSegment {
                 offset_expr: vec![0x41, 0x00, 0x0b],
-                function_indices: vec![1],
+                table_index: 0,
+                declarative: false,
+                function_indices: vec![Some(1)],
             }],
             data: vec![],
         };

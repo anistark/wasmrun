@@ -46,9 +46,22 @@ impl LinearMemory {
     pub fn grow(&mut self, pages: u32) -> Result<u32, String> {
         let current_size = self.size();
 
+        // A 32-bit memory tops out at 65536 pages (4 GiB), whatever the module
+        // declared as its own maximum. Without this the sum below could also
+        // wrap, and a growth that should report failure would report success.
+        const MAX_PAGES: u32 = 65536;
+        let requested = current_size.checked_add(pages).ok_or_else(|| {
+            format!("Cannot grow memory: {current_size} + {pages} pages overflows")
+        })?;
+        if requested > MAX_PAGES {
+            return Err(format!(
+                "Cannot grow memory: current {current_size} pages + {pages} pages > {MAX_PAGES} page limit"
+            ));
+        }
+
         // Check max limit
         if let Some(max_pages) = self.max {
-            if current_size + pages > max_pages {
+            if requested > max_pages {
                 return Err(format!(
                     "Cannot grow memory: current {current_size} pages + {pages} pages > max {max_pages} pages"
                 ));
@@ -325,7 +338,11 @@ impl LinearMemory {
 
     /// Read a slice of bytes
     pub fn read_bytes(&self, addr: usize, len: usize) -> Result<Vec<u8>, String> {
-        if addr + len > self.size_bytes() {
+        // `addr` and `len` both come from guest operands, so the sum has to be
+        // checked: a wrapped one would satisfy the bounds test and then be
+        // handed to an allocation.
+        let end = addr.saturating_add(len);
+        if end > self.size_bytes() {
             return Err(format!(
                 "Memory access out of bounds: read {} bytes at {} (size: {} bytes)",
                 len,
@@ -343,7 +360,8 @@ impl LinearMemory {
 
     /// Write a slice of bytes
     pub fn write_bytes(&mut self, addr: usize, data: &[u8]) -> Result<(), String> {
-        if addr + data.len() > self.size_bytes() {
+        let end = addr.saturating_add(data.len());
+        if end > self.size_bytes() {
             return Err(format!(
                 "Memory access out of bounds: write {} bytes at {} (size: {} bytes)",
                 data.len(),

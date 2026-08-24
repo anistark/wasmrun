@@ -114,8 +114,18 @@ pub struct DataSegment {
 /// Element segment for table initialization
 #[derive(Debug, Clone)]
 pub struct ElementSegment {
+    /// Const expression giving the target offset. Empty for a segment that is
+    /// not active, which is how the executor tells the two apart.
     pub offset_expr: Vec<u8>,
-    pub function_indices: Vec<u32>,
+    /// Table an active segment writes into. Meaningless for the others.
+    pub table_index: u32,
+    /// One entry per element. `None` is a null reference, which only the
+    /// expression-form encodings can express.
+    pub function_indices: Vec<Option<u32>>,
+    /// Declarative segments exist only to forward-declare functions for
+    /// `ref.func`. They are never written into a table and `table.init` may
+    /// not name them.
+    pub declarative: bool,
 }
 
 /// Parsed WASM module
@@ -569,6 +579,13 @@ fn parse_export_section(data: &[u8]) -> Result<HashMap<String, ExportDesc>, Stri
 }
 
 /// Parse Element section (table initialization)
+/// Parse the Element section.
+///
+/// A segment's leading flags field selects one of eight encodings. The low bit
+/// says the segment is not active, the next says either "an explicit table
+/// index follows" (for an active segment) or "declarative" (for one that is
+/// not), and bit 2 says the elements are written as full expressions rather
+/// than bare function indices. Only the expression forms can hold a null.
 fn parse_element_section(data: &[u8]) -> Result<Vec<ElementSegment>, String> {
     let mut cursor = Cursor::new(data.to_vec());
     let section_end = data.len();
@@ -577,37 +594,77 @@ fn parse_element_section(data: &[u8]) -> Result<Vec<ElementSegment>, String> {
     let mut elements = Vec::with_capacity(count);
     for _ in 0..count {
         let flags = read_leb128_u32(&mut cursor)?;
+        if flags > 7 {
+            return Err(format!("Unsupported element segment flags: {flags}"));
+        }
 
-        // If flags has bit 2 set, there's a type field
-        let _type_field = if (flags & 0x04) != 0 {
-            Some(read_u8(&mut cursor)?)
+        let passive_or_declarative = flags & 0x01 != 0;
+        let second_bit = flags & 0x02 != 0;
+        let uses_expressions = flags & 0x04 != 0;
+
+        let declarative = passive_or_declarative && second_bit;
+        let has_table_index = !passive_or_declarative && second_bit;
+
+        let table_index = if has_table_index {
+            read_leb128_u32(&mut cursor)?
         } else {
-            None
+            0
         };
 
-        // Parse offset expression (unless passive segment)
-        let offset_expr = if (flags & 0x01) == 0 {
-            // Active segment - has offset expression
-            parse_expression(&mut cursor, section_end)?
-        } else {
-            // Passive segment - no offset expression
+        let offset_expr = if passive_or_declarative {
             Vec::new()
+        } else {
+            parse_expression(&mut cursor, section_end)?
         };
 
-        // Parse indices/functions
-        let count = read_leb128_u32(&mut cursor)? as usize;
-        let mut function_indices = Vec::with_capacity(count);
-        for _ in 0..count {
-            function_indices.push(read_leb128_u32(&mut cursor)?);
+        // Everything except the two "table 0, funcref" shorthands (flags 0 and
+        // 4) carries an element type here: a one-byte elemkind for the index
+        // forms, a reftype for the expression forms.
+        if flags != 0 && flags != 4 {
+            let ty = read_u8(&mut cursor)?;
+            if !uses_expressions && ty != 0x00 {
+                return Err(format!("Unsupported element kind: 0x{ty:02x}"));
+            }
+        }
+
+        let item_count = read_leb128_u32(&mut cursor)? as usize;
+        let mut function_indices = Vec::with_capacity(item_count);
+        for _ in 0..item_count {
+            if uses_expressions {
+                let expr = parse_expression(&mut cursor, section_end)?;
+                function_indices.push(element_expr_func_index(&expr)?);
+            } else {
+                function_indices.push(Some(read_leb128_u32(&mut cursor)?));
+            }
         }
 
         elements.push(ElementSegment {
             offset_expr,
+            table_index,
             function_indices,
+            declarative,
         });
     }
 
     Ok(elements)
+}
+
+/// Reduce one element expression to the function it names, or `None` for a
+/// null reference.
+fn element_expr_func_index(expr: &[u8]) -> Result<Option<u32>, String> {
+    match expr.first() {
+        // ref.func <funcidx>
+        Some(0xd2) => {
+            let mut cursor = Cursor::new(expr[1..].to_vec());
+            Ok(Some(read_leb128_u32(&mut cursor)?))
+        }
+        // ref.null <heaptype>
+        Some(0xd0) => Ok(None),
+        Some(other) => Err(format!(
+            "Unsupported opcode 0x{other:02x} in element expression"
+        )),
+        None => Ok(None),
+    }
 }
 
 /// Parse Data section (memory initialization)

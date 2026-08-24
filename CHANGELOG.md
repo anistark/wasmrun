@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Runaway recursion in sandboxed code no longer takes the process down.** The interpreter runs each guest call on a host stack frame, so unbounded guest recursion overflowed the *host* stack. That is not a catchable panic: the process aborts, which in agent mode kills the server for every tenant rather than failing the one request, and the worker-pool containment added in 0.22.0 cannot help. Guest calls are now capped at 1024 deep by default and a program past it traps with "call stack exhausted"
+- **Three more ways guest code could abort the process**, all found by the new spec suite gate
+  - A negative length passed to `memory.copy`, `memory.fill` or `memory.init` sign-extended into a value near 2^64, sailed past the bounds check and reached an allocation
+  - `i32.rem_s` and `i64.rem_s` of `MIN % -1` panicked. The spec defines the remainder as 0
+  - An out-of-range `memory.grow` could wrap its page arithmetic instead of reporting failure
+- **A trap no longer poisons later executions on the same module.** The machine was left exactly as the trap found it, with the aborted call tree still on the call stack, so the next execution started from that wreckage
+- **Out-of-bounds accesses near the top of the address space now trap.** The effective address of a load or store is `base + offset`, and computing it in 32 bits let an address just under 4 GiB wrap back to the bottom of memory and read a valid byte where the spec requires a trap
+- **Modules using an inline `(elem)` segment now load.** The element section parser handled two of the format's eight segment encodings and misparsed the rest, which broke a large share of real modules
+- **`f32`/`f64` `min` and `max` propagate NaN**, and pin the sign of a zero result: `min` gives -0 and `max` gives +0. They previously used Rust's, which returns the non-NaN operand and leaves the zero sign unspecified
+- **`nearest` rounds halves to even**, where it previously rounded them away from zero, so `nearest(-0.5)` was -1.0 instead of -0.0
+- **Trapping float-to-int conversions accept their whole range.** `i32.trunc_f64_s(-2147483648.9)` traps no longer: the boundary is where the *truncated* value leaves range, and the old check compared the raw operand against bounds that are not always representable in the source float type
+- **The bulk table and memory operations are all-or-nothing.** `table.fill`, `table.copy`, `table.init`, `memory.copy` and `memory.init` wrote element by element and trapped partway, leaving the prefix modified where the spec requires the trap to come first
+- **`data.drop` takes effect.** It was a no-op, so a `memory.init` naming a dropped segment copied the data again
+- **Imported globals take their slots in the global index space.** They were skipped, so every module-defined global sat at the wrong index and `global.get` read a neighbour
 - **Rust programs built with stock flags now run.** `cargo build --target wasm32-wasip1` output previously failed with an operand stack underflow a few instructions into `core::fmt::write`, so anything that printed was unrunnable unless it had been rebuilt with `-C target-cpu=mvp` and `build-std`. That lowering requirement is gone: stock debug and release binaries run as they are
   - The cause was overlong LEB128 immediates. `wasm-ld` leaves the indices it relocates encoded at their full five bytes rather than compacting them, and wasmrun read the table index of `call_indirect` as a single byte. The remaining four bytes of padding were then decoded as instructions, starting with `i64.div_u`, and execution went off the rails from there. `memory.size`, `memory.grow`, `memory.copy`, `memory.fill` and `memory.init` all read their memory index the same way
   - `call_indirect` also dispatched through table 0 no matter which table its immediate named, which was wrong for any module with more than one
@@ -16,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Block type indices above 63 decoded as garbage.** A block's type field is a signed LEB128, not a byte, so index 64 and up needs more than one byte. The decoder read one byte and reinterpreted the result as a value type. The `funcref` and `externref` block shorthands were rejected outright for the same reason, despite reference types shipping in v0.21.0
 
 ### Added
+- **The WebAssembly spec test suite runs in CI.** 68 `.wast` files from the [official suite](https://github.com/WebAssembly/testsuite), pinned to a commit, covering the core instruction set and every proposal wasmrun implements: a little over 22,000 assertions. `just spec-suite` runs it locally and prints the per-file table
+  - The gate is a per-file baseline rather than a flat zero, so a regression fails the build and a fix is reported until the baseline is tightened. Every remaining known failure is a proposal wasmrun does not implement (typed function references, multi-memory, WasmGC) or a script needing cross-module linking, each listed with its reason
+  - `assert_invalid`, `assert_malformed` and `assert_unlinkable` are counted as skipped rather than passed. They assert that a *validator* rejects a bad module, and wasmrun has none: it assumes it is handed modules a toolchain already produced. Counting them as passes would overstate what the numbers mean
 - **`poll_oneoff` is implemented**, so a sandboxed program can wait. It previously returned `ENOSYS`, which meant `thread::sleep` and every timer built on it were unusable; `select`-style polling was only the visible half of what it blocked
   - Clock subscriptions support relative and absolute timeouts against the realtime and monotonic clocks
   - `fd_read` and `fd_write` subscriptions are ready as soon as they are asked about, which is what POSIX says about regular files, and a read subscription reports how many bytes are left: the rest of the file, or the unread remainder of the stdin the caller supplied

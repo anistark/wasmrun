@@ -24,6 +24,20 @@ A self-hosted WebAssembly interpreter written in Rust. No external runtime depen
 | **Variables** | local.get/set/tee, global.get/set | ✅ Complete |
 | **Type conversions** | wrap, extend, trunc, convert, demote, promote, reinterpret | ✅ Complete |
 | **Data sections** | Active data segment initialization into linear memory | ✅ Complete |
+| **Multi-value** | Blocks with parameters and more than one result | ✅ Complete |
+| **Sign extension** | i32/i64.extend8_s, extend16_s, extend32_s | ✅ Complete |
+| **Non-trapping conversions** | trunc_sat (all eight forms) | ✅ Complete |
+| **Bulk memory** | memory.copy/fill/init, data.drop, table.copy/fill/init, elem.drop | ✅ Complete |
+| **Reference types** | funcref/externref, typed tables, table.get/set/size/grow | ✅ Complete |
+| **SIMD, threads, WasmGC, typed function references, multi-memory** | - | ⬜ Not implemented |
+
+### Conformance
+
+Wasmrun runs a subset of the [official WebAssembly spec test suite](https://github.com/WebAssembly/testsuite) in CI: 68 `.wast` files covering the core instruction set plus the proposals above, which is a little over 22,000 assertions. `just spec-suite` runs it locally and prints the per-file table.
+
+The gate compares each file against a recorded baseline, so a regression fails the build and a fix is reported so the baseline gets tightened. Every remaining known failure is a proposal wasmrun does not implement (typed function references, multi-memory, WasmGC) or a `.wast` script that needs cross-module linking, which the harness does not do; those are listed with their reasons in `KNOWN_FAILURES` in `src/runtime/core/spec_suite.rs`.
+
+The suite's `assert_invalid`, `assert_malformed` and `assert_unlinkable` directives are counted as skipped rather than passed. They assert that a *validator* rejects a bad module, and wasmrun has no validator: it assumes it is handed modules a toolchain already produced.
 
 ### Linear Memory
 
@@ -32,17 +46,18 @@ A self-hosted WebAssembly interpreter written in Rust. No external runtime depen
 - Little-endian byte order (WASM standard)
 - Support for memory.grow
 
+## Limits
+
+Guest code runs against ceilings the host sets, so a runaway program fails its own execution rather than the process:
+
+- **Fuel**: an instruction budget, shared across the whole call tree
+- **Wall clock**: a cancellation flag the interpreter checks between instructions, and that a sleeping `poll_oneoff` checks while it waits
+- **Call depth**: 1024 nested guest calls by default. The interpreter runs each guest call on a host stack frame, so unbounded recursion would otherwise overflow the host stack, which is a process abort rather than a trap
+- **Memory**: a page ceiling per module, on top of the 65536-page (4 GiB) limit a 32-bit memory has by definition
+
 ## WASI Preview 1
 
-Basic WASI syscall support for system interaction:
-
-- `fd_write`: write to stdout/stderr
-- `fd_read`: read from stdin
-- `environ_get` / `environ_sizes_get`: environment variables
-- `args_get` / `args_sizes_get`: command-line arguments
-- `clock_time_get`: real-time and monotonic clocks
-- `random_get`: random bytes
-- `proc_exit`: process exit
+See [WASI Support](./wasi) for the full syscall table. In short: standard I/O with caller-supplied stdin, a real filesystem under the preopened directories, arguments and environment, clocks, random, `poll_oneoff` for timed waits, and `proc_exit`. `path_symlink` is the one syscall still unimplemented.
 
 ## Entry Point Detection
 
