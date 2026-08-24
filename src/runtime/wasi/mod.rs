@@ -10,6 +10,7 @@ use crate::runtime::core::linker::{ClosureHostFunction, Linker};
 use crate::runtime::core::values::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 pub const WASI_STDIN_FD: u32 = 0;
@@ -67,6 +68,11 @@ pub struct WasiEnv {
     /// so the cap can be checked in O(1) without walking the tree each write.
     /// Seeded from an actual directory scan at session start / before each exec.
     disk_used: u64,
+    /// The executor's cancellation flag, when one was installed. `poll_oneoff`
+    /// watches it while it sleeps: the flag is how the agent's wall-clock
+    /// timeout stops a running execution, and the executor can only check it
+    /// between instructions, which is never while a host function is blocked.
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 impl WasiEnv {
@@ -118,6 +124,7 @@ impl WasiEnv {
             max_file_size: None,
             max_disk_bytes: None,
             disk_used: 0,
+            cancel: None,
         }
     }
 
@@ -201,6 +208,16 @@ impl WasiEnv {
     }
 
     /// Configure the total-disk-usage cap (`None` = unlimited).
+    /// Install the executor's cancellation flag so a blocking syscall can
+    /// give up when the execution is cancelled.
+    pub fn set_cancel_token(&mut self, token: Option<Arc<AtomicBool>>) {
+        self.cancel = token;
+    }
+
+    pub fn cancel_token(&self) -> Option<&Arc<AtomicBool>> {
+        self.cancel.as_ref()
+    }
+
     pub fn set_max_disk_bytes(&mut self, max: Option<u64>) {
         self.max_disk_bytes = max;
     }
@@ -293,6 +310,11 @@ impl WasiEnv {
     pub fn clear_stderr(&mut self) {
         self.stderr.clear();
         self.output_truncated = false;
+    }
+
+    /// How many bytes of the supplied stdin have not been read yet.
+    pub fn stdin_remaining(&self) -> usize {
+        self.stdin.len().saturating_sub(self.stdin_pos)
     }
 
     pub fn get_fd(&self, fd: u32) -> Option<&FdEntry> {
@@ -847,31 +869,71 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
         )),
     );
 
-    // path_filestat_set_times (stub — return ENOSYS)
-    linker.register(
-        WASI_MODULE,
-        "path_filestat_set_times",
-        Box::new(ClosureHostFunction::new(
-            |_args, _mem| Ok(vec![Value::I32(syscalls::path_filestat_set_times())]),
-            6,
-            1,
-        )),
-    );
+    // path_filestat_set_times
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "path_filestat_set_times",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    // fd, lookupflags, path_ptr, path_len, atim, mtim, fst_flags.
+                    // This was registered as taking six arguments while the
+                    // signature has seven, so a guest that called it would have
+                    // left the operand stack one value short.
+                    let dir_fd = i32_arg(&args, 0)? as u32;
+                    let _flags = i32_arg(&args, 1)? as u32;
+                    let path_ptr = i32_arg(&args, 2)? as u32;
+                    let path_len = i32_arg(&args, 3)? as u32;
+                    let atim = i64_arg(&args, 4)? as u64;
+                    let mtim = i64_arg(&args, 5)? as u64;
+                    let fst_flags = i32_arg(&args, 6)? as u16;
+                    let errno = syscalls::path_filestat_set_times(
+                        dir_fd, path_ptr, path_len, atim, mtim, fst_flags, mem, &env,
+                    );
+                    Ok(vec![Value::I32(errno)])
+                },
+                7,
+                1,
+            )),
+        );
+    }
 
-    // path_readlink (stub — return ENOSYS, write 0 to buf_used)
-    linker.register(
-        WASI_MODULE,
-        "path_readlink",
-        Box::new(ClosureHostFunction::new(
-            |args, mem| {
-                // args: fd, flags, path_ptr, path_len, buf_ptr, buf_len, buf_used_ptr
-                let buf_used_ptr = i32_arg(&args, 6)? as u32;
-                Ok(vec![Value::I32(syscalls::path_readlink(buf_used_ptr, mem))])
-            },
-            7,
-            1,
-        )),
-    );
+    // path_readlink
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "path_readlink",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    // fd, path_ptr, path_len, buf_ptr, buf_len, buf_used_ptr.
+                    // There is no lookupflags argument here, so the old
+                    // registration read the buffer-used pointer one slot past
+                    // the end of a seven-argument list that never existed.
+                    let dir_fd = i32_arg(&args, 0)? as u32;
+                    let path_ptr = i32_arg(&args, 1)? as u32;
+                    let path_len = i32_arg(&args, 2)? as u32;
+                    let buf_ptr = i32_arg(&args, 3)? as u32;
+                    let buf_len = i32_arg(&args, 4)? as u32;
+                    let buf_used_ptr = i32_arg(&args, 5)? as u32;
+                    let errno = syscalls::path_readlink(
+                        dir_fd,
+                        path_ptr,
+                        path_len,
+                        buf_ptr,
+                        buf_len,
+                        buf_used_ptr,
+                        mem,
+                        &env,
+                    );
+                    Ok(vec![Value::I32(errno)])
+                },
+                6,
+                1,
+            )),
+        );
+    }
 
     // path_symlink (stub — return ENOSYS)
     linker.register(
@@ -884,23 +946,40 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
         )),
     );
 
-    // poll_oneoff (stub)
-    linker.register(
-        WASI_MODULE,
-        "poll_oneoff",
-        Box::new(ClosureHostFunction::new(
-            |_args, _mem| Ok(vec![Value::I32(syscalls::WASI_ENOSYS)]),
-            4,
-            1,
-        )),
-    );
+    // poll_oneoff
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "poll_oneoff",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let in_ptr = i32_arg(&args, 0)? as u32;
+                    let out_ptr = i32_arg(&args, 1)? as u32;
+                    let nsubscriptions = i32_arg(&args, 2)? as u32;
+                    let nevents_ptr = i32_arg(&args, 3)? as u32;
+                    let errno = syscalls::poll_oneoff(
+                        in_ptr,
+                        out_ptr,
+                        nsubscriptions,
+                        nevents_ptr,
+                        mem,
+                        &env,
+                    );
+                    Ok(vec![Value::I32(errno)])
+                },
+                4,
+                1,
+            )),
+        );
+    }
 
-    // sched_yield (stub)
+    // sched_yield
     linker.register(
         WASI_MODULE,
         "sched_yield",
         Box::new(ClosureHostFunction::new(
-            |_args, _mem| Ok(vec![Value::I32(syscalls::WASI_ESUCCESS)]),
+            |_args, _mem| Ok(vec![Value::I32(syscalls::sched_yield())]),
             0,
             1,
         )),

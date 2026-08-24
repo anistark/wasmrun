@@ -158,6 +158,10 @@ pub fn execute_wasm_bytes_with_env(
 
     if let Ok(mut env) = wasi_env.lock() {
         env.set_args(args.clone());
+        // Hand the cancellation flag to the WASI layer too. The executor checks
+        // it between instructions, which never happens while a host function is
+        // blocked, so a sleeping `poll_oneoff` has to watch it itself.
+        env.set_cancel_token(cancel.clone());
     }
 
     let wasi_linker = create_wasi_linker(wasi_env);
