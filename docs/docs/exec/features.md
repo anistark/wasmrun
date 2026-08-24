@@ -31,6 +31,14 @@ A self-hosted WebAssembly interpreter written in Rust. No external runtime depen
 | **Reference types** | funcref/externref, typed tables, table.get/set/size/grow | ✅ Complete |
 | **SIMD, threads, WasmGC, typed function references, multi-memory** | - | ⬜ Not implemented |
 
+### Components are detected, not misdiagnosed
+
+The four bytes after a WebAssembly file's `\0asm` magic are a 16-bit version and a 16-bit *layer*. The layer is what separates a core module (`01 00 00 00`) from a Component Model binary (`0d 00 01 00`).
+
+Wasmrun runs core modules. Handed a component, `exec`, `verify` and `inspect` all say so, name the version, and point at the `wasm32-wasip1` target. They previously read all four bytes as one number and reported "unsupported version 65549", or in `verify`'s case "missing magic bytes" for a file whose magic was perfectly fine.
+
+Detection is all that ships here. The Component Model parser, the canonical ABI and the WASI 0.2/0.3 worlds are a separate milestone; see [issue #94](https://github.com/anistark/wasmrun/issues/94).
+
 ### Conformance
 
 Wasmrun runs a subset of the [official WebAssembly spec test suite](https://github.com/WebAssembly/testsuite) in CI: 68 `.wast` files covering the core instruction set plus the proposals above, which is a little over 22,000 assertions. `just spec-suite` runs it locally and prints the per-file table.

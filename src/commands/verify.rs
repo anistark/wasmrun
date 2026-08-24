@@ -2,7 +2,7 @@ use crate::cli::CommandValidator;
 use crate::commands::{issue_detector, module_display};
 use crate::config::WASM_MAGIC_BYTES;
 use crate::error::{Result, WasmError, WasmrunError};
-use crate::runtime::core::module::Module;
+use crate::runtime::core::module::{BinaryKind, Module};
 use crate::utils::PathResolver;
 use std::fs;
 use std::io::{Cursor, Read};
@@ -20,6 +20,9 @@ pub struct WasmSection {
 #[derive(Debug)]
 pub struct VerificationResult {
     pub valid_magic: bool,
+    /// What the header says this binary is. A component has valid magic and is
+    /// still not something wasmrun can run.
+    pub kind: BinaryKind,
     pub file_size: usize,
     pub section_count: usize,
     pub sections: Vec<WasmSection>,
@@ -52,6 +55,16 @@ pub fn handle_verify_command(
         return Err(WasmrunError::Wasm(WasmError::InvalidMagicBytes {
             path: wasm_path,
         }));
+    }
+
+    // A component's header is well-formed, so the generic "no sections" error
+    // below would be both true and useless. Say what it actually is.
+    if let BinaryKind::Component { version } = result.kind {
+        return Err(WasmrunError::Wasm(WasmError::validation_failed(format!(
+            "{wasm_path} is a WebAssembly component (version {version}), not a core module. \
+             Wasmrun does not implement the Component Model yet \
+             (https://github.com/anistark/wasmrun/issues/94)."
+        ))));
     }
 
     if result.section_count == 0 {
@@ -111,10 +124,14 @@ pub fn verify_wasm(path: &str) -> std::result::Result<VerificationResult, String
     }
 
     let valid_magic = wasm_bytes.starts_with(&WASM_MAGIC_BYTES);
+    let kind = BinaryKind::detect(&wasm_bytes);
 
-    if !valid_magic {
+    // A component's sections are laid out differently, so walking them as core
+    // sections would report nonsense. Stop at the header and say what it is.
+    if !valid_magic || !matches!(kind, BinaryKind::CoreModule { version: 1 }) {
         return Ok(VerificationResult {
-            valid_magic: false,
+            valid_magic,
+            kind,
             file_size: wasm_bytes.len(),
             section_count: 0,
             sections: vec![],
@@ -263,6 +280,7 @@ pub fn verify_wasm(path: &str) -> std::result::Result<VerificationResult, String
 
     Ok(VerificationResult {
         valid_magic,
+        kind,
         file_size: wasm_bytes.len(),
         section_count: sections.len(),
         sections,
@@ -298,13 +316,38 @@ pub fn print_verification_results(path: &str, results: &VerificationResult, deta
 
     println!("  💾 \x1b[1;34mSize:\x1b[0m \x1b[1;33m{size_str}\x1b[0m");
 
-    if results.valid_magic {
-        println!("  ✅ \x1b[1;32mValid WebAssembly format\x1b[0m");
-    } else {
-        println!("  ❌ \x1b[1;31mInvalid WebAssembly format\x1b[0m");
-        println!("     \x1b[0;90mMissing magic bytes '\\0asm'\x1b[0m");
-        println!("\x1b[1;34m╰\x1b[0m");
-        return;
+    match results.kind {
+        BinaryKind::CoreModule { version: 1 } => {
+            println!("  ✅ \x1b[1;32mValid WebAssembly core module\x1b[0m");
+        }
+        BinaryKind::CoreModule { version } => {
+            println!("  ❌ \x1b[1;31mUnsupported core module version\x1b[0m");
+            println!("     \x1b[0;90mheader says version {version}, wasmrun runs version 1\x1b[0m");
+            println!("\x1b[1;34m╰\x1b[0m");
+            return;
+        }
+        BinaryKind::Component { version } => {
+            // The magic is fine; this is simply a different format. Saying
+            // "missing magic bytes" here sent people looking for a corrupt file.
+            println!("  ⚠️  \x1b[1;33mWebAssembly component, not a core module\x1b[0m");
+            println!("     \x1b[0;90mcomponent version {version}; wasmrun runs core modules against WASI Preview 1\x1b[0m");
+            println!("     \x1b[0;90mthe Component Model and WASI 0.2/0.3 are not implemented yet\x1b[0m");
+            println!("     \x1b[0;90mbuild for wasm32-wasip1 to get a core module\x1b[0m");
+            println!("\x1b[1;34m╰\x1b[0m");
+            return;
+        }
+        BinaryKind::UnknownLayer { version, layer } => {
+            println!("  ❌ \x1b[1;31mUnrecognized WebAssembly layer\x1b[0m");
+            println!("     \x1b[0;90mlayer {layer}, version {version}: neither a core module nor a component\x1b[0m");
+            println!("\x1b[1;34m╰\x1b[0m");
+            return;
+        }
+        BinaryKind::NotWasm => {
+            println!("  ❌ \x1b[1;31mInvalid WebAssembly format\x1b[0m");
+            println!("     \x1b[0;90mMissing magic bytes '\\0asm'\x1b[0m");
+            println!("\x1b[1;34m╰\x1b[0m");
+            return;
+        }
     }
 
     println!(
@@ -520,11 +563,36 @@ pub fn print_detailed_binary_info(path: &str) -> std::result::Result<(), String>
         return Err("Invalid magic bytes".to_string());
     }
 
-    let version = u32::from_le_bytes([wasm_bytes[4], wasm_bytes[5], wasm_bytes[6], wasm_bytes[7]]);
-    println!("  📊 \x1b[1;34mWASM version:\x1b[0m \x1b[1;33m{version}\x1b[0m");
+    // The four bytes after the magic are a version and a layer, not one u32.
+    // Reading them together reported a component as "version 65549".
+    let kind = BinaryKind::detect(&wasm_bytes);
+    println!(
+        "  📊 \x1b[1;34mBinary kind:\x1b[0m \x1b[1;33m{}\x1b[0m",
+        kind.describe()
+    );
 
-    if version != 1 {
-        println!("  ⚠️ \x1b[1;33mUnexpected WASM version (expected 1)\x1b[0m");
+    match kind {
+        BinaryKind::CoreModule { version: 1 } => {}
+        BinaryKind::CoreModule { version } => {
+            println!("  ⚠️ \x1b[1;33mUnexpected core module version {version} (expected 1)\x1b[0m");
+        }
+        BinaryKind::Component { .. } => {
+            println!(
+                "  ⚠️ \x1b[1;33mThis is a component. Its sections are laid out differently\x1b[0m"
+            );
+            println!(
+                "     \x1b[0;90mfrom a core module's, so there is nothing below to report.\x1b[0m"
+            );
+            println!("     \x1b[0;90mWasmrun does not implement the Component Model yet.\x1b[0m");
+            println!("\x1b[1;34m╰\x1b[0m");
+            return Ok(());
+        }
+        BinaryKind::UnknownLayer { layer, .. } => {
+            println!("  ⚠️ \x1b[1;33mUnrecognized layer {layer}\x1b[0m");
+            println!("\x1b[1;34m╰\x1b[0m");
+            return Ok(());
+        }
+        BinaryKind::NotWasm => {}
     }
 
     let mut _offset = 8;

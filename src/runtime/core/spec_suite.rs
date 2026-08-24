@@ -522,22 +522,32 @@ mod tests {
         );
     }
 
-    /// Run the whole gated subset and report per-file counts.
+    /// Run the gated subset in one pass: print the per-file table, then hold
+    /// every file to its baseline.
+    ///
+    /// One test rather than two, because walking all 68 files is the most
+    /// expensive thing in this repo's test suite and doing it twice bought
+    /// nothing. It also has to run on a thread of its own, so it competes with
+    /// the timing-sensitive integration tests for less time.
     #[test]
-    fn test_spec_core_subset_runs() {
+    fn test_spec_core_meets_baseline() {
         let Some(dir) = testsuite_dir() else {
             skip_message();
             return;
         };
-        on_a_big_stack(move || run_subset(dir));
+        on_a_big_stack(move || check_baseline(dir));
     }
 
-    fn run_subset(dir: PathBuf) {
+    fn check_baseline(dir: PathBuf) {
         // `WASM_TESTSUITE_ONLY=br_table.wast` narrows a run to one file, which
         // is how you read a single file's failures without the other sixty.
         let only = std::env::var("WASM_TESTSUITE_ONLY").ok();
 
         let mut total = SpecReport::default();
+        let mut regressions = Vec::new();
+        let mut improvements = Vec::new();
+        let mut ran = 0usize;
+
         for name in CORE_FILES {
             if let Some(filter) = &only {
                 if !name.contains(filter.as_str()) {
@@ -549,52 +559,7 @@ mod tests {
                 eprintln!("{name}: missing from the checkout");
                 continue;
             }
-            match run_wast_file(&path) {
-                Ok(r) => {
-                    eprintln!(
-                        "{name}: {} passed, {} failed, {} skipped",
-                        r.passed, r.failed, r.skipped
-                    );
-                    for f in &r.failures {
-                        eprintln!("    {f}");
-                    }
-                    total.passed += r.passed;
-                    total.failed += r.failed;
-                    total.skipped += r.skipped;
-                }
-                Err(e) => eprintln!("{name}: harness error: {e}"),
-            }
-        }
-        eprintln!(
-            "TOTAL: {} passed, {} failed, {} skipped",
-            total.passed, total.failed, total.skipped
-        );
-        assert!(total.total() > 0, "no directives ran at all");
-    }
-
-    /// The gate. Every gated file must fail no more than its recorded
-    /// baseline, and a file that improves past its baseline is reported so the
-    /// number is tightened rather than left to rot.
-    #[test]
-    fn test_spec_core_meets_baseline() {
-        let Some(dir) = testsuite_dir() else {
-            skip_message();
-            return;
-        };
-        on_a_big_stack(move || check_baseline(dir));
-    }
-
-    fn check_baseline(dir: PathBuf) {
-        let mut regressions = Vec::new();
-        let mut improvements = Vec::new();
-        let mut missing = Vec::new();
-
-        for name in CORE_FILES {
-            let path = dir.join(name);
-            if !path.is_file() {
-                missing.push(*name);
-                continue;
-            }
+            ran += 1;
             let report = match run_wast_file(&path) {
                 Ok(r) => r,
                 Err(e) => {
@@ -602,6 +567,17 @@ mod tests {
                     continue;
                 }
             };
+            eprintln!(
+                "{name}: {} passed, {} failed, {} skipped",
+                report.passed, report.failed, report.skipped
+            );
+            for f in &report.failures {
+                eprintln!("    {f}");
+            }
+            total.passed += report.passed;
+            total.failed += report.failed;
+            total.skipped += report.skipped;
+
             let expected = expected_failures(name);
             if report.failed > expected {
                 regressions.push(format!(
@@ -611,24 +587,27 @@ mod tests {
                 ));
             } else if report.failed < expected {
                 improvements.push(format!(
-                    "{name}: {} failures, baseline says {expected} — lower the baseline",
+                    "{name}: {} failures, baseline says {expected}, lower the baseline",
                     report.failed
                 ));
             }
         }
 
-        assert!(
-            missing.len() < CORE_FILES.len(),
-            "no spec files found in {}; is the checkout complete?",
-            dir.display()
+        eprintln!(
+            "TOTAL: {} passed, {} failed, {} skipped",
+            total.passed, total.failed, total.skipped
         );
+
+        assert!(ran > 0, "no spec files ran from {}", dir.display());
         assert!(
             regressions.is_empty(),
             "spec suite regressed:\n    {}",
             regressions.join("\n    ")
         );
+        // A narrowed run only visits one file, so the others would all look
+        // like they improved to zero.
         assert!(
-            improvements.is_empty(),
+            only.is_some() || improvements.is_empty(),
             "spec suite improved, update KNOWN_FAILURES:\n    {}",
             improvements.join("\n    ")
         );

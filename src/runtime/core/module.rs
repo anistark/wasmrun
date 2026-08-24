@@ -2,7 +2,60 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
 const WASM_MAGIC_BYTES: &[u8; 4] = b"\0asm";
-const WASM_VERSION: u32 = 1;
+const WASM_VERSION: u16 = 1;
+
+/// What kind of binary sits behind the `\0asm` magic.
+///
+/// The four bytes after the magic are not one number. They are a 16-bit version
+/// followed by a 16-bit *layer*, and the layer is what separates a core module
+/// from a Component Model binary: `01 00 00 00` is a core module, `0d 00 01 00`
+/// is a component. Reading all four as a `u32` and comparing against 1 turns
+/// every component into "unsupported version 65549", which tells the person
+/// holding it nothing about what they actually have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryKind {
+    /// A core module: the format wasmrun runs.
+    CoreModule { version: u16 },
+    /// A Component Model binary. wasmrun cannot run these yet; the parser, the
+    /// canonical ABI and the WASI 0.2/0.3 worlds are a milestone of their own.
+    Component { version: u16 },
+    /// The magic is right but the layer is one nobody has defined.
+    UnknownLayer { version: u16, layer: u16 },
+    /// Not a WebAssembly binary at all.
+    NotWasm,
+}
+
+impl BinaryKind {
+    /// Classify a binary from its first eight bytes.
+    pub fn detect(bytes: &[u8]) -> Self {
+        if bytes.len() < 8 || &bytes[0..4] != WASM_MAGIC_BYTES {
+            return BinaryKind::NotWasm;
+        }
+        let version = u16::from_le_bytes([bytes[4], bytes[5]]);
+        let layer = u16::from_le_bytes([bytes[6], bytes[7]]);
+        match layer {
+            0 => BinaryKind::CoreModule { version },
+            1 => BinaryKind::Component { version },
+            _ => BinaryKind::UnknownLayer { version, layer },
+        }
+    }
+
+    /// A one-line description for a person reading an error or a report.
+    pub fn describe(&self) -> String {
+        match self {
+            BinaryKind::CoreModule { version } => {
+                format!("core module (version {version})")
+            }
+            BinaryKind::Component { version } => {
+                format!("component (version {version})")
+            }
+            BinaryKind::UnknownLayer { version, layer } => {
+                format!("unknown layer {layer} (version {version})")
+            }
+            BinaryKind::NotWasm => "not a WebAssembly binary".to_string(),
+        }
+    }
+}
 
 /// Function signature describing parameter and return types
 #[derive(Debug, Clone)]
@@ -171,14 +224,40 @@ impl Module {
             return Err("Invalid WASM magic bytes".to_string());
         }
 
-        // Version is 4 fixed bytes (little-endian u32), not LEB128!
+        // The four bytes after the magic are a 16-bit version and a 16-bit
+        // layer, not one u32. The layer is what tells a core module from a
+        // component, so it is read before anything is said about the version.
         let mut version_bytes = [0u8; 4];
         cursor
             .read_exact(&mut version_bytes)
             .map_err(|_| "File too small - missing version")?;
-        module.version = u32::from_le_bytes(version_bytes);
-        if module.version != WASM_VERSION {
-            return Err(format!("Unsupported WASM version: {}", module.version));
+        let version = u16::from_le_bytes([version_bytes[0], version_bytes[1]]);
+        let layer = u16::from_le_bytes([version_bytes[2], version_bytes[3]]);
+        module.version = version as u32;
+
+        match layer {
+            0 => {
+                if version != WASM_VERSION {
+                    return Err(format!("Unsupported WASM version: {version}"));
+                }
+            }
+            1 => {
+                return Err(format!(
+                    "This is a WebAssembly component (version {version}), not a core module. \
+                     Wasmrun runs core modules against WASI Preview 1; the Component Model \
+                     and WASI 0.2/0.3 are not implemented yet \
+                     (https://github.com/anistark/wasmrun/issues/94). Build for the \
+                     wasm32-wasip1 target to get a core module. If you only have the \
+                     component, `wasm-tools component unbundle` can extract the core modules \
+                     embedded in it, though they still need their imports satisfied."
+                ));
+            }
+            other => {
+                return Err(format!(
+                    "Unknown WebAssembly layer {other} (version {version}): not a core module \
+                     and not a component"
+                ));
+            }
         }
 
         // Parse sections
@@ -878,6 +957,77 @@ mod tests {
         assert_eq!(module.version, 1);
         assert_eq!(module.types.len(), 0);
         assert_eq!(module.imports.len(), 0);
+    }
+
+    // ---- Binary kind detection (0.23.4) ----
+
+    #[test]
+    fn test_detect_core_module() {
+        let bytes = [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+        assert_eq!(
+            BinaryKind::detect(&bytes),
+            BinaryKind::CoreModule { version: 1 }
+        );
+        assert_eq!(
+            BinaryKind::detect(&bytes).describe(),
+            "core module (version 1)"
+        );
+    }
+
+    #[test]
+    fn test_detect_component() {
+        // What `wasm-tools component new` writes: version 13, layer 1.
+        let bytes = [0x00, 0x61, 0x73, 0x6D, 0x0D, 0x00, 0x01, 0x00];
+        assert_eq!(
+            BinaryKind::detect(&bytes),
+            BinaryKind::Component { version: 13 }
+        );
+        assert_eq!(
+            BinaryKind::detect(&bytes).describe(),
+            "component (version 13)"
+        );
+    }
+
+    #[test]
+    fn test_detect_rejects_short_input_and_bad_magic() {
+        assert_eq!(BinaryKind::detect(&[]), BinaryKind::NotWasm);
+        // Magic but no version/layer is not enough to classify.
+        assert_eq!(
+            BinaryKind::detect(&[0x00, 0x61, 0x73, 0x6D]),
+            BinaryKind::NotWasm
+        );
+        assert_eq!(BinaryKind::detect(b"notawasmfile"), BinaryKind::NotWasm);
+    }
+
+    #[test]
+    fn test_detect_unknown_layer() {
+        let bytes = [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x09, 0x00];
+        assert_eq!(
+            BinaryKind::detect(&bytes),
+            BinaryKind::UnknownLayer {
+                version: 1,
+                layer: 9
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_names_a_component_instead_of_blaming_the_version() {
+        // The whole point of the slice: this used to read all four bytes as a
+        // u32 and report "Unsupported WASM version: 65549", which says nothing
+        // about what the person is actually holding.
+        let bytes = [0x00, 0x61, 0x73, 0x6D, 0x0D, 0x00, 0x01, 0x00];
+        let err = Module::parse(&bytes).unwrap_err();
+        assert!(err.contains("component"), "got: {err}");
+        assert!(err.contains("wasm32-wasip1"), "got: {err}");
+        assert!(!err.contains("65549"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_still_rejects_a_core_module_of_the_wrong_version() {
+        let bytes = [0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00];
+        let err = Module::parse(&bytes).unwrap_err();
+        assert!(err.contains("Unsupported WASM version: 2"), "got: {err}");
     }
 
     #[test]

@@ -407,6 +407,7 @@ mod tests {
     fn create_mock_verification_result() -> VerificationResult {
         VerificationResult {
             valid_magic: true,
+            kind: crate::runtime::core::module::BinaryKind::CoreModule { version: 1 },
             file_size: 100,
             section_count: 3,
             sections: vec![],
