@@ -29,7 +29,7 @@ enum ControlFlow {
 
 /// WASM instruction representation
 /// Covers all instruction types from the WebAssembly specification
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     // Constants
     I32Const(i32),
@@ -213,6 +213,17 @@ pub enum Instruction {
     I64Extend16S,
     I64Extend32S,
 
+    // Saturating float-to-int truncation (0xFC prefix) — WASM
+    // non-trapping-float-to-int proposal
+    I32TruncSatF32S,
+    I32TruncSatF32U,
+    I32TruncSatF64S,
+    I32TruncSatF64U,
+    I64TruncSatF32S,
+    I64TruncSatF32U,
+    I64TruncSatF64S,
+    I64TruncSatF64U,
+
     // Bulk-memory (0xFC prefix) — WASM bulk-memory extension
     MemoryCopy,
     MemoryFill,
@@ -244,9 +255,9 @@ pub enum Instruction {
     // Control flow
     Nop,
     Unreachable,
-    Block(Option<ValueType>),
-    Loop(Option<ValueType>),
-    If(Option<ValueType>),
+    Block(BlockType),
+    Loop(BlockType),
+    If(BlockType),
     Else,
     End,
     Br(u32),
@@ -254,7 +265,7 @@ pub enum Instruction {
     BrTable(Vec<u32>, u32),
     Return,
     Call(u32),
-    CallIndirect(u32),
+    CallIndirect(u32, u32),
     Drop,
     Select,
 }
@@ -267,19 +278,56 @@ fn read_u8(cursor: &mut Cursor<&[u8]>) -> Result<u8, String> {
     Ok(byte_buf[0])
 }
 
-/// Decode block type (for block, loop, if instructions)
-fn decode_block_type(cursor: &mut Cursor<&[u8]>) -> Result<Option<ValueType>, String> {
-    let byte = read_u8(cursor)?;
+/// The type of a `block`, `loop` or `if`.
+///
+/// Three encodings share one field in the binary: `0x40` for a block that
+/// produces nothing, a value type byte for the single-result shorthand, and a
+/// non-negative index into the type section for the general form, which is the
+/// only one that can carry parameters or more than one result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockType {
+    Empty,
+    Value(ValueType),
+    FuncType(u32),
+}
+
+/// Decode block type (for block, loop, if instructions).
+///
+/// The field is a signed LEB128 in the s33 range: negative values are the
+/// single-byte shorthands, non-negative values are type indices. A type index
+/// above 63 needs more than one byte, so it cannot be read as a plain byte.
+fn decode_block_type(cursor: &mut Cursor<&[u8]>) -> Result<BlockType, String> {
+    let raw = decode_s33_leb128(cursor)?;
+    if raw >= 0 {
+        return Ok(BlockType::FuncType(raw as u32));
+    }
+    // Negative: the low seven bits are the value type byte, 0x40 meaning empty.
+    let byte = (raw & 0x7F) as u8;
     match byte {
-        0x40 => Ok(None), // empty block type (no result)
-        0x7F => Ok(Some(ValueType::I32)),
-        0x7E => Ok(Some(ValueType::I64)),
-        0x7D => Ok(Some(ValueType::F32)),
-        0x7C => Ok(Some(ValueType::F64)),
-        // Function type index (0x00-0x3F) - for multi-value blocks
-        // For now, treat as empty (no result)
-        0x00..=0x3F => Ok(None),
-        _ => Err(format!("Invalid block type: 0x{byte:02X}")),
+        0x40 => Ok(BlockType::Empty),
+        _ => ValueType::from_byte(byte)
+            .map(BlockType::Value)
+            .ok_or_else(|| format!("Invalid block type: 0x{byte:02X}")),
+    }
+}
+
+/// Decode a signed LEB128 in the s33 range, used only by the block type field.
+fn decode_s33_leb128(cursor: &mut Cursor<&[u8]>) -> Result<i64, String> {
+    let mut result: i64 = 0;
+    let mut shift = 0;
+    loop {
+        let byte = read_u8(cursor)?;
+        result |= ((byte & 0x7F) as i64) << shift;
+        shift += 7;
+        if (byte & 0x80) == 0 {
+            if shift < 64 && (byte & 0x40) != 0 {
+                result |= -1i64 << shift;
+            }
+            return Ok(result);
+        }
+        if shift >= 35 {
+            return Err("LEB128 value too large for a block type".to_string());
+        }
     }
 }
 
@@ -661,13 +709,13 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
             Ok(Instruction::I64Store32(offset))
         }
         0x3F => {
-            // memory.size - reads memory index (0x00)
-            let _mem_idx = read_u8(cursor)?;
+            // memory.size - memory index, always 0 with a single memory
+            let _mem_idx = decode_u32_leb128(cursor)?;
             Ok(Instruction::MemorySize)
         }
         0x40 => {
-            // memory.grow - reads memory index (0x00)
-            let _mem_idx = read_u8(cursor)?;
+            // memory.grow - memory index, always 0 with a single memory
+            let _mem_idx = decode_u32_leb128(cursor)?;
             Ok(Instruction::MemoryGrow)
         }
 
@@ -713,8 +761,8 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0x10 => Ok(Instruction::Call(decode_u32_leb128(cursor)?)),
         0x11 => {
             let type_idx = decode_u32_leb128(cursor)?;
-            let _table_idx = read_u8(cursor)?; // table index (always 0x00 in WASM MVP)
-            Ok(Instruction::CallIndirect(type_idx))
+            let table_idx = decode_u32_leb128(cursor)?;
+            Ok(Instruction::CallIndirect(type_idx, table_idx))
         }
         0x1A => Ok(Instruction::Drop),
         0x1B => Ok(Instruction::Select),
@@ -754,10 +802,18 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0xFC => {
             let op = decode_u32_leb128(cursor)?;
             match op {
+                0 => Ok(Instruction::I32TruncSatF32S),
+                1 => Ok(Instruction::I32TruncSatF32U),
+                2 => Ok(Instruction::I32TruncSatF64S),
+                3 => Ok(Instruction::I32TruncSatF64U),
+                4 => Ok(Instruction::I64TruncSatF32S),
+                5 => Ok(Instruction::I64TruncSatF32U),
+                6 => Ok(Instruction::I64TruncSatF64S),
+                7 => Ok(Instruction::I64TruncSatF64U),
                 8 => {
-                    // memory.init: seg_idx mem_idx(0x00)
+                    // memory.init: seg_idx mem_idx
                     let seg_idx = decode_u32_leb128(cursor)?;
-                    let _mem_idx = read_u8(cursor)?;
+                    let _mem_idx = decode_u32_leb128(cursor)?;
                     Ok(Instruction::MemoryInit(seg_idx))
                 }
                 9 => {
@@ -766,14 +822,14 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
                     Ok(Instruction::DataDrop(seg_idx))
                 }
                 10 => {
-                    // memory.copy: dst_mem(0x00) src_mem(0x00)
-                    let _dst = read_u8(cursor)?;
-                    let _src = read_u8(cursor)?;
+                    // memory.copy: dst_mem src_mem
+                    let _dst = decode_u32_leb128(cursor)?;
+                    let _src = decode_u32_leb128(cursor)?;
                     Ok(Instruction::MemoryCopy)
                 }
                 11 => {
-                    // memory.fill: mem_idx(0x00)
-                    let _mem_idx = read_u8(cursor)?;
+                    // memory.fill: mem_idx
+                    let _mem_idx = decode_u32_leb128(cursor)?;
                     Ok(Instruction::MemoryFill)
                 }
                 12 => {
@@ -816,13 +872,34 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
     }
 }
 
+/// The parameter and result counts a block type resolves to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BlockArity {
+    pub params: usize,
+    pub results: usize,
+}
+
+impl BlockArity {
+    pub const EMPTY: BlockArity = BlockArity {
+        params: 0,
+        results: 0,
+    };
+
+    fn results_only(results: usize) -> Self {
+        BlockArity { params: 0, results }
+    }
+}
+
 /// Represents a single function call frame on the call stack
 /// Control flow block state for branching
 #[derive(Debug, Clone)]
 pub struct BlockFrame {
-    /// Block type (None for Block/Loop, Some for If)
-    pub block_type: Option<ValueType>,
-    /// Stack depth at block entry
+    /// How many values the block takes from the stack on entry. Non-zero only
+    /// for a block typed by a type-section index with parameters
+    pub param_count: usize,
+    /// How many values the block leaves on the stack when it ends normally
+    pub result_count: usize,
+    /// Stack depth at block entry, below the block's own parameters
     pub stack_depth: usize,
     /// Whether this is a loop (affects branching)
     pub is_loop: bool,
@@ -974,15 +1051,19 @@ impl ExecutionContext {
     /// Push a control flow block
     pub fn push_block(
         &mut self,
-        block_type: Option<ValueType>,
+        arity: BlockArity,
         is_loop: bool,
         start_pos: usize,
         end_pos: usize,
         is_then_branch: bool,
     ) {
-        let stack_depth = self.operand_stack.len();
+        // The block's parameters are already on the stack and belong to it, so
+        // the recorded depth sits below them: that is what a branch out of the
+        // block, or a branch back to a loop header, restores the stack to.
+        let stack_depth = self.operand_stack.len().saturating_sub(arity.params);
         self.block_stack.push(BlockFrame {
-            block_type,
+            param_count: arity.params,
+            result_count: arity.results,
             stack_depth,
             is_loop,
             start_pos,
@@ -1370,8 +1451,11 @@ impl Executor {
         let block_depth_before = self.context.block_stack.len();
         // WASM spec: every function body is implicitly wrapped in a block.
         // Push it so the function-terminating 0x0b End byte pops this frame
-        // rather than accidentally popping the caller's block frames.
-        self.context.push_block(None, false, 0, 0, false);
+        // rather than accidentally popping the caller's block frames. Its
+        // results are the function's, so a `br` to the outermost label carries
+        // as many values as a `return` would.
+        self.context
+            .push_block(BlockArity::results_only(num_returns), false, 0, 0, false);
 
         // Execute bytecode
         let mut cursor = Cursor::new(code.as_slice());
@@ -1494,6 +1578,25 @@ impl Executor {
         }
     }
 
+    /// Resolve a block type to the number of values it takes and leaves.
+    fn block_arity(&self, block_type: BlockType) -> Result<BlockArity, String> {
+        match block_type {
+            BlockType::Empty => Ok(BlockArity::EMPTY),
+            BlockType::Value(_) => Ok(BlockArity::results_only(1)),
+            BlockType::FuncType(idx) => {
+                let ty = self
+                    .module
+                    .types
+                    .get(idx as usize)
+                    .ok_or_else(|| format!("Block type index {idx} out of bounds"))?;
+                Ok(BlockArity {
+                    params: ty.params.len(),
+                    results: ty.results.len(),
+                })
+            }
+        }
+    }
+
     /// Execute a branch to the given label depth
     fn do_branch(&mut self, label: u32, cursor: &mut Cursor<&[u8]>) -> Result<(), String> {
         let label_idx = label as usize;
@@ -1508,15 +1611,14 @@ impl Executor {
         let block_idx = self.context.block_stack.len() - 1 - label_idx;
         let target_block = &self.context.block_stack[block_idx];
 
-        // Arity: number of values to preserve on the stack.
-        // For loops: 0 (we're restarting, no result passed through br)
-        // For blocks/if: 0 if void, 1 if value type
+        // Arity: number of values the branch carries to its target.
+        // A loop label is its own header, so a branch to it supplies the loop's
+        // parameters again; every other label is the block's exit, so a branch
+        // to it supplies the block's results.
         let arity: usize = if target_block.is_loop {
-            0
-        } else if target_block.block_type.is_some() {
-            1
+            target_block.param_count
         } else {
-            0
+            target_block.result_count
         };
         let is_loop = target_block.is_loop;
 
@@ -1621,8 +1723,11 @@ impl Executor {
         let block_depth_before = self.context.block_stack.len();
         // WASM spec: every function body is implicitly wrapped in a block.
         // Push it so the function-terminating 0x0b End byte pops this frame
-        // rather than accidentally popping the caller's block frames.
-        self.context.push_block(None, false, 0, 0, false);
+        // rather than accidentally popping the caller's block frames. Its
+        // results are the function's, so a `br` to the outermost label carries
+        // as many values as a `return` would.
+        self.context
+            .push_block(BlockArity::results_only(num_results), false, 0, 0, false);
 
         // Execute function bytecode
         let mut cursor = Cursor::new(code.as_slice());
@@ -1672,14 +1777,15 @@ impl Executor {
             .ok_or_else(|| format!("Table index {idx} out of bounds"))
     }
 
-    fn call_function_indirect(&mut self, elem_idx: u32, type_idx: u32) -> Result<(), String> {
-        // call_indirect dispatches through table 0 (the only table the MVP
-        // encoding targets). The slot must be a non-null funcref.
-        let table0 = self
-            .tables
-            .first()
-            .ok_or_else(|| "call_indirect: module defines no table".to_string())?;
-        let abs_func_idx = match table0.get(elem_idx)? {
+    fn call_function_indirect(
+        &mut self,
+        elem_idx: u32,
+        type_idx: u32,
+        table_idx: u32,
+    ) -> Result<(), String> {
+        // The slot must hold a non-null funcref.
+        let table = self.table(table_idx)?;
+        let abs_func_idx = match table.get(elem_idx)? {
             Value::FuncRef(Some(f)) => f,
             Value::FuncRef(None) => {
                 return Err(format!(
@@ -2837,10 +2943,10 @@ impl Executor {
             }
 
             // CallIndirect - call function through table
-            Instruction::CallIndirect(type_idx) => {
+            Instruction::CallIndirect(type_idx, table_idx) => {
                 let func_idx = self.context.pop()?;
                 if let Value::I32(idx) = func_idx {
-                    self.call_function_indirect(idx as u32, type_idx)?;
+                    self.call_function_indirect(idx as u32, type_idx, table_idx)?;
                 } else {
                     return Err("CallIndirect requires i32 function index on stack".to_string());
                 }
@@ -3315,15 +3421,20 @@ impl Executor {
 
             // Control flow - proper implementation
             Instruction::Block(block_type) => {
+                let arity = self.block_arity(block_type)?;
                 let pos = cursor.position() as usize;
-                self.context.push_block(block_type, false, pos, 0, false);
+                self.context.push_block(arity, false, pos, 0, false);
             }
             Instruction::Loop(block_type) => {
+                let arity = self.block_arity(block_type)?;
                 let pos = cursor.position() as usize;
-                self.context.push_block(block_type, true, pos, 0, false);
+                self.context.push_block(arity, true, pos, 0, false);
             }
             Instruction::If(block_type) => {
-                // Pop condition from stack
+                let arity = self.block_arity(block_type)?;
+                // Pop condition from stack. The block's parameters sit under it
+                // and stay where they are, which is why the condition has to go
+                // first: push_block measures the stack from the top.
                 let cond = self.context.pop()?;
                 let cond_value = match cond {
                     Value::I32(v) => v,
@@ -3334,16 +3445,20 @@ impl Executor {
                     // Condition is true — push frame, execute then-branch.
                     // If there's no else, the End instruction will pop this frame.
                     // If there IS an else, the Else handler will skip to end and pop this frame.
-                    self.context.push_block(block_type, false, 0, 0, true);
+                    self.context.push_block(arity, false, 0, 0, true);
                 } else {
                     // Condition is false — scan forward to find else or end.
                     let found_else = self.skip_to_else_or_end(cursor)?;
                     if found_else {
                         // Cursor is now after `else`; push frame for the else-body.
                         // The End at the close of this if will pop this frame.
-                        self.context.push_block(block_type, false, 0, 0, false);
+                        self.context.push_block(arity, false, 0, 0, false);
                     }
-                    // If found_else is false, `end` was already consumed — don't push a frame.
+                    // If found_else is false, `end` was already consumed — don't
+                    // push a frame. An if with no else is only valid when its
+                    // parameters and results have the same types, so the values
+                    // already on the stack are the block's results and are left
+                    // exactly as they are.
                 }
             }
             Instruction::Else => {
@@ -3625,6 +3740,68 @@ impl Executor {
                     }
                     _ => return Err("Type mismatch for f64.reinterpret_i64".to_string()),
                 }
+            }
+
+            // Saturating float-to-int truncation. Where the trapping forms
+            // reject NaN and out-of-range inputs, these clamp: NaN becomes 0
+            // and anything past the target's range becomes its nearest bound.
+            // Rust's own `as` casts between floats and integers are defined the
+            // same way, so each one is a direct cast.
+            Instruction::I32TruncSatF32S => {
+                let a = match self.context.pop()? {
+                    Value::F32(v) => v as i32,
+                    _ => return Err("i32.trunc_sat_f32_s: expected f32".to_string()),
+                };
+                self.context.push(Value::I32(a));
+            }
+            Instruction::I32TruncSatF32U => {
+                let a = match self.context.pop()? {
+                    Value::F32(v) => v as u32,
+                    _ => return Err("i32.trunc_sat_f32_u: expected f32".to_string()),
+                };
+                self.context.push(Value::I32(a as i32));
+            }
+            Instruction::I32TruncSatF64S => {
+                let a = match self.context.pop()? {
+                    Value::F64(v) => v as i32,
+                    _ => return Err("i32.trunc_sat_f64_s: expected f64".to_string()),
+                };
+                self.context.push(Value::I32(a));
+            }
+            Instruction::I32TruncSatF64U => {
+                let a = match self.context.pop()? {
+                    Value::F64(v) => v as u32,
+                    _ => return Err("i32.trunc_sat_f64_u: expected f64".to_string()),
+                };
+                self.context.push(Value::I32(a as i32));
+            }
+            Instruction::I64TruncSatF32S => {
+                let a = match self.context.pop()? {
+                    Value::F32(v) => v as i64,
+                    _ => return Err("i64.trunc_sat_f32_s: expected f32".to_string()),
+                };
+                self.context.push(Value::I64(a));
+            }
+            Instruction::I64TruncSatF32U => {
+                let a = match self.context.pop()? {
+                    Value::F32(v) => v as u64,
+                    _ => return Err("i64.trunc_sat_f32_u: expected f32".to_string()),
+                };
+                self.context.push(Value::I64(a as i64));
+            }
+            Instruction::I64TruncSatF64S => {
+                let a = match self.context.pop()? {
+                    Value::F64(v) => v as i64,
+                    _ => return Err("i64.trunc_sat_f64_s: expected f64".to_string()),
+                };
+                self.context.push(Value::I64(a));
+            }
+            Instruction::I64TruncSatF64U => {
+                let a = match self.context.pop()? {
+                    Value::F64(v) => v as u64,
+                    _ => return Err("i64.trunc_sat_f64_u: expected f64".to_string()),
+                };
+                self.context.push(Value::I64(a as i64));
             }
 
             // Sign-extension operators
@@ -5644,5 +5821,547 @@ mod tests {
         executor.elem_segments[0].dropped = true;
         let err = executor.execute(0).unwrap_err();
         assert!(err.contains("already dropped"), "got: {err}");
+    }
+
+    // ---- Multi-value blocks (0.23.1) ----
+
+    /// Build a module with a caller function (index 0) plus the extra types a
+    /// multi-value block needs to name. `types[0]` is the function's own
+    /// signature; the rest are block signatures referenced by type index.
+    fn multivalue_module(
+        params: Vec<ValueType>,
+        results: Vec<ValueType>,
+        block_types: Vec<FunctionType>,
+        locals: Vec<(u32, ValueType)>,
+        code: Vec<u8>,
+    ) -> Module {
+        let mut types = vec![FunctionType { params, results }];
+        types.extend(block_types);
+        Module {
+            version: 1,
+            types,
+            imports: vec![],
+            functions: vec![Function {
+                type_index: 0,
+                locals,
+                code,
+            }],
+            tables: vec![],
+            memory: None,
+            globals: vec![],
+            exports: HashMap::new(),
+            start: None,
+            elements: vec![],
+            data: vec![],
+        }
+    }
+
+    #[test]
+    fn test_decode_block_type_forms() {
+        // 0x40: empty
+        assert_eq!(
+            decode_block_type(&mut Cursor::new([0x40].as_slice())).unwrap(),
+            BlockType::Empty
+        );
+        // Value-type shorthands, including the reference types
+        assert_eq!(
+            decode_block_type(&mut Cursor::new([0x7F].as_slice())).unwrap(),
+            BlockType::Value(ValueType::I32)
+        );
+        assert_eq!(
+            decode_block_type(&mut Cursor::new([0x7C].as_slice())).unwrap(),
+            BlockType::Value(ValueType::F64)
+        );
+        assert_eq!(
+            decode_block_type(&mut Cursor::new([0x70].as_slice())).unwrap(),
+            BlockType::Value(ValueType::FuncRef)
+        );
+        // A small type index fits in one byte
+        assert_eq!(
+            decode_block_type(&mut Cursor::new([0x07].as_slice())).unwrap(),
+            BlockType::FuncType(7)
+        );
+        // Index 64 needs two bytes as a signed LEB128, which the old
+        // single-byte read decoded as the value type 0xC0
+        assert_eq!(
+            decode_block_type(&mut Cursor::new([0xC0, 0x00].as_slice())).unwrap(),
+            BlockType::FuncType(64)
+        );
+        assert_eq!(
+            decode_block_type(&mut Cursor::new([0x80, 0x02].as_slice())).unwrap(),
+            BlockType::FuncType(256)
+        );
+        // A negative value that is not a value type is rejected
+        assert!(decode_block_type(&mut Cursor::new([0x6E].as_slice())).is_err());
+    }
+
+    #[test]
+    fn test_block_returning_two_values() {
+        // () -> (i32, i64)
+        //   block (type 1: [] -> [i32 i64])
+        //     i32.const 7; i64.const 9
+        //   end
+        let module = multivalue_module(
+            vec![],
+            vec![ValueType::I32, ValueType::I64],
+            vec![FunctionType {
+                params: vec![],
+                results: vec![ValueType::I32, ValueType::I64],
+            }],
+            vec![],
+            vec![
+                0x02, 0x01, // block (type 1)
+                0x41, 0x07, // i32.const 7
+                0x42, 0x09, // i64.const 9
+                0x0b, // end block
+                0x0b, // end function
+            ],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        assert_eq!(
+            executor.execute(0).unwrap(),
+            vec![Value::I32(7), Value::I64(9)]
+        );
+    }
+
+    #[test]
+    fn test_block_with_parameters() {
+        // (i32) -> i32
+        //   local.get 0; i32.const 10
+        //   block (type 1: [i32 i32] -> [i32])
+        //     i32.add
+        //   end
+        let module = multivalue_module(
+            vec![ValueType::I32],
+            vec![ValueType::I32],
+            vec![FunctionType {
+                params: vec![ValueType::I32, ValueType::I32],
+                results: vec![ValueType::I32],
+            }],
+            vec![],
+            vec![
+                0x20, 0x00, // local.get 0
+                0x41, 0x0a, // i32.const 10
+                0x02, 0x01, // block (type 1)
+                0x6a, // i32.add
+                0x0b, // end block
+                0x0b, // end function
+            ],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        assert_eq!(
+            executor.execute_with_args(0, vec![Value::I32(5)]).unwrap(),
+            vec![Value::I32(15)]
+        );
+    }
+
+    #[test]
+    fn test_br_out_of_multivalue_block_keeps_both_results() {
+        // () -> (i32, i32): a br carrying two values past dead code
+        //   block (type 1: [] -> [i32 i32])
+        //     i32.const 1; i32.const 2; br 0
+        //     i32.const 99          ;; unreachable, and would be left behind
+        //   end                      ;; if the branch preserved only one value
+        let module = multivalue_module(
+            vec![],
+            vec![ValueType::I32, ValueType::I32],
+            vec![FunctionType {
+                params: vec![],
+                results: vec![ValueType::I32, ValueType::I32],
+            }],
+            vec![],
+            vec![
+                0x02, 0x01, // block (type 1)
+                0x41, 0x01, // i32.const 1
+                0x41, 0x02, // i32.const 2
+                0x0c, 0x00, // br 0
+                0x41, 0x63, // i32.const 99 (dead)
+                0x0b, // end block
+                0x0b, // end function
+            ],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        assert_eq!(
+            executor.execute(0).unwrap(),
+            vec![Value::I32(1), Value::I32(2)]
+        );
+    }
+
+    #[test]
+    fn test_loop_with_parameters_carries_them_around() {
+        // (i32 n) -> i32: sum 1..=n, with the accumulator and the counter as
+        // the loop's own parameters. Each `br_if 0` back to the header has to
+        // carry both of them; with the old fixed arity of 0 the loop would
+        // restart on an empty stack.
+        //
+        //   i32.const 0; local.get 0
+        //   loop (type 1: [i32 i32] -> [i32])   ;; [acc, i]
+        //     local.set 1                        ;; local1 = i, [acc]
+        //     local.get 1; i32.add               ;; [acc + i]
+        //     local.get 1; i32.const 1; i32.sub
+        //     local.tee 2                        ;; [acc', i']
+        //     local.get 2; br_if 0               ;; back to the header with both
+        //     drop                               ;; i' is 0 here, leave acc'
+        //   end
+        let module = multivalue_module(
+            vec![ValueType::I32],
+            vec![ValueType::I32],
+            vec![FunctionType {
+                params: vec![ValueType::I32, ValueType::I32],
+                results: vec![ValueType::I32],
+            }],
+            vec![(2, ValueType::I32)],
+            vec![
+                0x41, 0x00, // i32.const 0
+                0x20, 0x00, // local.get 0
+                0x03, 0x01, // loop (type 1)
+                0x21, 0x01, // local.set 1
+                0x20, 0x01, // local.get 1
+                0x6a, // i32.add
+                0x20, 0x01, // local.get 1
+                0x41, 0x01, // i32.const 1
+                0x6b, // i32.sub
+                0x22, 0x02, // local.tee 2
+                0x20, 0x02, // local.get 2
+                0x0d, 0x00, // br_if 0
+                0x1a, // drop
+                0x0b, // end loop
+                0x0b, // end function
+            ],
+        );
+        // The body counts down and exits when the counter reaches zero, so it
+        // is written for n >= 1; n = 0 would wrap past the guard.
+        let mut executor = Executor::new(module).unwrap();
+        assert_eq!(
+            executor.execute_with_args(0, vec![Value::I32(4)]).unwrap(),
+            vec![Value::I32(10)]
+        );
+        assert_eq!(
+            executor.execute_with_args(0, vec![Value::I32(1)]).unwrap(),
+            vec![Value::I32(1)]
+        );
+    }
+
+    #[test]
+    fn test_if_with_parameters_in_both_branches() {
+        // (i32, i32, i32) -> i32
+        //   local.get 0; local.get 1     ;; the if's two parameters
+        //   local.get 2                  ;; the condition
+        //   if (type 1: [i32 i32] -> [i32])
+        //     i32.add
+        //   else
+        //     i32.sub
+        //   end
+        let module = multivalue_module(
+            vec![ValueType::I32, ValueType::I32, ValueType::I32],
+            vec![ValueType::I32],
+            vec![FunctionType {
+                params: vec![ValueType::I32, ValueType::I32],
+                results: vec![ValueType::I32],
+            }],
+            vec![],
+            vec![
+                0x20, 0x00, // local.get 0
+                0x20, 0x01, // local.get 1
+                0x20, 0x02, // local.get 2 (condition)
+                0x04, 0x01, // if (type 1)
+                0x6a, // i32.add
+                0x05, // else
+                0x6b, // i32.sub
+                0x0b, // end if
+                0x0b, // end function
+            ],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        assert_eq!(
+            executor
+                .execute_with_args(0, vec![Value::I32(9), Value::I32(4), Value::I32(1)])
+                .unwrap(),
+            vec![Value::I32(13)]
+        );
+        assert_eq!(
+            executor
+                .execute_with_args(0, vec![Value::I32(9), Value::I32(4), Value::I32(0)])
+                .unwrap(),
+            vec![Value::I32(5)]
+        );
+    }
+
+    #[test]
+    fn test_if_without_else_passes_parameters_through() {
+        // (i32, i32) -> i32: an if with no else is only valid when its
+        // parameters and results match, so a false condition must leave the
+        // parameter on the stack as the block's result.
+        //   local.get 0; local.get 1
+        //   if (type 1: [i32] -> [i32])
+        //     i32.const 2; i32.mul
+        //   end
+        let module = multivalue_module(
+            vec![ValueType::I32, ValueType::I32],
+            vec![ValueType::I32],
+            vec![FunctionType {
+                params: vec![ValueType::I32],
+                results: vec![ValueType::I32],
+            }],
+            vec![],
+            vec![
+                0x20, 0x00, // local.get 0 (parameter)
+                0x20, 0x01, // local.get 1 (condition)
+                0x04, 0x01, // if (type 1)
+                0x41, 0x02, // i32.const 2
+                0x6c, // i32.mul
+                0x0b, // end if
+                0x0b, // end function
+            ],
+        );
+        let mut executor = Executor::new(module).unwrap();
+        assert_eq!(
+            executor
+                .execute_with_args(0, vec![Value::I32(21), Value::I32(1)])
+                .unwrap(),
+            vec![Value::I32(42)]
+        );
+        assert_eq!(
+            executor
+                .execute_with_args(0, vec![Value::I32(21), Value::I32(0)])
+                .unwrap(),
+            vec![Value::I32(21)]
+        );
+    }
+
+    // ---- Overlong LEB128 immediates and saturating truncation (0.23.1) ----
+
+    #[test]
+    fn test_decode_call_indirect_with_padded_table_index() {
+        // wasm-ld leaves the indices it relocates encoded at their full five
+        // bytes rather than compacting them, so `call_indirect (type 4)` in a
+        // linked binary reads 0x11 <5-byte type> <5-byte table>. Reading the
+        // table index as a single byte left four bytes of the padding to be
+        // decoded as instructions, which is what made every linked rustc
+        // binary die inside core::fmt::write.
+        let padded = [
+            0x11, // call_indirect
+            0x84, 0x80, 0x80, 0x80, 0x00, // type index 4, padded
+            0x80, 0x80, 0x80, 0x80, 0x00, // table index 0, padded
+        ];
+        let mut cursor = Cursor::new(padded.as_slice());
+        assert_eq!(
+            decode_instruction(&mut cursor).unwrap(),
+            Instruction::CallIndirect(4, 0)
+        );
+        // The whole immediate must be consumed, or the next decode starts
+        // mid-number and everything after it is garbage.
+        assert_eq!(cursor.position(), padded.len() as u64);
+    }
+
+    #[test]
+    fn test_decode_memory_ops_with_padded_indices() {
+        // The same padding reaches every memory index.
+        let cases: Vec<(Vec<u8>, Instruction)> = vec![
+            (
+                vec![0x3F, 0x80, 0x80, 0x80, 0x80, 0x00],
+                Instruction::MemorySize,
+            ),
+            (
+                vec![0x40, 0x80, 0x80, 0x80, 0x80, 0x00],
+                Instruction::MemoryGrow,
+            ),
+            (
+                vec![
+                    0xFC, 0x0A, 0x80, 0x80, 0x80, 0x80, 0x00, 0x80, 0x80, 0x80, 0x80, 0x00,
+                ],
+                Instruction::MemoryCopy,
+            ),
+            (
+                vec![0xFC, 0x0B, 0x80, 0x80, 0x80, 0x80, 0x00],
+                Instruction::MemoryFill,
+            ),
+            (
+                vec![0xFC, 0x08, 0x03, 0x80, 0x80, 0x80, 0x80, 0x00],
+                Instruction::MemoryInit(3),
+            ),
+        ];
+        for (bytes, expected) in cases {
+            let mut cursor = Cursor::new(bytes.as_slice());
+            assert_eq!(decode_instruction(&mut cursor).unwrap(), expected);
+            assert_eq!(
+                cursor.position(),
+                bytes.len() as u64,
+                "immediate not fully consumed for {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_call_indirect_executes_with_padded_immediates() {
+        use crate::runtime::core::module::ElementSegment;
+        // The end-to-end form of the linked-binary bug: function 1 is reached
+        // through call_indirect whose type and table immediates are both padded
+        // to five bytes. Before the fix the decoder consumed one byte of the
+        // table index and then read the remaining padding as instructions,
+        // which is how every linked rustc binary derailed.
+        let module = Module {
+            version: 1,
+            types: vec![
+                // type 0: the caller, () -> i32
+                FunctionType {
+                    params: vec![],
+                    results: vec![ValueType::I32],
+                },
+                // type 1: the callee's signature, () -> i32
+                FunctionType {
+                    params: vec![],
+                    results: vec![ValueType::I32],
+                },
+            ],
+            imports: vec![],
+            functions: vec![
+                Function {
+                    type_index: 0,
+                    locals: vec![],
+                    code: vec![
+                        0x41, 0x00, // i32.const 0 (table slot)
+                        0x11, // call_indirect
+                        0x81, 0x80, 0x80, 0x80, 0x00, // type index 1, padded
+                        0x80, 0x80, 0x80, 0x80, 0x00, // table index 0, padded
+                        0x0b, // end
+                    ],
+                },
+                Function {
+                    type_index: 1,
+                    locals: vec![],
+                    code: vec![0x41, 0x2a, 0x0b], // i32.const 42; end
+                },
+            ],
+            tables: vec![TableType {
+                initial: 1,
+                max: None,
+                element_type: ValueType::FuncRef,
+            }],
+            memory: None,
+            globals: vec![],
+            exports: HashMap::new(),
+            start: None,
+            // Active segment placing function 1 in slot 0.
+            elements: vec![ElementSegment {
+                offset_expr: vec![0x41, 0x00, 0x0b],
+                function_indices: vec![1],
+            }],
+            data: vec![],
+        };
+        let mut executor = Executor::new(module).unwrap();
+        assert_eq!(executor.execute(0).unwrap(), vec![Value::I32(42)]);
+    }
+
+    #[test]
+    fn test_decode_trunc_sat() {
+        let cases = [
+            (0x00, Instruction::I32TruncSatF32S),
+            (0x01, Instruction::I32TruncSatF32U),
+            (0x02, Instruction::I32TruncSatF64S),
+            (0x03, Instruction::I32TruncSatF64U),
+            (0x04, Instruction::I64TruncSatF32S),
+            (0x05, Instruction::I64TruncSatF32U),
+            (0x06, Instruction::I64TruncSatF64S),
+            (0x07, Instruction::I64TruncSatF64U),
+        ];
+        for (op, expected) in cases {
+            assert_eq!(
+                decode_instruction(&mut Cursor::new([0xFC, op].as_slice())).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_trunc_sat_clamps_instead_of_trapping() {
+        // (f64) -> i32 : f64.const arg; i32.trunc_sat_f64_s
+        fn run_i32_s(input: f64) -> Value {
+            let module = multivalue_module(
+                vec![ValueType::F64],
+                vec![ValueType::I32],
+                vec![],
+                vec![],
+                vec![
+                    0x20, 0x00, // local.get 0
+                    0xFC, 0x02, // i32.trunc_sat_f64_s
+                    0x0b, // end
+                ],
+            );
+            let mut executor = Executor::new(module).unwrap();
+            executor
+                .execute_with_args(0, vec![Value::F64(input)])
+                .unwrap()[0]
+        }
+
+        assert_eq!(run_i32_s(3.9), Value::I32(3));
+        assert_eq!(run_i32_s(-3.9), Value::I32(-3));
+        // NaN saturates to zero rather than trapping, which is the whole point
+        assert_eq!(run_i32_s(f64::NAN), Value::I32(0));
+        // Out of range clamps to the bounds
+        assert_eq!(run_i32_s(1e30), Value::I32(i32::MAX));
+        assert_eq!(run_i32_s(-1e30), Value::I32(i32::MIN));
+        assert_eq!(run_i32_s(f64::INFINITY), Value::I32(i32::MAX));
+        assert_eq!(run_i32_s(f64::NEG_INFINITY), Value::I32(i32::MIN));
+
+        // The trapping form still rejects what the saturating one accepts
+        let trapping = multivalue_module(
+            vec![ValueType::F64],
+            vec![ValueType::I32],
+            vec![],
+            vec![],
+            vec![0x20, 0x00, 0xAA, 0x0b], // local.get 0; i32.trunc_f64_s
+        );
+        let mut executor = Executor::new(trapping).unwrap();
+        assert!(executor
+            .execute_with_args(0, vec![Value::F64(f64::NAN)])
+            .is_err());
+    }
+
+    #[test]
+    fn test_trunc_sat_unsigned_forms() {
+        fn run(opcode: u8, input: f64, result_is_i64: bool) -> Value {
+            let module = multivalue_module(
+                vec![ValueType::F64],
+                vec![if result_is_i64 {
+                    ValueType::I64
+                } else {
+                    ValueType::I32
+                }],
+                vec![],
+                vec![],
+                vec![0x20, 0x00, 0xFC, opcode, 0x0b],
+            );
+            let mut executor = Executor::new(module).unwrap();
+            executor
+                .execute_with_args(0, vec![Value::F64(input)])
+                .unwrap()[0]
+        }
+
+        // i32.trunc_sat_f64_u: negatives clamp to 0, overflow to u32::MAX
+        assert_eq!(run(0x03, -3.9, false), Value::I32(0));
+        assert_eq!(run(0x03, 1e30, false), Value::I32(u32::MAX as i32));
+        // i64.trunc_sat_f64_u
+        assert_eq!(run(0x07, -1.0, true), Value::I64(0));
+        assert_eq!(run(0x07, 1e30, true), Value::I64(u64::MAX as i64));
+        // i64.trunc_sat_f64_s
+        assert_eq!(run(0x06, -1e30, true), Value::I64(i64::MIN));
+    }
+
+    #[test]
+    fn test_block_type_index_out_of_bounds_is_rejected() {
+        let module = multivalue_module(
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![0x02, 0x09, 0x0b, 0x0b], // block (type 9), which does not exist
+        );
+        let mut executor = Executor::new(module).unwrap();
+        let err = executor.execute(0).unwrap_err();
+        assert!(
+            err.contains("Block type index 9 out of bounds"),
+            "got: {err}"
+        );
     }
 }

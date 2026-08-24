@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Rust programs built with stock flags now run.** `cargo build --target wasm32-wasip1` output previously failed with an operand stack underflow a few instructions into `core::fmt::write`, so anything that printed was unrunnable unless it had been rebuilt with `-C target-cpu=mvp` and `build-std`. That lowering requirement is gone: stock debug and release binaries run as they are
+  - The cause was overlong LEB128 immediates. `wasm-ld` leaves the indices it relocates encoded at their full five bytes rather than compacting them, and wasmrun read the table index of `call_indirect` as a single byte. The remaining four bytes of padding were then decoded as instructions, starting with `i64.div_u`, and execution went off the rails from there. `memory.size`, `memory.grow`, `memory.copy`, `memory.fill` and `memory.init` all read their memory index the same way
+  - `call_indirect` also dispatched through table 0 no matter which table its immediate named, which was wrong for any module with more than one
+- **Block type indices above 63 decoded as garbage.** A block's type field is a signed LEB128, not a byte, so index 64 and up needs more than one byte. The decoder read one byte and reinterpreted the result as a value type. The `funcref` and `externref` block shorthands were rejected outright for the same reason, despite reference types shipping in v0.21.0
+
+### Added
+- **Multi-value blocks**: `block`, `loop` and `if` can now take parameters and return more than one value, which is what a block typed by an index into the type section is for. Branch arity follows the target: a branch to a loop label carries the loop's parameters back to its header, a branch to any other label carries the block's results. Both were previously fixed at zero-or-one, so a multi-value block lost values on the way out and a loop with parameters restarted on an empty stack
+- **Saturating float-to-int conversions** (`i32.trunc_sat_f32_s` and its seven siblings). These are part of the default `wasm32-wasip1` feature set through `nontrapping-fptoint` and rustc emits them for ordinary `as` casts, but wasmrun rejected them as an unknown opcode. Where the trapping forms reject NaN and out-of-range input, these clamp: NaN becomes 0 and anything past the target's range becomes its nearest bound
+
 ## [0.22.0](https://github.com/anistark/wasmrun/releases/tag/v0.22.0) - 2026-08-20
 
 ### Added
