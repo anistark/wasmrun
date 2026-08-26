@@ -12,7 +12,7 @@ Wasmrun's exec mode provides WASI Preview 1 support, enabling WASM modules to in
 | Syscall | Description | Status |
 |---|---|---|
 | `fd_write` | Write to file descriptors (stdout, stderr): reads iovecs from memory | ✅ |
-| `fd_read` | Read from file descriptors (stdin returns EOF) | ✅ |
+| `fd_read` | Read from file descriptors, including stdin supplied by the caller | ✅ |
 | `fd_close` | Close a file descriptor | ✅ |
 | `fd_seek` | Seek within a file descriptor | ✅ |
 | `fd_fdstat_get` | File descriptor status (filetype, flags, rights) | ✅ |
@@ -25,8 +25,8 @@ Wasmrun's exec mode provides WASI Preview 1 support, enabling WASM modules to in
 | `clock_time_get` | Get current time (realtime, monotonic) in nanoseconds | ✅ |
 | `random_get` | Fill buffer with random bytes | ✅ |
 | `proc_exit` | Exit with a status code (terminates execution cleanly) | ✅ |
-| `poll_oneoff` | Poll for events (stub, returns ENOSYS) | ✅ Stub |
-| `sched_yield` | Yield execution (stub, returns success) | ✅ Stub |
+| `poll_oneoff` | Wait on clock and file descriptor subscriptions. This is what `thread::sleep` and every timer lowers to | ✅ |
+| `sched_yield` | Yield the rest of the time slice | ✅ |
 | `path_open` | Open (or create) a file by path | ✅ |
 | `path_filestat_get` | Stat a path | ✅ |
 | `path_create_directory` | Create a directory | ✅ |
@@ -36,9 +36,22 @@ Wasmrun's exec mode provides WASI Preview 1 support, enabling WASM modules to in
 | `fd_readdir` | Read directory entries | ✅ |
 | `fd_filestat_get` | Stat an open file descriptor | ✅ |
 | `fd_fdstat_set_flags` | Set file descriptor flags | ✅ |
-| `path_filestat_set_times` | Set path timestamps (returns ENOSYS) | ✅ Stub |
-| `path_readlink` | Read a symlink target (returns ENOSYS) | ✅ Stub |
-| `path_symlink` | Create a symlink (returns ENOSYS) | ✅ Stub |
+| `path_filestat_set_times` | Set a path's access and modification times | ✅ |
+| `path_readlink` | Read a symlink's target | ✅ |
+| `path_symlink` | Create a symlink | ⬜ Returns `ENOSYS` |
+
+`path_symlink` is the one syscall still unimplemented. Creating symlinks inside a sandbox needs the containment checks to resolve them, and the agent server's file API checks paths lexically today, so the two have to land together.
+
+### How `poll_oneoff` behaves
+
+Every file wasmrun can reach is a regular file and the interpreter is single-threaded, so the two kinds of subscription behave very differently:
+
+- **`fd_read` / `fd_write`** are ready as soon as they are asked about, which is what POSIX says about regular files. A read subscription reports how many bytes are left: the rest of the file, or the unread remainder of the stdin the caller supplied
+- **`clock`** is a real wait, and is the reason most programs call this at all. Relative and absolute timeouts are both supported, against either the realtime or the monotonic clock
+
+When a call mixes the two, ready descriptors win and nothing sleeps. A subscription naming a clock wasmrun does not implement fails on its own, with the rest of the call still answered.
+
+A sleeping `poll_oneoff` watches for cancellation, so an execution that hits its wall-clock timeout mid-sleep stops there rather than running the timeout out.
 
 ## How It Works
 

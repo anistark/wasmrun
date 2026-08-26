@@ -43,6 +43,15 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-target-test-
 
+    # Pinned to a commit rather than a branch: a newer suite can add files
+    # exercising proposals wasmrun does not implement, and that should be a
+    # deliberate baseline change rather than a surprise red build. Keep this in
+    # step with `spec_suite_rev` in the justfile.
+    - name: Fetch the WebAssembly spec test suite
+      run: |
+        git clone https://github.com/WebAssembly/testsuite.git _tests/testsuite
+        git -C _tests/testsuite checkout 65a43d2e9464b6967c98b23c8493765c4d124f4e
+
     - name: Run tests
       run: cargo test --all-features --verbose
       env:

@@ -41,6 +41,7 @@ libloading = "0.9.0"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+wast = { version = "257.0.1", default-features = false, features = ["wasm-module"] }
 
 [build-dependencies]
 regex = "1.13.1"

@@ -78,6 +78,33 @@ stop:
 test:
     cargo test
 
+# The spec suite commit the harness is pinned to. Bump this deliberately: a new
+# commit can add files that exercise proposals wasmrun does not implement, which
+# shows up as a baseline change rather than a bug.
+spec_suite_rev := "65a43d2e9464b6967c98b23c8493765c4d124f4e"
+
+# Fetch the official WebAssembly spec test suite into _tests/testsuite.
+# The harness in src/runtime/core/spec_suite.rs skips itself when this is
+# absent, so it is optional locally and required only for full coverage.
+spec-suite-fetch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="_tests/testsuite"
+    if [ -d "$dir/.git" ]; then
+        echo "Updating $dir to {{spec_suite_rev}}"
+        git -C "$dir" fetch --quiet origin {{spec_suite_rev}}
+    else
+        echo "Cloning the WebAssembly spec test suite into $dir"
+        mkdir -p _tests
+        git clone --quiet https://github.com/WebAssembly/testsuite.git "$dir"
+    fi
+    git -C "$dir" checkout --quiet {{spec_suite_rev}}
+    echo "✅ spec suite at {{spec_suite_rev}}"
+
+# Run the spec suite and print the per-file table.
+spec-suite: spec-suite-fetch
+    cargo test --release --bin wasmrun test_spec_core_subset_runs -- --nocapture
+
 # Check code formatting
 check-format:
     cargo fmt -- --check
@@ -164,7 +191,7 @@ ci-docs:
     cd docs && pnpm run build
 
 # test.yml "Run Tests" job
-ci-test:
+ci-test: spec-suite-fetch
     @echo "── test.yml: Run Tests ──"
     SKIP_UI_BUILD=1 cargo test --all-features --verbose
 

@@ -1,5 +1,6 @@
 use crate::commands::{verify_wasm, VerificationResult};
 use crate::error::{Result, WasmrunError};
+use crate::runtime::core::module::BinaryKind;
 use crate::utils::{CommandExecutor, PathResolver};
 use std::fs;
 use std::path::Path;
@@ -34,6 +35,10 @@ pub enum ModuleType {
     WasiModule,
     #[allow(dead_code)]
     WebApplication,
+    /// A Component Model binary. It is a well-formed WebAssembly file and
+    /// still not something wasmrun can run, so it needs to be its own answer
+    /// rather than "standard" or "unknown".
+    Component,
     Unknown,
 }
 
@@ -44,6 +49,7 @@ impl std::fmt::Display for ModuleType {
             ModuleType::WasmBindgen => write!(f, "WASM-Bindgen Module"),
             ModuleType::WasiModule => write!(f, "WASI Module"),
             ModuleType::WebApplication => write!(f, "Web Application"),
+            ModuleType::Component => write!(f, "WebAssembly Component"),
             ModuleType::Unknown => write!(f, "Unknown"),
         }
     }
@@ -154,6 +160,7 @@ impl WasmAnalysis {
             ModuleType::WasiModule => "🔧",
             ModuleType::WasmBindgen => "🌐",
             ModuleType::WebApplication => "📱",
+            ModuleType::Component => "🧩",
             _ => "⚡",
         };
 
@@ -365,6 +372,14 @@ fn determine_module_type(
     is_wasm_bindgen: bool,
     is_wasi: bool,
 ) -> ModuleType {
+    // The header settles this before any heuristic gets a say: a component's
+    // sections are a different format, so nothing read out of them means what
+    // the checks below assume.
+    if let Some(ref v) = verification {
+        if matches!(v.kind, BinaryKind::Component { .. }) {
+            return ModuleType::Component;
+        }
+    }
     if is_wasm_bindgen {
         ModuleType::WasmBindgen
     } else if is_wasi {
@@ -407,6 +422,7 @@ mod tests {
     fn create_mock_verification_result() -> VerificationResult {
         VerificationResult {
             valid_magic: true,
+            kind: crate::runtime::core::module::BinaryKind::CoreModule { version: 1 },
             file_size: 100,
             section_count: 3,
             sections: vec![],
@@ -537,6 +553,38 @@ mod tests {
     fn test_truncate_string_exact() {
         let result = truncate_string("exactly10!", 10);
         assert_eq!(result, "exactly10!");
+    }
+
+    #[test]
+    fn test_analysis_names_a_component() {
+        // A component has valid magic and is a well-formed WebAssembly file,
+        // so it reaches this far. It must not come back as "Standard
+        // WebAssembly" or "Unknown": both read as something wasmrun can run.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("component.wasm");
+        std::fs::write(&path, [0x00, 0x61, 0x73, 0x6D, 0x0D, 0x00, 0x01, 0x00]).unwrap();
+
+        let analysis = WasmAnalysis::analyze(path.to_str().unwrap()).unwrap();
+        assert!(matches!(analysis.module_type, ModuleType::Component));
+        assert!(analysis.get_summary().contains("WebAssembly Component"));
+    }
+
+    #[test]
+    fn test_determine_module_type_prefers_the_header_over_heuristics() {
+        // The wasm-bindgen and WASI checks read exports and import names, which
+        // in a component live in sections laid out differently. The header
+        // answer has to win regardless of what those heuristics claim.
+        let mut verification = create_mock_verification_result();
+        verification.kind = BinaryKind::Component { version: 13 };
+        let verification = Some(verification);
+        assert!(matches!(
+            determine_module_type(&verification, true, false),
+            ModuleType::Component
+        ));
+        assert!(matches!(
+            determine_module_type(&verification, false, true),
+            ModuleType::Component
+        ));
     }
 
     #[test]

@@ -55,13 +55,10 @@ mod exec_integration_tests {
 
         let output = run_wasmrun_exec(vec!["exec", wasm_path, "-c", "add", "5", "3"]);
 
-        // The native Rust example has known runtime initialization limitations
-        // It will fail with "Unreachable instruction" or "Operand stack underflow"
-        // This test just verifies the command runs without crashing
         let stderr = std::str::from_utf8(&output.stderr).unwrap_or("");
         assert!(
-            !stderr.contains("No such file") && !stderr.contains("not found"),
-            "Should find WASM file, got: {stderr}"
+            output.status.success(),
+            "add should run to completion, got: {stderr}"
         );
     }
 
@@ -77,11 +74,10 @@ mod exec_integration_tests {
 
         let output = run_wasmrun_exec(vec!["exec", wasm_path, "-c", "multiply", "7", "6"]);
 
-        // Same known runtime limitation as add function
         let stderr = std::str::from_utf8(&output.stderr).unwrap_or("");
         assert!(
-            !stderr.contains("No such file") && !stderr.contains("not found"),
-            "Should find WASM file, got: {stderr}"
+            output.status.success(),
+            "multiply should run to completion, got: {stderr}"
         );
     }
 

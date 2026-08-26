@@ -2,7 +2,60 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
 const WASM_MAGIC_BYTES: &[u8; 4] = b"\0asm";
-const WASM_VERSION: u32 = 1;
+const WASM_VERSION: u16 = 1;
+
+/// What kind of binary sits behind the `\0asm` magic.
+///
+/// The four bytes after the magic are not one number. They are a 16-bit version
+/// followed by a 16-bit *layer*, and the layer is what separates a core module
+/// from a Component Model binary: `01 00 00 00` is a core module, `0d 00 01 00`
+/// is a component. Reading all four as a `u32` and comparing against 1 turns
+/// every component into "unsupported version 65549", which tells the person
+/// holding it nothing about what they actually have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryKind {
+    /// A core module: the format wasmrun runs.
+    CoreModule { version: u16 },
+    /// A Component Model binary. wasmrun cannot run these yet; the parser, the
+    /// canonical ABI and the WASI 0.2/0.3 worlds are a milestone of their own.
+    Component { version: u16 },
+    /// The magic is right but the layer is one nobody has defined.
+    UnknownLayer { version: u16, layer: u16 },
+    /// Not a WebAssembly binary at all.
+    NotWasm,
+}
+
+impl BinaryKind {
+    /// Classify a binary from its first eight bytes.
+    pub fn detect(bytes: &[u8]) -> Self {
+        if bytes.len() < 8 || &bytes[0..4] != WASM_MAGIC_BYTES {
+            return BinaryKind::NotWasm;
+        }
+        let version = u16::from_le_bytes([bytes[4], bytes[5]]);
+        let layer = u16::from_le_bytes([bytes[6], bytes[7]]);
+        match layer {
+            0 => BinaryKind::CoreModule { version },
+            1 => BinaryKind::Component { version },
+            _ => BinaryKind::UnknownLayer { version, layer },
+        }
+    }
+
+    /// A one-line description for a person reading an error or a report.
+    pub fn describe(&self) -> String {
+        match self {
+            BinaryKind::CoreModule { version } => {
+                format!("core module (version {version})")
+            }
+            BinaryKind::Component { version } => {
+                format!("component (version {version})")
+            }
+            BinaryKind::UnknownLayer { version, layer } => {
+                format!("unknown layer {layer} (version {version})")
+            }
+            BinaryKind::NotWasm => "not a WebAssembly binary".to_string(),
+        }
+    }
+}
 
 /// Function signature describing parameter and return types
 #[derive(Debug, Clone)]
@@ -114,8 +167,18 @@ pub struct DataSegment {
 /// Element segment for table initialization
 #[derive(Debug, Clone)]
 pub struct ElementSegment {
+    /// Const expression giving the target offset. Empty for a segment that is
+    /// not active, which is how the executor tells the two apart.
     pub offset_expr: Vec<u8>,
-    pub function_indices: Vec<u32>,
+    /// Table an active segment writes into. Meaningless for the others.
+    pub table_index: u32,
+    /// One entry per element. `None` is a null reference, which only the
+    /// expression-form encodings can express.
+    pub function_indices: Vec<Option<u32>>,
+    /// Declarative segments exist only to forward-declare functions for
+    /// `ref.func`. They are never written into a table and `table.init` may
+    /// not name them.
+    pub declarative: bool,
 }
 
 /// Parsed WASM module
@@ -161,14 +224,40 @@ impl Module {
             return Err("Invalid WASM magic bytes".to_string());
         }
 
-        // Version is 4 fixed bytes (little-endian u32), not LEB128!
+        // The four bytes after the magic are a 16-bit version and a 16-bit
+        // layer, not one u32. The layer is what tells a core module from a
+        // component, so it is read before anything is said about the version.
         let mut version_bytes = [0u8; 4];
         cursor
             .read_exact(&mut version_bytes)
             .map_err(|_| "File too small - missing version")?;
-        module.version = u32::from_le_bytes(version_bytes);
-        if module.version != WASM_VERSION {
-            return Err(format!("Unsupported WASM version: {}", module.version));
+        let version = u16::from_le_bytes([version_bytes[0], version_bytes[1]]);
+        let layer = u16::from_le_bytes([version_bytes[2], version_bytes[3]]);
+        module.version = version as u32;
+
+        match layer {
+            0 => {
+                if version != WASM_VERSION {
+                    return Err(format!("Unsupported WASM version: {version}"));
+                }
+            }
+            1 => {
+                return Err(format!(
+                    "This is a WebAssembly component (version {version}), not a core module. \
+                     Wasmrun runs core modules against WASI Preview 1; the Component Model \
+                     and WASI 0.2/0.3 are not implemented yet \
+                     (https://github.com/anistark/wasmrun/issues/94). Build for the \
+                     wasm32-wasip1 target to get a core module. If you only have the \
+                     component, `wasm-tools component unbundle` can extract the core modules \
+                     embedded in it, though they still need their imports satisfied."
+                ));
+            }
+            other => {
+                return Err(format!(
+                    "Unknown WebAssembly layer {other} (version {version}): not a core module \
+                     and not a component"
+                ));
+            }
         }
 
         // Parse sections
@@ -569,6 +658,13 @@ fn parse_export_section(data: &[u8]) -> Result<HashMap<String, ExportDesc>, Stri
 }
 
 /// Parse Element section (table initialization)
+/// Parse the Element section.
+///
+/// A segment's leading flags field selects one of eight encodings. The low bit
+/// says the segment is not active, the next says either "an explicit table
+/// index follows" (for an active segment) or "declarative" (for one that is
+/// not), and bit 2 says the elements are written as full expressions rather
+/// than bare function indices. Only the expression forms can hold a null.
 fn parse_element_section(data: &[u8]) -> Result<Vec<ElementSegment>, String> {
     let mut cursor = Cursor::new(data.to_vec());
     let section_end = data.len();
@@ -577,37 +673,77 @@ fn parse_element_section(data: &[u8]) -> Result<Vec<ElementSegment>, String> {
     let mut elements = Vec::with_capacity(count);
     for _ in 0..count {
         let flags = read_leb128_u32(&mut cursor)?;
+        if flags > 7 {
+            return Err(format!("Unsupported element segment flags: {flags}"));
+        }
 
-        // If flags has bit 2 set, there's a type field
-        let _type_field = if (flags & 0x04) != 0 {
-            Some(read_u8(&mut cursor)?)
+        let passive_or_declarative = flags & 0x01 != 0;
+        let second_bit = flags & 0x02 != 0;
+        let uses_expressions = flags & 0x04 != 0;
+
+        let declarative = passive_or_declarative && second_bit;
+        let has_table_index = !passive_or_declarative && second_bit;
+
+        let table_index = if has_table_index {
+            read_leb128_u32(&mut cursor)?
         } else {
-            None
+            0
         };
 
-        // Parse offset expression (unless passive segment)
-        let offset_expr = if (flags & 0x01) == 0 {
-            // Active segment - has offset expression
-            parse_expression(&mut cursor, section_end)?
-        } else {
-            // Passive segment - no offset expression
+        let offset_expr = if passive_or_declarative {
             Vec::new()
+        } else {
+            parse_expression(&mut cursor, section_end)?
         };
 
-        // Parse indices/functions
-        let count = read_leb128_u32(&mut cursor)? as usize;
-        let mut function_indices = Vec::with_capacity(count);
-        for _ in 0..count {
-            function_indices.push(read_leb128_u32(&mut cursor)?);
+        // Everything except the two "table 0, funcref" shorthands (flags 0 and
+        // 4) carries an element type here: a one-byte elemkind for the index
+        // forms, a reftype for the expression forms.
+        if flags != 0 && flags != 4 {
+            let ty = read_u8(&mut cursor)?;
+            if !uses_expressions && ty != 0x00 {
+                return Err(format!("Unsupported element kind: 0x{ty:02x}"));
+            }
+        }
+
+        let item_count = read_leb128_u32(&mut cursor)? as usize;
+        let mut function_indices = Vec::with_capacity(item_count);
+        for _ in 0..item_count {
+            if uses_expressions {
+                let expr = parse_expression(&mut cursor, section_end)?;
+                function_indices.push(element_expr_func_index(&expr)?);
+            } else {
+                function_indices.push(Some(read_leb128_u32(&mut cursor)?));
+            }
         }
 
         elements.push(ElementSegment {
             offset_expr,
+            table_index,
             function_indices,
+            declarative,
         });
     }
 
     Ok(elements)
+}
+
+/// Reduce one element expression to the function it names, or `None` for a
+/// null reference.
+fn element_expr_func_index(expr: &[u8]) -> Result<Option<u32>, String> {
+    match expr.first() {
+        // ref.func <funcidx>
+        Some(0xd2) => {
+            let mut cursor = Cursor::new(expr[1..].to_vec());
+            Ok(Some(read_leb128_u32(&mut cursor)?))
+        }
+        // ref.null <heaptype>
+        Some(0xd0) => Ok(None),
+        Some(other) => Err(format!(
+            "Unsupported opcode 0x{other:02x} in element expression"
+        )),
+        None => Ok(None),
+    }
 }
 
 /// Parse Data section (memory initialization)
@@ -821,6 +957,77 @@ mod tests {
         assert_eq!(module.version, 1);
         assert_eq!(module.types.len(), 0);
         assert_eq!(module.imports.len(), 0);
+    }
+
+    // ---- Binary kind detection (0.23.4) ----
+
+    #[test]
+    fn test_detect_core_module() {
+        let bytes = [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00];
+        assert_eq!(
+            BinaryKind::detect(&bytes),
+            BinaryKind::CoreModule { version: 1 }
+        );
+        assert_eq!(
+            BinaryKind::detect(&bytes).describe(),
+            "core module (version 1)"
+        );
+    }
+
+    #[test]
+    fn test_detect_component() {
+        // What `wasm-tools component new` writes: version 13, layer 1.
+        let bytes = [0x00, 0x61, 0x73, 0x6D, 0x0D, 0x00, 0x01, 0x00];
+        assert_eq!(
+            BinaryKind::detect(&bytes),
+            BinaryKind::Component { version: 13 }
+        );
+        assert_eq!(
+            BinaryKind::detect(&bytes).describe(),
+            "component (version 13)"
+        );
+    }
+
+    #[test]
+    fn test_detect_rejects_short_input_and_bad_magic() {
+        assert_eq!(BinaryKind::detect(&[]), BinaryKind::NotWasm);
+        // Magic but no version/layer is not enough to classify.
+        assert_eq!(
+            BinaryKind::detect(&[0x00, 0x61, 0x73, 0x6D]),
+            BinaryKind::NotWasm
+        );
+        assert_eq!(BinaryKind::detect(b"notawasmfile"), BinaryKind::NotWasm);
+    }
+
+    #[test]
+    fn test_detect_unknown_layer() {
+        let bytes = [0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x09, 0x00];
+        assert_eq!(
+            BinaryKind::detect(&bytes),
+            BinaryKind::UnknownLayer {
+                version: 1,
+                layer: 9
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_names_a_component_instead_of_blaming_the_version() {
+        // The whole point of the slice: this used to read all four bytes as a
+        // u32 and report "Unsupported WASM version: 65549", which says nothing
+        // about what the person is actually holding.
+        let bytes = [0x00, 0x61, 0x73, 0x6D, 0x0D, 0x00, 0x01, 0x00];
+        let err = Module::parse(&bytes).unwrap_err();
+        assert!(err.contains("component"), "got: {err}");
+        assert!(err.contains("wasm32-wasip1"), "got: {err}");
+        assert!(!err.contains("65549"), "got: {err}");
+    }
+
+    #[test]
+    fn test_parse_still_rejects_a_core_module_of_the_wrong_version() {
+        let bytes = [0x00, 0x61, 0x73, 0x6D, 0x02, 0x00, 0x00, 0x00];
+        let err = Module::parse(&bytes).unwrap_err();
+        assert!(err.contains("Unsupported WASM version: 2"), "got: {err}");
     }
 
     #[test]

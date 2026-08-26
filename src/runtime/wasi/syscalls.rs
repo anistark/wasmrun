@@ -1,8 +1,9 @@
 //! WASI syscall implementations that operate on linear memory.
 
 use crate::runtime::core::memory::LinearMemory;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::{FdKind, WasiEnv, WASI_STDERR_FD, WASI_STDIN_FD, WASI_STDOUT_FD};
 
@@ -10,7 +11,8 @@ pub const WASI_ESUCCESS: i32 = 0;
 pub const WASI_EBADF: i32 = 8;
 pub const WASI_EDQUOT: i32 = 19;
 pub const WASI_EEXIST: i32 = 20;
-pub const WASI_EFBIG: i32 = 27;
+pub const WASI_EFBIG: i32 = 22;
+pub const WASI_EINTR: i32 = 27;
 pub const WASI_EINVAL: i32 = 28;
 pub const WASI_EIO: i32 = 29;
 pub const WASI_EISDIR: i32 = 31;
@@ -18,6 +20,14 @@ pub const WASI_ENOENT: i32 = 44;
 pub const WASI_ENOSYS: i32 = 52;
 pub const WASI_ENOTDIR: i32 = 54;
 pub const WASI_ENOTEMPTY: i32 = 55;
+pub const WASI_ERANGE: i32 = 68;
+pub const WASI_EACCES: i32 = 2;
+
+/// `fstflags`: which of a file's timestamps `path_filestat_set_times` writes.
+const WASI_FILESTAT_SET_ATIM: u16 = 1;
+const WASI_FILESTAT_SET_ATIM_NOW: u16 = 2;
+const WASI_FILESTAT_SET_MTIM: u16 = 4;
+const WASI_FILESTAT_SET_MTIM_NOW: u16 = 8;
 
 pub const WASI_CLOCK_REALTIME: u32 = 0;
 pub const WASI_CLOCK_MONOTONIC: u32 = 1;
@@ -1003,15 +1013,375 @@ pub fn fd_fdstat_set_flags(_fd: u32, _flags: u16) -> i32 {
 
 /// path_filestat_set_times: set file timestamps. Return ENOSYS since we
 /// don't have a mutable host FS. Callers treat ENOSYS as non-fatal.
-pub fn path_filestat_set_times() -> i32 {
-    WASI_ENOSYS
+/// path_filestat_set_times: set a file's access and modification times.
+///
+/// `fst_flags` picks which of the two to set and whether to take the value from
+/// the corresponding argument or from the current clock. A timestamp that is
+/// not being set has to be left at whatever the file already carries, which is
+/// why the existing metadata is read first.
+#[allow(clippy::too_many_arguments)]
+pub fn path_filestat_set_times(
+    dir_fd: u32,
+    path_ptr: u32,
+    path_len: u32,
+    atim: u64,
+    mtim: u64,
+    fst_flags: u16,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
+    let set_atim = fst_flags & WASI_FILESTAT_SET_ATIM != 0;
+    let set_atim_now = fst_flags & WASI_FILESTAT_SET_ATIM_NOW != 0;
+    let set_mtim = fst_flags & WASI_FILESTAT_SET_MTIM != 0;
+    let set_mtim_now = fst_flags & WASI_FILESTAT_SET_MTIM_NOW != 0;
+
+    // Asking for both an explicit timestamp and "now" for the same field is
+    // contradictory, and the spec says to reject it rather than pick one.
+    if (set_atim && set_atim_now) || (set_mtim && set_mtim_now) {
+        return WASI_EINVAL;
+    }
+
+    let path = match read_guest_string(path_ptr, path_len, memory) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+
+    let e = match env.lock() {
+        Ok(e) => e,
+        Err(_) => return WASI_EIO,
+    };
+
+    let host_path = match e.resolve_path(dir_fd, &path) {
+        Ok(p) => p,
+        Err(_) => return WASI_EBADF,
+    };
+
+    let metadata = match std::fs::metadata(&host_path) {
+        Ok(m) => m,
+        Err(_) => return WASI_ENOENT,
+    };
+
+    let now = SystemTime::now();
+    let atime = if set_atim {
+        UNIX_EPOCH + Duration::from_nanos(atim)
+    } else if set_atim_now {
+        now
+    } else {
+        metadata.accessed().unwrap_or(now)
+    };
+    let mtime = if set_mtim {
+        UNIX_EPOCH + Duration::from_nanos(mtim)
+    } else if set_mtim_now {
+        now
+    } else {
+        metadata.modified().unwrap_or(now)
+    };
+
+    let file = match std::fs::OpenOptions::new().write(true).open(&host_path) {
+        Ok(f) => f,
+        Err(err) => return errno_from_io(&err),
+    };
+    let times = std::fs::FileTimes::new()
+        .set_accessed(atime)
+        .set_modified(mtime);
+    match file.set_times(times) {
+        Ok(()) => WASI_ESUCCESS,
+        Err(err) => errno_from_io(&err),
+    }
 }
 
-/// path_readlink: read a symbolic link target into buf. Return ENOSYS.
-pub fn path_readlink(buf_used_ptr: u32, memory: &mut LinearMemory) -> i32 {
-    // Write 0 bytes used so callers don't read garbage
+/// path_readlink: read a symbolic link's target into `buf`.
+///
+/// The target is written untruncated or not at all: WASI has no way to say
+/// "here is a prefix", so a buffer that is too small is an ERANGE rather than a
+/// short write the guest would mistake for the whole path.
+#[allow(clippy::too_many_arguments)]
+pub fn path_readlink(
+    dir_fd: u32,
+    path_ptr: u32,
+    path_len: u32,
+    buf_ptr: u32,
+    buf_len: u32,
+    buf_used_ptr: u32,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
     let _ = memory.write_i32(buf_used_ptr as usize, 0);
-    WASI_ENOSYS
+
+    let path = match read_guest_string(path_ptr, path_len, memory) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+
+    let host_path = {
+        let e = match env.lock() {
+            Ok(e) => e,
+            Err(_) => return WASI_EIO,
+        };
+        match e.resolve_path(dir_fd, &path) {
+            Ok(p) => p,
+            Err(_) => return WASI_EBADF,
+        }
+    };
+
+    let target = match std::fs::read_link(&host_path) {
+        Ok(t) => t,
+        Err(err) => return errno_from_io(&err),
+    };
+
+    let bytes = target.to_string_lossy().into_owned().into_bytes();
+    if bytes.len() > buf_len as usize {
+        return WASI_ERANGE;
+    }
+    if memory.write_bytes(buf_ptr as usize, &bytes).is_err() {
+        return WASI_EINVAL;
+    }
+    if memory
+        .write_i32(buf_used_ptr as usize, bytes.len() as i32)
+        .is_err()
+    {
+        return WASI_EINVAL;
+    }
+    WASI_ESUCCESS
+}
+
+/// Map an I/O error onto the closest WASI errno.
+fn errno_from_io(err: &std::io::Error) -> i32 {
+    match err.kind() {
+        std::io::ErrorKind::NotFound => WASI_ENOENT,
+        std::io::ErrorKind::PermissionDenied => WASI_EACCES,
+        std::io::ErrorKind::AlreadyExists => WASI_EEXIST,
+        std::io::ErrorKind::InvalidInput => WASI_EINVAL,
+        // read_link on something that is not a symlink reports this on every
+        // platform wasmrun builds for.
+        _ => WASI_EINVAL,
+    }
+}
+
+/// `eventtype`: what a subscription is waiting on.
+const WASI_EVENTTYPE_CLOCK: u8 = 0;
+const WASI_EVENTTYPE_FD_READ: u8 = 1;
+const WASI_EVENTTYPE_FD_WRITE: u8 = 2;
+
+/// `subclockflags`: set when a clock subscription's timeout is an absolute
+/// point in time rather than a duration from now.
+const WASI_SUBSCRIPTION_CLOCK_ABSTIME: u16 = 1;
+
+/// Layout of `subscription` and `event`, which the guest lays out for us.
+const SUBSCRIPTION_SIZE: u32 = 48;
+const EVENT_SIZE: u32 = 32;
+
+/// How long a single sleep runs before the cancellation flag is re-checked.
+const POLL_SLICE: Duration = Duration::from_millis(20);
+
+/// poll_oneoff: wait until at least one of `nsubscriptions` subscriptions is
+/// ready, then write one event per ready subscription.
+///
+/// The interpreter is single-threaded and every file it can reach is a regular
+/// file, so the two halves of this behave very differently. An `fd_read` or
+/// `fd_write` subscription is ready the moment it is asked about, which is what
+/// POSIX says about regular files and is why `select` over them is not a wait
+/// at all. A `clock` subscription is a real wait, and is the reason programs
+/// call this at all: it is what `thread::sleep` and every timer lowers to.
+///
+/// When both kinds are present the ready file descriptors win and no sleeping
+/// happens, which is the same answer a real poll would give.
+pub fn poll_oneoff(
+    in_ptr: u32,
+    out_ptr: u32,
+    nsubscriptions: u32,
+    nevents_ptr: u32,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
+    let _ = memory.write_i32(nevents_ptr as usize, 0);
+
+    // Waiting on nothing would block forever, so the spec makes it an error.
+    if nsubscriptions == 0 {
+        return WASI_EINVAL;
+    }
+
+    let mut subscriptions = Vec::with_capacity(nsubscriptions as usize);
+    for i in 0..nsubscriptions {
+        let base = in_ptr + i * SUBSCRIPTION_SIZE;
+        let userdata = match memory.read_i64(base as usize) {
+            Ok(v) => v as u64,
+            Err(_) => return WASI_EINVAL,
+        };
+        let tag = match memory.read_u8((base + 8) as usize) {
+            Ok(v) => v,
+            Err(_) => return WASI_EINVAL,
+        };
+        subscriptions.push((userdata, tag, base));
+    }
+
+    let cancel = env.lock().ok().and_then(|e| e.cancel_token().cloned());
+
+    // Pass one: anything ready without waiting.
+    let mut events: Vec<(u64, u8, i32, u64)> = Vec::new();
+    for &(userdata, tag, base) in &subscriptions {
+        match tag {
+            WASI_EVENTTYPE_FD_READ | WASI_EVENTTYPE_FD_WRITE => {
+                let fd = match memory.read_i32((base + 16) as usize) {
+                    Ok(v) => v as u32,
+                    Err(_) => return WASI_EINVAL,
+                };
+                let (errno, nbytes) = poll_fd_readiness(fd, tag, env);
+                events.push((userdata, tag, errno, nbytes));
+            }
+            WASI_EVENTTYPE_CLOCK => {}
+            _ => events.push((userdata, tag, WASI_EINVAL, 0)),
+        }
+    }
+
+    if !events.is_empty() {
+        return write_events(out_ptr, nevents_ptr, &events, memory);
+    }
+
+    // Pass two: every subscription is a clock, so this is a real wait. Sleep
+    // until the earliest deadline, then report every clock that has come due.
+    let now_realtime = wall_clock_nanos();
+    let start = Instant::now();
+    let mut shortest: Option<Duration> = None;
+    let mut deadlines: Vec<(u64, Option<Duration>, i32)> = Vec::new();
+
+    for &(userdata, _tag, base) in &subscriptions {
+        let clock_id = match memory.read_i32((base + 16) as usize) {
+            Ok(v) => v as u32,
+            Err(_) => return WASI_EINVAL,
+        };
+        let timeout = match memory.read_i64((base + 24) as usize) {
+            Ok(v) => v as u64,
+            Err(_) => return WASI_EINVAL,
+        };
+        let flags = match memory.read_u16((base + 40) as usize) {
+            Ok(v) => v,
+            Err(_) => return WASI_EINVAL,
+        };
+
+        if clock_id != WASI_CLOCK_REALTIME && clock_id != WASI_CLOCK_MONOTONIC {
+            deadlines.push((userdata, None, WASI_EINVAL));
+            continue;
+        }
+
+        let wait = if flags & WASI_SUBSCRIPTION_CLOCK_ABSTIME != 0 {
+            // An absolute realtime deadline is measured against the wall clock;
+            // an absolute monotonic one against the same monotonic origin the
+            // guest read, which for us is also nanoseconds since the epoch.
+            Duration::from_nanos(timeout.saturating_sub(now_realtime))
+        } else {
+            Duration::from_nanos(timeout)
+        };
+        shortest = Some(match shortest {
+            Some(s) if s <= wait => s,
+            _ => wait,
+        });
+        deadlines.push((userdata, Some(wait), WASI_ESUCCESS));
+    }
+
+    if let Some(wait) = shortest {
+        // Sleep in slices so a cancelled execution stops here rather than
+        // running out the whole timeout inside a host call.
+        while start.elapsed() < wait {
+            if let Some(flag) = cancel.as_ref() {
+                if flag.load(Ordering::Relaxed) {
+                    return WASI_EINTR;
+                }
+            }
+            let remaining = wait - start.elapsed();
+            std::thread::sleep(remaining.min(POLL_SLICE));
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let mut clock_events: Vec<(u64, u8, i32, u64)> = Vec::new();
+    for (userdata, wait, errno) in deadlines {
+        match wait {
+            // An invalid clock id is reported against that subscription alone,
+            // rather than failing the whole call and stranding the valid ones.
+            None => clock_events.push((userdata, WASI_EVENTTYPE_CLOCK, errno, 0)),
+            Some(w) if w <= elapsed => {
+                clock_events.push((userdata, WASI_EVENTTYPE_CLOCK, WASI_ESUCCESS, 0))
+            }
+            Some(_) => {}
+        }
+    }
+
+    write_events(out_ptr, nevents_ptr, &clock_events, memory)
+}
+
+/// Whether a descriptor can be read from or written to right now, and how many
+/// bytes are available if it can.
+fn poll_fd_readiness(fd: u32, tag: u8, env: &Arc<Mutex<WasiEnv>>) -> (i32, u64) {
+    let e = match env.lock() {
+        Ok(e) => e,
+        Err(_) => return (WASI_EIO, 0),
+    };
+    let entry = match e.get_fd(fd) {
+        Some(entry) => entry,
+        None => return (WASI_EBADF, 0),
+    };
+    match (entry.kind, tag) {
+        // stdin reports what is left of the input it was given, so a program
+        // polling before reading learns whether a read would return anything.
+        (FdKind::Stdin, WASI_EVENTTYPE_FD_READ) => (WASI_ESUCCESS, e.stdin_remaining() as u64),
+        (FdKind::Stdin, _) => (WASI_EBADF, 0),
+        (FdKind::Stdout | FdKind::Stderr, WASI_EVENTTYPE_FD_WRITE) => (WASI_ESUCCESS, 0),
+        (FdKind::Stdout | FdKind::Stderr, _) => (WASI_EBADF, 0),
+        // A regular file is always ready both ways.
+        (FdKind::File, WASI_EVENTTYPE_FD_READ) => {
+            let remaining = std::fs::metadata(&entry.host_path)
+                .map(|m| m.len().saturating_sub(entry.offset))
+                .unwrap_or(0);
+            (WASI_ESUCCESS, remaining)
+        }
+        (FdKind::File, _) => (WASI_ESUCCESS, 0),
+        (FdKind::PreopenDir | FdKind::Directory, _) => (WASI_EBADF, 0),
+    }
+}
+
+/// Write `events` into the guest's output array and record how many there are.
+fn write_events(
+    out_ptr: u32,
+    nevents_ptr: u32,
+    events: &[(u64, u8, i32, u64)],
+    memory: &mut LinearMemory,
+) -> i32 {
+    for (i, (userdata, tag, errno, nbytes)) in events.iter().enumerate() {
+        let base = out_ptr as usize + i * EVENT_SIZE as usize;
+        if memory.write_i64(base, *userdata as i64).is_err()
+            || memory.write_u16(base + 8, *errno as u16).is_err()
+            || memory.write_u8(base + 10, *tag).is_err()
+            || memory.write_i64(base + 16, *nbytes as i64).is_err()
+            || memory.write_u16(base + 24, 0).is_err()
+        {
+            return WASI_EINVAL;
+        }
+    }
+    if memory
+        .write_i32(nevents_ptr as usize, events.len() as i32)
+        .is_err()
+    {
+        return WASI_EINVAL;
+    }
+    WASI_ESUCCESS
+}
+
+/// Nanoseconds since the Unix epoch, which is the origin both clocks report.
+fn wall_clock_nanos() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
+/// sched_yield: give up the rest of this time slice.
+///
+/// There is nothing else in the sandbox to yield to, so this only ever hands
+/// the hint to the host scheduler and reports success.
+pub fn sched_yield() -> i32 {
+    std::thread::yield_now();
+    WASI_ESUCCESS
 }
 
 /// path_symlink: create a symbolic link. Return ENOSYS.
@@ -1389,6 +1759,444 @@ mod tests {
     fn test_fd_close_stdio() {
         let env = make_env();
         assert_eq!(fd_close(WASI_STDOUT_FD, &env), WASI_ESUCCESS);
+    }
+
+    // ---- WASI Preview 1 tail (0.23.2) ----
+
+    /// Lay one subscription into guest memory at `base`.
+    fn write_clock_subscription(
+        mem: &mut LinearMemory,
+        base: u32,
+        userdata: u64,
+        clock_id: u32,
+        timeout_ns: u64,
+        abstime: bool,
+    ) {
+        mem.write_i64(base as usize, userdata as i64).unwrap();
+        mem.write_u8((base + 8) as usize, WASI_EVENTTYPE_CLOCK)
+            .unwrap();
+        mem.write_i32((base + 16) as usize, clock_id as i32)
+            .unwrap();
+        mem.write_i64((base + 24) as usize, timeout_ns as i64)
+            .unwrap();
+        mem.write_i64((base + 32) as usize, 0).unwrap();
+        mem.write_u16(
+            (base + 40) as usize,
+            if abstime {
+                WASI_SUBSCRIPTION_CLOCK_ABSTIME
+            } else {
+                0
+            },
+        )
+        .unwrap();
+    }
+
+    fn write_fd_subscription(mem: &mut LinearMemory, base: u32, userdata: u64, tag: u8, fd: u32) {
+        mem.write_i64(base as usize, userdata as i64).unwrap();
+        mem.write_u8((base + 8) as usize, tag).unwrap();
+        mem.write_i32((base + 16) as usize, fd as i32).unwrap();
+    }
+
+    /// Read back one event: (userdata, errno, type, nbytes).
+    fn read_event(mem: &LinearMemory, out_ptr: u32, i: u32) -> (u64, u16, u8, u64) {
+        let base = (out_ptr + i * EVENT_SIZE) as usize;
+        (
+            mem.read_i64(base).unwrap() as u64,
+            mem.read_u16(base + 8).unwrap(),
+            mem.read_u8(base + 10).unwrap(),
+            mem.read_i64(base + 16).unwrap() as u64,
+        )
+    }
+
+    #[test]
+    fn test_efbig_is_the_preview1_value() {
+        // Preview 1 numbers `fbig` 22; 27 is `intr`, which is what the constant
+        // used to be set to.
+        assert_eq!(WASI_EFBIG, 22);
+        assert_eq!(WASI_EINTR, 27);
+    }
+
+    #[test]
+    fn test_poll_oneoff_rejects_empty_subscription_list() {
+        let env = make_env();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        assert_eq!(poll_oneoff(100, 500, 0, 900, &mut mem, &env), WASI_EINVAL);
+        assert_eq!(mem.read_i32(900).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_poll_oneoff_relative_clock_waits() {
+        let env = make_env();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        write_clock_subscription(
+            &mut mem,
+            100,
+            0xABCD,
+            WASI_CLOCK_MONOTONIC,
+            60_000_000,
+            false,
+        );
+
+        let start = Instant::now();
+        assert_eq!(poll_oneoff(100, 500, 1, 900, &mut mem, &env), WASI_ESUCCESS);
+        assert!(
+            start.elapsed() >= Duration::from_millis(55),
+            "poll_oneoff returned early after {:?}",
+            start.elapsed()
+        );
+
+        assert_eq!(mem.read_i32(900).unwrap(), 1);
+        let (userdata, errno, ty, _) = read_event(&mem, 500, 0);
+        assert_eq!(userdata, 0xABCD);
+        assert_eq!(errno, WASI_ESUCCESS as u16);
+        assert_eq!(ty, WASI_EVENTTYPE_CLOCK);
+    }
+
+    #[test]
+    fn test_poll_oneoff_absolute_deadline_in_the_past_returns_at_once() {
+        let env = make_env();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        // One second before the epoch-relative now, so it is already due.
+        let past = wall_clock_nanos().saturating_sub(1_000_000_000);
+        write_clock_subscription(&mut mem, 100, 7, WASI_CLOCK_REALTIME, past, true);
+
+        let start = Instant::now();
+        assert_eq!(poll_oneoff(100, 500, 1, 900, &mut mem, &env), WASI_ESUCCESS);
+        assert!(start.elapsed() < Duration::from_millis(50));
+        assert_eq!(mem.read_i32(900).unwrap(), 1);
+        assert_eq!(read_event(&mem, 500, 0).0, 7);
+    }
+
+    #[test]
+    fn test_poll_oneoff_reports_only_the_clocks_that_came_due() {
+        let env = make_env();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        // 30ms and 5s: waking for the first must not report the second.
+        write_clock_subscription(&mut mem, 100, 1, WASI_CLOCK_MONOTONIC, 30_000_000, false);
+        write_clock_subscription(
+            &mut mem,
+            100 + SUBSCRIPTION_SIZE,
+            2,
+            WASI_CLOCK_MONOTONIC,
+            5_000_000_000,
+            false,
+        );
+
+        assert_eq!(poll_oneoff(100, 500, 2, 900, &mut mem, &env), WASI_ESUCCESS);
+        assert_eq!(mem.read_i32(900).unwrap(), 1);
+        assert_eq!(read_event(&mem, 500, 0).0, 1);
+    }
+
+    #[test]
+    fn test_poll_oneoff_invalid_clock_id_fails_only_that_subscription() {
+        let env = make_env();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        // Clock 3 is thread_cputime_id, which wasmrun does not implement.
+        write_clock_subscription(&mut mem, 100, 11, 3, 10_000_000, false);
+        write_clock_subscription(
+            &mut mem,
+            100 + SUBSCRIPTION_SIZE,
+            22,
+            WASI_CLOCK_MONOTONIC,
+            10_000_000,
+            false,
+        );
+
+        assert_eq!(poll_oneoff(100, 500, 2, 900, &mut mem, &env), WASI_ESUCCESS);
+        assert_eq!(mem.read_i32(900).unwrap(), 2);
+        let bad = read_event(&mem, 500, 0);
+        assert_eq!(bad.0, 11);
+        assert_eq!(bad.1, WASI_EINVAL as u16);
+        let good = read_event(&mem, 500, 1);
+        assert_eq!(good.0, 22);
+        assert_eq!(good.1, WASI_ESUCCESS as u16);
+    }
+
+    #[test]
+    fn test_poll_oneoff_stdin_reports_bytes_left() {
+        let env = Arc::new(Mutex::new(WasiEnv::new()));
+        env.lock().unwrap().set_stdin(b"hello".to_vec());
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        write_fd_subscription(&mut mem, 100, 5, WASI_EVENTTYPE_FD_READ, WASI_STDIN_FD);
+
+        assert_eq!(poll_oneoff(100, 500, 1, 900, &mut mem, &env), WASI_ESUCCESS);
+        assert_eq!(mem.read_i32(900).unwrap(), 1);
+        let (userdata, errno, ty, nbytes) = read_event(&mem, 500, 0);
+        assert_eq!(userdata, 5);
+        assert_eq!(errno, WASI_ESUCCESS as u16);
+        assert_eq!(ty, WASI_EVENTTYPE_FD_READ);
+        assert_eq!(nbytes, 5);
+    }
+
+    #[test]
+    fn test_poll_oneoff_ready_fd_beats_a_pending_clock() {
+        // A ready descriptor alongside a long timeout must return at once
+        // rather than sitting out the clock.
+        let env = Arc::new(Mutex::new(WasiEnv::new()));
+        env.lock().unwrap().set_stdin(b"x".to_vec());
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        write_clock_subscription(&mut mem, 100, 1, WASI_CLOCK_MONOTONIC, 5_000_000_000, false);
+        write_fd_subscription(
+            &mut mem,
+            100 + SUBSCRIPTION_SIZE,
+            2,
+            WASI_EVENTTYPE_FD_READ,
+            WASI_STDIN_FD,
+        );
+
+        let start = Instant::now();
+        assert_eq!(poll_oneoff(100, 500, 2, 900, &mut mem, &env), WASI_ESUCCESS);
+        assert!(start.elapsed() < Duration::from_millis(100));
+        assert_eq!(mem.read_i32(900).unwrap(), 1);
+        assert_eq!(read_event(&mem, 500, 0).0, 2);
+    }
+
+    #[test]
+    fn test_poll_oneoff_bad_fd() {
+        let env = make_env();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        write_fd_subscription(&mut mem, 100, 9, WASI_EVENTTYPE_FD_READ, 99);
+        assert_eq!(poll_oneoff(100, 500, 1, 900, &mut mem, &env), WASI_ESUCCESS);
+        assert_eq!(read_event(&mem, 500, 0).1, WASI_EBADF as u16);
+    }
+
+    #[test]
+    fn test_poll_oneoff_gives_up_when_the_execution_is_cancelled() {
+        use std::sync::atomic::AtomicBool;
+        // The agent's wall-clock timeout trips this flag. The executor only
+        // checks it between instructions, so without this a five second sleep
+        // would outlive a one second timeout.
+        let flag = Arc::new(AtomicBool::new(false));
+        let env = make_env();
+        env.lock().unwrap().set_cancel_token(Some(flag.clone()));
+
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        write_clock_subscription(&mut mem, 100, 1, WASI_CLOCK_MONOTONIC, 5_000_000_000, false);
+
+        let waker = flag.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(60));
+            waker.store(true, Ordering::Relaxed);
+        });
+
+        let start = Instant::now();
+        assert_eq!(poll_oneoff(100, 500, 1, 900, &mut mem, &env), WASI_EINTR);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "cancellation took {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn test_sched_yield_succeeds() {
+        assert_eq!(sched_yield(), WASI_ESUCCESS);
+    }
+
+    #[test]
+    fn test_path_readlink_reads_the_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("target.txt"), b"contents").unwrap();
+        std::os::unix::fs::symlink("target.txt", tmp.path().join("link.txt")).unwrap();
+
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_bytes(100, b"link.txt").unwrap();
+
+        let errno = path_readlink(3, 100, 8, 200, 64, 900, &mut mem, &env);
+        assert_eq!(errno, WASI_ESUCCESS);
+        let used = mem.read_i32(900).unwrap() as usize;
+        assert_eq!(
+            String::from_utf8(mem.read_bytes(200, used).unwrap()).unwrap(),
+            "target.txt"
+        );
+    }
+
+    #[test]
+    fn test_path_readlink_reports_a_buffer_that_is_too_small() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("target.txt"), b"contents").unwrap();
+        std::os::unix::fs::symlink("target.txt", tmp.path().join("link.txt")).unwrap();
+
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_bytes(100, b"link.txt").unwrap();
+
+        // "target.txt" is 10 bytes and there is no way to report a partial
+        // read, so a 4 byte buffer is an error rather than a truncated answer.
+        assert_eq!(
+            path_readlink(3, 100, 8, 200, 4, 900, &mut mem, &env),
+            WASI_ERANGE
+        );
+        assert_eq!(mem.read_i32(900).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_path_readlink_on_a_regular_file_is_not_a_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("plain.txt"), b"x").unwrap();
+
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_bytes(100, b"plain.txt").unwrap();
+        assert_eq!(
+            path_readlink(3, 100, 9, 200, 64, 900, &mut mem, &env),
+            WASI_EINVAL
+        );
+    }
+
+    #[test]
+    fn test_path_readlink_missing_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_bytes(100, b"nope.txt").unwrap();
+        assert_eq!(
+            path_readlink(3, 100, 8, 200, 64, 900, &mut mem, &env),
+            WASI_ENOENT
+        );
+    }
+
+    #[test]
+    fn test_path_filestat_set_times_sets_mtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("stamp.txt");
+        std::fs::write(&file, b"x").unwrap();
+
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_bytes(100, b"stamp.txt").unwrap();
+
+        let when_ns: u64 = 1_000_000_000 * 1_000_000_000;
+        let errno = path_filestat_set_times(
+            3,
+            100,
+            9,
+            0,
+            when_ns,
+            WASI_FILESTAT_SET_MTIM,
+            &mut mem,
+            &env,
+        );
+        assert_eq!(errno, WASI_ESUCCESS);
+
+        let mtime = std::fs::metadata(&file).unwrap().modified().unwrap();
+        assert_eq!(
+            mtime.duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            1_000_000_000
+        );
+    }
+
+    #[test]
+    fn test_path_filestat_set_times_now_flag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("stamp.txt");
+        std::fs::write(&file, b"x").unwrap();
+        // Push it into the past so "now" is a visible change.
+        let old = std::fs::File::options().write(true).open(&file).unwrap();
+        old.set_times(
+            std::fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000)),
+        )
+        .unwrap();
+        drop(old);
+
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_bytes(100, b"stamp.txt").unwrap();
+
+        let errno =
+            path_filestat_set_times(3, 100, 9, 0, 0, WASI_FILESTAT_SET_MTIM_NOW, &mut mem, &env);
+        assert_eq!(errno, WASI_ESUCCESS);
+        let mtime = std::fs::metadata(&file).unwrap().modified().unwrap();
+        assert!(mtime.duration_since(UNIX_EPOCH).unwrap().as_secs() > 1_000_000);
+    }
+
+    #[test]
+    fn test_path_filestat_set_times_rejects_contradictory_flags() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("stamp.txt"), b"x").unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_bytes(100, b"stamp.txt").unwrap();
+
+        // Asking for both an explicit atime and "now" says two different things.
+        assert_eq!(
+            path_filestat_set_times(
+                3,
+                100,
+                9,
+                5,
+                0,
+                WASI_FILESTAT_SET_ATIM | WASI_FILESTAT_SET_ATIM_NOW,
+                &mut mem,
+                &env,
+            ),
+            WASI_EINVAL
+        );
+    }
+
+    #[test]
+    fn test_path_filestat_set_times_leaves_the_other_stamp_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("stamp.txt");
+        std::fs::write(&file, b"x").unwrap();
+
+        let seed = std::fs::File::options().write(true).open(&file).unwrap();
+        let atime = UNIX_EPOCH + Duration::from_secs(500_000_000);
+        seed.set_times(
+            std::fs::FileTimes::new()
+                .set_accessed(atime)
+                .set_modified(atime),
+        )
+        .unwrap();
+        drop(seed);
+
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_bytes(100, b"stamp.txt").unwrap();
+
+        // Set only mtime; atime must survive.
+        let errno = path_filestat_set_times(
+            3,
+            100,
+            9,
+            0,
+            2_000_000_000 * 1_000_000_000,
+            WASI_FILESTAT_SET_MTIM,
+            &mut mem,
+            &env,
+        );
+        assert_eq!(errno, WASI_ESUCCESS);
+
+        let meta = std::fs::metadata(&file).unwrap();
+        assert_eq!(
+            meta.modified()
+                .unwrap()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            2_000_000_000
+        );
+        assert_eq!(
+            meta.accessed()
+                .unwrap()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            500_000_000
+        );
+    }
+
+    #[test]
+    fn test_path_filestat_set_times_missing_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        mem.write_bytes(100, b"nope.txt").unwrap();
+        assert_eq!(
+            path_filestat_set_times(3, 100, 8, 0, 0, WASI_FILESTAT_SET_MTIM, &mut mem, &env),
+            WASI_ENOENT
+        );
     }
 
     #[test]
