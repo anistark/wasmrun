@@ -5,8 +5,9 @@ build:
   tools:
     nodejs: "22"
   commands:
-    # Install pnpm
-    - npm install -g pnpm@latest
+    # Install pnpm. Pinned to a major so a new pnpm release cannot change the
+    # build under us; bump it deliberately alongside the local and CI versions.
+    - npm install -g pnpm@11
     # Install dependencies. STRICT_DEP_BUILDS=false stops pnpm 11 from failing
     # the build over ignored dependency build scripts (core-js postinstall).
     - cd docs && PNPM_CONFIG_STRICT_DEP_BUILDS=false pnpm install --frozen-lockfile

@@ -49,11 +49,5 @@
   },
   "engines": {
     "node": ">=20.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "serialize-javascript": "^7.1.0",
-      "uuid": "^11.1.1"
-    }
   }
 }
