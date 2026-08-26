@@ -3,11 +3,13 @@
 //! Registers memory-bridged host functions so the executor can dispatch
 //! WASI imports through the linker.
 
+pub mod network;
 pub mod syscalls;
 
 use crate::runtime::core::executor::WASI_PROC_EXIT_PREFIX;
 use crate::runtime::core::linker::{ClosureHostFunction, Linker};
 use crate::runtime::core::values::Value;
+use crate::runtime::wasi::network::NetworkAccess;
 use std::collections::{HashMap, VecDeque};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -43,6 +45,8 @@ pub enum FdKind {
 pub enum SocketHandle {
     Listener(Arc<TcpListener>),
     Stream(Arc<TcpStream>),
+    /// Created by `sock_open` and not yet connected.
+    Unconnected,
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +91,8 @@ pub struct WasiEnv {
     disk_used: u64,
     /// Live socket objects, keyed by the fd that names them in `fd_table`.
     sockets: HashMap<u32, SocketHandle>,
+    /// What this execution may connect to. Nothing, unless configured.
+    network: NetworkAccess,
     /// Connections accepted by a `poll_oneoff` readiness probe, waiting for
     /// the `sock_accept` that follows it. A listener cannot be asked whether a
     /// connection is waiting without taking it, so a poll that finds one keeps
@@ -144,6 +150,7 @@ impl WasiEnv {
             next_fd: WASI_FIRST_PREOPEN_FD,
             preopens: Vec::new(),
             sockets: HashMap::new(),
+            network: NetworkAccess::denied(),
             pending_accepts: HashMap::new(),
             max_output_bytes: None,
             output_truncated: false,
@@ -211,6 +218,40 @@ impl WasiEnv {
         self.sockets
             .insert(fd, SocketHandle::Listener(Arc::new(listener)));
         self
+    }
+
+    /// Give this execution a network. Absent this call it has none.
+    pub fn set_network(&mut self, network: NetworkAccess) {
+        self.network = network;
+    }
+
+    pub fn network(&self) -> &NetworkAccess {
+        &self.network
+    }
+
+    /// Allocate an unconnected socket, the fd `sock_connect` later fills in.
+    pub fn add_unconnected_socket(&mut self) -> u32 {
+        let fd = self.allocate_fd(FdEntry {
+            kind: FdKind::SocketStream,
+            host_path: PathBuf::new(),
+            guest_path: "socket".to_string(),
+            offset: 0,
+            flags: 0,
+        });
+        self.sockets.insert(fd, SocketHandle::Unconnected);
+        fd
+    }
+
+    /// Attach a connected stream to an fd `sock_open` already handed out.
+    pub fn connect_socket(&mut self, fd: u32, stream: TcpStream) {
+        if let Some(entry) = self.fd_table.get_mut(&fd) {
+            entry.guest_path = stream
+                .peer_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|_| "socket".to_string());
+        }
+        self.sockets
+            .insert(fd, SocketHandle::Stream(Arc::new(stream)));
     }
 
     /// Register an accepted connection and return the fd naming it.
@@ -1035,6 +1076,49 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                     Ok(vec![Value::I32(errno)])
                 },
                 6,
+                1,
+            )),
+        );
+    }
+
+    // sock_open (wasmrun extension: Preview 1 cannot create a socket)
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "sock_open",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let family = i32_arg(&args, 0)? as u32;
+                    let sock_type = i32_arg(&args, 1)? as u32;
+                    let protocol = i32_arg(&args, 2)? as u32;
+                    let fd_out_ptr = i32_arg(&args, 3)? as u32;
+                    let errno =
+                        syscalls::sock_open(family, sock_type, protocol, fd_out_ptr, mem, &env);
+                    Ok(vec![Value::I32(errno)])
+                },
+                4,
+                1,
+            )),
+        );
+    }
+
+    // sock_connect (wasmrun extension; takes a host string, not a sockaddr)
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "sock_connect",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let fd = i32_arg(&args, 0)? as u32;
+                    let addr_ptr = i32_arg(&args, 1)? as u32;
+                    let addr_len = i32_arg(&args, 2)? as u32;
+                    let port = i32_arg(&args, 3)? as u32;
+                    let errno = syscalls::sock_connect(fd, addr_ptr, addr_len, port, mem, &env);
+                    Ok(vec![Value::I32(errno)])
+                },
+                4,
                 1,
             )),
         );

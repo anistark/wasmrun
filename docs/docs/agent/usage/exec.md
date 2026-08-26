@@ -451,7 +451,7 @@ Execute a `.wasm` file already present in the session filesystem.
 |-------|----------|---------|-------------|
 | `wasm_path` | yes | - | Path to `.wasm` file relative to session root |
 | `function` | no | auto-detect | Exported function to call (defaults to `_start`, `main`, or start section) |
-| `args` | no | `[]` | Arguments passed to the WASM program |
+| `args` | no | `[]` | Arguments passed to the WASM program, after the program name. `wasm_path` is passed as `argv[0]`, per POSIX and WASI, so these start at `argv[1]` |
 
 ---
 

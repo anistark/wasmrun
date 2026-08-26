@@ -24,10 +24,12 @@
 //! ```
 
 use crate::agent::limits::LimitsOverride;
+use crate::config::project::NetworkConfig;
 use crate::error::{ConfigError, WasmrunError};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
+use wasmnet::policy::PolicyConfig;
 
 /// Compute the hex-encoded SHA-256 hash of an API key.
 ///
@@ -53,6 +55,12 @@ struct RawTenant {
     /// Optional `[tenants.rate]` sub-table; absent = inherit all defaults.
     #[serde(default)]
     rate: Option<TenantRate>,
+    /// Optional `[tenants.network]` sub-table: what this tenant may connect
+    /// to. Absent = inherit the server default, which is no network unless
+    /// the operator passed `--allow-net`. Same shape as a project's
+    /// `[os.network]`, and validated by the same code.
+    #[serde(default)]
+    network: Option<NetworkConfig>,
     /// Optional `[tenants.limits]` sub-table; the operator-assigned resource
     /// ceiling for this tenant. Absent = inherit the server defaults.
     #[serde(default)]
@@ -89,6 +97,10 @@ pub struct AuthConfig {
     /// Tenant id → operator-assigned resource-limit override. Only present for
     /// tenants that declared a `[tenants.limits]` table.
     limits: HashMap<String, LimitsOverride>,
+    /// Tenant id → resolved network policy. Only present for tenants that
+    /// declared a `[tenants.network]` table; everyone else inherits the
+    /// server default.
+    networks: HashMap<String, PolicyConfig>,
 }
 
 impl AuthConfig {
@@ -139,6 +151,7 @@ impl AuthConfig {
         let mut keys: HashMap<String, String> = HashMap::with_capacity(raw.tenants.len());
         let mut rates: HashMap<String, TenantRate> = HashMap::with_capacity(raw.tenants.len());
         let mut limits: HashMap<String, LimitsOverride> = HashMap::new();
+        let mut networks: HashMap<String, PolicyConfig> = HashMap::new();
         let mut seen_ids: HashMap<String, ()> = HashMap::with_capacity(raw.tenants.len());
 
         for tenant in raw.tenants {
@@ -176,12 +189,26 @@ impl AuthConfig {
             if let Some(ov) = tenant.limits {
                 limits.insert(id.to_string(), ov);
             }
+            // Validated at load, so a policy that cannot be honored stops the
+            // server starting rather than quietly leaving a tenant with a
+            // different network than the file describes.
+            if let Some(network) = tenant.network {
+                let policy = network
+                    .to_policy_config_named("tenants.network")
+                    .map_err(|e| {
+                        WasmrunError::Config(ConfigError::InvalidValue {
+                            message: format!("Tenant '{id}' has an invalid [tenants.network]: {e}"),
+                        })
+                    })?;
+                networks.insert(id.to_string(), policy);
+            }
         }
 
         Ok(AuthConfig {
             keys,
             rates,
             limits,
+            networks,
         })
     }
 
@@ -205,6 +232,11 @@ impl AuthConfig {
 
     /// The operator-assigned resource-limit override for `id`, or `None` if the
     /// tenant declared no `[tenants.limits]` table (inherit server defaults).
+    /// The tenant's own network policy, if it declared one.
+    pub fn network(&self, id: &str) -> Option<&PolicyConfig> {
+        self.networks.get(id)
+    }
+
     pub fn limits(&self, id: &str) -> Option<&LimitsOverride> {
         self.limits.get(id)
     }
@@ -362,6 +394,41 @@ mod tests {
         assert!(cfg.limits("b").is_none());
         // Unknown tenant id → no override.
         assert!(cfg.limits("nope").is_none());
+    }
+
+    #[test]
+    fn test_parse_tenant_network() {
+        let body = format!(
+            "[[tenants]]\nid = \"a\"\nkey_sha256 = \"{}\"\n[tenants.network]\nallow = [\"*.github.com:443\"]\n\n[[tenants]]\nid = \"b\"\nkey_sha256 = \"{}\"\n",
+            hash_key("ka"),
+            hash_key("kb"),
+        );
+        let f = write_toml(&body);
+        let cfg = AuthConfig::load(f.path()).unwrap();
+
+        let policy = cfg.network("a").unwrap();
+        assert_eq!(policy.network.allow, vec!["*.github.com:443".to_string()]);
+        // Unset fields keep wasmnet's defaults, same as [os.network].
+        assert!(policy.network.deny.contains(&"10.0.0.0/8".to_string()));
+
+        // A tenant with no table inherits the server default, which is no
+        // network unless the operator passed --allow-net.
+        assert!(cfg.network("b").is_none());
+        assert!(cfg.network("nope").is_none());
+    }
+
+    #[test]
+    fn test_a_tenant_policy_that_cannot_be_honored_fails_the_load() {
+        // The server refuses to start rather than run a tenant under a policy
+        // that is not the one written down.
+        let body = format!(
+            "[[tenants]]\nid = \"a\"\nkey_sha256 = \"{}\"\n[tenants.network]\ndeny = [\"10.0.0/8\"]\n",
+            hash_key("ka"),
+        );
+        let f = write_toml(&body);
+        let err = AuthConfig::load(f.path()).unwrap_err().to_string();
+        assert!(err.contains("tenants.network"), "{err}");
+        assert!(err.contains("not an IP address"), "{err}");
     }
 
     #[test]

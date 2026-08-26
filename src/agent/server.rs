@@ -14,6 +14,7 @@ use crate::agent::tools;
 use crate::agent::vendor;
 use crate::error::{Result, WasmrunError};
 use crate::runtime::core::native_executor::{execute_wasm_bytes_with_env, ExecLimits};
+use crate::runtime::wasi::network::NetworkAccess;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -22,6 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
+use wasmnet::policy::PolicyConfig;
 
 /// An exec that has been spawned and is running detached. The session's WASI
 /// buffers accumulate output as it goes, which is what lets the streaming
@@ -268,6 +270,11 @@ pub struct AgentConfig {
     /// npm registry base URL used to vendor `dependencies` (private
     /// registries and tests point this elsewhere).
     pub npm_registry: String,
+    /// The network a tenant gets when it declared no `[tenants.network]`
+    /// table, and the only network there is in open mode. `None` means no
+    /// network, which is the default: egress is something an operator turns
+    /// on, not something a sandbox has because nobody said otherwise.
+    pub default_network: Option<PolicyConfig>,
 }
 
 impl Default for AgentConfig {
@@ -287,6 +294,7 @@ impl Default for AgentConfig {
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
+            default_network: None,
         }
     }
 }
@@ -615,6 +623,23 @@ impl AgentServer {
     fn tenant_limits(&self, caller: Option<&str>) -> Option<LimitsOverride> {
         let id = caller?;
         self.auth_snapshot()?.limits(id).cloned()
+    }
+
+    /// What the calling tenant may connect to.
+    ///
+    /// Resolved per execution rather than once per session, so an auth reload
+    /// binds on the next exec: the same rule 0.22.11 settled for limits, where
+    /// a reload must take effect before the new config serves a request. A
+    /// tenant with no `[tenants.network]` table gets the server default, and
+    /// the server default is nothing unless `--allow-net` said otherwise.
+    fn tenant_network(&self, caller: Option<&str>) -> NetworkAccess {
+        let tenant_policy =
+            caller.and_then(|id| self.auth_snapshot().and_then(|a| a.network(id).cloned()));
+
+        match tenant_policy.or_else(|| self.config.default_network.clone()) {
+            Some(policy) => NetworkAccess::with_policy(&policy),
+            None => NetworkAccess::denied(),
+        }
     }
 
     /// Enforce the tenant's requests/min window. `true` = allowed. Always `true`
@@ -1378,6 +1403,9 @@ impl AgentServer {
                 .map_err(|_| ApiError::Internal("Lock".into()))?;
             env.clear_stdout();
             env.clear_stderr();
+            // Set every exec, so a policy change in a reloaded auth config
+            // reaches the next execution rather than only new sessions.
+            env.set_network(self.tenant_network(caller));
             // Rewound every exec: a request without stdin must see EOF, not
             // the last run's leftovers.
             env.set_stdin(req.stdin.clone().unwrap_or_default().into_bytes());
@@ -1552,7 +1580,15 @@ impl AgentServer {
             let wasm_bytes = std::fs::read(&resolved)
                 .map_err(|e| ApiError::NotFound(format!("{}: {e}", resolved.display())))?;
             let function = req.function.clone();
-            let args = req.args.clone();
+            // argv[0] is the program name, per POSIX and WASI, and `wasmrun
+            // exec` has always passed the wasm path there. The agent used to
+            // hand the caller's `args` over as-is, so the same binary saw its
+            // first real argument at argv[1] under one and argv[0] under the
+            // other. The path the caller named is used rather than the
+            // resolved one, which would leak the session directory into the
+            // sandbox.
+            let mut args = vec![wasm_path.to_string()];
+            args.extend(req.args.iter().cloned());
             let cancel_worker = cancel.clone();
             std::thread::Builder::new()
                 .stack_size(EXEC_THREAD_STACK_BYTES)
@@ -2537,6 +2573,7 @@ mod tests {
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
             host: DEFAULT_HOST.to_string(),
             insecure: false,
+            default_network: None,
         })
     }
 
@@ -2585,6 +2622,7 @@ mod tests {
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
             host: DEFAULT_HOST.to_string(),
             insecure: false,
+            default_network: None,
         })
     }
 
@@ -2610,6 +2648,7 @@ mod tests {
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
             host: DEFAULT_HOST.to_string(),
             insecure: false,
+            default_network: None,
         })
     }
 
@@ -2645,6 +2684,7 @@ mod tests {
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
             host: DEFAULT_HOST.to_string(),
             insecure: false,
+            default_network: None,
         })
     }
 

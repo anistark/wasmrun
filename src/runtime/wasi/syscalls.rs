@@ -26,6 +26,7 @@ pub const WASI_ERANGE: i32 = 68;
 pub const WASI_EACCES: i32 = 2;
 pub const WASI_EAGAIN: i32 = 6;
 pub const WASI_ECONNABORTED: i32 = 13;
+pub const WASI_EISCONN: i32 = 30;
 pub const WASI_ENOTSOCK: i32 = 57;
 pub const WASI_EPIPE: i32 = 64;
 
@@ -1696,6 +1697,146 @@ pub(crate) fn socket_write_iovs(
         return WASI_EINVAL;
     }
     WASI_ESUCCESS
+}
+
+/// sock_open: allocate an outbound socket.
+///
+/// Not a Preview 1 call. Preview 1 has no way to create a socket at all, so
+/// this and `sock_connect` are wasmrun extensions under the same module name,
+/// and their shape is a contract with the runtimes that call them
+/// (wasmhub#22). `family` is 0 unspecified, 1 IPv4, 2 IPv6, matching WASIX;
+/// `sock_type` is 1 for a stream, and nothing else is implemented yet.
+pub fn sock_open(
+    _family: u32,
+    sock_type: u32,
+    _protocol: u32,
+    fd_out_ptr: u32,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
+    const SOCK_STREAM: u32 = 1;
+    if sock_type != SOCK_STREAM {
+        return WASI_ENOSYS;
+    }
+
+    // Refusing here as well as at connect keeps a program without a network
+    // from getting a descriptor it can do nothing with.
+    let fd = match env.lock() {
+        Ok(mut e) => {
+            if !e.network().is_enabled() {
+                return WASI_EACCES;
+            }
+            e.add_unconnected_socket()
+        }
+        Err(_) => return WASI_EIO,
+    };
+
+    if memory.write_i32(fd_out_ptr as usize, fd as i32).is_err() {
+        return WASI_EINVAL;
+    }
+    WASI_ESUCCESS
+}
+
+/// sock_connect: connect an opened socket to `host:port`.
+///
+/// The address is a UTF-8 host string, a name or a literal, rather than the
+/// packed sockaddr WASIX passes. That is deliberate: the policy is written in
+/// terms of names as well as addresses, so the host has to see the name the
+/// guest asked for. Handing over a sockaddr would mean the guest resolved it
+/// first, which puts DNS outside the policy entirely.
+pub fn sock_connect(
+    fd: u32,
+    addr_ptr: u32,
+    addr_len: u32,
+    port: u32,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
+    let host = match memory.read_bytes(addr_ptr as usize, addr_len as usize) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(host) => host,
+            Err(_) => return WASI_EINVAL,
+        },
+        Err(_) => return WASI_EINVAL,
+    };
+    let port: u16 = match u16::try_from(port) {
+        Ok(port) if port != 0 => port,
+        _ => return WASI_EINVAL,
+    };
+
+    let (network, timeout) = match env.lock() {
+        Ok(e) => {
+            match e.get_fd(fd) {
+                Some(entry) if entry.kind == FdKind::SocketStream => {}
+                Some(_) => return WASI_ENOTSOCK,
+                None => return WASI_EBADF,
+            }
+            match e.socket(fd) {
+                Some(SocketHandle::Unconnected) => {}
+                // Connecting an already-connected socket is the guest's bug.
+                Some(_) => return WASI_EISCONN,
+                None => return WASI_EBADF,
+            }
+            (e.network().clone(), e.network().connect_timeout())
+        }
+        Err(_) => return WASI_EIO,
+    };
+
+    let addrs = match network.resolve_and_check(&host, port) {
+        Ok(addrs) => addrs,
+        Err(denied) => {
+            // The reason never reaches the guest, which only gets an errno, so
+            // it goes where an operator can find it.
+            eprintln!("⛔ Connection to {host}:{port} refused: {}", denied.reason);
+            return denied.errno;
+        }
+    };
+
+    // Connect on a helper thread so the wait can be sliced like every other
+    // blocking call here: a connect that hangs must not outlive the
+    // execution's timeout, and `connect_timeout` cannot be interrupted.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut last = None;
+        for addr in addrs {
+            match std::net::TcpStream::connect_timeout(&addr, timeout) {
+                Ok(stream) => {
+                    let _ = tx.send(Ok(stream));
+                    return;
+                }
+                Err(e) => last = Some(e),
+            }
+        }
+        let _ =
+            tx.send(Err(last.unwrap_or_else(|| {
+                std::io::Error::other("no address to connect to")
+            })));
+    });
+
+    let cancel = env.lock().ok().and_then(|e| e.cancel_token().cloned());
+    let stream = loop {
+        match rx.recv_timeout(SOCKET_SLICE) {
+            Ok(Ok(stream)) => break stream,
+            Ok(Err(err)) => return io_errno(&err),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if let Some(flag) = cancel.as_ref() {
+                    if flag.load(Ordering::Relaxed) {
+                        return WASI_EINTR;
+                    }
+                }
+            }
+            // The connecting thread is gone without an answer.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return WASI_EIO,
+        }
+    };
+
+    match env.lock() {
+        Ok(mut e) => {
+            e.connect_socket(fd, stream);
+            WASI_ESUCCESS
+        }
+        Err(_) => WASI_EIO,
+    }
 }
 
 /// sock_recv: read from a socket. `ri_flags` (peek, waitall) is not honored.

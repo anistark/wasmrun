@@ -84,19 +84,26 @@ impl ProjectConfig {
 
 impl NetworkConfig {
     /// Fold the configured fields into wasmnet's default policy.
-    fn to_policy_config(&self) -> Result<PolicyConfig> {
+    pub fn to_policy_config(&self) -> Result<PolicyConfig> {
+        self.to_policy_config_named("os.network")
+    }
+
+    /// The same, naming the table in any error. The `[os.network]` table and a
+    /// tenant's `[tenants.network]` table have the same shape, and a message
+    /// that names the wrong one sends the reader to the wrong file.
+    pub fn to_policy_config_named(&self, table: &str) -> Result<PolicyConfig> {
         let mut network = NetworkPolicy::default();
 
         if let Some(allow) = &self.allow {
-            validate_rules("allow", allow)?;
+            validate_rules(table, "allow", allow)?;
             network.allow = allow.clone();
         }
         if let Some(deny) = &self.deny {
-            validate_rules("deny", deny)?;
+            validate_rules(table, "deny", deny)?;
             network.deny = deny.clone();
         }
         if let Some(bind_ports) = &self.bind_ports {
-            validate_bind_ports(bind_ports)?;
+            validate_bind_ports(table, bind_ports)?;
             network.bind_ports = bind_ports.clone();
         }
         if let Some(max_connections) = self.max_connections {
@@ -128,7 +135,7 @@ fn invalid(message: impl Into<String>) -> crate::error::WasmrunError {
 /// becomes a *hostname* that no address ever matches, and a `deny` written
 /// that way is a rule the user believes in and does not have. Both mistakes
 /// are caught here, where there is a file and a line to point at.
-fn validate_rules(field: &str, rules: &[String]) -> Result<()> {
+fn validate_rules(table: &str, field: &str, rules: &[String]) -> Result<()> {
     for rule in rules {
         if rule == "*" {
             continue;
@@ -136,12 +143,12 @@ fn validate_rules(field: &str, rules: &[String]) -> Result<()> {
 
         if rule.trim().is_empty() {
             return Err(invalid(format!(
-                "[os.network] {field}: an empty rule matches nothing; remove it or use \"*\""
+                "[{table}] {field}: an empty rule matches nothing; remove it or use \"*\""
             )));
         }
 
         if let Some((addr, prefix)) = rule.split_once('/') {
-            validate_cidr(field, rule, addr, prefix)?;
+            validate_cidr(table, field, rule, addr, prefix)?;
             continue;
         }
 
@@ -150,7 +157,7 @@ fn validate_rules(field: &str, rules: &[String]) -> Result<()> {
         let host = split_host(rule);
         if host.parse::<IpAddr>().is_ok() {
             return Err(invalid(format!(
-                "[os.network] {field}: \"{rule}\" is a bare IP address, which is matched as a \
+                "[{table}] {field}: \"{rule}\" is a bare IP address, which is matched as a \
                  hostname and never matches a connection. Write it as a CIDR range instead, \
                  for example \"{host}/32\" (\"/128\" for IPv6)"
             )));
@@ -158,7 +165,7 @@ fn validate_rules(field: &str, rules: &[String]) -> Result<()> {
 
         if host.contains(char::is_whitespace) {
             return Err(invalid(format!(
-                "[os.network] {field}: \"{rule}\" is not a valid host pattern"
+                "[{table}] {field}: \"{rule}\" is not a valid host pattern"
             )));
         }
     }
@@ -166,24 +173,24 @@ fn validate_rules(field: &str, rules: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn validate_cidr(field: &str, rule: &str, addr: &str, prefix: &str) -> Result<()> {
+fn validate_cidr(table: &str, field: &str, rule: &str, addr: &str, prefix: &str) -> Result<()> {
     let ip: IpAddr = addr.parse().map_err(|_| {
         invalid(format!(
-            "[os.network] {field}: \"{rule}\" looks like a CIDR range but \"{addr}\" is not an \
+            "[{table}] {field}: \"{rule}\" looks like a CIDR range but \"{addr}\" is not an \
              IP address"
         ))
     })?;
 
     let bits: u8 = prefix.parse().map_err(|_| {
         invalid(format!(
-            "[os.network] {field}: \"{rule}\" has a prefix length that is not a number"
+            "[{table}] {field}: \"{rule}\" has a prefix length that is not a number"
         ))
     })?;
 
     let max = if ip.is_ipv4() { 32 } else { 128 };
     if bits > max {
         return Err(invalid(format!(
-            "[os.network] {field}: \"{rule}\" has a prefix length above /{max}"
+            "[{table}] {field}: \"{rule}\" has a prefix length above /{max}"
         )));
     }
 
@@ -203,16 +210,18 @@ fn split_host(rule: &str) -> &str {
 
 /// Check a `bind_ports` string. wasmnet drops the parts it cannot read, so an
 /// unreadable string leaves a policy that binds nothing at all, silently.
-fn validate_bind_ports(spec: &str) -> Result<()> {
+fn validate_bind_ports(table: &str, spec: &str) -> Result<()> {
     for part in spec.split(',') {
         let part = part.trim();
         if part.is_empty() {
-            return Err(invalid("[os.network] bind_ports: empty range in the list"));
+            return Err(invalid(format!(
+                "[{table}] bind_ports: empty range in the list"
+            )));
         }
 
         let bad = |what: &str| {
             invalid(format!(
-                "[os.network] bind_ports: \"{part}\" {what}. Use a port or a range, \
+                "[{table}] bind_ports: \"{part}\" {what}. Use a port or a range, \
                  for example \"3000-9999\" or \"8080,9000-9100\""
             ))
         };
