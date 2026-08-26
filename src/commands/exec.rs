@@ -2,21 +2,54 @@
 
 use crate::error::{Result, WasmrunError};
 use crate::runtime::core::native_executor;
+use crate::runtime::wasi::WASI_FIRST_PREOPEN_FD;
+use std::net::TcpListener;
 use std::path::Path;
 
 pub fn handle_exec_command(
     wasm_file: &Option<String>,
     call: &Option<String>,
+    tcplisten: &[String],
     args: Vec<String>,
 ) -> Result<()> {
     let wasm_path = wasm_file
         .as_ref()
         .ok_or_else(|| WasmrunError::from("WASM file path is required".to_string()))?;
 
-    execute_wasm_with_args(wasm_path, call.clone(), args)
+    execute_wasm_with_args(wasm_path, call.clone(), tcplisten, args)
 }
 
-fn execute_wasm_with_args(wasm_path: &str, call: Option<String>, args: Vec<String>) -> Result<()> {
+/// Bind every `--tcplisten` address before the program starts.
+///
+/// Binding here rather than inside the guest is the whole model: the sandbox
+/// gets a socket it can accept on and no way to ask for a different one.
+fn bind_listeners(addrs: &[String]) -> Result<Vec<TcpListener>> {
+    addrs
+        .iter()
+        .enumerate()
+        .map(|(i, addr)| {
+            let listener = TcpListener::bind(addr).map_err(|e| {
+                WasmrunError::from(format!("Failed to bind {addr} for --tcplisten: {e}"))
+            })?;
+            let bound = listener
+                .local_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_else(|_| addr.clone());
+            // Preopened fds start at 3 and are handed out in order, so the
+            // first listener is fd 3, which is what a guest hardcodes.
+            let fd = WASI_FIRST_PREOPEN_FD as usize + i;
+            println!("🔌 Listening on {bound}, passed to the program as fd {fd}");
+            Ok(listener)
+        })
+        .collect()
+}
+
+fn execute_wasm_with_args(
+    wasm_path: &str,
+    call: Option<String>,
+    tcplisten: &[String],
+    args: Vec<String>,
+) -> Result<()> {
     if !Path::new(wasm_path).exists() {
         return Err(WasmrunError::from(format!(
             "WASM file not found: {wasm_path}"
@@ -38,7 +71,9 @@ fn execute_wasm_with_args(wasm_path: &str, call: Option<String>, args: Vec<Strin
     }
     println!("🏃 Executing natively (interpreter mode)");
 
-    let exit_code = native_executor::execute_wasm_file_with_args(wasm_path, call, args)?;
+    let listeners = bind_listeners(tcplisten)?;
+    let exit_code =
+        native_executor::execute_wasm_file_with_sockets(wasm_path, call, args, listeners)?;
     if exit_code != 0 {
         println!("✅ Execution completed (exit code: {exit_code})");
     } else {
@@ -55,7 +90,7 @@ mod tests {
     /// Test: Missing WASM file path parameter
     #[test]
     fn test_handle_exec_missing_wasm_path() {
-        let result = handle_exec_command(&None, &None, Vec::new());
+        let result = handle_exec_command(&None, &None, &[], Vec::new());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("required"));
     }
@@ -63,7 +98,12 @@ mod tests {
     /// Test: Non-existent WASM file
     #[test]
     fn test_handle_exec_nonexistent_file() {
-        let result = handle_exec_command(&Some("nonexistent.wasm".to_string()), &None, Vec::new());
+        let result = handle_exec_command(
+            &Some("nonexistent.wasm".to_string()),
+            &None,
+            &[],
+            Vec::new(),
+        );
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not found"));
@@ -72,7 +112,8 @@ mod tests {
     /// Test: Invalid file extension (not .wasm)
     #[test]
     fn test_handle_exec_invalid_extension() {
-        let result = handle_exec_command(&Some("test_file.txt".to_string()), &None, Vec::new());
+        let result =
+            handle_exec_command(&Some("test_file.txt".to_string()), &None, &[], Vec::new());
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         // Error could be either about extension or file not found
@@ -89,7 +130,7 @@ mod tests {
             return;
         }
 
-        let result = handle_exec_command(&Some(wasm_path.to_string()), &None, Vec::new());
+        let result = handle_exec_command(&Some(wasm_path.to_string()), &None, &[], Vec::new());
 
         match result {
             Ok(_) => println!("✓ Successfully executed Go example WASM"),
@@ -110,6 +151,7 @@ mod tests {
         let result = handle_exec_command(
             &Some(wasm_path.to_string()),
             &Some("nonexistent_func".to_string()),
+            &[],
             Vec::new(),
         );
 
@@ -128,7 +170,7 @@ mod tests {
         }
 
         let args = vec!["arg1".to_string(), "arg2".to_string()];
-        let result = handle_exec_command(&Some(wasm_path.to_string()), &None, args);
+        let result = handle_exec_command(&Some(wasm_path.to_string()), &None, &[], args);
 
         match result {
             Ok(_) => println!("✓ Successfully executed with arguments"),
@@ -146,8 +188,12 @@ mod tests {
         }
 
         let args = vec!["test_arg".to_string()];
-        let result =
-            handle_exec_command(&Some(wasm_path.to_string()), &Some("run".to_string()), args);
+        let result = handle_exec_command(
+            &Some(wasm_path.to_string()),
+            &Some("run".to_string()),
+            &[],
+            args,
+        );
 
         match result {
             Ok(_) => println!("✓ Successfully executed with function and arguments"),

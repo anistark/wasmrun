@@ -1,6 +1,9 @@
+use crate::config::project::PROJECT_CONFIG_FILE;
+use crate::config::ProjectConfig;
 use crate::error::{Result, WasmrunError};
 use crate::logging::{LogEntry, LogSource, LogTrailSystem};
 use crate::runtime::multilang_kernel::{MultiLanguageKernel, OsRunConfig};
+use crate::runtime::network::NetworkServer;
 use crate::runtime::project_files::ProjectFilesCollector;
 use crate::runtime::runtime_cache::RuntimeCache;
 use crate::runtime::tunnel::BoreClient;
@@ -8,12 +11,18 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use tiny_http::{Header, Method, Request, Response, Server};
+use wasmnet::policy::PolicyConfig;
 
 const TEMPLATE_INDEX_HTML: &str = include_str!("../../templates/os/index.html");
 const TEMPLATE_OS_JS: &str = include_str!("../../templates/os/os.js");
 const TEMPLATE_INDEX_CSS: &str = include_str!("../../templates/os/index.css");
 const TEMPLATE_LOGGING_JS: &str = include_str!("../../templates/os/logging.js");
 const TEMPLATE_LOGS_HTML: &str = include_str!("../../templates/os/logs.html");
+
+/// The proxy binds loopback like the OS server does: the browser reaching it
+/// is the same machine, and a socket bridge on a routable address would be an
+/// open proxy.
+const NETWORK_HOST: &str = "127.0.0.1";
 
 const ASSET_LOGO_PNG: &[u8] = include_bytes!("../../templates/assets/logo.png");
 const ASSET_LOGO_TEXT_PNG: &[u8] = include_bytes!("../../templates/assets/logo-text.png");
@@ -28,6 +37,9 @@ pub struct OsServer {
     tunnel_client: Arc<RwLock<Option<BoreClient>>>,
     runtime_cache: RuntimeCache,
     cors_origin: String,
+    /// The wasmnet proxy's port, once it is up. `None` until `start` runs it,
+    /// and if it failed to start: OS mode still serves everything else.
+    network_port: Arc<RwLock<Option<u16>>>,
 }
 
 impl OsServer {
@@ -48,6 +60,7 @@ impl OsServer {
             tunnel_client: Arc::new(RwLock::new(None)),
             runtime_cache,
             cors_origin,
+            network_port: Arc::new(RwLock::new(None)),
         };
 
         // Load and process templates
@@ -153,6 +166,11 @@ impl OsServer {
 
     /// Start the OS server
     pub fn start(self, port: u16) -> Result<()> {
+        // Read the policy before anything binds: a project that asked for one
+        // and wrote it wrong should hear about it instead of watching a server
+        // come up.
+        let policy = self.network_policy()?;
+
         let server = Server::http(format!("127.0.0.1:{port}"))
             .map_err(|e| WasmrunError::from(format!("Failed to start HTTP server: {e}")))?;
 
@@ -161,6 +179,10 @@ impl OsServer {
             format!("OS Mode server listening on http://127.0.0.1:{port}"),
         ));
         println!("🌐 OS Mode server listening on http://127.0.0.1:{port}");
+
+        // The proxy lives exactly as long as this call: dropping the handle
+        // when the request loop ends stops it and joins its thread.
+        let _network = self.start_network(port, policy);
 
         // Start the project in the kernel
         self.start_project()?;
@@ -174,6 +196,57 @@ impl OsServer {
         }
 
         Ok(())
+    }
+
+    /// Read the project's network policy from `wasmrun.toml`.
+    ///
+    /// This is the one part of starting the proxy that can fail the whole
+    /// server: the file is the project saying which egress it wants, so a file
+    /// that cannot be read is a policy that cannot be honored, and starting
+    /// anyway would run the project under settings nobody chose.
+    fn network_policy(&self) -> Result<PolicyConfig> {
+        let config = ProjectConfig::load(&self.config.project_path)?;
+        let policy = config.network_policy()?;
+
+        if config.has_network_config() {
+            self.log_system.log(LogEntry::info(
+                LogSource::Kernel,
+                format!("Network policy loaded from {PROJECT_CONFIG_FILE}"),
+            ));
+            println!("🔒 Network policy loaded from {PROJECT_CONFIG_FILE}");
+        }
+
+        Ok(policy)
+    }
+
+    /// Start the wasmnet proxy alongside the OS server.
+    ///
+    /// A proxy that will not start is reported and then left alone: everything
+    /// in OS mode except sockets works without it, and failing the whole server
+    /// over an unavailable port would be the worse trade. A policy that will
+    /// not load is a different matter and is raised by the caller, since a
+    /// project that asked for a policy must not run under a different one.
+    fn start_network(&self, os_port: u16, policy: PolicyConfig) -> Option<NetworkServer> {
+        match NetworkServer::start(NETWORK_HOST, os_port, policy) {
+            Ok(server) => {
+                let network_port = server.port();
+                *self.network_port.write().unwrap() = Some(network_port);
+                self.log_system.log(LogEntry::info(
+                    LogSource::Kernel,
+                    format!("Network proxy listening on {}", server.url(NETWORK_HOST)),
+                ));
+                println!("🔌 Network proxy listening on {}", server.url(NETWORK_HOST));
+                Some(server)
+            }
+            Err(e) => {
+                self.log_system.log(LogEntry::error(
+                    LogSource::Kernel,
+                    format!("Network proxy unavailable: {e}"),
+                ));
+                eprintln!("⚠️ Network proxy unavailable, sockets will not work: {e}");
+                None
+            }
+        }
     }
 
     /// Start the project in the kernel.
@@ -325,14 +398,25 @@ impl OsServer {
                 }
             }
 
+            // Sockets do not go through this server: tiny_http has no upgrade
+            // path, so the browser shim talks to the wasmnet proxy on its own
+            // port. `/api/network/status` says where.
             (Method::Get, "/ws") => {
-                // TODO: WebSocket upgrade for real-time communication
-                let response = Response::from_string("WebSocket not implemented yet").with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"text/plain"[..]).unwrap(),
-                );
+                let response = Response::from_string(
+                    "Sockets are proxied by wasmnet on its own port. \
+                     GET /api/network/status for the URL.",
+                )
+                .with_status_code(tiny_http::StatusCode(410))
+                .with_header(Header::from_bytes(&b"Content-Type"[..], &b"text/plain"[..]).unwrap())
+                .with_header(self.cors_header());
                 request
                     .respond(response)
                     .map_err(|e| WasmrunError::from(e.to_string()))?;
+            }
+
+            // Where the browser shim connects its sockets
+            (Method::Get, "/api/network/status") => {
+                self.handle_network_status_request(request)?;
             }
 
             // API endpoint for runtime binary (serves cached wasmhub runtime)
@@ -1488,6 +1572,40 @@ impl OsServer {
                     .map_err(|e| WasmrunError::from(e.to_string()))?;
             }
         }
+
+        Ok(())
+    }
+
+    /// Report the wasmnet proxy's URL, or that it is not running.
+    ///
+    /// The browser shim reads this before it boots a module, since the proxy
+    /// picks its port at startup and is not always on the default.
+    fn handle_network_status_request(&self, request: Request) -> Result<()> {
+        let port = *self.network_port.read().unwrap();
+
+        let response_json = match port {
+            Some(port) => serde_json::json!({
+                "success": true,
+                "enabled": true,
+                "host": NETWORK_HOST,
+                "port": port,
+                "url": format!("ws://{NETWORK_HOST}:{port}"),
+            }),
+            None => serde_json::json!({
+                "success": true,
+                "enabled": false,
+                "reason": "the network proxy is not running",
+            }),
+        };
+
+        let response = Response::from_string(response_json.to_string())
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+            .with_header(self.cors_header());
+        request
+            .respond(response)
+            .map_err(|e| WasmrunError::from(e.to_string()))?;
 
         Ok(())
     }

@@ -8,7 +8,8 @@ pub mod syscalls;
 use crate::runtime::core::executor::WASI_PROC_EXIT_PREFIX;
 use crate::runtime::core::linker::{ClosureHostFunction, Linker};
 use crate::runtime::core::values::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -26,6 +27,22 @@ pub enum FdKind {
     PreopenDir,
     File,
     Directory,
+    /// A listening socket handed to the guest by the host. WASI Preview 1 gives
+    /// a guest no way to create one, so every listener is preopened the way a
+    /// directory is.
+    SocketListener,
+    /// A connected socket, always the result of `sock_accept`.
+    SocketStream,
+}
+
+/// The host side of a socket fd.
+///
+/// Kept beside `FdEntry` rather than inside it: that type is `Clone` and
+/// describes a path, while these are live kernel objects shared by reference.
+#[derive(Debug, Clone)]
+pub enum SocketHandle {
+    Listener(Arc<TcpListener>),
+    Stream(Arc<TcpStream>),
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +85,13 @@ pub struct WasiEnv {
     /// so the cap can be checked in O(1) without walking the tree each write.
     /// Seeded from an actual directory scan at session start / before each exec.
     disk_used: u64,
+    /// Live socket objects, keyed by the fd that names them in `fd_table`.
+    sockets: HashMap<u32, SocketHandle>,
+    /// Connections accepted by a `poll_oneoff` readiness probe, waiting for
+    /// the `sock_accept` that follows it. A listener cannot be asked whether a
+    /// connection is waiting without taking it, so a poll that finds one keeps
+    /// it here rather than dropping it on the floor.
+    pending_accepts: HashMap<u32, VecDeque<TcpStream>>,
     /// The executor's cancellation flag, when one was installed. `poll_oneoff`
     /// watches it while it sleeps: the flag is how the agent's wall-clock
     /// timeout stops a running execution, and the executor can only check it
@@ -119,6 +143,8 @@ impl WasiEnv {
             fd_table,
             next_fd: WASI_FIRST_PREOPEN_FD,
             preopens: Vec::new(),
+            sockets: HashMap::new(),
+            pending_accepts: HashMap::new(),
             max_output_bytes: None,
             output_truncated: false,
             max_file_size: None,
@@ -155,6 +181,80 @@ impl WasiEnv {
         );
         self.preopens.push((guest_path.to_string(), host));
         self
+    }
+
+    /// Hand the guest a listening socket on the next free fd.
+    ///
+    /// Preview 1 has no call that creates a listener, so a server in the
+    /// sandbox can only serve on one the host bound for it and passed in, the
+    /// same shape as a preopened directory. The listener is put in
+    /// non-blocking mode here: `sock_accept` waits in slices so it can watch
+    /// the cancellation flag, which it could not do inside a blocking accept.
+    pub fn with_tcp_listener(mut self, listener: TcpListener) -> Self {
+        let _ = listener.set_nonblocking(true);
+        let fd = self.next_fd;
+        self.next_fd += 1;
+        let name = listener
+            .local_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|_| "socket".to_string());
+        self.fd_table.insert(
+            fd,
+            FdEntry {
+                kind: FdKind::SocketListener,
+                host_path: PathBuf::new(),
+                guest_path: name,
+                offset: 0,
+                flags: 0,
+            },
+        );
+        self.sockets
+            .insert(fd, SocketHandle::Listener(Arc::new(listener)));
+        self
+    }
+
+    /// Register an accepted connection and return the fd naming it.
+    pub fn add_socket_stream(&mut self, stream: TcpStream) -> u32 {
+        let name = stream
+            .peer_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|_| "socket".to_string());
+        let fd = self.allocate_fd(FdEntry {
+            kind: FdKind::SocketStream,
+            host_path: PathBuf::new(),
+            guest_path: name,
+            offset: 0,
+            flags: 0,
+        });
+        self.sockets
+            .insert(fd, SocketHandle::Stream(Arc::new(stream)));
+        fd
+    }
+
+    /// The socket behind an fd, if that fd names one.
+    pub fn socket(&self, fd: u32) -> Option<SocketHandle> {
+        self.sockets.get(&fd).cloned()
+    }
+
+    /// Park a connection a readiness probe had to take in order to see it.
+    pub fn push_pending_accept(&mut self, listener_fd: u32, stream: TcpStream) {
+        self.pending_accepts
+            .entry(listener_fd)
+            .or_default()
+            .push_back(stream);
+    }
+
+    /// Take a parked connection, if a probe left one.
+    pub fn take_pending_accept(&mut self, listener_fd: u32) -> Option<TcpStream> {
+        self.pending_accepts
+            .get_mut(&listener_fd)
+            .and_then(|queue| queue.pop_front())
+    }
+
+    pub fn has_pending_accept(&self, listener_fd: u32) -> bool {
+        self.pending_accepts
+            .get(&listener_fd)
+            .is_some_and(|queue| !queue.is_empty())
     }
 
     pub fn set_args(&mut self, args: Vec<String>) {
@@ -330,6 +430,11 @@ impl WasiEnv {
         if fd <= WASI_STDERR_FD {
             return true;
         }
+        // Dropping the handle is what closes the underlying socket, so it has
+        // to go with the table entry rather than outliving it. A listener that
+        // closes takes its parked connections with it.
+        self.sockets.remove(&fd);
+        self.pending_accepts.remove(&fd);
         self.fd_table.remove(&fd).is_some()
     }
 
@@ -930,6 +1035,106 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
                     Ok(vec![Value::I32(errno)])
                 },
                 6,
+                1,
+            )),
+        );
+    }
+
+    // sock_accept
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "sock_accept",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let fd = i32_arg(&args, 0)? as u32;
+                    let flags = i32_arg(&args, 1)? as u32;
+                    let result_fd_ptr = i32_arg(&args, 2)? as u32;
+                    let errno = syscalls::sock_accept(fd, flags, result_fd_ptr, mem, &env);
+                    Ok(vec![Value::I32(errno)])
+                },
+                3,
+                1,
+            )),
+        );
+    }
+
+    // sock_recv
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "sock_recv",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let fd = i32_arg(&args, 0)? as u32;
+                    let ri_data_ptr = i32_arg(&args, 1)? as u32;
+                    let ri_data_len = i32_arg(&args, 2)? as u32;
+                    let ri_flags = i32_arg(&args, 3)? as u32;
+                    let ro_datalen_ptr = i32_arg(&args, 4)? as u32;
+                    let ro_flags_ptr = i32_arg(&args, 5)? as u32;
+                    let errno = syscalls::sock_recv(
+                        fd,
+                        ri_data_ptr,
+                        ri_data_len,
+                        ri_flags,
+                        ro_datalen_ptr,
+                        ro_flags_ptr,
+                        mem,
+                        &env,
+                    );
+                    Ok(vec![Value::I32(errno)])
+                },
+                6,
+                1,
+            )),
+        );
+    }
+
+    // sock_send
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "sock_send",
+            Box::new(ClosureHostFunction::new(
+                move |args, mem| {
+                    let fd = i32_arg(&args, 0)? as u32;
+                    let si_data_ptr = i32_arg(&args, 1)? as u32;
+                    let si_data_len = i32_arg(&args, 2)? as u32;
+                    let si_flags = i32_arg(&args, 3)? as u32;
+                    let so_datalen_ptr = i32_arg(&args, 4)? as u32;
+                    let errno = syscalls::sock_send(
+                        fd,
+                        si_data_ptr,
+                        si_data_len,
+                        si_flags,
+                        so_datalen_ptr,
+                        mem,
+                        &env,
+                    );
+                    Ok(vec![Value::I32(errno)])
+                },
+                5,
+                1,
+            )),
+        );
+    }
+
+    // sock_shutdown
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "sock_shutdown",
+            Box::new(ClosureHostFunction::new(
+                move |args, _mem| {
+                    let fd = i32_arg(&args, 0)? as u32;
+                    let how = i32_arg(&args, 1)? as u32;
+                    Ok(vec![Value::I32(syscalls::sock_shutdown(fd, how, &env))])
+                },
+                2,
                 1,
             )),
         );

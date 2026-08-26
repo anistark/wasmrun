@@ -1,11 +1,13 @@
 //! WASI syscall implementations that operate on linear memory.
 
 use crate::runtime::core::memory::LinearMemory;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use super::{FdKind, WasiEnv, WASI_STDERR_FD, WASI_STDIN_FD, WASI_STDOUT_FD};
+use super::{FdKind, SocketHandle, WasiEnv, WASI_STDERR_FD, WASI_STDIN_FD, WASI_STDOUT_FD};
 
 pub const WASI_ESUCCESS: i32 = 0;
 pub const WASI_EBADF: i32 = 8;
@@ -22,6 +24,10 @@ pub const WASI_ENOTDIR: i32 = 54;
 pub const WASI_ENOTEMPTY: i32 = 55;
 pub const WASI_ERANGE: i32 = 68;
 pub const WASI_EACCES: i32 = 2;
+pub const WASI_EAGAIN: i32 = 6;
+pub const WASI_ECONNABORTED: i32 = 13;
+pub const WASI_ENOTSOCK: i32 = 57;
+pub const WASI_EPIPE: i32 = 64;
 
 /// `fstflags`: which of a file's timestamps `path_filestat_set_times` writes.
 const WASI_FILESTAT_SET_ATIM: u16 = 1;
@@ -36,6 +42,7 @@ pub const WASI_FILETYPE_UNKNOWN: u8 = 0;
 pub const WASI_FILETYPE_CHARACTER_DEVICE: u8 = 2;
 pub const WASI_FILETYPE_DIRECTORY: u8 = 3;
 pub const WASI_FILETYPE_REGULAR_FILE: u8 = 4;
+pub const WASI_FILETYPE_SOCKET_STREAM: u8 = 6;
 pub const WASI_FILETYPE_SYMBOLIC_LINK: u8 = 7;
 
 const WASI_O_CREAT: u32 = 1;
@@ -87,6 +94,10 @@ pub fn fd_write(
     memory: &mut LinearMemory,
     env: &Arc<Mutex<WasiEnv>>,
 ) -> i32 {
+    if is_socket_fd(fd, env) {
+        return socket_write_iovs(fd, iovs_ptr, iovs_len, nwritten_ptr, memory, env);
+    }
+
     let mut total_written: u32 = 0;
 
     for i in 0..iovs_len {
@@ -239,6 +250,12 @@ pub fn fd_read(
     if fd == WASI_STDOUT_FD || fd == WASI_STDERR_FD {
         return WASI_EBADF;
     }
+    // A stock `wasm32-wasip1` guest reads an accepted connection with the
+    // ordinary file calls, not with `sock_recv`, so this is the path that
+    // actually carries socket traffic.
+    if is_socket_fd(fd, env) {
+        return socket_read_iovs(fd, iovs_ptr, iovs_len, nread_ptr, memory, env);
+    }
 
     let mut e = match env.lock() {
         Ok(e) => e,
@@ -383,6 +400,9 @@ pub fn fd_fdstat_get(
         FdKind::Stdout | FdKind::Stderr => (WASI_FILETYPE_CHARACTER_DEVICE, 1u16, 0x400u64),
         FdKind::PreopenDir | FdKind::Directory => (WASI_FILETYPE_DIRECTORY, 0u16, 0x0FFF_FFFFu64),
         FdKind::File => (WASI_FILETYPE_REGULAR_FILE, 0u16, 0x0FFF_FFFFu64),
+        FdKind::SocketListener | FdKind::SocketStream => {
+            (WASI_FILETYPE_SOCKET_STREAM, 0u16, 0x0FFF_FFFFu64)
+        }
     };
 
     let base = stat_ptr as usize;
@@ -1313,7 +1333,7 @@ pub fn poll_oneoff(
 /// Whether a descriptor can be read from or written to right now, and how many
 /// bytes are available if it can.
 fn poll_fd_readiness(fd: u32, tag: u8, env: &Arc<Mutex<WasiEnv>>) -> (i32, u64) {
-    let e = match env.lock() {
+    let mut e = match env.lock() {
         Ok(e) => e,
         Err(_) => return (WASI_EIO, 0),
     };
@@ -1337,6 +1357,51 @@ fn poll_fd_readiness(fd: u32, tag: u8, env: &Arc<Mutex<WasiEnv>>) -> (i32, u64) 
         }
         (FdKind::File, _) => (WASI_ESUCCESS, 0),
         (FdKind::PreopenDir | FdKind::Directory, _) => (WASI_EBADF, 0),
+        // A socket is ready when the kernel says so, which is the point of
+        // polling one: reporting it always-ready the way a file is would turn
+        // a poll loop into a spin. `peek` on a non-blocking socket answers
+        // without consuming anything.
+        (FdKind::SocketStream, WASI_EVENTTYPE_FD_READ) => match e.socket(fd) {
+            Some(SocketHandle::Stream(stream)) => {
+                let mut probe = [0u8; 1];
+                match stream.peek(&mut probe) {
+                    // Zero bytes peeked means the peer is gone, so a read
+                    // would return EOF immediately: ready, with nothing on it.
+                    Ok(n) => (WASI_ESUCCESS, n as u64),
+                    Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        (WASI_EAGAIN, 0)
+                    }
+                    Err(_) => (WASI_EIO, 0),
+                }
+            }
+            _ => (WASI_EBADF, 0),
+        },
+        // Writability is not predicted: a send that would block reports it
+        // itself rather than this claiming to know in advance.
+        (FdKind::SocketStream, _) => (WASI_ESUCCESS, 0),
+        // A listener is readable when a connection is waiting. There is no way
+        // to ask without taking it, so a probe that finds one parks it for the
+        // `sock_accept` that follows rather than dropping the connection.
+        (FdKind::SocketListener, WASI_EVENTTYPE_FD_READ) => {
+            if e.has_pending_accept(fd) {
+                (WASI_ESUCCESS, 1)
+            } else {
+                match e.socket(fd) {
+                    Some(SocketHandle::Listener(listener)) => match listener.accept() {
+                        Ok((stream, _)) => {
+                            e.push_pending_accept(fd, stream);
+                            (WASI_ESUCCESS, 1)
+                        }
+                        Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                            (WASI_EAGAIN, 0)
+                        }
+                        Err(_) => (WASI_EIO, 0),
+                    },
+                    _ => (WASI_EBADF, 0),
+                }
+            }
+        }
+        (FdKind::SocketListener, _) => (WASI_EBADF, 0),
     }
 }
 
@@ -1382,6 +1447,317 @@ fn wall_clock_nanos() -> u64 {
 pub fn sched_yield() -> i32 {
     std::thread::yield_now();
     WASI_ESUCCESS
+}
+
+// ── Sockets ──────────────────────────────────────────────
+//
+// Preview 1 gives a guest no way to create a socket, so everything here starts
+// from a listener the host bound and preopened. `sock_accept` turns that into
+// a connected fd, and the guest then reads and writes it with `fd_read` and
+// `fd_write`, which is what a stock `wasm32-wasip1` Rust binary does: its
+// `TcpListener::accept` lowers to `sock_accept` and its `TcpStream` to the
+// ordinary file calls. `sock_recv` and `sock_send` are the same operations
+// under their socket names, for guests whose libc uses them.
+
+/// How long a blocking socket call waits before re-checking cancellation.
+const SOCKET_SLICE: Duration = Duration::from_millis(20);
+
+/// Run `attempt` until it returns something other than `WouldBlock`, giving up
+/// if the execution is cancelled.
+///
+/// The executor can only notice cancellation between instructions, which never
+/// happens while a host call is blocked, so every wait in this file is sliced
+/// the way `poll_oneoff` slices its sleep.
+fn wait_for_socket<T>(
+    env: &Arc<Mutex<WasiEnv>>,
+    mut attempt: impl FnMut() -> std::io::Result<T>,
+) -> std::result::Result<T, i32> {
+    let cancel = env.lock().ok().and_then(|e| e.cancel_token().cloned());
+    loop {
+        match attempt() {
+            Ok(value) => return Ok(value),
+            Err(ref err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(ref err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(err) => return Err(io_errno(&err)),
+        }
+
+        if let Some(flag) = cancel.as_ref() {
+            if flag.load(Ordering::Relaxed) {
+                return Err(WASI_EINTR);
+            }
+        }
+        std::thread::sleep(SOCKET_SLICE);
+    }
+}
+
+fn io_errno(err: &std::io::Error) -> i32 {
+    match err.kind() {
+        std::io::ErrorKind::WouldBlock => WASI_EAGAIN,
+        std::io::ErrorKind::BrokenPipe => WASI_EPIPE,
+        std::io::ErrorKind::ConnectionAborted => WASI_ECONNABORTED,
+        std::io::ErrorKind::ConnectionReset => WASI_ECONNABORTED,
+        std::io::ErrorKind::InvalidInput => WASI_EINVAL,
+        _ => WASI_EIO,
+    }
+}
+
+/// Whether an fd names a connected socket, which decides who serves `fd_read`
+/// and `fd_write` for it.
+fn is_socket_fd(fd: u32, env: &Arc<Mutex<WasiEnv>>) -> bool {
+    env.lock()
+        .ok()
+        .and_then(|e| e.get_fd(fd).map(|entry| entry.kind == FdKind::SocketStream))
+        .unwrap_or(false)
+}
+
+/// The stream behind an fd, or the errno explaining why there is not one.
+fn stream_for(fd: u32, env: &Arc<Mutex<WasiEnv>>) -> std::result::Result<Arc<TcpStream>, i32> {
+    let e = env.lock().map_err(|_| WASI_EIO)?;
+    match e.get_fd(fd) {
+        Some(entry) if entry.kind == FdKind::SocketStream => match e.socket(fd) {
+            Some(SocketHandle::Stream(stream)) => Ok(stream),
+            _ => Err(WASI_EBADF),
+        },
+        Some(_) => Err(WASI_ENOTSOCK),
+        None => Err(WASI_EBADF),
+    }
+}
+
+/// sock_accept: take the next connection on a listening fd.
+///
+/// `flags` carries `fdflags`, of which only `nonblock` (bit 0) means anything
+/// here: with it set the call reports `EAGAIN` rather than waiting.
+pub fn sock_accept(
+    fd: u32,
+    flags: u32,
+    result_fd_ptr: u32,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
+    const FDFLAG_NONBLOCK: u32 = 0x0004;
+    let nonblocking = flags & FDFLAG_NONBLOCK != 0;
+
+    let listener = {
+        let mut e = match env.lock() {
+            Ok(e) => e,
+            Err(_) => return WASI_EIO,
+        };
+        // A poll may already have taken a connection to find out there was one.
+        if let Some(stream) = e.take_pending_accept(fd) {
+            let new_fd = e.add_socket_stream(stream);
+            drop(e);
+            return write_accepted_fd(new_fd, result_fd_ptr, memory);
+        }
+        match e.get_fd(fd) {
+            Some(entry) if entry.kind == FdKind::SocketListener => match e.socket(fd) {
+                Some(SocketHandle::Listener(listener)) => listener,
+                _ => return WASI_EBADF,
+            },
+            Some(_) => return WASI_ENOTSOCK,
+            None => return WASI_EBADF,
+        }
+    };
+
+    let stream = if nonblocking {
+        match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(err) => return io_errno(&err),
+        }
+    } else {
+        match wait_for_socket(env, || listener.accept()) {
+            Ok((stream, _)) => stream,
+            Err(errno) => return errno,
+        }
+    };
+
+    // The listener is non-blocking so accept can be sliced; the connection it
+    // produces must not inherit that, or every read on it would spin.
+    if stream.set_nonblocking(false).is_err() {
+        return WASI_EIO;
+    }
+
+    let new_fd = match env.lock() {
+        Ok(mut e) => e.add_socket_stream(stream),
+        Err(_) => return WASI_EIO,
+    };
+    write_accepted_fd(new_fd, result_fd_ptr, memory)
+}
+
+fn write_accepted_fd(new_fd: u32, result_fd_ptr: u32, memory: &mut LinearMemory) -> i32 {
+    if memory
+        .write_i32(result_fd_ptr as usize, new_fd as i32)
+        .is_err()
+    {
+        return WASI_EINVAL;
+    }
+    WASI_ESUCCESS
+}
+
+/// Read from a connected socket into an iovec array.
+///
+/// Shared by `sock_recv` and by `fd_read` when the fd names a socket, since
+/// they are the same operation and a guest may reach for either.
+pub(crate) fn socket_read_iovs(
+    fd: u32,
+    iovs_ptr: u32,
+    iovs_len: u32,
+    nread_ptr: u32,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
+    let stream = match stream_for(fd, env) {
+        Ok(stream) => stream,
+        Err(errno) => return errno,
+    };
+
+    let mut total_read: u32 = 0;
+    for i in 0..iovs_len {
+        let iov_base = iovs_ptr as usize + (i as usize) * 8;
+        let buf_ptr = match memory.read_i32(iov_base) {
+            Ok(v) => v as u32 as usize,
+            Err(_) => return WASI_EINVAL,
+        };
+        let buf_len = match memory.read_i32(iov_base + 4) {
+            Ok(v) => v as u32 as usize,
+            Err(_) => return WASI_EINVAL,
+        };
+        if buf_len == 0 {
+            continue;
+        }
+
+        let mut buf = vec![0u8; buf_len];
+        let read = match wait_for_socket(env, || (&*stream).read(&mut buf)) {
+            Ok(n) => n,
+            Err(errno) => return errno,
+        };
+        if read > 0 && memory.write_bytes(buf_ptr, &buf[..read]).is_err() {
+            return WASI_EINVAL;
+        }
+        total_read += read as u32;
+        // A short read is the whole answer: waiting to fill the next iovec
+        // would block a caller that already has what it asked for.
+        if read < buf_len {
+            break;
+        }
+    }
+
+    if memory
+        .write_i32(nread_ptr as usize, total_read as i32)
+        .is_err()
+    {
+        return WASI_EINVAL;
+    }
+    WASI_ESUCCESS
+}
+
+/// Write an iovec array to a connected socket. Shared with `fd_write`.
+pub(crate) fn socket_write_iovs(
+    fd: u32,
+    iovs_ptr: u32,
+    iovs_len: u32,
+    nwritten_ptr: u32,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
+    let stream = match stream_for(fd, env) {
+        Ok(stream) => stream,
+        Err(errno) => return errno,
+    };
+
+    let mut total_written: u32 = 0;
+    for i in 0..iovs_len {
+        let iov_base = iovs_ptr as usize + (i as usize) * 8;
+        let buf_ptr = match memory.read_i32(iov_base) {
+            Ok(v) => v as u32 as usize,
+            Err(_) => return WASI_EINVAL,
+        };
+        let buf_len = match memory.read_i32(iov_base + 4) {
+            Ok(v) => v as u32 as usize,
+            Err(_) => return WASI_EINVAL,
+        };
+        if buf_len == 0 {
+            continue;
+        }
+
+        let data = match memory.read_bytes(buf_ptr, buf_len) {
+            Ok(d) => d,
+            Err(_) => return WASI_EINVAL,
+        };
+        if let Err(errno) = wait_for_socket(env, || (&*stream).write_all(&data)) {
+            return errno;
+        }
+        total_written += buf_len as u32;
+    }
+
+    if memory
+        .write_i32(nwritten_ptr as usize, total_written as i32)
+        .is_err()
+    {
+        return WASI_EINVAL;
+    }
+    WASI_ESUCCESS
+}
+
+/// sock_recv: read from a socket. `ri_flags` (peek, waitall) is not honored.
+#[allow(clippy::too_many_arguments)]
+pub fn sock_recv(
+    fd: u32,
+    ri_data_ptr: u32,
+    ri_data_len: u32,
+    _ri_flags: u32,
+    ro_datalen_ptr: u32,
+    ro_flags_ptr: u32,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
+    let errno = socket_read_iovs(fd, ri_data_ptr, ri_data_len, ro_datalen_ptr, memory, env);
+    if errno != WASI_ESUCCESS {
+        return errno;
+    }
+    // roflags reports out-of-band conditions; none of them apply to a stream
+    // socket read that just succeeded.
+    if memory.write_u16(ro_flags_ptr as usize, 0).is_err() {
+        return WASI_EINVAL;
+    }
+    WASI_ESUCCESS
+}
+
+/// sock_send: write to a socket. `si_flags` is reserved and must be zero.
+pub fn sock_send(
+    fd: u32,
+    si_data_ptr: u32,
+    si_data_len: u32,
+    _si_flags: u32,
+    so_datalen_ptr: u32,
+    memory: &mut LinearMemory,
+    env: &Arc<Mutex<WasiEnv>>,
+) -> i32 {
+    socket_write_iovs(fd, si_data_ptr, si_data_len, so_datalen_ptr, memory, env)
+}
+
+/// sock_shutdown: close one or both directions of a connection.
+pub fn sock_shutdown(fd: u32, how: u32, env: &Arc<Mutex<WasiEnv>>) -> i32 {
+    const SHUT_RD: u32 = 1;
+    const SHUT_WR: u32 = 2;
+
+    let shutdown = match how {
+        SHUT_RD => std::net::Shutdown::Read,
+        SHUT_WR => std::net::Shutdown::Write,
+        n if n == SHUT_RD | SHUT_WR => std::net::Shutdown::Both,
+        _ => return WASI_EINVAL,
+    };
+
+    let stream = match stream_for(fd, env) {
+        Ok(stream) => stream,
+        Err(errno) => return errno,
+    };
+    match stream.shutdown(shutdown) {
+        Ok(()) => WASI_ESUCCESS,
+        // Shutting down a connection the peer already dropped is the state the
+        // caller asked for, not a failure.
+        Err(ref err) if err.kind() == std::io::ErrorKind::NotConnected => WASI_ESUCCESS,
+        Err(err) => io_errno(&err),
+    }
 }
 
 /// path_symlink: create a symbolic link. Return ENOSYS.
@@ -2412,5 +2788,201 @@ mod tests {
         assert_eq!(write_bytes_to(fd, b"xyz", &env, &mut mem), WASI_EDQUOT);
         // 2-byte write → 8 + 2 = 10 → ok.
         assert_eq!(write_bytes_to(fd, b"yo", &env, &mut mem), WASI_ESUCCESS);
+    }
+
+    // ── Sockets ──────────────────────────────────────────
+
+    /// A `WasiEnv` holding one listener on a free port, plus that port.
+    fn env_with_listener() -> (Arc<Mutex<WasiEnv>>, u16) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        (
+            Arc::new(Mutex::new(WasiEnv::new().with_tcp_listener(listener))),
+            port,
+        )
+    }
+
+    /// Write one iovec at `iov_at` pointing at `buf_at`, the shape every
+    /// read and write syscall takes.
+    fn write_iovec(mem: &mut LinearMemory, iov_at: usize, buf_at: usize, len: usize) {
+        mem.write_i32(iov_at, buf_at as i32).unwrap();
+        mem.write_i32(iov_at + 4, len as i32).unwrap();
+    }
+
+    #[test]
+    fn test_sock_accept_hands_back_a_connected_fd() {
+        let (env, port) = env_with_listener();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        let client = std::thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream.write_all(b"ping").unwrap();
+            let mut reply = [0u8; 4];
+            stream.read_exact(&mut reply).unwrap();
+            reply
+        });
+
+        assert_eq!(sock_accept(3, 0, 100, &mut mem, &env), WASI_ESUCCESS);
+        let conn_fd = mem.read_i32(100).unwrap() as u32;
+        assert!(conn_fd > 3, "expected a fresh fd, got {conn_fd}");
+
+        // The guest reads with fd_read and writes with fd_write, which is what
+        // a stock wasm32-wasip1 binary does with an accepted socket.
+        write_iovec(&mut mem, 200, 300, 16);
+        assert_eq!(fd_read(conn_fd, 200, 1, 400, &mut mem, &env), WASI_ESUCCESS);
+        assert_eq!(mem.read_i32(400).unwrap(), 4);
+        assert_eq!(&mem.read_bytes(300, 4).unwrap(), b"ping");
+
+        mem.write_bytes(500, b"pong").unwrap();
+        write_iovec(&mut mem, 600, 500, 4);
+        assert_eq!(
+            fd_write(conn_fd, 600, 1, 700, &mut mem, &env),
+            WASI_ESUCCESS
+        );
+        assert_eq!(mem.read_i32(700).unwrap(), 4);
+
+        assert_eq!(&client.join().unwrap(), b"pong");
+    }
+
+    #[test]
+    fn test_sock_recv_and_send_are_the_same_socket() {
+        let (env, port) = env_with_listener();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        let client = std::thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream.write_all(b"hello").unwrap();
+            let mut reply = [0u8; 2];
+            stream.read_exact(&mut reply).unwrap();
+            reply
+        });
+
+        assert_eq!(sock_accept(3, 0, 100, &mut mem, &env), WASI_ESUCCESS);
+        let conn_fd = mem.read_i32(100).unwrap() as u32;
+
+        write_iovec(&mut mem, 200, 300, 32);
+        assert_eq!(
+            sock_recv(conn_fd, 200, 1, 0, 400, 404, &mut mem, &env),
+            WASI_ESUCCESS
+        );
+        assert_eq!(mem.read_i32(400).unwrap(), 5);
+        assert_eq!(&mem.read_bytes(300, 5).unwrap(), b"hello");
+        assert_eq!(mem.read_u16(404).unwrap(), 0, "no roflags on a plain read");
+
+        mem.write_bytes(500, b"ok").unwrap();
+        write_iovec(&mut mem, 600, 500, 2);
+        assert_eq!(
+            sock_send(conn_fd, 600, 1, 0, 700, &mut mem, &env),
+            WASI_ESUCCESS
+        );
+        assert_eq!(&client.join().unwrap(), b"ok");
+    }
+
+    #[test]
+    fn test_sock_accept_reports_a_non_socket_fd() {
+        let env = make_env();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        // fd 1 is stdout: a descriptor, but not one you can accept on.
+        assert_eq!(sock_accept(1, 0, 100, &mut mem, &env), WASI_ENOTSOCK);
+        assert_eq!(sock_accept(99, 0, 100, &mut mem, &env), WASI_EBADF);
+    }
+
+    #[test]
+    fn test_sock_accept_nonblocking_reports_eagain_with_nobody_waiting() {
+        let (env, _port) = env_with_listener();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        assert_eq!(sock_accept(3, 0x0004, 100, &mut mem, &env), WASI_EAGAIN);
+    }
+
+    #[test]
+    fn test_a_blocked_accept_gives_up_when_the_execution_is_cancelled() {
+        use std::sync::atomic::AtomicBool;
+        // The agent's wall-clock timeout trips this flag, and the executor
+        // only reads it between instructions: never, while accept waits.
+        let (env, _port) = env_with_listener();
+        let flag = Arc::new(AtomicBool::new(false));
+        env.lock().unwrap().set_cancel_token(Some(flag.clone()));
+
+        let waker = flag.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(60));
+            waker.store(true, Ordering::Relaxed);
+        });
+
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        let start = Instant::now();
+        assert_eq!(sock_accept(3, 0, 100, &mut mem, &env), WASI_EINTR);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "cancellation took {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn test_poll_reports_a_listener_ready_and_accept_takes_that_connection() {
+        let (env, port) = env_with_listener();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        let _client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        // Give the connection a moment to land in the accept queue.
+        std::thread::sleep(Duration::from_millis(50));
+
+        // A readiness probe has to take the connection to see it, so the one
+        // it took must be the one the following accept returns rather than a
+        // dropped connection and a hang.
+        let (errno, ready) = poll_fd_readiness(3, WASI_EVENTTYPE_FD_READ, &env);
+        assert_eq!(errno, WASI_ESUCCESS);
+        assert_eq!(ready, 1);
+
+        let start = Instant::now();
+        assert_eq!(sock_accept(3, 0, 100, &mut mem, &env), WASI_ESUCCESS);
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "accept should have taken the parked connection immediately"
+        );
+    }
+
+    #[test]
+    fn test_closing_a_socket_fd_drops_the_connection() {
+        let (env, port) = env_with_listener();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        let client = std::thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let mut buf = [0u8; 1];
+            // Reads zero at EOF, which is what the guest closing its end means.
+            stream.read(&mut buf).unwrap()
+        });
+
+        assert_eq!(sock_accept(3, 0, 100, &mut mem, &env), WASI_ESUCCESS);
+        let conn_fd = mem.read_i32(100).unwrap() as u32;
+        assert!(env.lock().unwrap().close_fd(conn_fd));
+        assert_eq!(client.join().unwrap(), 0);
+
+        // And the fd is gone as far as the guest is concerned.
+        write_iovec(&mut mem, 200, 300, 4);
+        assert_eq!(fd_read(conn_fd, 200, 1, 400, &mut mem, &env), WASI_EBADF);
+    }
+
+    #[test]
+    fn test_sock_shutdown_rejects_a_nonsense_direction() {
+        let (env, port) = env_with_listener();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        let _client = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+
+        assert_eq!(sock_accept(3, 0, 100, &mut mem, &env), WASI_ESUCCESS);
+        let conn_fd = mem.read_i32(100).unwrap() as u32;
+
+        assert_eq!(sock_shutdown(conn_fd, 9, &env), WASI_EINVAL);
+        assert_eq!(sock_shutdown(conn_fd, 2, &env), WASI_ESUCCESS);
+    }
+
+    #[test]
+    fn test_fdstat_calls_a_socket_a_socket() {
+        let (env, _port) = env_with_listener();
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        assert_eq!(fd_fdstat_get(3, 100, &mut mem, &env), WASI_ESUCCESS);
+        assert_eq!(mem.read_u8(100).unwrap(), WASI_FILETYPE_SOCKET_STREAM);
     }
 }

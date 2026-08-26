@@ -130,6 +130,7 @@ fn main() {
         Some(Commands::Exec {
             wasm_file,
             call,
+            tcplisten,
             args,
         }) => {
             debug_println!(
@@ -137,9 +138,11 @@ fn main() {
                 args.len(),
                 call
             );
-            commands::handle_exec_command(wasm_file, call, args.clone()).map_err(|e| match e {
-                WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
-                _ => e,
+            commands::handle_exec_command(wasm_file, call, tcplisten, args.clone()).map_err(|e| {
+                match e {
+                    WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
+                    _ => e,
+                }
             })
         }
 

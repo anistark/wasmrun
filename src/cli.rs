@@ -215,6 +215,14 @@ pub enum Commands {
         )]
         call: Option<String>,
 
+        /// Bind a TCP listener and hand it to the program
+        #[arg(
+            long = "tcplisten",
+            value_name = "ADDR",
+            help = "Bind ADDR (host:port) and pass the listening socket to the program. Repeatable"
+        )]
+        tcplisten: Vec<String>,
+
         /// Arguments to pass to the WASM program (after the WASM file)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
