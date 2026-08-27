@@ -130,6 +130,8 @@ fn main() {
         Some(Commands::Exec {
             wasm_file,
             call,
+            tcplisten,
+            allow_net,
             args,
         }) => {
             debug_println!(
@@ -137,10 +139,11 @@ fn main() {
                 args.len(),
                 call
             );
-            commands::handle_exec_command(wasm_file, call, args.clone()).map_err(|e| match e {
-                WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
-                _ => e,
-            })
+            commands::handle_exec_command(wasm_file, call, tcplisten, allow_net, args.clone())
+                .map_err(|e| match e {
+                    WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
+                    _ => e,
+                })
         }
 
         Some(Commands::Os {
@@ -196,6 +199,7 @@ fn main() {
             verbose,
             auth_config,
             hash_key,
+            allow_net,
         }) => {
             debug_println!(
                 "Processing agent command: host={}, port={}, timeout={}, max_sessions={}, max_memory={}MB, max_fuel={}, max_output={}MB, max_file_size={}MB, max_disk={}MB, max_body={}MB, max_concurrent_exec={}, workers={}",
@@ -233,6 +237,7 @@ fn main() {
                 *verbose,
                 auth_config.as_deref(),
                 hash_key.as_deref(),
+                allow_net,
             )
         }
 

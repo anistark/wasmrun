@@ -31,6 +31,7 @@ pub fn handle_agent_command(
     verbose: bool,
     auth_config: Option<&str>,
     hash_key: Option<&str>,
+    allow_net: &[String],
 ) -> Result<()> {
     // `--hash-key` is a standalone helper: print sha256(key) and exit without
     // starting the server, so operators can populate the auth config.
@@ -54,6 +55,21 @@ pub fn handle_agent_command(
     // 0 = unlimited, matching the resource-limit flag convention.
     let max_body_bytes = (max_body != 0).then(|| max_body as usize * 1024 * 1024);
 
+    // The network every tenant gets unless its own `[tenants.network]` says
+    // otherwise. Nothing, unless the operator asked for something.
+    let default_network = if allow_net.is_empty() {
+        None
+    } else {
+        let network = crate::config::project::NetworkConfig {
+            allow: Some(allow_net.to_vec()),
+            deny: Some(Vec::new()),
+            ..Default::default()
+        };
+        let policy = network.to_policy_config()?;
+        println!("🌐 Default network for tenants: {}", allow_net.join(", "));
+        Some(policy)
+    };
+
     let config = AgentConfig {
         port,
         host: host.to_string(),
@@ -74,6 +90,7 @@ pub fn handle_agent_command(
         auth,
         auth_path,
         npm_registry: npm_registry.to_string(),
+        default_network,
     };
 
     let server = AgentServer::new(config);

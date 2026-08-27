@@ -3,8 +3,10 @@ use super::executor::{Executor, WASI_PROC_EXIT_PREFIX};
 use super::module::Module;
 use super::values::Value;
 use crate::error::{CommandError, Result, WasmrunError};
+use crate::runtime::wasi::network::NetworkAccess;
 use crate::runtime::wasi::{create_wasi_linker, WasiEnv};
 use std::fs;
+use std::net::TcpListener;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -37,6 +39,25 @@ pub fn execute_wasm_file_with_args(
     function: Option<String>,
     args: Vec<String>,
 ) -> Result<i32> {
+    execute_wasm_file_with_sockets(
+        wasm_path,
+        function,
+        args,
+        Vec::new(),
+        NetworkAccess::denied(),
+    )
+}
+
+/// Run a file, first handing the guest any listening sockets the host bound
+/// for it. Preview 1 has no call that creates a listener, so this is the only
+/// way a program in the sandbox can serve.
+pub fn execute_wasm_file_with_sockets(
+    wasm_path: &str,
+    function: Option<String>,
+    args: Vec<String>,
+    listeners: Vec<TcpListener>,
+    network: NetworkAccess,
+) -> Result<i32> {
     if !Path::new(wasm_path).exists() {
         return Err(WasmrunError::from(format!(
             "WASM file not found: {wasm_path}"
@@ -49,7 +70,7 @@ pub fn execute_wasm_file_with_args(
     // (e.g. QuickJS) index into argv[1] for their first real argument.
     let mut wasi_args = vec![wasm_path.to_string()];
     wasi_args.extend(args.iter().cloned());
-    execute_wasm_bytes_with_args(&wasm_bytes, function, wasi_args)
+    execute_wasm_bytes_with(&wasm_bytes, function, wasi_args, listeners, network)
 }
 
 pub fn execute_wasm_bytes(wasm_bytes: &[u8]) -> Result<i32> {
@@ -61,10 +82,31 @@ pub fn execute_wasm_bytes_with_args(
     function: Option<String>,
     args: Vec<String>,
 ) -> Result<i32> {
+    execute_wasm_bytes_with(
+        wasm_bytes,
+        function,
+        args,
+        Vec::new(),
+        NetworkAccess::denied(),
+    )
+}
+
+pub fn execute_wasm_bytes_with(
+    wasm_bytes: &[u8],
+    function: Option<String>,
+    args: Vec<String>,
+    listeners: Vec<TcpListener>,
+    network: NetworkAccess,
+) -> Result<i32> {
     let module = Module::parse(wasm_bytes)
         .map_err(|e| WasmrunError::from(format!("Failed to parse WASM module: {e}")))?;
 
-    let wasi_env = Arc::new(Mutex::new(WasiEnv::new().with_args(args.clone())));
+    let mut env = WasiEnv::new().with_args(args.clone());
+    env.set_network(network);
+    for listener in listeners {
+        env = env.with_tcp_listener(listener);
+    }
+    let wasi_env = Arc::new(Mutex::new(env));
     let wasi_linker = create_wasi_linker(wasi_env.clone());
 
     let mut executor = Executor::new_with_linker(module, wasi_linker)

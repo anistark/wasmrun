@@ -215,6 +215,22 @@ pub enum Commands {
         )]
         call: Option<String>,
 
+        /// Bind a TCP listener and hand it to the program
+        #[arg(
+            long = "tcplisten",
+            value_name = "ADDR",
+            help = "Bind ADDR (host:port) and pass the listening socket to the program. Repeatable"
+        )]
+        tcplisten: Vec<String>,
+
+        /// Let the program reach the network, one rule at a time
+        #[arg(
+            long = "allow-net",
+            value_name = "RULE",
+            help = "Allow outbound connections matching RULE (host, *.domain, or CIDR, with an optional :port). Repeatable; without it the program has no network"
+        )]
+        allow_net: Vec<String>,
+
         /// Arguments to pass to the WASM program (after the WASM file)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -429,6 +445,14 @@ pub enum Commands {
             help = "Print sha256(KEY) for use in the auth config, then exit"
         )]
         hash_key: Option<String>,
+
+        /// Default network for tenants without their own policy
+        #[arg(
+            long = "allow-net",
+            value_name = "RULE",
+            help = "Allow outbound connections matching RULE for tenants with no [tenants.network] table. Repeatable; without it tenants have no network"
+        )]
+        allow_net: Vec<String>,
     },
 
     /// Plugin management commands
