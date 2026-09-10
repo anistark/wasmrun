@@ -93,7 +93,7 @@ Wasmrun has **four distinct execution modes**. They are separate systems with se
 **Philosophy:** A REST API that gives AI agents isolated sandboxes to execute code in. Exec mode's interpreter, wrapped in a long-lived HTTP server with sessions, resource limits, and multi-tenancy. No Docker, no daemon, no browser.
 
 - **Trigger:** `wasmrun agent --port 8430`
-- **What it does:** Starts an HTTP server → creates per-session sandboxes (isolated work dir + WASI env) → accepts code (shell command, JS/TS source, multi-file project, or `.wasm`) over REST → runs it on the exec interpreter → returns structured JSON (stdout, stderr, exit code, duration)
+- **What it does:** Starts an HTTP server → creates per-session sandboxes (isolated work dir + WASI env) → accepts code (shell command, JS/TS source, multi-file project, or `.wasm`) over REST → runs it on the exec interpreter → returns structured JSON (stdout, stderr, exit code, duration). A session can also run a **long-lived server** (`POST /sessions/:id/serve`), where the host binds a loopback port and hands the guest the listener as an fd
 - **Key files:**
   - `src/commands/agent.rs`: command handler
   - `src/agent/server.rs`: HTTP server, routing, exec orchestration
@@ -102,6 +102,7 @@ Wasmrun has **four distinct execution modes**. They are separate systems with se
   - `src/agent/esm.rs`: ESM → CommonJS lowering for vendored packages
   - `src/agent/vendor.rs`: npm dependency resolution and vendoring
   - `src/agent/shell.rs`: shell emulation over the session filesystem
+  - `src/agent/serve.rs`: long-lived servers in a session (bind, spawn, stop)
   - `src/agent/auth.rs`, `limits.rs`, `metrics.rs`, `tools.rs`, `api.rs`
 - **Executes with:** the exec-mode interpreter (`runtime/core/` + `runtime/wasi/`). A `.wasm` behaves identically under `wasmrun exec` and `POST /exec`
 - **Uses plugins:** No
@@ -227,6 +228,7 @@ src/
 │   ├── esm.rs           #   ESM → CommonJS lowering for vendored packages
 │   ├── vendor.rs        #   npm resolution and vendoring
 │   ├── shell.rs         #   Shell emulation over the session filesystem
+│   ├── serve.rs         #   Long-lived servers in a session (bind, spawn, stop)
 │   ├── auth.rs          #   API keys and tenant isolation
 │   ├── limits.rs        #   Resource limits (memory, fuel, output, disk)
 │   ├── metrics.rs       #   Metrics endpoint and access log
@@ -307,17 +309,18 @@ docs/docs/
 │   ├── index.md          #   Overview
 │   ├── features.md       #   Feature list
 │   ├── wasi.md           #   WASI support details
+│   ├── networking.md     #   Sockets, --tcplisten, --allow-net, tenant policy
 │   └── usage/            #   Running, arguments, function calls
 ├── os/                   # OS Mode documentation
 │   ├── index.md          #   Overview
 │   ├── features.md       #   Feature list
-│   ├── network-isolation.md
-│   ├── port-forwarding.md
+│   ├── network-isolation.md   # OS mode network policy ([os.network])
+│   ├── port-forwarding.md     # Where a sandbox can actually serve
 │   ├── public-tunneling.md
 │   └── usage/            #   Running, language selection, server options
 ├── agent/                # Agent Mode documentation
 │   ├── index.md          #   Overview, CLI flags, auth, tenancy
-│   └── usage/            #   Sessions, execution, files, environment, observability
+│   └── usage/            #   Sessions, execution, files, environment, observability, serving
 ├── plugins/              # Plugin system (Server Mode)
 ├── contributing/         # Development guides
 ├── installation.md
@@ -403,7 +406,7 @@ pnpm typecheck      # TypeScript check
 
 - **Unit tests** live alongside source code (standard Rust `#[cfg(test)]` modules).
 - **Integration tests** are in `tests/` (currently `tests/exec_integration_tests.rs`).
-- **Test count:** ~750+ tests across unit and integration suites.
+- **Test count:** ~950 tests across unit and integration suites.
 - **Network-gated tests** are `#[ignore]`d so the suite stays offline-friendly; run them with `cargo test -- --ignored` (use `--test-threads=1` the first time, while `~/.wasmrun/runtimes` is cold).
 - Always run `cargo test` before committing.
 - The CI expects zero clippy warnings: `cargo clippy --all-targets --all-features -- -D warnings`.
@@ -478,6 +481,8 @@ wasmrun plugin list|install|update|uninstall  # Plugin management
 # Exec Mode
 wasmrun exec <file.wasm> [args]   # Execute WASM natively with interpreter
 wasmrun exec <file.wasm> --call <func> [args]  # Call specific exported function
+wasmrun exec --tcplisten 127.0.0.1:8080 <file.wasm>  # Bind a port, pass it in as fd 3
+wasmrun exec --allow-net "api.example.com:443" <file.wasm>  # Allow outbound, one rule at a time
 
 # OS Mode
 wasmrun os <path>                 # Run project in browser-based OS environment
@@ -488,6 +493,8 @@ wasmrun os <path> --watch --port 3000  # With file watching and custom port
 wasmrun agent                     # Start the REST sandbox API (default port 8430)
 wasmrun agent --port 8430 --max-sessions 100  # With explicit port and session cap
 wasmrun agent --auth ./tenants.toml  # Enable API-key auth and tenant isolation
+wasmrun agent --max-servers 8        # Cap sessions running a server at once
+wasmrun agent --allow-net "api.example.com:443"  # Default tenant network policy
 ```
 
 ---
@@ -507,6 +514,8 @@ wasmrun agent --auth ./tenants.toml  # Enable API-key auth and tenant isolation
 | `src/commands/agent.rs` | Agent | Agent mode entry point |
 | `src/agent/server.rs` | Agent | Agent HTTP server, routing, exec orchestration |
 | `src/agent/session.rs` | Agent | Session lifecycle and sandbox isolation |
+| `src/agent/serve.rs` | Agent | Long-lived servers in a session; where a loopback port is bound |
+| `src/runtime/wasi/network.rs` | Exec/Agent | Egress policy: what a sandbox may connect to |
 | `src/runtime/core/executor.rs` | Exec | The WASM interpreter (~4400 lines) |
 | `src/runtime/core/module.rs` | Exec/Shared | WASM binary parser |
 | `src/runtime/wasi/syscalls.rs` | Exec | WASI syscall implementations |
@@ -592,6 +601,9 @@ wasmrun agent --auth ./tenants.toml  # Enable API-key auth and tenant isolation
 - **Two different WASI systems exist:** `src/runtime/wasi/` is for Exec and Agent Mode (host functions linked to the interpreter). `src/runtime/wasi_fs.rs` is for OS Mode (virtual filesystem in browser). Don't confuse them.
 - **Three different "server" concepts:** Server Mode's HTTP server (`src/server/`) serves WASM files for browser execution. OS Mode's HTTP server (`src/runtime/os_server.rs`) serves the OS UI and APIs. Agent Mode's HTTP server (`src/agent/server.rs`) serves the REST sandbox API. They are independent.
 - **A WASI syscall change affects two modes.** `src/runtime/wasi/` is reached by `wasmrun exec` and by every agent-mode execution, so test both when touching it.
+- **A guest never binds its own port.** WASI Preview 1 has no call that creates a socket, so the *host* binds and passes the listener in as an fd (`--tcplisten` in exec mode, `POST /sessions/:id/serve` in agent mode). `sock_bind` and `sock_listen` are deliberately unimplemented. Don't add them without the `bind_ports` half of the policy meaning something first, or a sandbox gains the ability to choose a port it was never granted.
+- **The listener fd is not always 3.** Preopens are handed out in order, so a session that preopens its work directory first puts the listener on 4. Guests read `WASMHUB_LISTEN_FD`; host code should use the fd returned by `WasiEnv::add_tcp_listener` rather than assuming one.
+- **A sandbox has no network unless configured.** `NetworkAccess::denied()` is the default in both modes; egress comes from `--allow-net` or a tenant's `[tenants.network]` table. Don't "fix" a failing connection by widening the default.
 
 ---
 

@@ -1,266 +1,119 @@
 ---
 sidebar_position: 5
-title: Network Isolation
+title: Network Policy
 ---
 
-# Network Isolation
+# Network Policy
 
-Wasmrun provides per-process network namespace isolation for WASM processes, ensuring each process runs in its own isolated network environment with full socket API support.
+Code running in a wasmrun sandbox has no network unless someone gives it one. When it does, every connection it opens is checked against a policy the host configured, and the sandbox has no way to see or change that policy.
 
-## Overview
+:::info Where this applies
+This page covers **OS mode**, where a project runs in the browser VM and its sockets leave through a local proxy.
 
-Network isolation provides:
-- **Per-process namespaces** preventing cross-process interference
-- **Full WASI socket API** implementation
-- **Isolated network stacks** for each WASM process
-- **Security** through namespace separation
+For `wasmrun exec` and agent mode, where wasmrun runs the program itself, see [exec networking](../exec/networking.md). The policy syntax on this page is shared; the enforcement point is not.
+:::
 
-This feature was introduced in v0.15.x and is part of the OS Mode capabilities.
+## What is implemented today
 
-## WASI Socket API Support
+Two halves, and only one of them is connected in OS mode:
 
-Wasmrun implements the complete WASI socket API:
+| Piece | State |
+|---|---|
+| The [wasmnet](https://github.com/anistark/wasmnet) proxy runs beside the OS server, under the project's policy | Working |
+| `[os.network]` in `wasmrun.toml` configures that policy, and a malformed rule stops the server starting | Working |
+| The browser's WASI shim calls the proxy, so a program in the VM can actually open a socket | **Not yet** |
 
-### Socket Operations
-- `sock_open` - Create new sockets
-- `sock_bind` - Bind socket to address
-- `sock_listen` - Listen for connections
-- `sock_accept` - Accept incoming connections
-- `sock_connect` - Connect to remote hosts
-- `sock_send` - Send data
-- `sock_recv` - Receive data
-- `sock_shutdown` - Shutdown socket
+The last row is the one that matters to a running project. Until it lands, a program inside the browser VM cannot open a socket at all: the proxy is up and speaks its protocol, but nothing in the VM talks to it. Progress is tracked in [wasmrun#99](https://github.com/anistark/wasmrun/issues/99).
 
-### Supported Socket Types
-- **TCP sockets** for reliable connections
-- **UDP sockets** for datagram communication
-- **Unix domain sockets** (local communication)
+The blocker is not the proxy. The WASI shim runs `_start()` synchronously on the browser's main thread, so an imported function has to return before the event loop turns again, and a socket call has nothing to wait on. Fixing it means giving the shim a way to suspend, either with JSPI or by moving the VM into a worker with `SharedArrayBuffer` and `Atomics.wait`.
 
-### DNS Resolution
-- `getaddrinfo` - Hostname to IP address resolution
-  - IPv4 and IPv6 address resolution
-  - Integration with host DNS resolver (respects `/etc/resolv.conf`)
-  - Support for numeric and string port formats
-  - Comprehensive error handling and validation
+## The proxy
 
-## How It Works
+Sockets in a browser do not exist. A WASM program in the VM that wants a TCP connection has to have one opened on its behalf, somewhere that can open one, and that is what the proxy is for: it runs on the host beside the OS server, accepts a WebSocket from the VM, and makes the real connection under the policy below.
 
-### Network Namespace Creation
+It starts and stops with `wasmrun os`, and picks its own port:
 
-When a WASM process starts:
-1. **New namespace** created for the process
-2. **Isolated network stack** initialized
-3. **Loopback interface** configured
-4. **Socket syscalls** routed to the namespace
+```
+OS server   http://localhost:8420
+wasmnet     http://localhost:8440     (os_port + 20, scanning up if taken)
+```
 
-### Process Isolation
+`GET /api/network/status` reports the URL, since the port is chosen at startup rather than fixed:
 
-Each process gets:
-- Its own network interfaces
-- Separate routing tables
-- Isolated port bindings
-- Independent firewall rules
+```sh
+curl http://localhost:8420/api/network/status
+```
 
-## Usage
-
-### Basic Network Operations
-
-```rust
-// Rust example with WASI sockets
-use std::net::{TcpListener, TcpStream};
-
-fn main() {
-    // Listen on isolated namespace
-    let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
-    
-    for stream in listener.incoming() {
-        let stream = stream.unwrap();
-        handle_connection(stream);
-    }
+```json
+{
+  "running": true,
+  "url": "ws://127.0.0.1:8440"
 }
 ```
 
-```sh
-# Run with network isolation
-wasmrun os ./network-app
-```
+The proxy binds loopback only. It opens connections on behalf of whoever reaches it, so it is not something to expose.
 
-### DNS Resolution Example
+## Configuring the policy
 
-```rust
-// Rust example with DNS resolution
-use std::net::ToSocketAddrs;
-
-fn main() {
-    // Resolve hostname to IP addresses
-    let addrs: Vec<_> = "google.com:443"
-        .to_socket_addrs()
-        .unwrap()
-        .collect();
-
-    println!("Resolved addresses: {:?}", addrs);
-
-    // Connect to resolved address
-    let stream = std::net::TcpStream::connect(&addrs[0]).unwrap();
-    println!("Connected to {}", addrs[0]);
-}
-```
-
-```sh
-# Run with DNS resolution support
-wasmrun os ./dns-app
-```
-
-### OS Mode Integration
-
-Network isolation is automatically enabled in OS mode:
-
-```sh
-# Node.js server with isolated network
-wasmrun os ./node-server --language nodejs
-
-# Python web app with isolated network
-wasmrun os ./python-app --language python
-```
-
-## Security Benefits
-
-### Prevents Cross-Process Interference
-
-Without isolation:
-```
-Process A binds to :8080 → Success
-Process B binds to :8080 → Port conflict error
-```
-
-With isolation:
-```
-Process A (namespace 1) binds to :8080 → Success
-Process B (namespace 2) binds to :8080 → Success (different namespace)
-```
-
-### Attack Surface Reduction
-- Processes can't sniff other processes' traffic
-- Network attacks limited to single namespace
-- Easier to apply per-process firewall rules
-
-## Port Forwarding
-
-To expose services running in isolated namespaces to the host or external networks, use the port forwarding feature:
-
-```sh
-# Forward host port to WASM process port
-wasmrun os ./app --forward 8080:3000
-```
-
-See [Port Forwarding](./port-forwarding.md) for details.
-
-## Configuration
-
-### Default Isolation
-
-Network isolation is enabled by default in OS mode:
-
-```sh
-# Isolation automatically enabled
-wasmrun os ./app
-```
-
-### Custom Network Settings
-
-Configure network behavior in `.wasmrun.toml`:
+Put an `[os.network]` table in a `wasmrun.toml` at your project root:
 
 ```toml
-[network]
-# Enable/disable network isolation (default: true)
-isolation = true
+[os.network]
+# Hosts and ranges the sandbox may reach. A rule is a hostname, a
+# "*.domain" wildcard, or a CIDR, each with an optional ":port".
+allow = ["api.example.com:443", "*.githubusercontent.com"]
 
-# Namespace configuration
-namespace_prefix = "wasmrun"
+# Ranges it may never reach, checked before the allow list.
+deny = ["10.0.0.0/8", "192.168.0.0/16"]
 
-# Network interface settings
-loopback_enabled = true
+# Ports a program in the VM may bind, once inbound sockets are wired up.
+bind_ports = "3000-3999,8080"
+
+# Ceilings.
+max_connections = 100
+max_bandwidth_mbps = 10
+connection_timeout_secs = 30
 ```
 
-## Compatibility
+Every field falls back on its own, so a table that sets only `allow` keeps the default `deny`. The default policy blocks RFC1918, loopback and link-local, which is what stops a sandboxed program from reaching your router, your database or a cloud metadata endpoint.
 
-### Supported Platforms
-- **Linux** - Full support with kernel namespaces
-- **macOS** - Limited support (simulated isolation)
-- **Windows** - Limited support (simulated isolation)
+`wasmrun.toml` at the project root is the project's own config. It is not `~/.wasmrun/config.toml`, which is the global one, and not the `wasmrun.toml` inside a plugin directory, which is a plugin manifest.
 
-### Requirements
-- Linux kernel 3.8+ for full namespace support
-- Root/CAP_NET_ADMIN for namespace creation (or unprivileged user namespaces)
+### A rule you believe in and do not have
 
-## Troubleshooting
+Rules are validated before the proxy binds anything, and a bad one is an error rather than a warning. This is deliberate. The policy engine parses a rule as a CIDR first and treats anything else as a *hostname*, so:
 
-### Permission Denied
-
-```sh
-# If namespace creation fails due to permissions
-sudo wasmrun os ./app
-
-# Or configure unprivileged user namespaces (Linux)
-sudo sysctl -w kernel.unprivileged_userns_clone=1
+```toml
+deny = ["10.0.0/8"]   # refused: one octet short of a range
 ```
 
-### Connection Refused
+would quietly become a hostname that no address ever matches. You would have a deny rule that reads correctly, appears in your config, and blocks nothing. A bare IP has the same problem and is refused with the CIDR you meant:
 
-```sh
-# Ensure service is listening in the namespace
-# Check logs for bind errors
-wasmrun os ./app --verbose
+```toml
+deny = ["203.0.113.7"]      # refused
+deny = ["203.0.113.7/32"]   # what to write instead
 ```
 
-### Port Conflicts
+An unknown key inside `[os.network]` is also an error, so a typo cannot silently disable a rule. Other tables in the file are ignored, so the config can grow later.
 
-If you see port conflicts even with isolation:
-- Check if isolation is actually enabled
-- Verify namespace creation succeeded
-- Review logs with `--verbose`
+A policy that cannot be honored stops OS mode before it binds anything. The file was written to be obeyed, and running a project under settings nobody chose is worse than refusing to run it.
 
-## Examples
+### How a rule is matched
 
-### HTTP Server
+- A bare domain covers its subdomains: `example.com` allows `api.example.com`. It is equivalent to `*.example.com`.
+- A rule's port is enforced: `api.example.com:443` opens that port and no other. A rule without a port covers every port.
+- Ports work on CIDR and bare-IP rules too: `10.0.0.0/8:22`.
+- A trailing dot does not escape a rule: `evil.com.` is denied by `evil.com`.
+- Deny is checked before allow.
 
-```javascript
-// Node.js server in isolated namespace
-const http = require('http');
+## What this is not
 
-const server = http.createServer((req, res) => {
-    res.writeHead(200);
-    res.end('Hello from isolated namespace!');
-});
+This page used to describe per-process kernel network namespaces, `CAP_NET_ADMIN`, and a `[network]` table with `isolation`, `namespace_prefix` and `loopback_enabled` keys. None of that was ever implemented and none of those keys are read by anything.
 
-server.listen(3000, () => {
-    console.log('Server running on port 3000');
-});
-```
+Isolation here is a **policy** enforced at the point where a connection is opened, not a kernel namespace. There is no `--forward` flag and no per-process network stack. What a sandboxed program can reach is decided by the rules above, and nothing else.
 
-```sh
-# Run with network isolation
-wasmrun os ./server --language nodejs
+## See also
 
-# Access via port forwarding
-wasmrun os ./server --language nodejs --forward 8080:3000
-```
-
-### Multiple Isolated Processes
-
-```sh
-# Terminal 1: Process A on port 8080 in namespace A
-wasmrun os ./app-a --forward 8080:8080
-
-# Terminal 2: Process B on port 8080 in namespace B
-wasmrun os ./app-b --forward 8081:8080
-
-# No port conflict - different namespaces!
-```
-
-## See Also
-
-- [OS Mode](./) - Full OS mode documentation
-- [Port Forwarding](./port-forwarding.md) - Exposing isolated services
-- [WASI Support](../exec/wasi.md) - WASI socket APIs
-- [OS Mode Usage](./usage/running.md) - OS mode command reference
+- [Exec and agent networking](../exec/networking.md): sockets where wasmrun runs the program itself
+- [Public tunneling](./public-tunneling.md): exposing the OS mode server itself
+- [wasmrun#99](https://github.com/anistark/wasmrun/issues/99): the browser socket bridge

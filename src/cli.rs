@@ -227,7 +227,7 @@ pub enum Commands {
         #[arg(
             long = "allow-net",
             value_name = "RULE",
-            help = "Allow outbound connections matching RULE (host, *.domain, or CIDR, with an optional :port). Repeatable; without it the program has no network"
+            help = "Allow outbound connections matching RULE (host or *.domain, each covering subdomains, or CIDR, with an optional :port). Repeatable; without it the program has no network"
         )]
         allow_net: Vec<String>,
 
@@ -387,6 +387,14 @@ pub enum Commands {
             help = "Maximum concurrent executions across all sessions (0 = unlimited)"
         )]
         max_concurrent_exec: usize,
+
+        /// Maximum sessions serving at once (default: 8, 0 = unlimited)
+        #[arg(
+            long,
+            default_value_t = 8,
+            help = "Maximum sessions running a server at once (0 = unlimited). Counted apart from --max-concurrent-exec, since a server holds its thread and port for as long as it runs"
+        )]
+        max_servers: usize,
 
         /// Maximum HTTP request-handling threads (default: 0 = auto)
         #[arg(

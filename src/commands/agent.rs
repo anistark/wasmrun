@@ -23,6 +23,7 @@ pub fn handle_agent_command(
     max_disk: u32,
     max_body: u32,
     max_concurrent_exec: usize,
+    max_servers: usize,
     workers: usize,
     shutdown_timeout: u64,
     max_cache_size: u64,
@@ -90,6 +91,7 @@ pub fn handle_agent_command(
         auth,
         auth_path,
         npm_registry: npm_registry.to_string(),
+        max_servers,
         default_network,
     };
 

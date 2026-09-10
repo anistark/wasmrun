@@ -1,295 +1,68 @@
 ---
 sidebar_position: 6
-title: Port Forwarding
+title: Serving a Port
 ---
 
-# Port Forwarding
+# Serving a Port
 
-Port forwarding enables external access to services running in isolated WASM network namespaces by mapping host ports to process ports.
+A program in a sandbox that binds a port and answers requests on it. Where this works depends on which mode is running the program, and OS mode is the one where it does not work yet.
 
-## Overview
+## OS mode: not yet
 
-Port forwarding provides:
-- **Host-to-namespace** port mapping
-- **External access** to isolated services
-- **Multiple port** forwarding support
-- **Automatic setup** with OS mode
+There is no `--forward` flag and no port forwarding in OS mode. A project running in the browser VM cannot bind a port, so there is nothing to forward.
 
-This feature works in conjunction with [Network Isolation](./network-isolation.md) to expose services running in isolated namespaces.
+This page previously documented a `--forward HOST_PORT:PROCESS_PORT` flag with examples for Express, Flask and PostgreSQL. None of it was implemented; the flag has never existed.
 
-## Basic Usage
+What is missing is the browser socket bridge, described in [Network Policy](./network-isolation.md). The proxy that would carry those sockets is running, and the WASI shim in the browser does not call it yet. Tracked in [wasmrun#99](https://github.com/anistark/wasmrun/issues/99).
 
-### Single Port Forward
+## What works today
 
-```sh
-# Forward host port 8080 to process port 3000
-wasmrun os ./app --forward 8080:3000
+Both of these run the program on wasmrun's own interpreter rather than in a browser, which is why sockets are available there and not here.
 
-# Access at http://localhost:8080
-# Maps to process listening on port 3000
-```
+### Agent mode: a server in a session
 
-### Multiple Ports
+`POST /sessions/:id/serve` starts a long-lived program and binds a loopback port for it. The response carries the port, so nothing has to agree on a number in advance:
 
 ```sh
-# Forward multiple ports
-wasmrun os ./app --forward 8080:3000 --forward 8081:3001
+curl -X POST http://localhost:8430/api/v1/sessions/$SESSION/serve \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "source": "const http = require(\"http\"); http.createServer((req, res) => res.end(\"hello\")).listen();",
+    "language": "javascript"
+  }'
 ```
 
-### Same Port
-
-```sh
-# Forward same port number
-wasmrun os ./app --forward 3000:3000
-```
-
-## Syntax
-
-The `--forward` flag accepts the format:
-
-```
---forward <HOST_PORT>:<PROCESS_PORT>
-```
-
-Where:
-- **HOST_PORT**: Port on the host machine (external access)
-- **PROCESS_PORT**: Port in the WASM process namespace
-
-## Use Cases
-
-### Web Servers
-
-```javascript
-// Express server listening on port 3000
-const express = require('express');
-const app = express();
-
-app.get('/', (req, res) => {
-    res.send('Hello from WASM process!');
-});
-
-app.listen(3000);
+```json
+{ "server_id": "srv_0a1b2c3d4e5f", "addr": "127.0.0.1:53412", "port": 53412 }
 ```
 
 ```sh
-# Forward host :8080 to process :3000
-wasmrun os ./node-server --language nodejs --forward 8080:3000
-
-# Access at http://localhost:8080
+curl http://127.0.0.1:53412
+# hello
 ```
 
-### API Services
+See [Serving from a session](../agent/usage/serving.md) for the full lifecycle.
 
-```python
-# Flask API on port 5000
-from flask import Flask
-app = Flask(__name__)
+### Exec mode: a bound port on the command line
 
-@app.route('/api/status')
-def status():
-    return {'status': 'running'}
-
-if __name__ == '__main__':
-    app.run(port=5000)
-```
+`wasmrun exec --tcplisten` binds a port on the host and hands the listening socket to the program:
 
 ```sh
-# Expose API on host port 3000
-wasmrun os ./api --language python --forward 3000:5000
-
-# Access at http://localhost:3000/api/status
+wasmrun exec --tcplisten 127.0.0.1:8080 ./server.wasm
 ```
 
-### Database Services
+See [exec networking](../exec/networking.md).
 
-```sh
-# PostgreSQL in isolated namespace
-wasmrun os ./postgres-app --forward 5432:5432
+## Why the host binds the port
 
-# Connect from host
-psql -h localhost -p 5432 -U user database
-```
+In both cases the *host* binds and the program is handed the result. This is not a limitation to work around, it is the design.
 
-## Multiple Process Example
+WASI Preview 1 has no call that creates a socket. A guest cannot ask for a port, which means it cannot ask for one it should not have: a listener arrives the way a preopened directory does, already decided. A program that wants to serve calls `accept` on what it was given.
 
-Run multiple isolated processes on the same internal port, exposed via different host ports:
+wasmhub's `net` and `http` modules read the descriptor number from `WASMHUB_LISTEN_FD` and the address from `WASMHUB_LISTEN_ADDR`, which is what makes an ordinary `server.listen()` and `server.address()` work in JavaScript without the program knowing any of this happened.
 
-```sh
-# Terminal 1: Service A (namespace A, internal :8080)
-wasmrun os ./service-a --forward 3000:8080
+## See also
 
-# Terminal 2: Service B (namespace B, internal :8080)
-wasmrun os ./service-b --forward 3001:8080
-
-# Terminal 3: Service C (namespace C, internal :8080)
-wasmrun os ./service-c --forward 3002:8080
-
-# Access each service independently
-curl http://localhost:3000  # Service A
-curl http://localhost:3001  # Service B
-curl http://localhost:3002  # Service C
-```
-
-## Security Considerations
-
-### Binding to Localhost
-
-By default, forwarded ports bind to localhost only:
-- Safe for local development
-- Not accessible from external networks
-- Requires explicit configuration for external access
-
-### Firewall Rules
-
-Port forwarding respects host firewall rules:
-```sh
-# Host firewall still controls external access
-# Even if forwarded, external access may be blocked
-```
-
-### Process Isolation
-
-Each process is isolated:
-- Can't interfere with other processes
-- Separate network stacks
-- Independent port bindings
-
-## Configuration
-
-### Via CLI
-
-```sh
-# Command-line forwarding
-wasmrun os ./app \
-    --forward 8080:3000 \
-    --forward 8081:3001
-```
-
-### Via Configuration File
-
-```toml
-# .wasmrun.toml
-[network]
-# Port forwarding rules
-forwards = [
-    "8080:3000",
-    "8081:3001"
-]
-```
-
-```sh
-# Reads from .wasmrun.toml
-wasmrun os ./app
-```
-
-## Combined with Live Reload
-
-Port forwarding works with live reload for development:
-
-```sh
-# Forward ports + watch for changes
-wasmrun os ./app --forward 8080:3000 --watch
-
-# Server auto-restarts on file changes
-# Port forwarding maintained across restarts
-```
-
-## Troubleshooting
-
-### Port Already in Use
-
-```sh
-# Error: host port 8080 already in use
-# Solution: Use different host port
-wasmrun os ./app --forward 8081:3000
-```
-
-### Connection Refused
-
-```sh
-# Ensure process is listening
-# Check process logs
-wasmrun os ./app --forward 8080:3000 --verbose
-
-# Verify port forwarding is active
-netstat -an | grep 8080
-```
-
-### Firewall Blocking
-
-```sh
-# On Linux, check firewall rules
-sudo iptables -L -n
-
-# On macOS, check firewall settings
-sudo pfctl -s rules
-```
-
-## Platform Support
-
-### Linux
-✅ Full support with iptables/nftables
-
-### macOS
-✅ Full support with pf (packet filter)
-
-### Windows
-⚠️ Limited support (development mode only)
-
-## Examples
-
-### Node.js Express API
-
-```javascript
-// server.js
-const express = require('express');
-const app = express();
-
-app.get('/api/hello', (req, res) => {
-    res.json({ message: 'Hello from isolated process!' });
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
-```
-
-```sh
-# Forward and run
-wasmrun os . --language nodejs --forward 8080:3000
-
-# Test API
-curl http://localhost:8080/api/hello
-```
-
-### Python Flask App
-
-```python
-# app.py
-from flask import Flask, jsonify
-
-app = Flask(__name__)
-
-@app.route('/health')
-def health():
-    return jsonify({'status': 'healthy'})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-```
-
-```sh
-# Forward and run
-wasmrun os . --language python --forward 3000:5000
-
-# Check health
-curl http://localhost:3000/health
-```
-
-## See Also
-
-- [Network Isolation](./network-isolation.md) - Network namespace details
-- [OS Mode](./) - Full OS mode documentation
-- [OS Mode Usage](./usage/running.md) - Command reference
-- Example: [Node.js Express API](https://github.com/anistark/wasmrun/tree/main/examples/nodejs-express-api) - Complete example
+- [Network Policy](./network-isolation.md): what a sandbox may connect out to
+- [Serving from a session](../agent/usage/serving.md): the agent-mode lifecycle
+- [Exec networking](../exec/networking.md): `--tcplisten` and `--allow-net`

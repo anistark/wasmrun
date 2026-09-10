@@ -307,7 +307,7 @@ Bare specifiers resolve through a `node_modules/<name>` tree, so a project can s
 
 ## JavaScript Runtime Capabilities
 
-JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/) (QuickJS-based, WASI; v0.4.2+), fetched once and cached. Supported surface:
+JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io/wasmhub/runtimes/nodejs/) (QuickJS-based, WASI; v0.5.0+), fetched once and cached. Supported surface:
 
 **Module system (CommonJS):**
 - Relative and absolute `require()` (`./x`, `../x`), with `.js`/`.json` extension probing, `index.*` resolution, and `package.json` `main`

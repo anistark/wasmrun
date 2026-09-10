@@ -200,6 +200,13 @@ pub struct Session {
     /// `None` in open mode (no auth config). Cross-tenant access is rejected
     /// as `NotFound` to hide the session's existence.
     owner: Option<String>,
+    /// The session's long-lived server, if one was started.
+    ///
+    /// At most one: wasmhub's runtime gives a process a single socket, so a
+    /// second `listen()` inside the same guest fails `EADDRINUSE` anyway, and
+    /// a cap the API states beats one the guest discovers. Dropping the
+    /// session drops this, which cancels the execution and frees the port.
+    server: Mutex<Option<crate::agent::serve::RunningServer>>,
 }
 
 impl Session {
@@ -234,6 +241,7 @@ impl Session {
             owns_work_dir: true,
             limits,
             owner,
+            server: Mutex::new(None),
         })
     }
 
@@ -282,6 +290,7 @@ impl Session {
             owns_work_dir: false, // test manages cleanup
             limits,
             owner: None,
+            server: Mutex::new(None),
         })
     }
 
@@ -328,6 +337,49 @@ impl Session {
     /// Get a clone of the WASI environment Arc for use with the executor.
     pub fn wasi_env(&self) -> Arc<Mutex<WasiEnv>> {
         self.wasi_env.clone()
+    }
+
+    /// Install this session's server, replacing any finished one.
+    ///
+    /// A server that is still running is *not* replaced: the caller gets it
+    /// back so the handler can answer 409 rather than silently orphaning a
+    /// bound port. One that has exited is cleared out of the way, so a crashed
+    /// server never blocks the next start.
+    pub fn set_server(
+        &self,
+        server: crate::agent::serve::RunningServer,
+    ) -> Result<(), crate::agent::serve::RunningServer> {
+        let mut slot = match self.server.lock() {
+            Ok(slot) => slot,
+            Err(_) => return Err(server),
+        };
+        if slot.as_ref().is_some_and(|s| s.is_running()) {
+            return Err(server);
+        }
+        *slot = Some(server);
+        Ok(())
+    }
+
+    /// Read something out of this session's server, if it has one.
+    pub fn with_server<T>(
+        &self,
+        f: impl FnOnce(&crate::agent::serve::RunningServer) -> T,
+    ) -> Option<T> {
+        self.server.lock().ok()?.as_ref().map(f)
+    }
+
+    /// Stop and forget this session's server. Reports whether there was one.
+    pub fn take_server(&self) -> bool {
+        match self.server.lock() {
+            Ok(mut slot) => match slot.take() {
+                Some(server) => {
+                    server.stop();
+                    true
+                }
+                None => false,
+            },
+            Err(_) => false,
+        }
     }
 
     /// Record an access — resets the idle timeout clock.
@@ -386,6 +438,10 @@ impl Session {
 
     /// Clean up session resources (delete work directory).
     fn cleanup(&self) {
+        // Stop the server before the directory goes: it is executing out of
+        // that directory, and an expired session must not keep answering on a
+        // port after the files behind it have been removed.
+        self.take_server();
         if self.owns_work_dir && self.work_dir.exists() {
             let _ = std::fs::remove_dir_all(&self.work_dir);
         }
@@ -611,6 +667,30 @@ impl SessionManager {
             .collect();
         rows.sort_by_key(|(created, _)| std::cmp::Reverse(*created));
         rows.into_iter().map(|(_, r)| r).collect()
+    }
+
+    /// How many sessions are currently serving, across every tenant.
+    ///
+    /// Counted by asking each session rather than kept as a running total: a
+    /// server can end on its own at any moment, and a counter that only the
+    /// start and stop paths touch would drift every time one did.
+    pub fn running_servers(&self) -> usize {
+        let Ok(sessions) = self.sessions.read() else {
+            return 0;
+        };
+        sessions
+            .values()
+            .filter(|s| s.with_server(|srv| srv.is_running()).unwrap_or(false))
+            .count()
+    }
+
+    /// Stop every running server. Used on shutdown, before sessions are torn
+    /// down, so no port outlives the process that bound it.
+    pub fn stop_all_servers(&self) -> usize {
+        let Ok(sessions) = self.sessions.read() else {
+            return 0;
+        };
+        sessions.values().filter(|s| s.take_server()).count()
     }
 
     /// Per-session resource report (id, disk footprint, configured memory cap)

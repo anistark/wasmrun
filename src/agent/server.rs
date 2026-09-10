@@ -6,6 +6,7 @@ use crate::agent::executor;
 use crate::agent::limits::{dir_size, LimitsOverride, ResourceLimits};
 use crate::agent::metrics::{Gauges, Metrics, SessionResourceRow};
 use crate::agent::pool::{resolve_workers, PoolStats, WorkerPool, DEFAULT_SHUTDOWN_GRACE};
+use crate::agent::serve;
 use crate::agent::session;
 use crate::agent::session::{SessionConfig, SessionError, SessionManager, SessionState};
 use crate::agent::shell;
@@ -212,6 +213,14 @@ const EXEC_THREAD_STACK_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 /// Default ceiling on concurrent exec workers when none is configured.
 const DEFAULT_MAX_CONCURRENT_EXEC: usize = 100;
+/// Default ceiling on sessions serving at once.
+///
+/// Deliberately far below `max_concurrent_exec`: a server holds its thread,
+/// its stack and its port for as long as it runs, where an exec gives all
+/// three back in seconds. Servers are counted separately for the same reason,
+/// so a session that is serving can never exhaust the pool an ordinary exec
+/// draws from.
+const DEFAULT_MAX_SERVERS: usize = 8;
 /// Default bind address. Loopback, not `0.0.0.0`: the server runs arbitrary
 /// WASM and JavaScript on request, so reaching it from another host is opt-in
 /// (`--host`) and, without auth, needs an explicit `--insecure`.
@@ -270,6 +279,9 @@ pub struct AgentConfig {
     /// npm registry base URL used to vendor `dependencies` (private
     /// registries and tests point this elsewhere).
     pub npm_registry: String,
+    /// Maximum number of sessions that may be serving at once, across every
+    /// tenant. `0` = unlimited.
+    pub max_servers: usize,
     /// The network a tenant gets when it declared no `[tenants.network]`
     /// table, and the only network there is in open mode. `None` means no
     /// network, which is the default: egress is something an operator turns
@@ -294,6 +306,7 @@ impl Default for AgentConfig {
             auth: None,
             auth_path: None,
             npm_registry: crate::agent::vendor::DEFAULT_NPM_REGISTRY.to_string(),
+            max_servers: DEFAULT_MAX_SERVERS,
             default_network: None,
         }
     }
@@ -772,6 +785,13 @@ impl AgentServer {
         if abandoned > 0 {
             eprintln!("   Gave up on {abandoned} request(s) still running at the deadline");
         }
+        // Servers first: they are executions that never end on their own, so
+        // nothing else in this sequence would stop them, and a bound port
+        // outliving the process that bound it is what makes a restart fail.
+        let servers = this.session_manager.stop_all_servers();
+        if servers > 0 {
+            eprintln!("   Stopped {servers} running server(s)");
+        }
         let destroyed = this.session_manager.destroy_all().unwrap_or(0);
         this.session_manager.stop_cleanup();
         let _ = cleanup_handle.join();
@@ -1133,6 +1153,15 @@ impl AgentServer {
                 } else {
                     self.respond_json(request, self.handle_exec(id, &body, tenant), &log)
                 }
+            }
+            (Method::Post, ["sessions", id, "serve"]) => {
+                self.respond_json(request, self.handle_serve_start(id, &body, tenant), &log)
+            }
+            (Method::Get, ["sessions", id, "serve"]) => {
+                self.respond_json(request, self.handle_serve_status(id, tenant), &log)
+            }
+            (Method::Delete, ["sessions", id, "serve"]) => {
+                self.respond_json(request, self.handle_serve_stop(id, tenant), &log)
             }
             (Method::Post, ["sessions", id, "files"]) => {
                 self.respond_json(request, self.handle_write_file(id, &body, tenant), &log)
@@ -1623,6 +1652,256 @@ impl AgentServer {
             timeout,
             timeout_secs,
         })
+    }
+
+    /// Start a long-lived server in a session.
+    ///
+    /// The counterpart to `handle_exec`, for a program that never returns. The
+    /// port is bound before the thread exists, so a bind failure is an error
+    /// response and not a server that reports success and then dies; and the
+    /// resolved port is known synchronously, which is what lets an ephemeral
+    /// bind be the default.
+    pub fn handle_serve_start(
+        &self,
+        id: &str,
+        body: &str,
+        caller: Option<&str>,
+    ) -> std::result::Result<ServeResponse, ApiError> {
+        let req: ServeRequest = if body.trim().is_empty() {
+            ServeRequest::default()
+        } else {
+            serde_json::from_str(body).map_err(|e| ApiError::BadRequest(e.to_string()))?
+        };
+
+        let (work_dir, limits) = self
+            .session_manager
+            .get_session(id, caller, |s| {
+                (s.work_dir().to_path_buf(), s.limits().clone())
+            })
+            .map_err(map_session_err)?;
+
+        // Refuse before binding anything. A session already serving keeps the
+        // server it has: replacing it would strand the port the caller was
+        // handed earlier, and they may still be using it.
+        let already = self
+            .session_manager
+            .get_session(id, caller, |s| {
+                s.with_server(|srv| (srv.is_running(), srv.id.clone(), srv.addr.to_string()))
+            })
+            .map_err(map_session_err)?;
+        if let Some((true, srv_id, addr)) = already {
+            return Err(ApiError::Conflict(format!(
+                "session is already serving as {srv_id} on {addr}; stop it first"
+            )));
+        }
+
+        if self.config.max_servers != 0
+            && self.session_manager.running_servers() >= self.config.max_servers
+        {
+            return Err(ApiError::TooManyRequests(self.config.max_servers));
+        }
+
+        let lang = req.language.clone().unwrap_or_else(|| "javascript".into());
+        executor::resolve_language(&lang)?;
+
+        // Validate the execution shape before binding a port.
+        let entry = match (&req.files, &req.entry) {
+            (Some(files), Some(entry)) => {
+                if !files.contains_key(entry) {
+                    return Err(ApiError::BadRequest(format!(
+                        "Entry '{entry}' not found in 'files' map"
+                    )));
+                }
+                Some(entry.clone())
+            }
+            (Some(_), None) => {
+                return Err(ApiError::BadRequest(
+                    "'entry' is required with 'files'".into(),
+                ))
+            }
+            _ => None,
+        };
+        if req.source.is_none() && req.files.is_none() && req.wasm_path.is_none() {
+            return Err(ApiError::BadRequest(
+                "Missing wasm_path, source, or files".into(),
+            ));
+        }
+
+        let (wasi_env, addr) = serve::prepare(&work_dir, &limits, req.port.unwrap_or(0))?;
+        {
+            let mut env = wasi_env
+                .lock()
+                .map_err(|_| ApiError::Internal("Lock".into()))?;
+            // A server gets the tenant's network like any other execution: it
+            // may well need to reach a database to answer a request.
+            env.set_network(self.tenant_network(caller));
+            if let Some(ref vars) = req.env {
+                for (k, v) in vars {
+                    env.add_env(k.clone(), v.clone());
+                }
+            }
+        }
+
+        let server_id = serve::generate_server_id();
+        let registry = self.config.npm_registry.clone();
+        let deps = req.dependencies.clone();
+        let lock_in = req.lockfile.clone();
+        let limits_clone = limits.clone();
+        let work_dir_clone = work_dir.clone();
+        let env_for_worker = wasi_env.clone();
+        let source = req.source.clone();
+        let files = req.files.clone();
+        let wasm_path = req.wasm_path.clone();
+
+        let server = serve::spawn(
+            server_id.clone(),
+            addr,
+            wasi_env,
+            EXEC_THREAD_STACK_BYTES,
+            move |cancel| {
+                let lock_out: Mutex<Option<vendor::Lockfile>> = Mutex::new(None);
+                vendor_for_exec(
+                    &registry,
+                    deps.as_ref(),
+                    lock_in.as_ref(),
+                    &work_dir_clone,
+                    &limits_clone,
+                    &lock_out,
+                )?;
+                if let Some(files) = files {
+                    let entry = entry.unwrap_or_default();
+                    executor::execute_source_project(
+                        &files,
+                        &entry,
+                        &lang,
+                        env_for_worker,
+                        &work_dir_clone,
+                        &limits_clone,
+                        Some(cancel),
+                    )
+                } else if let Some(source) = source {
+                    executor::execute_source(
+                        &source,
+                        &lang,
+                        env_for_worker,
+                        &work_dir_clone,
+                        &limits_clone,
+                        Some(cancel),
+                    )
+                } else {
+                    let path = wasm_path.unwrap_or_default();
+                    let resolved = resolve_session_path(&work_dir_clone, &path)?;
+                    let wasm_bytes = std::fs::read(&resolved)
+                        .map_err(|e| ApiError::NotFound(format!("{}: {e}", resolved.display())))?;
+                    execute_wasm_bytes_with_env(
+                        &wasm_bytes,
+                        env_for_worker,
+                        None,
+                        vec![path],
+                        // No fuel ceiling: a fuel budget is a bound on how long
+                        // an execution may run, and a server is supposed to run
+                        // until it is stopped. The cancellation flag is what
+                        // ends it, and the memory cap still applies.
+                        ExecLimits {
+                            max_memory_pages: limits_clone.max_memory_pages,
+                            max_fuel: None,
+                        },
+                        Some(cancel),
+                    )
+                    .map_err(|e| ApiError::Internal(e.to_string()))
+                }
+            },
+        )?;
+
+        let response = ServeResponse {
+            server_id,
+            addr: addr.to_string(),
+            port: addr.port(),
+        };
+
+        // Installing can still lose a race with a concurrent start. The loser
+        // is stopped rather than left running on a port nobody will be told
+        // about.
+        let installed = self
+            .session_manager
+            .get_session(id, caller, |s| s.set_server(server))
+            .map_err(map_session_err)?;
+        if let Err(orphan) = installed {
+            orphan.stop();
+            return Err(ApiError::Conflict(
+                "session started serving concurrently; stop that server first".into(),
+            ));
+        }
+
+        Ok(response)
+    }
+
+    /// Report what a session's server is doing.
+    pub fn handle_serve_status(
+        &self,
+        id: &str,
+        caller: Option<&str>,
+    ) -> std::result::Result<ServeStatus, ApiError> {
+        let status = self
+            .session_manager
+            .get_session(id, caller, |s| {
+                s.with_server(|srv| {
+                    let (ended, exit_code, error) = match srv.outcome() {
+                        None => (None, None, None),
+                        Some(serve::ServerOutcome::Exited(code)) => {
+                            (Some("exited".to_string()), Some(code), None)
+                        }
+                        Some(serve::ServerOutcome::Failed(e)) => {
+                            (Some("failed".to_string()), None, Some(e))
+                        }
+                        Some(serve::ServerOutcome::Stopped) => {
+                            (Some("stopped".to_string()), None, None)
+                        }
+                    };
+                    let (stdout, stderr) = match srv.wasi_env.lock() {
+                        Ok(env) => (
+                            String::from_utf8_lossy(&env.get_stdout()).to_string(),
+                            String::from_utf8_lossy(&env.get_stderr()).to_string(),
+                        ),
+                        Err(_) => (String::new(), String::new()),
+                    };
+                    ServeStatus {
+                        server_id: srv.id.clone(),
+                        addr: srv.addr.to_string(),
+                        port: srv.addr.port(),
+                        running: srv.is_running(),
+                        uptime_ms: srv.started_at.elapsed().as_millis() as u64,
+                        ended,
+                        exit_code,
+                        error,
+                        stdout,
+                        stderr,
+                    }
+                })
+            })
+            .map_err(map_session_err)?;
+
+        status.ok_or_else(|| ApiError::NotFound(format!("Session {id} is not serving")))
+    }
+
+    /// Stop a session's server.
+    pub fn handle_serve_stop(
+        &self,
+        id: &str,
+        caller: Option<&str>,
+    ) -> std::result::Result<MessageResponse, ApiError> {
+        let stopped = self
+            .session_manager
+            .get_session(id, caller, |s| s.take_server())
+            .map_err(map_session_err)?;
+
+        if stopped {
+            Ok(MessageResponse {
+                message: format!("Server stopped for session {id}"),
+            })
+        } else {
+            Err(ApiError::NotFound(format!("Session {id} is not serving")))
+        }
     }
 
     /// Streaming exec: emit output as Server-Sent Events while it runs.
@@ -2554,6 +2833,7 @@ mod tests {
 
     fn test_server_with_concurrency(max_concurrent_exec: usize) -> AgentServer {
         AgentServer::new(AgentConfig {
+            max_servers: DEFAULT_MAX_SERVERS,
             port: 0,
             session_config: SessionConfig {
                 default_timeout: Duration::from_secs(60),
@@ -2603,6 +2883,7 @@ mod tests {
     /// The same, with an explicit server-wide exec cap.
     fn open_server_with_concurrency(port: u16, max_concurrent_exec: usize) -> AgentServer {
         AgentServer::new(AgentConfig {
+            max_servers: DEFAULT_MAX_SERVERS,
             port,
             session_config: SessionConfig {
                 default_timeout: Duration::from_secs(60),
@@ -2629,6 +2910,7 @@ mod tests {
     /// A server on `port` with auth enabled for the given `(key, tenant_id)` pairs.
     fn auth_server(port: u16, tenants: &[(&str, &str)]) -> AgentServer {
         AgentServer::new(AgentConfig {
+            max_servers: DEFAULT_MAX_SERVERS,
             port,
             session_config: SessionConfig {
                 default_timeout: Duration::from_secs(60),
@@ -2665,6 +2947,7 @@ mod tests {
         std::io::Write::write_all(&mut f, toml.as_bytes()).unwrap();
         let auth = AuthConfig::load(f.path()).unwrap();
         AgentServer::new(AgentConfig {
+            max_servers: DEFAULT_MAX_SERVERS,
             port,
             session_config: SessionConfig {
                 default_timeout: Duration::from_secs(60),
@@ -3483,6 +3766,202 @@ mod tests {
     /// setTimeout, Buffer, TextEncoder and a built-in module (path) — work
     /// end-to-end through /exec (wasmhub nodejs >= v0.3.0).
     /// Ignored by default; see test_multi_file_js_require_integration.
+    // ── serve: long-lived servers in a session ──────────────────────────
+
+    #[test]
+    fn serve_refuses_a_request_with_no_program() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        match server.handle_serve_start(&id, "{}", None) {
+            Err(ApiError::BadRequest(msg)) => {
+                assert!(msg.contains("wasm_path"), "{msg}");
+            }
+            other => panic!("expected 400, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn serve_status_on_a_session_that_is_not_serving_is_404() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        match server.handle_serve_status(&id, None) {
+            Err(ApiError::NotFound(_)) => {}
+            other => panic!("expected 404, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stopping_a_server_that_is_not_running_is_404() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        match server.handle_serve_stop(&id, None) {
+            Err(ApiError::NotFound(_)) => {}
+            other => panic!("expected 404, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn serve_validates_the_entry_before_binding_a_port() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        let body = r#"{"files": {"a.js": "1"}, "entry": "missing.js"}"#;
+        match server.handle_serve_start(&id, body, None) {
+            Err(ApiError::BadRequest(msg)) => assert!(msg.contains("missing.js"), "{msg}"),
+            other => panic!("expected 400, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn serve_rejects_an_unknown_language_before_binding_a_port() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        let body = r#"{"source": "1", "language": "cobol"}"#;
+        assert!(server.handle_serve_start(&id, body, None).is_err());
+    }
+
+    #[test]
+    fn a_session_serves_one_server_at_a_time() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // A .wasm that does not exist fails inside the worker, not at start:
+        // the point here is that the slot is taken either way.
+        let body = r#"{"wasm_path": "nope.wasm"}"#;
+        let first = server.handle_serve_start(&id, body, None).unwrap();
+        assert!(first.port > 0);
+
+        // The worker may already have failed on the missing file, in which
+        // case a second start is allowed to replace it. Only assert the
+        // conflict while the first is genuinely still running.
+        let running = server
+            .session_manager
+            .get_session(&id, None, |s| {
+                s.with_server(|srv| srv.is_running()).unwrap_or(false)
+            })
+            .unwrap();
+        if running {
+            match server.handle_serve_start(&id, body, None) {
+                Err(ApiError::Conflict(msg)) => assert!(msg.contains("already serving"), "{msg}"),
+                other => panic!("expected 409, got {other:?}"),
+            }
+        }
+        let _ = server.handle_serve_stop(&id, None);
+    }
+
+    #[test]
+    fn the_server_cap_is_counted_across_sessions() {
+        let mut config_server = test_server();
+        config_server.config.max_servers = 1;
+        let server = config_server;
+
+        let a = server.handle_create_session().unwrap().session_id;
+        let b = server.handle_create_session().unwrap().session_id;
+
+        // A guest that parks forever would be ideal here, but any execution
+        // holds the slot while it runs; a missing .wasm is enough to take one.
+        let body = r#"{"wasm_path": "nope.wasm"}"#;
+        server.handle_serve_start(&a, body, None).unwrap();
+
+        if server.session_manager.running_servers() >= 1 {
+            match server.handle_serve_start(&b, body, None) {
+                Err(ApiError::TooManyRequests(1)) => {}
+                other => panic!("expected 429 at the cap, got {other:?}"),
+            }
+        }
+        let _ = server.handle_serve_stop(&a, None);
+    }
+
+    #[test]
+    fn stopping_a_server_frees_the_session_to_serve_again() {
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+        let body = r#"{"wasm_path": "nope.wasm"}"#;
+        server.handle_serve_start(&id, body, None).unwrap();
+        let _ = server.handle_serve_stop(&id, None);
+        match server.handle_serve_stop(&id, None) {
+            Err(ApiError::NotFound(_)) => {}
+            other => panic!("a stopped server must be gone, got {other:?}"),
+        }
+        // And the session can serve again.
+        assert!(server.handle_serve_start(&id, body, None).is_ok());
+        let _ = server.handle_serve_stop(&id, None);
+    }
+
+    #[test]
+    fn serve_on_a_missing_session_is_404() {
+        let server = test_server();
+        let body = r#"{"source": "1"}"#;
+        match server.handle_serve_start("deadbeef", body, None) {
+            Err(ApiError::SessionNotFound(_)) => {}
+            other => panic!("expected 404, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[ignore] // Network-gated: fetches the wasmhub nodejs runtime.
+    fn test_serve_http_from_javascript_integration() {
+        use std::io::{Read, Write};
+
+        let server = test_server();
+        let id = server.handle_create_session().unwrap().session_id;
+
+        // The whole point of 0.24.6c: wasmhub reads WASMHUB_LISTEN_FD to find
+        // the descriptor the host bound, so `listen()` needs no port of its own.
+        // The marker on stdout is the readiness signal: connecting proves
+        // nothing here, because the *host* bound the socket and a connect
+        // succeeds whether or not the guest has reached `accept`.
+        let body = r#"{
+            "source": "const http = require('http'); const s = http.createServer((req, res) => { res.writeHead(200, {'Content-Type': 'text/plain'}); res.end('hello from the sandbox'); }); s.listen(); console.log('LISTENING');",
+            "language": "javascript"
+        }"#;
+        let resp = server.handle_serve_start(&id, body, None).unwrap();
+        assert!(resp.port > 0, "no port was bound");
+
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let mut status = server.handle_serve_status(&id, None).unwrap();
+        while Instant::now() < deadline && !status.stdout.contains("LISTENING") {
+            if !status.running {
+                panic!(
+                    "server ended before it listened: ended={:?} exit_code={:?} \
+                     error={:?} stdout={:?} stderr={:?}",
+                    status.ended, status.exit_code, status.error, status.stdout, status.stderr
+                );
+            }
+            std::thread::sleep(Duration::from_millis(200));
+            status = server.handle_serve_status(&id, None).unwrap();
+        }
+        assert!(
+            status.stdout.contains("LISTENING"),
+            "guest never reached listen() within the deadline: stdout={:?} stderr={:?}",
+            status.stdout,
+            status.stderr
+        );
+
+        let mut stream = std::net::TcpStream::connect(&resp.addr).expect("connect");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(60)))
+            .unwrap();
+        let request = format!(
+            "GET / HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            resp.addr
+        );
+        stream.write_all(request.as_bytes()).expect("write request");
+        let mut answered = String::new();
+        stream.read_to_string(&mut answered).expect("read response");
+
+        assert!(
+            answered.contains("200"),
+            "expected a 200 response, got: {answered:?}"
+        );
+        assert!(
+            answered.contains("hello from the sandbox"),
+            "body missing from response: {answered:?}"
+        );
+
+        let stopped = server.handle_serve_stop(&id, None);
+        assert!(stopped.is_ok(), "stop failed: {stopped:?}");
+    }
+
     #[test]
     #[ignore]
     fn test_js_stdlib_and_timers_integration() {

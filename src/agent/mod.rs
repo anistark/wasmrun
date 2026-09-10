@@ -11,6 +11,7 @@ pub mod executor;
 pub mod limits;
 pub mod metrics;
 pub mod pool;
+pub mod serve;
 pub mod server;
 pub mod session;
 pub mod shell;

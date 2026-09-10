@@ -30,30 +30,18 @@ pub struct Denied {
 pub struct NetworkAccess {
     /// `None` means no network at all, which is the default.
     policy: Option<Arc<Policy>>,
-    /// The same deny rules with everything allowed, used to vet the addresses
-    /// a name resolved to. The allow decision is made on the name, because
-    /// that is what a rule like `*.github.com` is written in terms of, and an
-    /// address never matches it. Re-checking allow after resolution would
-    /// refuse every domain rule ever written.
-    deny_only: Option<Arc<Policy>>,
 }
 
 impl NetworkAccess {
     /// No network. Every connection attempt is refused.
     pub fn denied() -> Self {
-        Self {
-            policy: None,
-            deny_only: None,
-        }
+        Self { policy: None }
     }
 
     /// The network described by a policy.
     pub fn with_policy(config: &PolicyConfig) -> Self {
-        let mut deny_view = config.network.clone();
-        deny_view.allow = vec!["*".to_string()];
         Self {
             policy: Some(Arc::new(Policy::new(&config.network))),
-            deny_only: Some(Arc::new(Policy::new(&deny_view))),
         }
     }
 
@@ -82,11 +70,13 @@ impl NetworkAccess {
     /// addresses that passed rather than re-resolving the name and possibly
     /// getting a different answer.
     ///
-    /// This is [wasmnet#3](https://github.com/anistark/wasmnet/issues/3) seen
-    /// from the other side: wasmnet's proxy hands the name to `TcpStream::
-    /// connect` and never rechecks, while `Policy` itself is correct once it
-    /// is given an address. wasmrun does its own connecting, so it can put the
-    /// check in the right place without waiting for that fix.
+    /// wasmnet 0.2.0 splits the decision the same way and names the halves:
+    /// `check_connect` rules on the string, `check_resolved` on each address
+    /// it resolved to. That is [wasmnet#3](https://github.com/anistark/wasmnet/issues/3),
+    /// fixed upstream. The loop stays here regardless, because wasmrun does
+    /// its own connecting and the proxy's ordering is not in the path: what
+    /// this function owns is connecting to an address that passed rather than
+    /// re-resolving the name and possibly getting a different one.
     pub fn resolve_and_check(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, Denied> {
         let policy = match &self.policy {
             Some(policy) => policy,
@@ -120,11 +110,6 @@ impl NetworkAccess {
             reason: format!("could not resolve {host}: {e}"),
         })?;
 
-        let deny_only = match &self.deny_only {
-            Some(policy) => policy,
-            None => policy,
-        };
-
         // Every resolved address has to pass, not just one of them. A name
         // maps to a set the guest does not choose from, so "some of these are
         // allowed" means the connection may still land on one that is not.
@@ -134,7 +119,7 @@ impl NetworkAccess {
         // subset that passed would leave loopback reachable over IPv6.
         let mut allowed = Vec::new();
         for addr in resolved {
-            if let Err(reason) = deny_only.check_connect(&addr.ip().to_string(), port) {
+            if let Err(reason) = policy.check_resolved(addr.ip(), port) {
                 return Err(Denied {
                     errno: crate::runtime::wasi::syscalls::WASI_EACCES,
                     reason: format!(
@@ -231,6 +216,37 @@ mod tests {
         // since an address never matches a domain pattern.
         let access = access(&["localhost"], &[]);
         assert!(access.resolve_and_check("localhost", 8080).is_ok());
+    }
+
+    #[test]
+    fn an_allow_rule_covers_subdomains() {
+        // wasmnet 0.2.0 made a bare domain rule cover its subdomains, where it
+        // used to match exactly. `--allow-net "example.com"` is now the same
+        // grant as `*.example.com`, so a rule meant to name one host has to
+        // carry a port to narrow it.
+        let access = access(&["example.com"], &[]);
+        assert!(access
+            .policy
+            .as_ref()
+            .unwrap()
+            .check_connect("api.example.com", 443)
+            .is_ok());
+        assert!(access
+            .policy
+            .as_ref()
+            .unwrap()
+            .check_connect("example.com.evil.com", 443)
+            .is_err());
+    }
+
+    #[test]
+    fn a_port_in_a_rule_is_enforced() {
+        // Also new in 0.2.0: a rule's `:port` used to be advisory on the
+        // connect path, so `api.example.com:443` opened every port on it.
+        let access = access(&["example.com:443"], &[]);
+        let policy = access.policy.as_ref().unwrap();
+        assert!(policy.check_connect("example.com", 443).is_ok());
+        assert!(policy.check_connect("example.com", 8080).is_err());
     }
 
     #[test]
