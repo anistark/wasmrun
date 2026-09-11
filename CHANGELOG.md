@@ -94,6 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Multi-value blocks**: `block`, `loop` and `if` can now take parameters and return more than one value, which is what a block typed by an index into the type section is for. Branch arity follows the target: a branch to a loop label carries the loop's parameters back to its header, a branch to any other label carries the block's results. Both were previously fixed at zero-or-one, so a multi-value block lost values on the way out and a loop with parameters restarted on an empty stack
 - **Saturating float-to-int conversions** (`i32.trunc_sat_f32_s` and its seven siblings). These are part of the default `wasm32-wasip1` feature set through `nontrapping-fptoint` and rustc emits them for ordinary `as` casts, but wasmrun rejected them as an unknown opcode. Where the trapping forms reject NaN and out-of-range input, these clamp: NaN becomes 0 and anything past the target's range becomes its nearest bound
 
+### Security
+- **Thirteen advisories in the docs site's transitive dependencies are pinned out**, via `overrides` in `docs/pnpm-workspace.yaml`: `js-yaml` 4.3.2, `colord` 2.9.4, `joi` 17.13.6, `svgo` 3.3.5, `qs` 6.16.0 and `fast-uri` 3.1.6, each the first patched release. None of these reach the wasmrun binary; they are build-time dependencies of Docusaurus
+  - `image-size`, reachable through `@docusaurus/mdx-loader`, has two open denial-of-service advisories and no patched release. It only ever measures images committed to this repository at build time, so there is no untrusted input to reach the affected parsers
+
 ## [0.22.0](https://github.com/anistark/wasmrun/releases/tag/v0.22.0) - 2026-08-20
 
 ### Added
