@@ -120,6 +120,72 @@ pub struct ExecResponse {
     pub lockfile: Option<crate::agent::vendor::Lockfile>,
 }
 
+/// Start a long-lived server inside a session.
+///
+/// The execution shape mirrors [`ExecRequest`] (`source`, or `files` plus
+/// `entry`, or a `wasm_path`), because a server is an ordinary execution that
+/// happens not to return. What it adds is the socket: the host binds a
+/// loopback port before the program starts and hands it over as an fd, since
+/// WASI Preview 1 gives a guest no way to create one for itself.
+#[derive(Debug, Deserialize, Default)]
+pub struct ServeRequest {
+    /// Path to a pre-compiled .wasm file (relative to session root).
+    pub wasm_path: Option<String>,
+    /// Source code to serve with, as an alternative to `wasm_path`.
+    pub source: Option<String>,
+    /// Multi-file project: filename → content. Use with `entry`.
+    pub files: Option<HashMap<String, String>>,
+    /// Entry filename for a multi-file project (must be a key in `files`).
+    pub entry: Option<String>,
+    /// Language for source execution. Defaults to JavaScript.
+    pub language: Option<String>,
+    /// npm dependencies to vendor before the server starts.
+    pub dependencies: Option<HashMap<String, String>>,
+    /// A lockfile from a previous exec, replayed instead of re-resolving.
+    pub lockfile: Option<crate::agent::vendor::Lockfile>,
+    /// Extra environment variables for the server process.
+    pub env: Option<HashMap<String, String>>,
+    /// Loopback port to bind. Omit or use 0 for an ephemeral one, which is the
+    /// sane default: the caller reads the resolved port out of the response,
+    /// and nothing has to agree in advance on a number that may be taken.
+    pub port: Option<u16>,
+}
+
+/// A server that is now listening.
+#[derive(Debug, Serialize)]
+pub struct ServeResponse {
+    /// Identifier for this server within its session.
+    pub server_id: String,
+    /// Host and port it is listening on, ready to connect to.
+    pub addr: String,
+    /// The port on its own, so a caller does not have to parse `addr`.
+    pub port: u16,
+}
+
+/// What a session's server is doing.
+#[derive(Debug, Serialize)]
+pub struct ServeStatus {
+    pub server_id: String,
+    pub addr: String,
+    pub port: u16,
+    /// False once the program has exited, failed or been stopped. The entry is
+    /// kept after it ends so the caller can find out *why* it stopped serving.
+    pub running: bool,
+    pub uptime_ms: u64,
+    /// How it ended: "exited", "failed" or "stopped". Absent while running.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended: Option<String>,
+    /// Exit code, when it ended by exiting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// Failure detail, when it ended by failing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// What the server has written so far, subject to the session's output cap.
+    pub stdout: String,
+    pub stderr: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ReadFileResponse {
     pub path: String,
@@ -173,6 +239,9 @@ pub enum ApiError {
     /// A per-tenant rate limit was exceeded (session count, concurrent exec, or
     /// requests/min). Carries a human-readable reason.
     RateLimited(String),
+    /// The request conflicts with state that already exists, such as starting a
+    /// second server in a session that is already serving.
+    Conflict(String),
     #[allow(dead_code)] // TODO: Used when exec timeout triggers API-level error
     Timeout,
     Internal(String),
@@ -187,6 +256,7 @@ impl ApiError {
                 429
             }
             ApiError::BadRequest(_) => 400,
+            ApiError::Conflict(_) => 409,
             ApiError::Unauthorized(_) => 401,
             ApiError::PayloadTooLarge(_) => 413,
             ApiError::Timeout => 408,
@@ -218,6 +288,7 @@ impl std::fmt::Display for ApiError {
                 write!(f, "Too many concurrent executions: limit is {max}")
             }
             ApiError::RateLimited(reason) => write!(f, "Rate limit exceeded: {reason}"),
+            ApiError::Conflict(msg) => write!(f, "Conflict: {msg}"),
             ApiError::Timeout => write!(f, "Execution timed out"),
             ApiError::Internal(msg) => write!(f, "Internal error: {msg}"),
         }

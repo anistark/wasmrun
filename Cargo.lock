@@ -2025,9 +2025,9 @@ dependencies = [
 
 [[package]]
 name = "wasmnet"
-version = "0.1.4"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df7718e2176032658a26d4e25c8b27d983c8de4cd975e1b8f071847785a8c3ce"
+checksum = "8c59a91d9a2d5c133237ea56304a003b2d783bac6c8b26c93e0bb55d3707860b"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

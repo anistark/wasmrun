@@ -198,6 +198,18 @@ impl WasiEnv {
     /// non-blocking mode here: `sock_accept` waits in slices so it can watch
     /// the cancellation flag, which it could not do inside a blocking accept.
     pub fn with_tcp_listener(mut self, listener: TcpListener) -> Self {
+        self.add_tcp_listener(listener);
+        self
+    }
+
+    /// Hand the guest a listening socket and report the fd it landed on.
+    ///
+    /// The builder form above is what `wasmrun exec` uses, where the fd is
+    /// predictable because nothing else is preopened first. A caller that has
+    /// to *tell* the guest which fd to accept on needs the number back: a
+    /// session preopens its work directory first, so the listener is not fd 3
+    /// there and a hardcoded guess would be wrong.
+    pub fn add_tcp_listener(&mut self, listener: TcpListener) -> u32 {
         let _ = listener.set_nonblocking(true);
         let fd = self.next_fd;
         self.next_fd += 1;
@@ -217,7 +229,7 @@ impl WasiEnv {
         );
         self.sockets
             .insert(fd, SocketHandle::Listener(Arc::new(listener)));
-        self
+        fd
     }
 
     /// Give this execution a network. Absent this call it has none.

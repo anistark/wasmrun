@@ -5,11 +5,19 @@ title: Public Tunneling
 
 # Public Tunneling
 
-Expose your local WASM applications to the internet using the Bore tunneling protocol.
+Expose the OS mode server to the internet using the Bore tunneling protocol.
+
+:::caution What actually gets tunneled
+The tunnel carries **the OS mode server's own port**: the development UI, its APIs, and the project files it serves. It does not carry a port belonging to a program running inside the browser VM, because a program in the VM cannot bind one yet (see [Network Policy](./network-isolation.md)).
+
+So this exposes your wasmrun dev environment to whoever has the URL, not an application the VM is serving. Treat the public URL accordingly: anyone with it can reach the OS mode APIs.
+
+To expose a program that is actually serving, see [Serving a Port](./port-forwarding.md).
+:::
 
 ## Overview
 
-The public tunneling feature allows you to make your WASM applications running in OS mode accessible from the internet. This is useful for:
+The public tunneling feature makes an OS mode server reachable from the internet. This is useful for:
 
 - **Demos and testing**: Share your work-in-progress with others
 - **Webhooks**: Receive callbacks from external services

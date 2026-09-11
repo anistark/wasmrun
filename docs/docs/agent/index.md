@@ -29,6 +29,7 @@ wasmrun agent [OPTIONS]
 | `--max-disk` | `100` | Maximum total disk usage per session (MB) |
 | `--max-body` | `32` | Maximum accepted request body size (MB) |
 | `--max-concurrent-exec` | `100` | Maximum executions in flight across all sessions |
+| `--max-servers` | `8` | Maximum sessions running a [server](./usage/serving.md) at once. Counted separately, since a server holds its thread and port for as long as it runs |
 | `--workers` | `0` | Maximum HTTP request-handling threads (`0` = auto, derived from `--max-concurrent-exec`) |
 | `--shutdown-timeout` | `10` | Seconds to let in-flight requests finish on shutdown before the process exits |
 | `--max-cache-size` | `2048` | Ceiling on the shared npm package cache in MB (`0` = unlimited) |
