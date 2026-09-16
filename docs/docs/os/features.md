@@ -37,26 +37,14 @@ Project files are served via `GET /api/project/files` as a base64-encoded JSON b
 - Size limits: 10MB per file, 50MB total, 5000 file cap
 - Files are decoded in the browser and written to the WASI virtual FS
 
-## Network Isolation
+## Networking
 
-Each process runs in its own network namespace:
+A program in the VM has no network of its own. What it gets goes through a local proxy under a policy the project sets in `wasmrun.toml`:
 
-- Isolated port bindings (no conflicts between processes)
-- Port forwarding from guest to host
-- Connection tracking and stats
-- Per-process network statistics
+- A port from the policy's `bind_ports` range is bound for the program when it starts, so `server.listen()` in a Node project answers requests on `localhost`
+- Outbound connections are not wired up yet
 
-See [Network Isolation](./network-isolation.md) for details.
-
-## Port Forwarding
-
-Expose services running in isolated namespaces:
-
-```sh
-wasmrun os ./app --forward 8080:3000
-```
-
-See [Port Forwarding](./port-forwarding.md) for details.
+See [Network Policy](./network-isolation.md) and [Serving a Port](./port-forwarding.md).
 
 ## Public Tunneling
 

@@ -3,8 +3,10 @@
 // and terminate.
 
 import { WASIImplementation, WASI_ERRNO } from '../wasi/wasmrun_wasi_impl.js'
+import type { SocketBridge } from '../wasi/wasmrun_wasi_impl.js'
 import { base64ToUint8Array } from './vm'
 import type { PageToVm, VmStartMessage, VmToPage } from './vm'
+import { InboxReader, WAKE } from './netInbox'
 
 const post = (message: VmToPage) => self.postMessage(message)
 
@@ -15,18 +17,39 @@ self.onmessage = (event: MessageEvent<PageToVm>) => {
 }
 
 async function run(start: VmStartMessage): Promise<void> {
-  const wake = new Int32Array(start.wake)
+  const inbox = start.net ? new InboxReader(start.net.inbox) : null
+  const wake = start.net
+    ? new Int32Array(start.net.inbox, 0, 1)
+    : new Int32Array(new SharedArrayBuffer(4))
 
+  const sockets: SocketBridge | undefined = start.net
+    ? {
+        listenerId: start.net.listenerId,
+        poll: () => inbox!.drain(),
+        send: (id, bytes) => post({ type: 'sock', op: 'send', id, bytes: bytes.slice() }),
+        close: id => post({ type: 'sock', op: 'close', id }),
+      }
+    : undefined
+
+  const env: Record<string, string> = {}
   const wasi = new WASIImplementation({
     args: start.args,
-    env: {},
+    env,
     preopens: { '/': '/' },
     stdout: text => post({ type: 'stdout', text }),
     stderr: text => post({ type: 'stderr', text }),
     wait: ms => {
-      Atomics.wait(wake, 0, 0, ms)
+      Atomics.wait(wake, WAKE, 0, ms)
     },
+    sockets,
   })
+
+  // The runtime finds its listener the way it does under `exec --tcplisten`
+  // and agent serve: a descriptor number and address in the environment
+  if (start.net) {
+    env.WASMHUB_LISTEN_FD = String(wasi.listenFd())
+    env.WASMHUB_LISTEN_ADDR = start.net.address
+  }
 
   post({ type: 'status', status: 'populating-fs' })
   populateFilesystem(wasi, start.files)

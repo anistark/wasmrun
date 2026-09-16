@@ -16,12 +16,23 @@ export interface VmStartMessage {
   runtimeBytes: ArrayBuffer
   args: string[]
   files: Record<string, string>
-  // One Int32 the page bumps and notifies to wake a blocked worker. Unused
-  // by the page until sockets land; clocks wait on it with a timeout
-  wake: SharedArrayBuffer
+  // Present when the network proxy is up and a port was bound for the
+  // program. The inbox is the shared ring the page writes socket events
+  // into (netInbox.ts); the worker also waits on its wake word for clocks
+  net?: {
+    inbox: SharedArrayBuffer
+    listenerId: number
+    address: string
+  }
 }
 
 export type PageToVm = VmStartMessage
+
+// Outbound socket traffic. Sent from inside a WASI import, which is fine:
+// posting never waits for the page
+export type VmSocketMessage =
+  | { type: 'sock'; op: 'send'; id: number; bytes: Uint8Array }
+  | { type: 'sock'; op: 'close'; id: number }
 
 export type VmToPage =
   | { type: 'stdout'; text: string }
@@ -29,6 +40,7 @@ export type VmToPage =
   | { type: 'status'; status: WasmRunnerStatus; detail?: string }
   | { type: 'exit'; code: number }
   | { type: 'error'; message: string }
+  | VmSocketMessage
 
 export function base64ToUint8Array(base64: string): Uint8Array {
   const binaryString = atob(base64)

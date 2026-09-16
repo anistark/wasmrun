@@ -41,6 +41,9 @@ pub struct OsServer {
     /// The wasmnet proxy's port, once it is up. `None` until `start` runs it,
     /// and if it failed to start: OS mode still serves everything else.
     network_port: Arc<RwLock<Option<u16>>>,
+    /// The policy's `bind_ports`, so the page can pick a port the proxy will
+    /// accept before it asks
+    network_bind_ports: Arc<RwLock<String>>,
 }
 
 impl OsServer {
@@ -62,6 +65,7 @@ impl OsServer {
             runtime_cache,
             cors_origin,
             network_port: Arc::new(RwLock::new(None)),
+            network_bind_ports: Arc::new(RwLock::new(String::new())),
         };
 
         // Load and process templates
@@ -248,10 +252,12 @@ impl OsServer {
     /// not load is a different matter and is raised by the caller, since a
     /// project that asked for a policy must not run under a different one.
     fn start_network(&self, os_port: u16, policy: PolicyConfig) -> Option<NetworkServer> {
+        let bind_ports = policy.network.bind_ports.clone();
         match NetworkServer::start(NETWORK_HOST, os_port, policy) {
             Ok(server) => {
                 let network_port = server.port();
                 *self.network_port.write().unwrap() = Some(network_port);
+                *self.network_bind_ports.write().unwrap() = bind_ports;
                 self.log_system.log(LogEntry::info(
                     LogSource::Kernel,
                     format!("Network proxy listening on {}", server.url(NETWORK_HOST)),
@@ -1599,6 +1605,7 @@ impl OsServer {
                 "host": NETWORK_HOST,
                 "port": port,
                 "url": format!("ws://{NETWORK_HOST}:{port}"),
+                "bind_ports": *self.network_bind_ports.read().unwrap(),
             }),
             None => serde_json::json!({
                 "success": true,

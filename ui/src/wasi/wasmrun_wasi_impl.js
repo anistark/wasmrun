@@ -2,11 +2,13 @@
 const WASI = {
   // Error codes
   ERRNO_SUCCESS: 0,
+  ERRNO_AGAIN: 6,
   ERRNO_BADF: 8,
   ERRNO_INVAL: 28,
   ERRNO_IO: 29,
   ERRNO_NOENT: 44,
   ERRNO_NOSYS: 52,
+  ERRNO_NOTSOCK: 57,
 
   // File descriptors
   FD_STDIN: 0,
@@ -239,6 +241,21 @@ class WasiFS {
     })
 
     return { fd, errno: WASI.ERRNO_SUCCESS }
+  }
+
+  // A descriptor for a socket the host bridge owns. `socketId` is the
+  // bridge's name for it; every sock_* call maps back through it
+  openSocket(socketId) {
+    const fd = this.nextFd++
+    this.fileDescriptors.set(fd, {
+      path: 'socket',
+      rights: WASI.RIGHTS_FD_READ | WASI.RIGHTS_FD_WRITE,
+      type: FILETYPE.SOCKET_STREAM,
+      position: 0,
+      content: null,
+      socketId,
+    })
+    return fd
   }
 
   // Close a file descriptor
@@ -476,6 +493,11 @@ class WASIImplementation {
       // Blocks the calling thread for `ms`. Only a worker can supply one
       // (Atomics.wait); without it poll_oneoff cannot wait and returns at once
       wait: options.wait || null,
+      // Inbound sockets, when the host can provide them. `poll()` returns the
+      // events that arrived since the last call, `send`/`close` go the other
+      // way, and `listenerId` names the one listening socket the program is
+      // handed. See ui/src/os/netInbox.ts for where the events come from
+      sockets: options.sockets || null,
       ...options,
     }
 
@@ -486,6 +508,9 @@ class WASIImplementation {
     // Initialize virtual filesystem
     this.fs = new WasiFS()
 
+    // Socket state: connections by bridge id, and the accept queue
+    this.net = { byId: new Map(), accepts: [], listenFd: -1 }
+
     // Set up any preopen directories. fd_prestat_get advertises them from fd 3
     // up, so each one has to be a real open descriptor at that number or the
     // first path_open through it fails with EBADF
@@ -493,6 +518,15 @@ class WASIImplementation {
       this.fs.mkdir(guest)
       this.fs.open(guest)
     }
+
+    if (this.options.sockets) {
+      this.net.listenFd = this.fs.openSocket(this.options.sockets.listenerId)
+    }
+  }
+
+  // The descriptor a server program should find in WASMHUB_LISTEN_FD, or -1
+  listenFd() {
+    return this.net.listenFd
   }
 
   // Initialize the WASI instance with WebAssembly instance
@@ -591,25 +625,12 @@ class WASIImplementation {
         random_get: (buf, buf_len) => this.random_get(buf, buf_len),
         sched_yield: () => this.sched_yield(),
         // Socket functions
-        sock_accept: (fd, flags, result_fd) => {
-          // Return ENOSYS (function not implemented)
-          return WASI.ERRNO_NOSYS
-        },
-
-        sock_recv: (fd, ri_data, ri_flags, ro_datalen, ro_flags) => {
-          // Return ENOSYS (function not implemented)
-          return WASI.ERRNO_NOSYS
-        },
-
-        sock_send: (fd, si_data, si_flags, so_datalen) => {
-          // Return ENOSYS (function not implemented)
-          return WASI.ERRNO_NOSYS
-        },
-
-        sock_shutdown: (fd, how) => {
-          // Return ENOSYS (function not implemented)
-          return WASI.ERRNO_NOSYS
-        },
+        sock_accept: (fd, flags, result_fd) => this.sock_accept(fd, flags, result_fd),
+        sock_recv: (fd, ri_data, ri_data_len, ri_flags, ro_datalen, ro_flags) =>
+          this.sock_recv(fd, ri_data, ri_data_len, ri_flags, ro_datalen, ro_flags),
+        sock_send: (fd, si_data, si_data_len, si_flags, so_datalen) =>
+          this.sock_send(fd, si_data, si_data_len, si_flags, so_datalen),
+        sock_shutdown: (fd, how) => this.sock_shutdown(fd, how),
 
         // These are additional socket-related functions that might be needed
         sock_open: (af, socktype, protocol, fd) => {
@@ -793,6 +814,11 @@ class WASIImplementation {
 
   // WASI implementation: fd_close
   fd_close(fd) {
+    const socket = this._socket(fd)
+    if (socket) {
+      this.options.sockets.close(socket.socketId)
+      this.net.byId.delete(socket.socketId)
+    }
     return this.fs.close(fd)
   }
 
@@ -1448,6 +1474,7 @@ class WASIImplementation {
 
     const ready = []
     const clocks = []
+    const sockets = []
     for (let i = 0; i < nsubscriptions; i++) {
       const sub = in_ptr + i * SUBSCRIPTION_SIZE
       const userdata = this.view.getBigUint64(sub, true)
@@ -1461,7 +1488,22 @@ class WASIImplementation {
       } else {
         const fd = this.view.getUint32(sub + 16, true)
         const errno = this.fs.fdstat(fd).errno
-        ready.push({ userdata, type, errno })
+        if (errno === WASI.ERRNO_SUCCESS && this._socket(fd) && !this._socketReady(fd, type)) {
+          sockets.push({ userdata, type, fd })
+        } else {
+          ready.push({ userdata, type, errno })
+        }
+      }
+    }
+
+    // Only sockets to wait for: block until the bridge writes something,
+    // then look again
+    while (ready.length === 0 && clocks.length === 0 && sockets.length > 0 && this.options.wait) {
+      this.options.wait(1000)
+      for (const sub of sockets) {
+        if (this._socketReady(sub.fd, sub.type)) {
+          ready.push({ userdata: sub.userdata, type: sub.type, errno: WASI.ERRNO_SUCCESS })
+        }
       }
     }
 
@@ -1498,6 +1540,131 @@ class WASIImplementation {
       this.view.setUint8(ev + 10, ready[i].type)
     }
     this.view.setUint32(nevents, ready.length, true)
+    return WASI.ERRNO_SUCCESS
+  }
+
+  // ── Sockets ──────────────────────────────────────────────────────────────
+  //
+  // Inbound only, and non-blocking: the one listening socket arrives from the
+  // host, accept and recv answer EAGAIN when nothing is pending, and the
+  // program is expected to poll. That is how the wasmhub nodejs runtime
+  // drives its servers, on a timer that lowers to poll_oneoff above.
+
+  _socket(fd) {
+    const desc = this.fs.fileDescriptors.get(fd)
+    return desc && desc.type === FILETYPE.SOCKET_STREAM ? desc : null
+  }
+
+  // Pull what the bridge has delivered since the last call into per-socket
+  // queues. Cheap when nothing arrived, so every sock_* call does it first
+  _pumpSockets() {
+    if (!this.options.sockets) return
+    for (const frame of this.options.sockets.poll()) {
+      if (frame.kind === 'accepted') {
+        this.net.byId.set(frame.connId, { fd: -1, recv: [], closed: false })
+        this.net.accepts.push(frame.connId)
+      } else {
+        const conn = this.net.byId.get(frame.id)
+        if (!conn) continue
+        if (frame.kind === 'data') conn.recv.push(frame.bytes)
+        else conn.closed = true
+      }
+    }
+  }
+
+  _socketReady(fd, type) {
+    this._pumpSockets()
+    const EVENTTYPE_FD_WRITE = 2
+    if (type === EVENTTYPE_FD_WRITE) return true
+    if (fd === this.net.listenFd) return this.net.accepts.length > 0
+    const conn = this.net.byId.get(this._socket(fd).socketId)
+    return !conn || conn.recv.length > 0 || conn.closed
+  }
+
+  // WASI implementation: sock_accept
+  sock_accept(fd, flags, result_fd) {
+    this.refreshMemory()
+    if (!this._socket(fd)) return WASI.ERRNO_NOTSOCK
+    if (fd !== this.net.listenFd) return WASI.ERRNO_INVAL
+    this._pumpSockets()
+    if (this.net.accepts.length === 0) return WASI.ERRNO_AGAIN
+
+    const connId = this.net.accepts.shift()
+    const newFd = this.fs.openSocket(connId)
+    this.net.byId.get(connId).fd = newFd
+    this.view.setUint32(result_fd, newFd, true)
+    return WASI.ERRNO_SUCCESS
+  }
+
+  // WASI implementation: sock_recv
+  sock_recv(fd, ri_data, ri_data_len, ri_flags, ro_datalen, ro_flags) {
+    this.refreshMemory()
+    const socket = this._socket(fd)
+    if (!socket) return WASI.ERRNO_NOTSOCK
+    this._pumpSockets()
+    const conn = this.net.byId.get(socket.socketId)
+    if (!conn) return WASI.ERRNO_BADF
+
+    let total = 0
+    for (let i = 0; i < ri_data_len && conn.recv.length > 0; i++) {
+      const iovPtr = ri_data + i * 8
+      const bufPtr = this.view.getUint32(iovPtr, true)
+      const bufLen = this.view.getUint32(iovPtr + 4, true)
+      let filled = 0
+      while (filled < bufLen && conn.recv.length > 0) {
+        const chunk = conn.recv[0]
+        const take = Math.min(chunk.length, bufLen - filled)
+        new Uint8Array(this.memory.buffer, bufPtr + filled, take).set(chunk.subarray(0, take))
+        filled += take
+        if (take === chunk.length) conn.recv.shift()
+        else conn.recv[0] = chunk.subarray(take)
+      }
+      total += filled
+    }
+
+    if (total === 0 && !conn.closed) return WASI.ERRNO_AGAIN
+    this.view.setUint32(ro_datalen, total, true)
+    this.view.setUint16(ro_flags, 0, true)
+    return WASI.ERRNO_SUCCESS
+  }
+
+  // WASI implementation: sock_send
+  sock_send(fd, si_data, si_data_len, si_flags, so_datalen) {
+    this.refreshMemory()
+    const socket = this._socket(fd)
+    if (!socket) return WASI.ERRNO_NOTSOCK
+
+    const parts = []
+    let total = 0
+    for (let i = 0; i < si_data_len; i++) {
+      const iovPtr = si_data + i * 8
+      const bufPtr = this.view.getUint32(iovPtr, true)
+      const bufLen = this.view.getUint32(iovPtr + 4, true)
+      parts.push(new Uint8Array(this.memory.buffer, bufPtr, bufLen))
+      total += bufLen
+    }
+    const bytes = new Uint8Array(total)
+    let at = 0
+    for (const part of parts) {
+      bytes.set(part, at)
+      at += part.length
+    }
+
+    this.options.sockets.send(socket.socketId, bytes)
+    this.view.setUint32(so_datalen, total, true)
+    return WASI.ERRNO_SUCCESS
+  }
+
+  // WASI implementation: sock_shutdown
+  //
+  // The bridge has no half-close, so shutting down the write side closes the
+  // connection. The read side then reports end of stream, which is what a
+  // server that has finished its response wants to see anyway
+  sock_shutdown(fd, how) {
+    const SHUT_WR = 2
+    const socket = this._socket(fd)
+    if (!socket) return WASI.ERRNO_NOTSOCK
+    if (how & SHUT_WR) this.options.sockets.close(socket.socketId)
     return WASI.ERRNO_SUCCESS
   }
 

@@ -95,6 +95,7 @@ export default function OSMode() {
       },
       onError: error => addLine('stderr', `Error: ${error.message}`),
       onExit: code => addLine('system', `Process exited with code ${code}`),
+      onListening: address => addLine('system', `Port bound for the program: http://${address}`),
     })
 
     runnerRef.current = runner

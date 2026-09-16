@@ -3,6 +3,7 @@
 // what lets it block without freezing the page and lets stop() actually stop.
 
 import VmWorker from './vm.worker?worker&inline'
+import { NetBridge } from './NetBridge'
 import { base64ToUint8Array } from './vm'
 import type { VmStartMessage, VmToPage, WasmRunnerStatus } from './vm'
 
@@ -14,6 +15,7 @@ export interface WasmRunnerCallbacks {
   onStatusChange?: (status: WasmRunnerStatus, detail?: string) => void
   onError?: (error: Error) => void
   onExit?: (code: number) => void
+  onListening?: (address: string) => void
 }
 
 interface ProjectFilesResponse {
@@ -65,6 +67,7 @@ export class WasmRunner {
   private status: WasmRunnerStatus = 'idle'
   private callbacks: WasmRunnerCallbacks
   private worker: Worker | null = null
+  private net: NetBridge | null = null
 
   constructor(callbacks: WasmRunnerCallbacks = {}) {
     this.callbacks = callbacks
@@ -90,6 +93,14 @@ export class WasmRunner {
 
       const entryFile = this.detectEntryFile(runtimeInfo.detected_language, projectFiles.files)
 
+      // A port for the program, if the proxy is up and the policy has one.
+      // Without it the program still runs; it just cannot listen
+      const net = new NetBridge({
+        onListening: address => this.callbacks.onListening?.(address),
+        onNetworkError: message => this.callbacks.onStderr?.(`network: ${message}\n`),
+      })
+      this.net = (await net.open()) ? net : null
+
       const worker = new VmWorker()
       this.worker = worker
       worker.onmessage = (event: MessageEvent<VmToPage>) => this.onWorkerMessage(event.data)
@@ -100,7 +111,9 @@ export class WasmRunner {
         runtimeBytes,
         args: runtimeArgs(runtimeLang, entryFile),
         files: projectFiles.files,
-        wake: new SharedArrayBuffer(4),
+        net: this.net
+          ? { inbox: this.net.inbox, listenerId: this.net.listener, address: this.net.address }
+          : undefined,
       }
       worker.postMessage(message, [runtimeBytes])
     } catch (err) {
@@ -115,7 +128,13 @@ export class WasmRunner {
       this.worker.terminate()
       this.worker = null
     }
+    this.closeNet()
     this.setStatus('stopped')
+  }
+
+  private closeNet(): void {
+    this.net?.close()
+    this.net = null
   }
 
   private onWorkerMessage(message: VmToPage): void {
@@ -131,12 +150,17 @@ export class WasmRunner {
         break
       case 'exit':
         this.worker = null
+        this.closeNet()
         this.setStatus('stopped')
         this.callbacks.onExit?.(message.code)
         break
       case 'error':
         this.worker = null
+        this.closeNet()
         this.fail(new Error(message.message))
+        break
+      case 'sock':
+        this.net?.handle(message)
         break
     }
   }
