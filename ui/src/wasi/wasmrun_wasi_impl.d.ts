@@ -5,6 +5,7 @@ export interface WasiOptions {
   stdout?: (text: string) => void
   stderr?: (text: string) => void
   stdin?: () => string | null
+  wait?: (ms: number) => void
 }
 
 export declare class WasiFS {

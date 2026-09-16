@@ -58,13 +58,15 @@ The UI opens at `http://localhost:8420` with panels for application output, cons
 │  ┌─ UI (Preact) ────────────────────────────────────┐  │
 │  │  Console, Filesystem, Kernel Status, Logs panels │  │
 │  └──────────────────────────────────────────────────┘  │
-│  ┌─ WASM VM ────────────────────────────────────────┐  │
+│  ┌─ WASM VM (web worker) ───────────────────────────┐  │
 │  │  Language Runtime .wasm (nodejs, rustpython)     │  │
 │  │  WASI Shim (JS) → virtual FS, stdout, args       │  │
 │  │  User code runs fully sandboxed                   │  │
 │  └──────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┘
 ```
+
+The VM runs in a web worker, off the page's own thread. That is what lets a program wait (a timer, a `sleep`) by really blocking rather than spinning, keeps the console painting while the program runs, and makes **Stop** an actual stop: the worker is terminated, whatever the program was doing. To allow the worker to block, the OS server serves its pages with the cross-origin isolation headers (`Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy`), which is why everything the page loads is same-origin.
 
 ## Security Model
 

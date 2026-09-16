@@ -8,6 +8,7 @@ use crate::runtime::project_files::ProjectFilesCollector;
 use crate::runtime::runtime_cache::RuntimeCache;
 use crate::runtime::tunnel::BoreClient;
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use tiny_http::{Header, Method, Request, Response, Server};
@@ -127,6 +128,26 @@ impl OsServer {
             self.cors_origin.as_bytes(),
         )
         .unwrap()
+    }
+
+    /// A response for anything the browser treats as a document: the OS page,
+    /// the logs page, and whatever the dev server hands the Application
+    /// panel's iframe. All of them carry the cross-origin isolation headers,
+    /// since browsers only enable `SharedArrayBuffer` on an isolated page and
+    /// the VM worker blocks on one. An iframe has to send them too, even
+    /// same-origin, or the isolated parent refuses to load it. Scripts,
+    /// styles and API responses need nothing: they are all same-origin.
+    fn document_response(body: String, content_type: &str) -> Response<Cursor<Vec<u8>>> {
+        Response::from_string(body)
+            .with_header(Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap())
+            .with_header(
+                Header::from_bytes(&b"Cross-Origin-Opener-Policy"[..], &b"same-origin"[..])
+                    .unwrap(),
+            )
+            .with_header(
+                Header::from_bytes(&b"Cross-Origin-Embedder-Policy"[..], &b"require-corp"[..])
+                    .unwrap(),
+            )
     }
 
     /// Detect the project language
@@ -327,10 +348,8 @@ impl OsServer {
             // Serve the main OS interface
             (Method::Get, "/") => {
                 if let Some(content) = self.template_cache.get("index.html") {
-                    let response = Response::from_string(content).with_header(
-                        Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
-                            .unwrap(),
-                    );
+                    let response =
+                        Self::document_response(content.clone(), "text/html; charset=utf-8");
                     request
                         .respond(response)
                         .map_err(|e| WasmrunError::from(e.to_string()))?;
@@ -386,10 +405,8 @@ impl OsServer {
             // Serve logs panel
             (Method::Get, "/logs") => {
                 if let Some(content) = self.template_cache.get("logs.html") {
-                    let response = Response::from_string(content).with_header(
-                        Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
-                            .unwrap(),
-                    );
+                    let response =
+                        Self::document_response(content.clone(), "text/html; charset=utf-8");
                     request
                         .respond(response)
                         .map_err(|e| WasmrunError::from(e.to_string()))?;
@@ -1026,10 +1043,7 @@ impl OsServer {
 
                 match self.fetch_from_dev_server(&target_url) {
                     Ok((content, content_type)) => {
-                        let response = Response::from_string(content).with_header(
-                            Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes())
-                                .unwrap(),
-                        );
+                        let response = Self::document_response(content, &content_type);
                         request
                             .respond(response)
                             .map_err(|e| WasmrunError::from(e.to_string()))?;
@@ -1038,9 +1052,7 @@ impl OsServer {
                         let error_html = format!(
                             "<html><body><h1>Dev Server Error</h1><p>{e}</p></body></html>"
                         );
-                        let response = Response::from_string(error_html).with_header(
-                            Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
-                        );
+                        let response = Self::document_response(error_html, "text/html");
                         request
                             .respond(response)
                             .map_err(|e| WasmrunError::from(e.to_string()))?;
@@ -1050,17 +1062,14 @@ impl OsServer {
                 let error_html = format!(
                     "<html><body><h1>No Dev Server</h1><p>No dev server running for PID {pid}</p></body></html>"
                 );
-                let response = Response::from_string(error_html).with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap(),
-                );
+                let response = Self::document_response(error_html, "text/html");
                 request
                     .respond(response)
                     .map_err(|e| WasmrunError::from(e.to_string()))?;
             }
         } else {
             let error_html = "<html><body><h1>No Project Running</h1><p>No project is currently running</p></body></html>";
-            let response = Response::from_string(error_html)
-                .with_header(Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap());
+            let response = Self::document_response(error_html.to_string(), "text/html");
             request
                 .respond(response)
                 .map_err(|e| WasmrunError::from(e.to_string()))?;

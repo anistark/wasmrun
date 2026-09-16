@@ -473,6 +473,9 @@ class WASIImplementation {
       stdout: options.stdout || (text => console.log(text)),
       stderr: options.stderr || (text => console.error(text)),
       stdin: options.stdin || (() => null),
+      // Blocks the calling thread for `ms`. Only a worker can supply one
+      // (Atomics.wait); without it poll_oneoff cannot wait and returns at once
+      wait: options.wait || null,
       ...options,
     }
 
@@ -483,9 +486,12 @@ class WASIImplementation {
     // Initialize virtual filesystem
     this.fs = new WasiFS()
 
-    // Set up any preopen directories
-    for (const [guest, host] of Object.entries(this.options.preopens)) {
+    // Set up any preopen directories. fd_prestat_get advertises them from fd 3
+    // up, so each one has to be a real open descriptor at that number or the
+    // first path_open through it fails with EBADF
+    for (const guest of Object.keys(this.options.preopens)) {
       this.fs.mkdir(guest)
+      this.fs.open(guest)
     }
   }
 
@@ -1424,10 +1430,74 @@ class WASIImplementation {
   }
 
   // WASI implementation: poll_oneoff
+  //
+  // File descriptors are always ready: regular files never block and stdin is
+  // at EOF in the browser. So the only thing worth waiting for is a clock, and
+  // that needs a thread that can block. With `options.wait` (a worker) the
+  // call sleeps until the earliest deadline; without it, it returns no events
+  // immediately, as it always has on the main thread.
   poll_oneoff(in_ptr, out_ptr, nsubscriptions, nevents) {
-    // Basic implementation that always returns immediately
     this.refreshMemory()
-    this.view.setUint32(nevents, 0, true)
+
+    const SUBSCRIPTION_SIZE = 48
+    const EVENT_SIZE = 32
+    const EVENTTYPE_CLOCK = 0
+    const SUBCLOCKFLAGS_ABSTIME = 1
+
+    const nowNs = () => BigInt(Date.now()) * 1000000n
+
+    const ready = []
+    const clocks = []
+    for (let i = 0; i < nsubscriptions; i++) {
+      const sub = in_ptr + i * SUBSCRIPTION_SIZE
+      const userdata = this.view.getBigUint64(sub, true)
+      const type = this.view.getUint8(sub + 8)
+
+      if (type === EVENTTYPE_CLOCK) {
+        const timeout = this.view.getBigUint64(sub + 24, true)
+        const flags = this.view.getUint16(sub + 40, true)
+        const deadline = flags & SUBCLOCKFLAGS_ABSTIME ? timeout : nowNs() + timeout
+        clocks.push({ userdata, deadline })
+      } else {
+        const fd = this.view.getUint32(sub + 16, true)
+        const errno = this.fs.fdstat(fd).errno
+        ready.push({ userdata, type, errno })
+      }
+    }
+
+    if (ready.length === 0 && clocks.length > 0) {
+      if (!this.options.wait) {
+        this.view.setUint32(nevents, 0, true)
+        return WASI.ERRNO_SUCCESS
+      }
+      const earliest = clocks.reduce((a, b) => (b.deadline < a.deadline ? b : a))
+      const remainingMs = Number((earliest.deadline - nowNs()) / 1000000n)
+      if (remainingMs > 0) {
+        this.options.wait(remainingMs)
+      }
+      const now = nowNs()
+      for (const clock of clocks) {
+        if (clock.deadline <= now) {
+          ready.push({ userdata: clock.userdata, type: EVENTTYPE_CLOCK, errno: WASI.ERRNO_SUCCESS })
+        }
+      }
+      if (ready.length === 0) {
+        ready.push({
+          userdata: earliest.userdata,
+          type: EVENTTYPE_CLOCK,
+          errno: WASI.ERRNO_SUCCESS,
+        })
+      }
+    }
+
+    for (let i = 0; i < ready.length; i++) {
+      const ev = out_ptr + i * EVENT_SIZE
+      new Uint8Array(this.memory.buffer, ev, EVENT_SIZE).fill(0)
+      this.view.setBigUint64(ev, ready[i].userdata, true)
+      this.view.setUint16(ev + 8, ready[i].errno, true)
+      this.view.setUint8(ev + 10, ready[i].type)
+    }
+    this.view.setUint32(nevents, ready.length, true)
     return WASI.ERRNO_SUCCESS
   }
 
@@ -1484,10 +1554,13 @@ class WASIImplementation {
   }
 }
 
-// Export the WASI implementation (global for template-based UI)
-window.WASI = {
-  WASIImplementation,
-  ERRNO: WASI,
+// Export the WASI implementation (global for template-based UI). There is no
+// window inside a worker, which is where OS mode runs it
+if (typeof window !== 'undefined') {
+  window.WASI = {
+    WASIImplementation,
+    ERRNO: WASI,
+  }
 }
 
 // ES module exports for TypeScript/bundler contexts

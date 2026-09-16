@@ -54,7 +54,6 @@ export default function OSMode() {
   const projectName = (window as any).PROJECT_NAME || 'Unknown Project'
   const [currentPath, setCurrentPath] = useState(`/${projectName}`)
   const language = (window as any).LANGUAGE || 'unknown'
-  const port = (window as any).PORT || '8420'
 
   const runtimeStatus = wasmToRuntimeStatus(wasmStatus)
 
@@ -247,7 +246,6 @@ export default function OSMode() {
           <ApplicationPanel
             projectName={projectName}
             language={language}
-            port={port}
             kernelStats={kernelStats}
           />
         )

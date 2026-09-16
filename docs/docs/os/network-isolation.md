@@ -25,7 +25,7 @@ Two halves, and only one of them is connected in OS mode:
 
 The last row is the one that matters to a running project. Until it lands, a program inside the browser VM cannot open a socket at all: the proxy is up and speaks its protocol, but nothing in the VM talks to it. Progress is tracked in [wasmrun#99](https://github.com/anistark/wasmrun/issues/99).
 
-The blocker is not the proxy. The WASI shim runs `_start()` synchronously on the browser's main thread, so an imported function has to return before the event loop turns again, and a socket call has nothing to wait on. Fixing it means giving the shim a way to suspend, either with JSPI or by moving the VM into a worker with `SharedArrayBuffer` and `Atomics.wait`.
+The blocker was never the proxy. Until recently the WASI shim ran `_start()` synchronously on the browser's main thread, so an imported function had to return before the event loop turned again, and a socket call had nothing to wait on. That half is now solved: the VM runs in a web worker and blocks on `Atomics.wait`, which is how timers and `sleep` already work inside it. What remains is the bridge itself, the `sock_*` calls in the shim talking to the proxy through the page.
 
 ## The proxy
 
