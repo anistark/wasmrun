@@ -16,7 +16,8 @@
   "dependencies": {
     "clsx": "^2.1.1",
     "preact": "^10.29.8",
-    "preact-router": "^4.1.2"
+    "preact-router": "^4.1.2",
+    "wasmnet": "0.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,14 +1,13 @@
-import { WASIImplementation, WASI_ERRNO } from '../wasi/wasmrun_wasi_impl.js'
+// Page-side half of the VM. Fetches what the worker needs, hands it over, and
+// relays what comes back. The program itself runs in vm.worker.ts, which is
+// what lets it block without freezing the page and lets stop() actually stop.
 
-export type WasmRunnerStatus =
-  | 'idle'
-  | 'loading-runtime'
-  | 'loading-files'
-  | 'populating-fs'
-  | 'starting'
-  | 'running'
-  | 'stopped'
-  | 'error'
+import VmWorker from './vm.worker?worker&inline'
+import { NetBridge } from './NetBridge'
+import { base64ToUint8Array } from './vm'
+import type { VmStartMessage, VmToPage, WasmRunnerStatus } from './vm'
+
+export type { WasmRunnerStatus }
 
 export interface WasmRunnerCallbacks {
   onStdout?: (text: string) => void
@@ -16,6 +15,7 @@ export interface WasmRunnerCallbacks {
   onStatusChange?: (status: WasmRunnerStatus, detail?: string) => void
   onError?: (error: Error) => void
   onExit?: (code: number) => void
+  onListening?: (address: string) => void
 }
 
 interface ProjectFilesResponse {
@@ -49,17 +49,25 @@ const ENTRY_CANDIDATES: Record<string, string[]> = {
   python: ['main.py', 'app.py', '__main__.py', 'src/main.py', 'src/app.py'],
 }
 
-const RUNTIME_NAMES: Record<string, string> = {
-  quickjs: 'qjs',
-  rustpython: 'rustpython',
-  rust: 'program',
-  go: 'program',
+// argv per runtime. The wasmhub nodejs runtime dispatches on a subcommand,
+// `run <file>`, the same way agent mode invokes it (src/agent/executor.rs)
+function runtimeArgs(runtimeLang: string, entryFile: string): string[] {
+  switch (runtimeLang) {
+    case 'nodejs':
+      return entryFile ? ['nodejs-runtime', 'run', entryFile] : ['nodejs-runtime']
+    case 'rust':
+    case 'go':
+      return ['program']
+    default:
+      return entryFile ? [runtimeLang, entryFile] : [runtimeLang]
+  }
 }
 
 export class WasmRunner {
   private status: WasmRunnerStatus = 'idle'
   private callbacks: WasmRunnerCallbacks
-  private wasiInstance: WASIImplementation | null = null
+  private worker: Worker | null = null
+  private net: NetBridge | null = null
 
   constructor(callbacks: WasmRunnerCallbacks = {}) {
     this.callbacks = callbacks
@@ -67,10 +75,6 @@ export class WasmRunner {
 
   getStatus(): WasmRunnerStatus {
     return this.status
-  }
-
-  getWasi(): WASIImplementation | null {
-    return this.wasiInstance
   }
 
   async run(): Promise<void> {
@@ -87,34 +91,83 @@ export class WasmRunner {
         this.fetchProjectFiles(),
       ])
 
-      this.setStatus('populating-fs')
       const entryFile = this.detectEntryFile(runtimeInfo.detected_language, projectFiles.files)
 
-      this.wasiInstance = this.createWasiInstance(runtimeLang, entryFile)
-      this.populateFilesystem(projectFiles.files)
+      // A port for the program, if the proxy is up and the policy has one.
+      // Without it the program still runs; it just cannot listen
+      const net = new NetBridge({
+        onListening: address => this.callbacks.onListening?.(address),
+        onNetworkError: message => this.callbacks.onStderr?.(`network: ${message}\n`),
+      })
+      this.net = (await net.open()) ? net : null
 
-      this.setStatus('starting')
-      const importObject = this.wasiInstance.getImportObject()
-      const { instance } = await WebAssembly.instantiate(runtimeBytes, importObject)
-      this.wasiInstance.initialize(instance)
+      const worker = new VmWorker()
+      this.worker = worker
+      worker.onmessage = (event: MessageEvent<VmToPage>) => this.onWorkerMessage(event.data)
+      worker.onerror = event => this.fail(new Error(event.message || 'VM worker failed'))
 
-      this.setStatus('running')
-      const start = instance.exports._start as (() => void) | undefined
-      if (!start) {
-        throw new Error('No _start export found in WASM runtime')
+      const message: VmStartMessage = {
+        type: 'start',
+        runtimeBytes,
+        args: runtimeArgs(runtimeLang, entryFile),
+        files: projectFiles.files,
+        net: this.net
+          ? { inbox: this.net.inbox, listenerId: this.net.listener, address: this.net.address }
+          : undefined,
       }
-
-      start()
-      this.setStatus('stopped')
-      this.callbacks.onExit?.(0)
+      worker.postMessage(message, [runtimeBytes])
     } catch (err) {
-      this.handleExecutionError(err)
+      this.fail(err instanceof Error ? err : new Error(String(err)))
     }
   }
 
+  // Terminating the worker is what makes this work mid-run: the program owns
+  // its thread, so nothing cooperative could interrupt it
   stop(): void {
-    this.wasiInstance = null
+    if (this.worker) {
+      this.worker.terminate()
+      this.worker = null
+    }
+    this.closeNet()
     this.setStatus('stopped')
+  }
+
+  private closeNet(): void {
+    this.net?.close()
+    this.net = null
+  }
+
+  private onWorkerMessage(message: VmToPage): void {
+    switch (message.type) {
+      case 'stdout':
+        this.callbacks.onStdout?.(message.text)
+        break
+      case 'stderr':
+        this.callbacks.onStderr?.(message.text)
+        break
+      case 'status':
+        this.setStatus(message.status, message.detail)
+        break
+      case 'exit':
+        this.worker = null
+        this.closeNet()
+        this.setStatus('stopped')
+        this.callbacks.onExit?.(message.code)
+        break
+      case 'error':
+        this.worker = null
+        this.closeNet()
+        this.fail(new Error(message.message))
+        break
+      case 'sock':
+        this.net?.handle(message)
+        break
+    }
+  }
+
+  private fail(error: Error): void {
+    this.setStatus('error')
+    this.callbacks.onError?.(error)
   }
 
   private setStatus(status: WasmRunnerStatus, detail?: string): void {
@@ -149,45 +202,6 @@ export class WasmRunner {
       throw new Error('Server returned unsuccessful project files response')
     }
     return data
-  }
-
-  private createWasiInstance(runtimeLang: string, entryFile: string): WASIImplementation {
-    const runtimeName = RUNTIME_NAMES[runtimeLang] || runtimeLang
-    const args = entryFile ? [runtimeName, entryFile] : [runtimeName]
-
-    return new WASIImplementation({
-      args,
-      env: {},
-      preopens: { '/': '/' },
-      stdout: (text: string) => this.callbacks.onStdout?.(text),
-      stderr: (text: string) => this.callbacks.onStderr?.(text),
-    })
-  }
-
-  private populateFilesystem(files: Record<string, string>): void {
-    if (!this.wasiInstance) return
-
-    const dirs = new Set<string>()
-    for (const relativePath of Object.keys(files)) {
-      const parts = relativePath.split('/')
-      for (let i = 1; i < parts.length; i++) {
-        dirs.add('/' + parts.slice(0, i).join('/'))
-      }
-    }
-
-    const sortedDirs = Array.from(dirs).sort()
-    for (const dir of sortedDirs) {
-      this.wasiInstance.fs.mkdir(dir)
-    }
-
-    for (const [relativePath, base64Content] of Object.entries(files)) {
-      const bytes = base64ToUint8Array(base64Content)
-      const absolutePath = '/' + relativePath
-      const result = this.wasiInstance.fs.writeFile(absolutePath, bytes)
-      if (result !== WASI_ERRNO.ERRNO_SUCCESS) {
-        this.callbacks.onStderr?.(`Warning: failed to write ${absolutePath} to virtual FS\n`)
-      }
-    }
   }
 
   private detectEntryFile(detectedLanguage: string, files: Record<string, string>): string {
@@ -232,31 +246,4 @@ export class WasmRunner {
 
     return null
   }
-
-  private handleExecutionError(err: unknown): void {
-    if (err instanceof Error) {
-      const exitMatch = err.message.match(/process exited with code (\d+)/)
-      if (exitMatch) {
-        const code = parseInt(exitMatch[1], 10)
-        this.callbacks.onExit?.(code)
-        this.setStatus('stopped')
-        return
-      }
-
-      this.setStatus('error')
-      this.callbacks.onError?.(err)
-    } else {
-      this.setStatus('error')
-      this.callbacks.onError?.(new Error(String(err)))
-    }
-  }
-}
-
-function base64ToUint8Array(base64: string): Uint8Array {
-  const binaryString = atob(base64)
-  const bytes = new Uint8Array(binaryString.length)
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i)
-  }
-  return bytes
 }

@@ -5,19 +5,37 @@ title: Serving a Port
 
 # Serving a Port
 
-A program in a sandbox that binds a port and answers requests on it. Where this works depends on which mode is running the program, and OS mode is the one where it does not work yet.
+A program in a sandbox that binds a port and answers requests on it. All three modes can do this now, and in all three the host binds the port and hands it to the program.
 
-## OS mode: not yet
+## OS mode
 
-There is no `--forward` flag and no port forwarding in OS mode. A project running in the browser VM cannot bind a port, so there is nothing to forward.
+When a project starts in the browser VM, the page asks the network proxy for a port from the policy's `bind_ports` range (`3000-9999` by default, see [Network Policy](./network-isolation.md)), taking the first one that is free. The address is printed in the Console panel:
 
-This page previously documented a `--forward HOST_PORT:PROCESS_PORT` flag with examples for Express, Flask and PostgreSQL. None of it was implemented; the flag has never existed.
+```
+Port bound for the program: http://127.0.0.1:3000
+```
 
-What is missing is the browser socket bridge, described in [Network Policy](./network-isolation.md). The proxy that would carry those sockets is running, and the WASI shim in the browser does not call it yet. Tracked in [wasmrun#99](https://github.com/anistark/wasmrun/issues/99).
+A Node project then serves on it with nothing special in the code:
 
-## What works today
+```js
+const http = require('http')
+http.createServer((req, res) => res.end('hello from the browser VM\n')).listen()
+```
 
-Both of these run the program on wasmrun's own interpreter rather than in a browser, which is why sockets are available there and not here.
+```sh
+curl http://127.0.0.1:3000
+# hello from the browser VM
+```
+
+`server.listen()` needs no port, and passing one is ignored: the socket already exists, and `server.address()` reports the real one. Requests reach the VM through the proxy's WebSocket, and the program reads them from a shared buffer between the page and the VM worker, so a busy program and an idle one both see their connections without the page having to wait for either.
+
+Stopping the program releases the port. One port is bound per running project, so a second `wasmrun os` on the same machine gets the next free one in the range.
+
+There is no `--forward` flag. This page once documented one, with examples for Express, Flask and PostgreSQL; it never existed, and it is not needed: the port the program serves on is already a host port.
+
+## The other two modes
+
+Both run the program on wasmrun's own interpreter rather than in a browser.
 
 ### Agent mode: a server in a session
 
@@ -55,7 +73,7 @@ See [exec networking](../exec/networking.md).
 
 ## Why the host binds the port
 
-In both cases the *host* binds and the program is handed the result. This is not a limitation to work around, it is the design.
+In every mode the *host* binds and the program is handed the result. This is not a limitation to work around, it is the design.
 
 WASI Preview 1 has no call that creates a socket. A guest cannot ask for a port, which means it cannot ask for one it should not have: a listener arrives the way a preopened directory does, already decided. A program that wants to serve calls `accept` on what it was given.
 

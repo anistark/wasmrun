@@ -15,17 +15,16 @@ For `wasmrun exec` and agent mode, where wasmrun runs the program itself, see [e
 
 ## What is implemented today
 
-Two halves, and only one of them is connected in OS mode:
-
 | Piece | State |
 |---|---|
 | The [wasmnet](https://github.com/anistark/wasmnet) proxy runs beside the OS server, under the project's policy | Working |
 | `[os.network]` in `wasmrun.toml` configures that policy, and a malformed rule stops the server starting | Working |
-| The browser's WASI shim calls the proxy, so a program in the VM can actually open a socket | **Not yet** |
+| A program in the VM can **serve**: the page binds a port from `bind_ports` and the program accepts connections on it | Working |
+| A program in the VM can **connect out** | Not yet |
 
-The last row is the one that matters to a running project. Until it lands, a program inside the browser VM cannot open a socket at all: the proxy is up and speaks its protocol, but nothing in the VM talks to it. Progress is tracked in [wasmrun#99](https://github.com/anistark/wasmrun/issues/99).
+Inbound is the half a project usually needs, and it works end to end: `http.createServer(...).listen()` in a Node project answers a `curl` from the host. See [Serving a Port](./port-forwarding.md).
 
-The blocker is not the proxy. The WASI shim runs `_start()` synchronously on the browser's main thread, so an imported function has to return before the event loop turns again, and a socket call has nothing to wait on. Fixing it means giving the shim a way to suspend, either with JSPI or by moving the VM into a worker with `SharedArrayBuffer` and `Atomics.wait`.
+Outbound is not wired. The proxy can open connections under the `allow` and `deny` rules below, and the VM's WASI shim does not ask it to yet, so a program in the VM cannot `connect`. wasmhub's `net.connect` and `http.request` throw `ERR_NOT_SUPPORTED` for the same reason. The rules are still worth writing now, since the proxy enforces them the moment something calls it. Tracked in [wasmrun#99](https://github.com/anistark/wasmrun/issues/99).
 
 ## The proxy
 
@@ -66,7 +65,8 @@ allow = ["api.example.com:443", "*.githubusercontent.com"]
 # Ranges it may never reach, checked before the allow list.
 deny = ["10.0.0.0/8", "192.168.0.0/16"]
 
-# Ports a program in the VM may bind, once inbound sockets are wired up.
+# Ports a program in the VM may serve on. The page takes the first free
+# one when a project starts.
 bind_ports = "3000-3999,8080"
 
 # Ceilings.

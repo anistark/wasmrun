@@ -3,19 +3,17 @@ import type { KernelStats } from '../../types/osTypes'
 interface ApplicationPanelProps {
   projectName: string
   language: string
-  port: string
   kernelStats: KernelStats | null
 }
 
 export default function ApplicationPanel({
   projectName,
   language,
-  port,
   kernelStats,
 }: ApplicationPanelProps) {
   const handleStart = async () => {
     try {
-      const response = await fetch(`http://localhost:${port}/api/kernel/start`, {
+      const response = await fetch('/api/kernel/start', {
         method: 'POST',
       })
       const data = await response.json()
@@ -32,7 +30,7 @@ export default function ApplicationPanel({
 
   const handleRestart = async () => {
     try {
-      const response = await fetch(`http://localhost:${port}/api/kernel/restart`, {
+      const response = await fetch('/api/kernel/restart', {
         method: 'POST',
       })
       const data = await response.json()
@@ -83,11 +81,7 @@ export default function ApplicationPanel({
         </div>
 
         <div className="bg-white/5 backdrop-blur-lg border border-green-500/30 rounded-xl h-96 overflow-hidden">
-          <iframe
-            src={`http://localhost:${port}/app/`}
-            className="w-full h-full rounded-xl"
-            title="Project Application"
-          />
+          <iframe src={'/app/'} className="w-full h-full rounded-xl" title="Project Application" />
         </div>
       </div>
     </div>

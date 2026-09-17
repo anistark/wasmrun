@@ -51,7 +51,7 @@ Live stdout/stderr output from your running project. Color-coded:
 - 🔴 Red: stderr
 - 🔵 Blue: system messages
 
-Includes Run/Stop controls and a clear button.
+Includes Run/Stop controls and a clear button. Output appears as the program writes it, and **Stop** ends the program immediately, even inside a busy loop, because the VM runs in a worker the page can terminate.
 
 ### Filesystem Panel
 Browse the WASI virtual filesystem. View project files as they exist inside the sandbox.

@@ -21,6 +21,9 @@ importers:
       preact-router:
         specifier: ^4.1.2
         version: 4.1.2(preact@10.29.8)
+      wasmnet:
+        specifier: 0.2.0
+        version: 0.2.0
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -1167,6 +1170,9 @@ packages:
       yaml:
         optional: true
 
+  wasmnet@0.2.0:
+    resolution: {integrity: sha512-oztD7RBnX+5D7/7ltXnz/m7QdovTht0L4bscZdwrs/x2oNdYKkt3G2vO1p32QR4AR+2vFE8yHVn3LA4lei2imQ==}
+
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
     engines: {node: '>= 8'}
@@ -2197,6 +2203,8 @@ snapshots:
       '@types/node': 22.18.1
       fsevents: 2.3.3
       jiti: 2.7.0
+
+  wasmnet@0.2.0: {}
 
   which@2.0.2:
     dependencies:

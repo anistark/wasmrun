@@ -5,7 +5,22 @@ export interface WasiOptions {
   stdout?: (text: string) => void
   stderr?: (text: string) => void
   stdin?: () => string | null
+  wait?: (ms: number) => void
+  sockets?: SocketBridge
 }
+
+/** Inbound sockets from the host. See ui/src/os/netInbox.ts */
+export interface SocketBridge {
+  listenerId: number
+  poll(): SocketEvent[]
+  send(id: number, bytes: Uint8Array): void
+  close(id: number): void
+}
+
+export type SocketEvent =
+  | { kind: 'accepted'; id: number; connId: number; remote: string }
+  | { kind: 'data'; id: number; bytes: Uint8Array }
+  | { kind: 'closed'; id: number }
 
 export declare class WasiFS {
   mkdir(path: string): number
@@ -23,6 +38,7 @@ export declare class WASIImplementation {
 
   constructor(options?: WasiOptions)
   initialize(instance: WebAssembly.Instance): void
+  listenFd(): number
   getImportObject(): WebAssembly.Imports
   createVirtualFile(path: string, content: string | Uint8Array): number
   readVirtualFile(path: string): string | null
