@@ -110,7 +110,7 @@ Two probe endpoints for orchestrators and load balancers. Both are answered **be
 
 ```sh
 curl http://localhost:8430/health
-# {"status":"ok","version":"0.22.0","uptime_seconds":3841}
+# {"status":"ok","version":"0.23.0","uptime_seconds":3841}
 ```
 
 **`/ready`** is readiness: whether this instance can take **new** work. **200** when it can, **503** when it cannot, with a machine-readable `reason`. Unready is a routing signal, not a fault; a saturated server keeps serving the sessions it already has, so pull it out of the pool rather than restarting it.

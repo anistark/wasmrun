@@ -196,7 +196,7 @@ spec:
       terminationGracePeriodSeconds: 60
       containers:
         - name: agent
-          image: your-registry/wasmrun-agent:0.22.0
+          image: your-registry/wasmrun-agent:0.23.0
           args:
             - --host=0.0.0.0
             - --auth=/etc/wasmrun/auth.toml
