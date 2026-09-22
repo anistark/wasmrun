@@ -31,14 +31,14 @@ wasmrun os ./my-project
 ## Quick Example
 
 ```sh
-# Run a Node.js project
-wasmrun os ./my-express-app
+# Run the bundled Node.js example, an HTTP API that serves on a host port
+wasmrun os examples/nodejs-http-api
 
 # Run with explicit language
 wasmrun os ./my-app --language python
 
-# Custom port with file watching
-wasmrun os ./my-project --port 3000 --watch
+# Custom port for the UI
+wasmrun os ./my-project --port 3000
 ```
 
 The UI opens at `http://localhost:8420` with panels for application output, console, filesystem browser, kernel status, and structured logs.

@@ -31,6 +31,8 @@ curl http://127.0.0.1:3000
 
 Stopping the program releases the port. One port is bound per running project, so a second `wasmrun os` on the same machine gets the next free one in the range.
 
+[`examples/nodejs-http-api`](https://github.com/anistark/wasmrun/tree/main/examples/nodejs-http-api) is a full REST API built this way: routes, JSON bodies, a static page from `public/`, on the `http` module alone. `wasmrun os examples/nodejs-http-api`, press **Run**, and `curl http://127.0.0.1:3000/health` answers from the browser VM.
+
 There is no `--forward` flag. This page once documented one, with examples for Express, Flask and PostgreSQL; it never existed, and it is not needed: the port the program serves on is already a host port.
 
 ## The other two modes

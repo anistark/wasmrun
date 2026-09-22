@@ -868,27 +868,28 @@ class WASIImplementation {
     }
 
     const fileDesc = this.fs.fileDescriptors.get(fd)
+    this._writeFilestat(buf, fileDesc)
+    return WASI.ERRNO_SUCCESS
+  }
 
-    // Fill the stat structure with zeros first
+  // Layout of a WASI filestat, 64 bytes:
+  //   0: dev     8: ino    16: filetype (u8)  24: nlink
+  //  32: size   40: atim   48: mtim           56: ctim
+  // A wrong offset here is not a cosmetic bug: a runtime sizes its read
+  // buffer from `size`, so a timestamp in that slot makes every file unreadable
+  _writeFilestat(buf, entry) {
     for (let i = 0; i < 64; i++) {
       this.view.setUint8(buf + i, 0)
     }
-
-    // Set file type
-    this.view.setUint8(buf + 16, fileDesc.type)
-
-    // Set file size for regular files
-    if (fileDesc.type === FILETYPE.REGULAR_FILE && fileDesc.content) {
-      this.view.setBigUint64(buf + 24, BigInt(fileDesc.content.byteLength), true)
+    this.view.setUint8(buf + 16, entry.type)
+    this.view.setBigUint64(buf + 24, BigInt(1), true)
+    if (entry.type === FILETYPE.REGULAR_FILE && entry.content) {
+      this.view.setBigUint64(buf + 32, BigInt(entry.content.byteLength), true)
     }
-
-    // Set timestamps (current time for all)
     const now = BigInt(Date.now()) * BigInt(1000000) // milliseconds to nanoseconds
-    this.view.setBigUint64(buf + 32, now, true) // atime
-    this.view.setBigUint64(buf + 40, now, true) // mtime
-    this.view.setBigUint64(buf + 48, now, true) // ctime
-
-    return WASI.ERRNO_SUCCESS
+    this.view.setBigUint64(buf + 40, now, true)
+    this.view.setBigUint64(buf + 48, now, true)
+    this.view.setBigUint64(buf + 56, now, true)
   }
 
   // WASI implementation: fd_filestat_set_size
@@ -1080,63 +1081,20 @@ class WASIImplementation {
     const dir = this.fs.files.get(dirPath)
     const entries = Array.from(dir.content.entries())
 
+    // Same shape as the native fd_readdir in src/runtime/wasi/syscalls.rs:
+    // no `.` or `..`, d_next is the index of the entry after this one, and
+    // an entry that does not fit ends the batch rather than being truncated
     let bytesUsed = 0
-    let cookieIndex = Number(cookie)
-
-    // Add special entries for . and ..
-    if (cookieIndex === 0) {
-      // Current directory (.)
-      const entry = {
-        name: '.',
-        type: FILETYPE.DIRECTORY,
-      }
-
-      const bytesWritten = this._writeDirectoryEntry(buf, bytesUsed, buf_len, 0, entry)
-      if (bytesWritten < 0) {
-        // Not enough space
-        this.view.setUint32(bufused, bytesUsed, true)
-        return WASI.ERRNO_SUCCESS
-      }
-
-      bytesUsed += bytesWritten
-      cookieIndex++
-    }
-
-    if (cookieIndex === 1) {
-      // Parent directory (..)
-      const entry = {
-        name: '..',
-        type: FILETYPE.DIRECTORY,
-      }
-
-      const bytesWritten = this._writeDirectoryEntry(buf, bytesUsed, buf_len, 1, entry)
-      if (bytesWritten < 0) {
-        // Not enough space
-        this.view.setUint32(bufused, bytesUsed, true)
-        return WASI.ERRNO_SUCCESS
-      }
-
-      bytesUsed += bytesWritten
-      cookieIndex++
-    }
-
-    // Process regular entries
-    for (let i = cookieIndex - 2; i < entries.length; i++) {
+    for (let i = Number(cookie); i < entries.length; i++) {
       const [name, path] = entries[i]
       const file = this.fs.files.get(path)
-
-      const entry = {
+      const bytesWritten = this._writeDirectoryEntry(buf, bytesUsed, buf_len, i + 1, {
         name,
         type: file.type,
-      }
-
-      const entryCookie = i + 2 // +2 for . and .. entries
-      const bytesWritten = this._writeDirectoryEntry(buf, bytesUsed, buf_len, entryCookie, entry)
+      })
       if (bytesWritten < 0) {
-        // Not enough space
         break
       }
-
       bytesUsed += bytesWritten
     }
 
@@ -1144,12 +1102,13 @@ class WASIImplementation {
     return WASI.ERRNO_SUCCESS
   }
 
-  // Helper for fd_readdir to write a directory entry
+  // Helper for fd_readdir to write a directory entry.
+  // dirent: 24-byte header + name bytes (no NUL)
+  //   0: d_next (u64)
+  //   8: d_ino (u64)
+  //  16: d_namlen (u32)
+  //  20: d_type (u8)
   _writeDirectoryEntry(buf, offset, buf_len, d_next, entry) {
-    if (offset >= buf_len) {
-      return -1 // Not enough space
-    }
-
     const nameBytes = new TextEncoder().encode(entry.name)
     const entrySize = 24 + nameBytes.length
 
@@ -1157,14 +1116,11 @@ class WASIImplementation {
       return -1 // Not enough space
     }
 
-    // Write directory entry
-    this.view.setBigUint64(buf + offset, BigInt(d_next), true) // d_next
-    this.view.setBigUint64(buf + offset + 8, BigInt(entry.name.length), true) // d_namlen
-    this.view.setUint8(buf + offset + 16, entry.type) // d_type
-
-    // Write name
-    const nameBuffer = new Uint8Array(this.memory.buffer, buf + offset + 24, nameBytes.length)
-    nameBuffer.set(nameBytes)
+    this.view.setBigUint64(buf + offset, BigInt(d_next), true)
+    this.view.setBigUint64(buf + offset + 8, BigInt(0), true)
+    this.view.setUint32(buf + offset + 16, nameBytes.length, true)
+    this.view.setUint8(buf + offset + 20, entry.type)
+    new Uint8Array(this.memory.buffer, buf + offset + 24, nameBytes.length).set(nameBytes)
 
     return entrySize
   }
@@ -1336,26 +1292,7 @@ class WASIImplementation {
     }
 
     const file = this.fs.files.get(fullPath)
-
-    // Fill the stat structure with zeros first
-    for (let i = 0; i < 64; i++) {
-      this.view.setUint8(buf + i, 0)
-    }
-
-    // Set file type
-    this.view.setUint8(buf + 16, file.type)
-
-    // Set file size for regular files
-    if (file.type === FILETYPE.REGULAR_FILE && file.content) {
-      this.view.setBigUint64(buf + 24, BigInt(file.content.byteLength), true)
-    }
-
-    // Set timestamps (current time for all)
-    const now = BigInt(Date.now()) * BigInt(1000000) // milliseconds to nanoseconds
-    this.view.setBigUint64(buf + 32, now, true) // atime
-    this.view.setBigUint64(buf + 40, now, true) // mtime
-    this.view.setBigUint64(buf + 48, now, true) // ctime
-
+    this._writeFilestat(buf, file)
     return WASI.ERRNO_SUCCESS
   }
 

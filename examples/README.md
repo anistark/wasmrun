@@ -41,6 +41,11 @@ This directory contains example projects demonstrating how to create WebAssembly
 - **Functions**: Counter, todo list, interactive forms with Leptos framework
 - **Build**: Rust Leptos framework compiled to WebAssembly
 
+### 🟢 Node.js HTTP API (`nodejs-http-api/`)
+- **Features**: REST API on the built-in `http` module, no dependencies; serves on a host-bound port from the browser VM or an agent session
+- **Endpoints**: users and todos CRUD, `/health`, `/api/stats`, a test page from `public/`
+- **Run**: `wasmrun os examples/nodejs-http-api` (OS Mode), or through `POST /sessions/:id/serve` (Agent Mode); see its README
+
 ### 🤖 Agent API Flows (`agent-flows/`)
 - **Features**: End-to-end Agent API request sequences: multi-file TypeScript execution and npm dependency vendoring
 - **Scripts**: `typescript-project.sh`, `npm-dependencies.sh`
@@ -59,6 +64,9 @@ wasmrun examples/c-hello
 wasmrun examples/asc-hello
 wasmrun examples/web-asc
 wasmrun examples/web-leptos
+
+# Run the Node.js example in the browser VM (OS mode)
+wasmrun os examples/nodejs-http-api
 
 # Compile only
 wasmrun compile examples/rust-hello

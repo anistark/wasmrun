@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>wasmrun Express API Example</title>
+    <title>wasmrun HTTP API Example</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -110,7 +110,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🚀 wasmrun Express API Example</h1>
+        <h1>🚀 wasmrun HTTP API Example</h1>
 
         <div id="status" class="status loading">
             <strong>Connecting to API...</strong>
@@ -120,7 +120,7 @@
             <h2>🔍 Health & Info</h2>
             <div class="endpoint">
                 <span class="method get">GET</span>
-                <span class="url">/</span>
+                <span class="url">/api</span>
                 <div class="description">Welcome message with API documentation</div>
             </div>
             <div class="endpoint">
@@ -128,7 +128,7 @@
                 <span class="url">/health</span>
                 <div class="description">Server health check and status</div>
             </div>
-            <button onclick="testEndpoint('/')">Test Welcome</button>
+            <button onclick="testEndpoint('/api')">Test Welcome</button>
             <button onclick="testEndpoint('/health')">Test Health</button>
         </div>
 

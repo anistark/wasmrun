@@ -1,0 +1,20 @@
+{
+  "name": "wasmrun-http-api-example",
+  "version": "1.0.0",
+  "description": "Example Node.js HTTP API for wasmrun OS mode and agent serve, built on the http module alone",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "http",
+    "api",
+    "wasmrun",
+    "example"
+  ],
+  "author": "wasmrun",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -620,6 +620,6 @@ The `examples/` directory contains sample projects in various languages:
 - `native-go/`: Native Go → WASM (Exec Mode)
 - `web-leptos/`: Leptos web framework example (Server Mode)
 - `web-asc/`: AssemblyScript web example (Server Mode)
-- `nodejs-express-api/`: Node.js Express API (OS Mode)
+- `nodejs-http-api/`: Node.js HTTP API on the built-in `http` module, no npm dependencies (OS Mode, Agent Mode)
 
 Use these for testing. Integration tests in `tests/exec_integration_tests.rs` build and run some of these.

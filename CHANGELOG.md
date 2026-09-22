@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A Node.js example that serves from the browser VM.** `examples/nodejs-http-api` is a REST API on the built-in `http` module: routes, JSON bodies, a static page from `public/`, and no npm dependencies. `wasmrun os examples/nodejs-http-api`, press **Run**, and `curl http://127.0.0.1:3000/health` answers from the VM; the same file runs unchanged under agent mode's `POST /sessions/:id/serve` and plain `node`. It replaces `examples/nodejs-express-api`, which could never have run in OS mode: the VM is populated from the project's own files and there is no `node_modules` in it, so `require('express')` failed at startup ([#99](https://github.com/anistark/wasmrun/issues/99))
+
+### Fixed
+- **A program in the browser VM could not read its own files.** The OS mode WASI shim wrote a file's size into the `nlink` slot of `filestat` and shifted the timestamps after it, so `fs.statSync` reported a timestamp as the size and `fs.readFileSync`, which sizes its buffer from a stat, threw `invalid array index` on every file. The layout now matches the spec and the native implementation
+- **`fs.readdirSync` hung the browser VM.** The shim's `fd_readdir` wrote `d_namlen` where `d_ino` belongs, put `d_type` in the wrong byte, and gave the first entry a `d_next` cookie of `0`, which told the runtime to start over on every call. Entries now carry the spec layout and the same cookies as the native `fd_readdir`, and the synthetic `.` and `..` entries are gone, as they are natively
+- **The OS mode docs described an Express app and a `--watch` reload that do not work there.** The examples now use `nodejs-http-api`, the running page says what the VM does and does not receive from the project directory, and `--watch` is documented as accepted but inert until hot reload lands
+
 ## [0.23.0](https://github.com/anistark/wasmrun/releases/tag/v0.23.0) - 2026-09-21
 
 ### Added

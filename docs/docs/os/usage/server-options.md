@@ -51,18 +51,11 @@ wasmrun os --port 8421        # or use a different port
 
 ### `--watch`
 
-Monitor project files for changes and trigger reload.
-
 ```sh
 wasmrun os ./my-project --watch
 ```
 
-When files change:
-- The file watcher detects modifications
-- Project files are re-served to the browser
-- The WASM runtime can be restarted with fresh files
-
-Works well during active development for quick iteration.
+The flag is accepted and printed at startup, but nothing watches the project yet: the VM is not restarted when a file changes. Project files are fetched fresh on every **Run**, so **Stop** and **Run** in the Console panel picks up an edit.
 
 ## CORS Configuration
 
@@ -101,7 +94,7 @@ Verbose output includes:
 - Runtime fetch status
 
 ```
-🔍 OS Mode: Analyzing project path: ./my-express-app
+🔍 OS Mode: Analyzing project path: ./my-app
 🏷️  Detected language: nodejs
 ✅ Multi-language kernel started
 ✅ OS mode templates loaded
