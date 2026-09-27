@@ -6,6 +6,7 @@ import VmWorker from './vm.worker?worker&inline'
 import { NetBridge } from './NetBridge'
 import { base64ToUint8Array } from './vm'
 import type { VmStartMessage, VmToPage, WasmRunnerStatus } from './vm'
+import type { TunnelInfo } from './tunnel'
 
 export type { WasmRunnerStatus }
 
@@ -16,6 +17,7 @@ export interface WasmRunnerCallbacks {
   onError?: (error: Error) => void
   onExit?: (code: number) => void
   onListening?: (address: string) => void
+  onTunnel?: (tunnel: TunnelInfo) => void
 }
 
 interface ProjectFilesResponse {
@@ -97,6 +99,7 @@ export class WasmRunner {
       // Without it the program still runs; it just cannot listen
       const net = new NetBridge({
         onListening: address => this.callbacks.onListening?.(address),
+        onTunnel: tunnel => this.callbacks.onTunnel?.(tunnel),
         onNetworkError: message => this.callbacks.onStderr?.(`network: ${message}\n`),
       })
       this.net = (await net.open()) ? net : null

@@ -115,5 +115,5 @@ Isolation here is a **policy** enforced at the point where a connection is opene
 ## See also
 
 - [Exec and agent networking](../exec/networking.md): sockets where wasmrun runs the program itself
-- [Public tunneling](./public-tunneling.md): exposing the OS mode server itself
+- [Public tunneling](./public-tunneling.md): publishing the program's port with `--expose`
 - [wasmrun#99](https://github.com/anistark/wasmrun/issues/99): the browser socket bridge

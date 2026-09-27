@@ -6,13 +6,14 @@ use crate::runtime::multilang_kernel::{MultiLanguageKernel, OsRunConfig};
 use crate::runtime::network::NetworkServer;
 use crate::runtime::project_files::ProjectFilesCollector;
 use crate::runtime::runtime_cache::RuntimeCache;
-use crate::runtime::tunnel::BoreClient;
+use crate::runtime::tunnel::bore::{self, BoreClient, BoreServer, TunnelStatus};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use tiny_http::{Header, Method, Request, Response, Server};
-use wasmnet::policy::PolicyConfig;
+use wasmnet::policy::{NetworkPolicy, Policy, PolicyConfig};
 
 const TEMPLATE_INDEX_HTML: &str = include_str!("../../templates/os/index.html");
 const TEMPLATE_OS_JS: &str = include_str!("../../templates/os/os.js");
@@ -35,7 +36,13 @@ pub struct OsServer {
     project_pid: Arc<RwLock<Option<u32>>>,
     template_cache: HashMap<String, String>,
     log_system: Arc<LogTrailSystem>,
+    /// The public tunnel, while `--expose` has one open.
     tunnel_client: Arc<RwLock<Option<BoreClient>>>,
+    /// The program's port as the page last reported it. Kept apart from the
+    /// client so a tunnel restarted from the UI picks it up.
+    tunnel_target: Arc<RwLock<Option<u16>>>,
+    /// The port this server is listening on, set by `start`.
+    os_port: u16,
     runtime_cache: RuntimeCache,
     cors_origin: String,
     /// The wasmnet proxy's port, once it is up. `None` until `start` runs it,
@@ -55,6 +62,7 @@ impl OsServer {
             format!("http://127.0.0.1:{}", config.port.unwrap_or(8420))
         };
         let runtime_cache = RuntimeCache::new()?;
+        let os_port = config.port.unwrap_or(8420);
         let mut server = Self {
             kernel: Arc::new(RwLock::new(kernel)),
             config,
@@ -62,6 +70,8 @@ impl OsServer {
             template_cache: HashMap::new(),
             log_system,
             tunnel_client: Arc::new(RwLock::new(None)),
+            tunnel_target: Arc::new(RwLock::new(None)),
+            os_port,
             runtime_cache,
             cors_origin,
             network_port: Arc::new(RwLock::new(None)),
@@ -190,7 +200,9 @@ impl OsServer {
     }
 
     /// Start the OS server
-    pub fn start(self, port: u16) -> Result<()> {
+    pub fn start(mut self, port: u16) -> Result<()> {
+        self.os_port = port;
+
         // Read the policy before anything binds: a project that asked for one
         // and wrote it wrong should hear about it instead of watching a server
         // come up.
@@ -208,6 +220,10 @@ impl OsServer {
         // The proxy lives exactly as long as this call: dropping the handle
         // when the request loop ends stops it and joins its thread.
         let _network = self.start_network(port, policy);
+
+        if self.config.expose {
+            self.start_tunnel_at_boot();
+        }
 
         // Start the project in the kernel
         self.start_project()?;
@@ -563,7 +579,12 @@ impl OsServer {
                 self.handle_recent_logs_request(request)?;
             }
 
-            // Tunnel API endpoints
+            // Tunnel API endpoints. `--expose` opens the tunnel; the page
+            // points it at the program's port with `target`
+            (Method::Post, "/api/tunnel/target") => {
+                self.handle_tunnel_target_request(request)?;
+            }
+
             (Method::Post, "/api/tunnel/start") => {
                 self.handle_tunnel_start_request(request)?;
             }
@@ -1519,78 +1540,6 @@ impl OsServer {
         Ok(())
     }
 
-    fn handle_tunnel_start_request(&self, request: Request) -> Result<()> {
-        let mut tunnel_guard = self.tunnel_client.write().unwrap();
-
-        if tunnel_guard.is_some() {
-            let response_json = serde_json::json!({
-                "success": false,
-                "error": "Tunnel is already running"
-            });
-
-            let response = Response::from_string(response_json.to_string())
-                .with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                )
-                .with_header(self.cors_header());
-
-            request
-                .respond(response)
-                .map_err(|e| WasmrunError::from(e.to_string()))?;
-            return Ok(());
-        }
-
-        let server = self
-            .config
-            .tunnel_server
-            .clone()
-            .unwrap_or_else(|| "bore.pub:7835".to_string());
-        let secret = self.config.tunnel_secret.clone();
-        let local_port = self.config.port.unwrap_or(8420);
-
-        let mut client = BoreClient::new(server, secret, local_port);
-
-        match client.connect() {
-            Ok(public_url) => {
-                let response_json = serde_json::json!({
-                    "success": true,
-                    "public_url": public_url,
-                    "status": "Connected"
-                });
-
-                *tunnel_guard = Some(client);
-
-                let response = Response::from_string(response_json.to_string())
-                    .with_header(
-                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                    )
-                    .with_header(self.cors_header());
-
-                request
-                    .respond(response)
-                    .map_err(|e| WasmrunError::from(e.to_string()))?;
-            }
-            Err(e) => {
-                let response_json = serde_json::json!({
-                    "success": false,
-                    "error": e
-                });
-
-                let response = Response::from_string(response_json.to_string())
-                    .with_header(
-                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                    )
-                    .with_header(self.cors_header());
-
-                request
-                    .respond(response)
-                    .map_err(|e| WasmrunError::from(e.to_string()))?;
-            }
-        }
-
-        Ok(())
-    }
-
     /// Report the wasmnet proxy's URL, or that it is not running.
     ///
     /// The browser shim reads this before it boots a module, since the proxy
@@ -1606,6 +1555,7 @@ impl OsServer {
                 "port": port,
                 "url": format!("ws://{NETWORK_HOST}:{port}"),
                 "bind_ports": *self.network_bind_ports.read().unwrap(),
+                "tunnel": self.config.expose,
             }),
             None => serde_json::json!({
                 "success": true,
@@ -1626,73 +1576,314 @@ impl OsServer {
         Ok(())
     }
 
-    fn handle_tunnel_status_request(&self, request: Request) -> Result<()> {
-        let tunnel_guard = self.tunnel_client.read().unwrap();
+    /// Open the tunnel `--expose` asked for, pointed at whatever port the
+    /// program has reported so far. Returns the client's server address so
+    /// the caller can say where it is connecting.
+    fn start_tunnel(&self) -> std::result::Result<String, String> {
+        let server = BoreServer::parse(
+            self.config
+                .tunnel_server
+                .as_deref()
+                .unwrap_or(bore::DEFAULT_SERVER),
+        )?;
+        let target = *self.tunnel_target.read().unwrap();
+        let client = BoreClient::start(server, self.config.tunnel_secret.as_deref(), target)
+            .map_err(|e| format!("could not start the tunnel thread: {e}"))?;
+        let address = client.server().to_string();
+        *self.tunnel_client.write().unwrap() = Some(client);
+        Ok(address)
+    }
 
-        let response_json = if let Some(ref client) = *tunnel_guard {
-            let status = client.get_status();
-            let status_str = match status {
-                crate::runtime::tunnel::bore::TunnelStatus::Disconnected => "Disconnected",
-                crate::runtime::tunnel::bore::TunnelStatus::Connecting => "Connecting",
-                crate::runtime::tunnel::bore::TunnelStatus::Connected => "Connected",
-                crate::runtime::tunnel::bore::TunnelStatus::Reconnecting => "Reconnecting",
-                crate::runtime::tunnel::bore::TunnelStatus::Failed => "Failed",
-            };
-
-            serde_json::json!({
-                "success": true,
-                "status": status_str,
-                "public_url": client.get_public_url(),
-                "public_port": client.get_public_port()
-            })
-        } else {
-            serde_json::json!({
-                "success": true,
-                "status": "Not started"
-            })
+    /// Open the tunnel at startup and say how it went. Waiting a few seconds
+    /// here is what lets the public URL be printed next to the local one;
+    /// past that the tunnel keeps trying on its own and the UI reports it.
+    fn start_tunnel_at_boot(&self) {
+        let address = match self.start_tunnel() {
+            Ok(address) => address,
+            Err(e) => {
+                eprintln!("⚠️ Public tunnel not started: {e}");
+                return;
+            }
         };
+        println!("🌍 Opening a public tunnel through {address}…");
 
-        let response = Response::from_string(response_json.to_string())
+        let guard = self.tunnel_client.read().unwrap();
+        let Some(client) = guard.as_ref() else {
+            return;
+        };
+        match client.wait_connected(Duration::from_secs(8)) {
+            TunnelStatus::Connected => {
+                let url = client.public_url().unwrap_or_default();
+                self.log_system.log(LogEntry::info(
+                    LogSource::Kernel,
+                    format!("Public tunnel open at {url}"),
+                ));
+                println!("🌍 Public URL: {url}");
+                println!("   It forwards to the program's port once the program listens");
+            }
+            status => {
+                let reason = client
+                    .last_error()
+                    .unwrap_or_else(|| status.as_str().to_lowercase());
+                self.log_system.log(LogEntry::error(
+                    LogSource::Kernel,
+                    format!("Public tunnel not up yet: {reason}"),
+                ));
+                eprintln!("⚠️ Public tunnel not up yet ({reason}); still retrying");
+            }
+        }
+    }
+
+    fn send_json(&self, request: Request, status: u16, body: serde_json::Value) -> Result<()> {
+        let response = Response::from_string(body.to_string())
+            .with_status_code(tiny_http::StatusCode(status))
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
             )
             .with_header(self.cors_header());
-
         request
             .respond(response)
-            .map_err(|e| WasmrunError::from(e.to_string()))?;
+            .map_err(|e| WasmrunError::from(e.to_string()))
+    }
 
-        Ok(())
+    /// The tunnel endpoints change what the internet can reach, so only the
+    /// OS page itself may call them. A browser always sends `Origin` on a
+    /// cross-origin POST, which is what stops another site the user has open
+    /// from asking this server to publish a port.
+    fn tunnel_request_allowed(&self, request: &Request) -> bool {
+        let origin = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("Origin"))
+            .map(|h| h.value.as_str().to_string());
+        origin_allowed(origin.as_deref(), self.os_port)
+    }
+
+    fn tunnel_disabled(&self, request: Request) -> Result<()> {
+        self.send_json(
+            request,
+            409,
+            serde_json::json!({
+                "success": false,
+                "error": "the tunnel is off: start wasmrun os with --expose",
+            }),
+        )
+    }
+
+    fn tunnel_forbidden(&self, request: Request) -> Result<()> {
+        self.send_json(
+            request,
+            403,
+            serde_json::json!({
+                "success": false,
+                "error": "tunnel requests are only accepted from the OS mode page",
+            }),
+        )
+    }
+
+    fn tunnel_status_json(&self) -> serde_json::Value {
+        if !self.config.expose {
+            return serde_json::json!({
+                "success": true,
+                "enabled": false,
+                "status": "Disabled",
+            });
+        }
+
+        let target = *self.tunnel_target.read().unwrap();
+        let guard = self.tunnel_client.read().unwrap();
+        match guard.as_ref() {
+            Some(client) => serde_json::json!({
+                "success": true,
+                "enabled": true,
+                "status": client.status().as_str(),
+                "server": client.server().to_string(),
+                "public_url": client.public_url(),
+                "public_port": client.public_port(),
+                "target_port": target,
+                "error": client.last_error(),
+            }),
+            None => serde_json::json!({
+                "success": true,
+                "enabled": true,
+                "status": "Not started",
+                "target_port": target,
+            }),
+        }
+    }
+
+    fn handle_tunnel_status_request(&self, request: Request) -> Result<()> {
+        let body = self.tunnel_status_json();
+        self.send_json(request, 200, body)
+    }
+
+    fn handle_tunnel_start_request(&self, request: Request) -> Result<()> {
+        if !self.config.expose {
+            return self.tunnel_disabled(request);
+        }
+        if !self.tunnel_request_allowed(&request) {
+            return self.tunnel_forbidden(request);
+        }
+        if self.tunnel_client.read().unwrap().is_none() {
+            if let Err(e) = self.start_tunnel() {
+                return self.send_json(
+                    request,
+                    500,
+                    serde_json::json!({ "success": false, "error": e }),
+                );
+            }
+        }
+        let body = self.tunnel_status_json();
+        self.send_json(request, 200, body)
     }
 
     fn handle_tunnel_stop_request(&self, request: Request) -> Result<()> {
-        let mut tunnel_guard = self.tunnel_client.write().unwrap();
+        if !self.config.expose {
+            return self.tunnel_disabled(request);
+        }
+        if !self.tunnel_request_allowed(&request) {
+            return self.tunnel_forbidden(request);
+        }
+        // Dropping the client closes the control connection, which is what
+        // releases the public port on the server
+        let client = self.tunnel_client.write().unwrap().take();
+        drop(client);
+        let body = self.tunnel_status_json();
+        self.send_json(request, 200, body)
+    }
 
-        let response_json = if let Some(ref client) = *tunnel_guard {
-            client.stop();
-            *tunnel_guard = None;
+    /// Where the tunnel forwards: the port the page bound for the program,
+    /// or `null` when the program stops. The page is the only party that
+    /// knows, since wasmnet binds the port on the page's behalf.
+    fn handle_tunnel_target_request(&self, mut request: Request) -> Result<()> {
+        if !self.config.expose {
+            return self.tunnel_disabled(request);
+        }
+        if !self.tunnel_request_allowed(&request) {
+            return self.tunnel_forbidden(request);
+        }
 
-            serde_json::json!({
-                "success": true,
-                "message": "Tunnel stopped"
-            })
-        } else {
-            serde_json::json!({
-                "success": false,
-                "error": "No tunnel is running"
-            })
+        let mut content = String::new();
+        if let Err(e) = std::io::Read::read_to_string(request.as_reader(), &mut content) {
+            return self.send_error(request, &format!("Failed to read request body: {e}"));
+        }
+        let body: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => return self.send_error(request, &format!("Invalid JSON: {e}")),
         };
 
-        let response = Response::from_string(response_json.to_string())
-            .with_header(
-                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-            )
-            .with_header(self.cors_header());
+        let port = match body.get("port") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(v) => match v.as_u64().and_then(|p| u16::try_from(p).ok()) {
+                Some(p) => Some(p),
+                None => return self.send_error(request, "port must be a number or null"),
+            },
+        };
 
-        request
-            .respond(response)
-            .map_err(|e| WasmrunError::from(e.to_string()))?;
+        if let Some(port) = port {
+            let network_port = *self.network_port.read().unwrap();
+            let bind_ports = self.network_bind_ports.read().unwrap().clone();
+            let checked = check_tunnel_target(port, self.os_port, network_port, &bind_ports)
+                .and_then(|_| {
+                    // The page says it bound this port; make sure something is
+                    // there before sending the internet at it
+                    std::net::TcpStream::connect_timeout(
+                        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+                        Duration::from_secs(1),
+                    )
+                    .map(|_| ())
+                    .map_err(|e| format!("nothing is listening on 127.0.0.1:{port}: {e}"))
+                });
+            if let Err(e) = checked {
+                return self.send_error(request, &e);
+            }
+        }
 
-        Ok(())
+        *self.tunnel_target.write().unwrap() = port;
+        if let Some(client) = self.tunnel_client.read().unwrap().as_ref() {
+            client.set_target(port);
+        }
+        if let Some(port) = port {
+            self.log_system.log(LogEntry::info(
+                LogSource::Kernel,
+                format!("Public tunnel now forwards to 127.0.0.1:{port}"),
+            ));
+        }
+
+        let body = self.tunnel_status_json();
+        self.send_json(request, 200, body)
+    }
+}
+
+/// Whether a request carrying this `Origin` came from the OS page. No header
+/// means no browser (curl, a script), which is the user at their own machine.
+fn origin_allowed(origin: Option<&str>, os_port: u16) -> bool {
+    match origin {
+        None => true,
+        Some(origin) => {
+            origin == format!("http://127.0.0.1:{os_port}")
+                || origin == format!("http://localhost:{os_port}")
+        }
+    }
+}
+
+/// Whether the tunnel may forward to `port`: one the policy lets the VM bind,
+/// and never the OS server or the proxy, both of which sit inside the
+/// default `bind_ports` range and would publish the dev environment itself.
+fn check_tunnel_target(
+    port: u16,
+    os_port: u16,
+    network_port: Option<u16>,
+    bind_ports: &str,
+) -> std::result::Result<(), String> {
+    if port == os_port {
+        return Err(format!(
+            "port {port} is the OS mode server; the tunnel only carries the program's port"
+        ));
+    }
+    if network_port == Some(port) {
+        return Err(format!(
+            "port {port} is the network proxy; the tunnel only carries the program's port"
+        ));
+    }
+    if network_port.is_none() {
+        return Err("the network proxy is not running, so the program has no port".to_string());
+    }
+    let policy = Policy::new(&NetworkPolicy {
+        bind_ports: bind_ports.to_string(),
+        ..NetworkPolicy::default()
+    });
+    policy.check_bind(port)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_os_page_may_steer_the_tunnel() {
+        assert!(origin_allowed(None, 8420));
+        assert!(origin_allowed(Some("http://127.0.0.1:8420"), 8420));
+        assert!(origin_allowed(Some("http://localhost:8420"), 8420));
+        assert!(!origin_allowed(Some("http://127.0.0.1:9999"), 8420));
+        assert!(!origin_allowed(Some("https://example.com"), 8420));
+        assert!(!origin_allowed(Some("null"), 8420));
+    }
+
+    #[test]
+    fn tunnel_target_must_be_a_program_port() {
+        let proxy = Some(8440);
+        assert!(check_tunnel_target(3000, 8420, proxy, "3000-9999").is_ok());
+
+        // The OS server and the proxy are inside the default range
+        assert!(check_tunnel_target(8420, 8420, proxy, "3000-9999").is_err());
+        assert!(check_tunnel_target(8440, 8420, proxy, "3000-9999").is_err());
+
+        // Outside what the policy lets the VM bind
+        assert!(check_tunnel_target(22, 8420, proxy, "3000-9999").is_err());
+        assert!(check_tunnel_target(3001, 8420, proxy, "3000,8080").is_err());
+
+        // No proxy, no program port
+        assert!(check_tunnel_target(3000, 8420, None, "3000-9999").is_err());
     }
 }

@@ -17,6 +17,9 @@ Options:
       --watch               Enable file watching and live reload
   -v, --verbose             Show detailed output
       --allow-cors          Allow cross-origin requests from any domain
+      --expose              Publish the program's port through a bore tunnel
+      --tunnel-server <HOST[:PORT]>  Bore server [default: bore.pub]
+      --tunnel-secret <SECRET>       Secret for a private bore server
 ```
 
 ## Port Configuration
@@ -75,6 +78,26 @@ wasmrun os --allow-cors
 - Development with separate frontend running on another port
 
 **Security note:** Don't use `--allow-cors` in production or on shared networks. It allows any website to call your OS mode API.
+
+## Public Tunnel
+
+### `--expose`
+
+Publish the port the program serves on through a [bore](https://github.com/ekzhang/bore) server. The public URL is printed at startup and shown in the Console panel:
+
+```sh
+wasmrun os ./my-project --expose
+```
+
+### `--tunnel-server <HOST[:PORT]>` and `--tunnel-secret <SECRET>`
+
+Use a private bore server instead of `bore.pub`. The secret can come from `WASMRUN_TUNNEL_SECRET` instead, which keeps it out of shell history. Both need `--expose`.
+
+```sh
+WASMRUN_TUNNEL_SECRET=mysecret123 wasmrun os ./my-project --expose --tunnel-server tunnel.example.com
+```
+
+See [Public Tunneling](../public-tunneling.md) for the lifecycle, the API, and what is and is not safe to publish.
 
 ## Verbose Output
 

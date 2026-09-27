@@ -33,6 +33,8 @@ Stopping the program releases the port. One port is bound per running project, s
 
 [`examples/nodejs-http-api`](https://github.com/anistark/wasmrun/tree/main/examples/nodejs-http-api) is a full REST API built this way: routes, JSON bodies, a static page from `public/`, on the `http` module alone. `wasmrun os examples/nodejs-http-api`, press **Run**, and `curl http://127.0.0.1:3000/health` answers from the browser VM.
 
+To reach it from outside this machine, start with `--expose`: the port is published through a bore tunnel and the Console panel shows the public URL. See [Public Tunneling](./public-tunneling.md).
+
 There is no `--forward` flag. This page once documented one, with examples for Express, Flask and PostgreSQL; it never existed, and it is not needed: the port the program serves on is already a host port.
 
 ## The other two modes
@@ -84,5 +86,6 @@ wasmhub's `net` and `http` modules read the descriptor number from `WASMHUB_LIST
 ## See also
 
 - [Network Policy](./network-isolation.md): what a sandbox may connect out to
+- [Public Tunneling](./public-tunneling.md): publishing the port on the internet
 - [Serving from a session](../agent/usage/serving.md): the agent-mode lifecycle
 - [Exec networking](../exec/networking.md): `--tcplisten` and `--allow-net`
