@@ -284,6 +284,31 @@ pub enum Commands {
             help = "Allow cross-origin requests from any domain (default: localhost only)"
         )]
         allow_cors: bool,
+
+        /// Publish the program's port on the internet through a bore server
+        #[arg(
+            long,
+            help = "Share the program's port publicly through a bore tunnel (default server: bore.pub)"
+        )]
+        expose: bool,
+
+        /// Bore server for --expose
+        #[arg(
+            long,
+            value_name = "HOST[:PORT]",
+            requires = "expose",
+            help = "Bore server to tunnel through (default: bore.pub, control port 7835)"
+        )]
+        tunnel_server: Option<String>,
+
+        /// Secret for a private bore server
+        #[arg(
+            long,
+            value_name = "SECRET",
+            requires = "expose",
+            help = "Secret for a bore server started with --secret (or set WASMRUN_TUNNEL_SECRET)"
+        )]
+        tunnel_secret: Option<String>,
     },
 
     /// Start the agent sandbox API server for AI agents

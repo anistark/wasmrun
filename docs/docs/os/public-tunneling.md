@@ -5,294 +5,121 @@ title: Public Tunneling
 
 # Public Tunneling
 
-Expose the OS mode server to the internet using the Bore tunneling protocol.
-
-:::caution What actually gets tunneled
-The tunnel carries **the OS mode server's own port**: the development UI, its APIs, and the project files it serves. It does not carry a port belonging to a program running inside the browser VM, because a program in the VM cannot bind one yet (see [Network Policy](./network-isolation.md)).
-
-So this exposes your wasmrun dev environment to whoever has the URL, not an application the VM is serving. Treat the public URL accordingly: anyone with it can reach the OS mode APIs.
-
-To expose a program that is actually serving, see [Serving a Port](./port-forwarding.md).
-:::
-
-## Overview
-
-The public tunneling feature makes an OS mode server reachable from the internet. This is useful for:
-
-- **Demos and testing**: Share your work-in-progress with others
-- **Webhooks**: Receive callbacks from external services
-- **Remote access**: Access your local development environment from anywhere
-- **API development**: Test integrations with external systems
-
-wasmrun supports the [bore](https://github.com/ekzhang/bore) tunneling protocol, providing a simple TCP-based tunnel without requiring TLS/HTTPS setup.
-
-## Quick Start
-
-### Using Public bore.pub Server
-
-The simplest way to expose your app is using the public bore.pub server:
+`--expose` puts the port a program in the browser VM serves on onto the internet, through a [bore](https://github.com/ekzhang/bore) server. The public server `bore.pub` is the default; a private one works the same way.
 
 ```sh
-# Start your OS mode application
-wasmrun os -p ./my-app
-
-# In the UI or via API, start the tunnel
-# POST /api/tunnel/start
+wasmrun os examples/nodejs-http-api --expose
 ```
 
-Your app will be assigned a public URL like: `http://bore.pub:12345`
+```
+🌍 Opening a public tunnel through bore.pub:7835…
+🌍 Public URL: http://bore.pub:41234
+   It forwards to the program's port once the program listens
+```
 
-### Using a Custom Bore Server
+Press **Run** in the Console panel. Once the program has its port, the Console says where it is reachable:
 
-For production use or custom domains, you can run your own bore server:
+```
+Port bound for the program: http://127.0.0.1:3000
+Public URL: http://bore.pub:41234 → 127.0.0.1:3000
+```
 
 ```sh
-# On your VPS (one-time setup)
+curl http://bore.pub:41234/health
+```
+
+The Console panel also shows both addresses above the output, with the tunnel's state and a button to copy the public URL.
+
+## What gets published
+
+The **program's port**, and only that: the one the page binds for it from the policy's `bind_ports` range (see [Serving a Port](./port-forwarding.md)). The OS mode server, its APIs, and the network proxy are never published, even though both sit inside the default `3000-9999` range; the server refuses to point the tunnel at either.
+
+## Lifecycle
+
+- **The tunnel opens when `wasmrun os` starts** and holds one public port for the whole session.
+- **Run points it at the program.** Until then, and after **Stop**, a visitor is connected and closed straight away rather than left waiting.
+- **The URL survives Stop and Run.** The public port belongs to the tunnel, not to the program, so a restarted program is reachable at the same address.
+- **A dropped link reconnects on its own**, retrying with backoff up to 30 seconds apart, and asks for the public port it had. It gets it back unless someone else took it in the meantime.
+- **The tunnel closes when `wasmrun os` exits**, which releases the public port on the server.
+
+## Options
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--expose` | off | Open the tunnel |
+| `--tunnel-server <HOST[:PORT]>` | `bore.pub` | The bore server. The port is its control port, `7835` unless given. IPv6 goes in brackets: `[::1]:7835` |
+| `--tunnel-secret <SECRET>` | none | Secret for a server started with `bore server --secret`. `WASMRUN_TUNNEL_SECRET` works too, and keeps the secret out of shell history and the process list |
+
+`--tunnel-server` and `--tunnel-secret` need `--expose`.
+
+## A private bore server
+
+```sh
+# On a host the internet can reach
 cargo install bore-cli
 bore server --secret mysecret123
-
-# Configure wasmrun to use your server
-# Update OsRunConfig with:
-# - tunnel_server: "tunnel.mydomain.com:7835"
-# - tunnel_secret: "mysecret123"
 ```
 
-## Configuration
-
-### OsRunConfig Options
-
-```rust
-pub struct OsRunConfig {
-    // ... other fields
-    pub expose: bool,                    // Enable public tunneling
-    pub tunnel_server: Option<String>,   // Custom bore server (default: "bore.pub:7835")
-    pub tunnel_secret: Option<String>,   // Authentication secret for private servers
-}
+```sh
+WASMRUN_TUNNEL_SECRET=mysecret123 \
+  wasmrun os ./my-app --expose --tunnel-server tunnel.example.com
 ```
 
-### Example Configuration
+The server needs its control port (`7835`) reachable, and the range it hands out public ports from (`--min-port`/`--max-port`, `1024-65535` by default). Visitors connect to `tunnel.example.com:<public port>` directly.
 
-```rust
-let config = OsRunConfig {
-    project_path: "./my-app".to_string(),
-    expose: true,
-    tunnel_server: Some("tunnel.mydomain.com:7835".to_string()),
-    tunnel_secret: Some("mysecret123".to_string()),
-    // ... other fields
-};
-```
+A secret is checked on every connection the client makes: the control connection, and the one it opens for each visitor. A wrong secret shows up as a `Failed` tunnel with the server's reason, and so does a server that wants a secret when none was given.
 
 ## REST API
 
-### Start Tunnel
+The UI drives these; they are documented for scripting.
 
-Start a public tunnel connection.
+| Endpoint | Method | What it does |
+|---|---|---|
+| `/api/tunnel/status` | GET | State, public URL, and where it forwards |
+| `/api/tunnel/target` | POST | Point the tunnel at the program's port, `{"port": 3000}`, or at nothing, `{"port": null}` |
+| `/api/tunnel/stop` | POST | Close the tunnel |
+| `/api/tunnel/start` | POST | Open it again after a stop |
 
-```http
-POST /api/tunnel/start
-```
-
-**Response:**
 ```json
 {
   "success": true,
-  "public_url": "http://bore.pub:12345",
-  "status": "Connected"
-}
-```
-
-### Get Tunnel Status
-
-Check the current tunnel status and public URL.
-
-```http
-GET /api/tunnel/status
-```
-
-**Response:**
-```json
-{
-  "success": true,
+  "enabled": true,
   "status": "Connected",
-  "public_url": "http://bore.pub:12345",
-  "public_port": 12345
+  "server": "bore.pub:7835",
+  "public_url": "http://bore.pub:41234",
+  "public_port": 41234,
+  "target_port": 3000,
+  "error": null
 }
 ```
 
-**Status Values:**
-- `Not started` - No tunnel has been initiated
-- `Disconnected` - Tunnel was stopped
-- `Connecting` - Establishing connection to bore server
-- `Connected` - Tunnel is active
-- `Reconnecting` - Attempting to restore connection
-- `Failed` - Connection failed
+`status` is one of `Connecting`, `Connected`, `Reconnecting`, `Failed` (retrying; `error` says why), or `Not started` after a stop. Without `--expose`, status reports `"enabled": false` and the other three answer `409`.
 
-### Stop Tunnel
+`target` only accepts a port the policy lets the VM bind, with something listening on it, and never the OS server's or the proxy's own port. All three POSTs are refused with `403` when the request carries an `Origin` other than the OS page's own, so another site open in the same browser cannot publish a port. A request with no `Origin`, like `curl`, is accepted.
 
-Stop the active tunnel connection.
+## Security
 
-```http
-POST /api/tunnel/stop
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Tunnel stopped"
-}
-```
-
-## Bore Protocol
-
-wasmrun implements the bore protocol as follows:
-
-1. **Handshake**: Send `HELLO 1\n` to identify protocol version
-2. **Authentication** (optional): Send `AUTH <secret>\n` for private servers
-3. **Port Registration**: Send `<local_port>\n` to register the port to expose
-4. **Response**: Server responds with `OK <public_port>\n`
-5. **Keepalive**: Background thread maintains connection and handles reconnection
-
-## Connection Management
-
-### Automatic Reconnection
-
-The bore client includes automatic reconnection logic:
-
-- Background keepalive thread monitors connection health
-- On disconnect, status changes to `Reconnecting`
-- Automatic retry with exponential backoff
-- Status changes to `Connected` on successful reconnection
-- Status changes to `Failed` if reconnection attempts fail
-
-### Connection Lifecycle
-
-```sh
-┌─────────────┐
-│ Disconnected│
-└──────┬──────┘
-       │ start()
-       ▼
-┌─────────────┐
-│ Connecting  │
-└──────┬──────┘
-       │ success
-       ▼
-┌─────────────┐    disconnect    ┌──────────────┐
-│  Connected  │ ───────────────> │ Reconnecting │
-└─────────────┘                  └──────┬───────┘
-       │                                │
-       │ stop()                   retry │
-       ▼                                │
-┌─────────────┐    failed        ┌─────▼────────┐
-│ Disconnected│ <─────────────── │    Failed    │
-└─────────────┘                  └──────────────┘
-```
-
-## Security Considerations
-
-### Public bore.pub Server
-
-- **Plain TCP**: No TLS encryption (HTTPS support planned for future releases)
-- **Public server**: Anyone can see traffic if they know your port
-- **Random ports**: Assigned port is unpredictable but not secret
-- **Best for**: Development, testing, demos
-
-### Private Bore Server
-
-- **Authentication**: Use `tunnel_secret` to restrict access
-- **Custom domain**: Control your own infrastructure
-- **Network policy**: Restrict which destinations WASM apps can connect to
-- **Best for**: Production use, sensitive data
-
-### Recommendations
-
-1. **Never expose sensitive data** through public tunnels without TLS
-2. **Use authentication** for private bore servers
-3. **Implement application-level security** (authentication, authorization)
-4. **Monitor connection logs** for suspicious activity
-5. **Use temporary tunnels** for development only
+- **Plain TCP.** bore carries bytes and nothing else: no TLS, so whatever the program serves crosses the internet unencrypted.
+- **Anyone with the URL gets in.** A public port on `bore.pub` is not a secret; ports are easy to scan. Put authentication in the program if what it serves is not public.
+- **The tunnel's secret authenticates *you* to the bore server.** It does nothing for visitors.
+- The program is still inside the VM and its [network policy](./network-isolation.md): publishing its port changes who can reach it, not what it can reach.
 
 ## Troubleshooting
 
-### Connection Failed
+**`Failed`: could not reach bore.pub:7835.** Outbound connections to port 7835 are blocked where you are, or the server is down. The tunnel keeps retrying.
 
-**Problem**: Tunnel fails to connect
+**`Failed`: the server requires a secret.** The server was started with `--secret`; pass `--tunnel-secret` or set `WASMRUN_TUNNEL_SECRET`.
 
-**Solutions**:
-- Check bore server is running and accessible
-- Verify network connectivity
-- Check firewall rules allow outbound connections to bore server port
-- Ensure DNS resolution works for custom servers
+**The public URL closes the connection immediately.** Nothing is running: press **Run**. Once the Console shows `Public URL: … → 127.0.0.1:<port>`, it forwards.
 
-### Reconnection Loop
+**The public URL changed.** The link dropped and the old public port was taken by the time it reconnected. The new one is in the Console panel and in `/api/tunnel/status`.
 
-**Problem**: Tunnel continuously reconnects
+## What changed
 
-**Solutions**:
-- Check bore server logs for errors
-- Verify authentication secret matches server configuration
-- Check if port is already in use
-- Monitor network stability
+Before 0.24, OS mode's built-in client did not speak bore's protocol, so it could not connect to `bore.pub` or any other bore server, and it forwarded no traffic. It was also aimed at the OS mode server's own port, the dev UI and its APIs, rather than at the program. `--expose` did not exist as a flag.
 
-### Wrong Public URL
+## See also
 
-**Problem**: Public URL doesn't work
-
-**Solutions**:
-- Verify local application is running on specified port
-- Check port forwarding configuration
-- Ensure bore server has correct public IP/domain
-- Test with `curl http://bore.pub:<port>` directly
-
-## Advanced Usage
-
-### Self-Hosted Setup with nginx
-
-```nginx
-# /etc/nginx/sites-available/bore-tunnel
-server {
-    listen 80;
-    server_name tunnel.mydomain.com;
-
-    location / {
-        proxy_pass http://localhost:7835;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
-### Docker Compose
-
-```yaml
-version: '3.8'
-services:
-  bore-server:
-    image: ekzhang/bore
-    command: server --secret mysecret123
-    ports:
-      - "7835:7835"
-    restart: unless-stopped
-```
-
-### Dynamic DNS with DuckDNS
-
-```sh
-# Update DuckDNS every 5 minutes (cron)
-*/5 * * * * curl "https://www.duckdns.org/update?domains=myapp&token=YOUR_TOKEN&ip="
-```
-
-## Next Steps
-
-- [Network Isolation](./network-isolation.md) - Understanding WASM network security
-- [Port Forwarding](./port-forwarding.md) - Forward ports to WASM processes
-- [OS Mode](./index.md) - Complete OS mode documentation
-
-## References
-
-- [bore GitHub Repository](https://github.com/ekzhang/bore)
-- [bore Protocol Specification](https://github.com/ekzhang/bore#how-it-works)
+- [Serving a Port](./port-forwarding.md): how the program gets the port the tunnel publishes
+- [Network Policy](./network-isolation.md): `bind_ports`, and what the program may connect to
+- [bore](https://github.com/ekzhang/bore): the protocol and the server

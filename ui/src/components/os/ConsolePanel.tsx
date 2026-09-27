@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'preact/hooks'
 import { clsx } from 'clsx'
 import type { ConsoleLine, StatusType } from '../../types/osTypes'
 import type { WasmRunnerStatus } from '../../os/WasmRunner'
+import type { TunnelInfo } from '../../os/tunnel'
+import NetworkBar from './NetworkBar'
 
 interface ConsolePanelProps {
   lines: ConsoleLine[]
@@ -10,6 +12,8 @@ interface ConsolePanelProps {
   onClear: () => void
   onRun: () => void
   onStop: () => void
+  listenAddress: string | null
+  tunnel: TunnelInfo | null
 }
 
 function formatTimestamp(ts: number): string {
@@ -49,6 +53,8 @@ export default function ConsolePanel({
   onClear,
   onRun,
   onStop,
+  listenAddress,
+  tunnel,
 }: ConsolePanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -111,6 +117,8 @@ export default function ConsolePanel({
           </button>
         </div>
       </div>
+
+      <NetworkBar listenAddress={listenAddress} tunnel={tunnel} />
 
       <div
         ref={scrollRef}

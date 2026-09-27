@@ -48,12 +48,12 @@ See [Network Policy](./network-isolation.md) and [Serving a Port](./port-forward
 
 ## Public Tunneling
 
-Expose local apps to the internet via [bore.pub](https://bore.pub):
+`wasmrun os --expose` publishes the program's port on the internet through a [bore](https://github.com/ekzhang/bore) server, `bore.pub` by default:
 
-- Built-in bore client (Rust implementation)
-- Automatic reconnection
-- Optional authentication for private servers
-- Start/stop/status via REST API
+- One public URL for the session, kept across **Stop** and **Run**
+- Reconnects on its own and asks for the same public port back
+- Private bore servers with `--tunnel-server` and a secret
+- Local and public addresses in the Console panel, with the tunnel's state
 
 See [Public Tunneling](./public-tunneling.md) for details.
 
@@ -77,8 +77,10 @@ OS mode exposes a JSON API:
 | `/api/logs/recent` | GET | Recent logs |
 | `/api/kernel/start` | POST | Start project |
 | `/api/kernel/restart` | POST | Restart project |
-| `/api/tunnel/start` | POST | Start bore tunnel |
-| `/api/tunnel/status` | GET | Tunnel status |
-| `/api/tunnel/stop` | POST | Stop tunnel |
+| `/api/network/status` | GET | Network proxy URL and `bind_ports` |
+| `/api/tunnel/status` | GET | Tunnel status and public URL |
+| `/api/tunnel/target` | POST | Point the tunnel at the program's port |
+| `/api/tunnel/start` | POST | Reopen the tunnel (`--expose` only) |
+| `/api/tunnel/stop` | POST | Close the tunnel |
 | `/api/processes/<pid>/ports` | GET | List port mappings |
 | `/api/processes/<pid>/forward` | POST | Create port forward |

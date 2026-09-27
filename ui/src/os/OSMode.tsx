@@ -10,6 +10,8 @@ import { panels } from '../components/os/panels'
 import { formatUptime, formatBytes } from '../utils/osUtils'
 import { WasmRunner } from './WasmRunner'
 import type { WasmRunnerStatus } from './WasmRunner'
+import { fetchTunnelStatus } from './tunnel'
+import type { TunnelInfo } from './tunnel'
 import type {
   KernelStats,
   FilesystemStats,
@@ -43,6 +45,8 @@ export default function OSMode() {
   const [wasmStatus, setWasmStatus] = useState<WasmRunnerStatus>('idle')
   const lineIdRef = useRef(0)
   const runnerRef = useRef<WasmRunner | null>(null)
+  const [listenAddress, setListenAddress] = useState<string | null>(null)
+  const [tunnel, setTunnel] = useState<TunnelInfo | null>(null)
 
   // Filesystem state
   const [fsStats, setFsStats] = useState<FilesystemStats | null>(null)
@@ -93,9 +97,27 @@ export default function OSMode() {
         if (status === 'starting') addLine('system', 'Instantiating WASM module…')
         if (status === 'running') addLine('system', 'Runtime started')
       },
-      onError: error => addLine('stderr', `Error: ${error.message}`),
-      onExit: code => addLine('system', `Process exited with code ${code}`),
-      onListening: address => addLine('system', `Port bound for the program: http://${address}`),
+      onError: error => {
+        setListenAddress(null)
+        addLine('stderr', `Error: ${error.message}`)
+      },
+      onExit: code => {
+        setListenAddress(null)
+        addLine('system', `Process exited with code ${code}`)
+      },
+      onListening: address => {
+        setListenAddress(address)
+        addLine('system', `Port bound for the program: http://${address}`)
+      },
+      onTunnel: info => {
+        setTunnel(info)
+        if (info.target_port == null) return
+        if (info.public_url && info.status === 'Connected') {
+          addLine('system', `Public URL: ${info.public_url} → 127.0.0.1:${info.target_port}`)
+        } else {
+          addLine('system', `Public tunnel is ${info.status.toLowerCase()}; it will forward here`)
+        }
+      },
     })
 
     runnerRef.current = runner
@@ -106,6 +128,7 @@ export default function OSMode() {
     if (runnerRef.current) {
       runnerRef.current.stop()
       runnerRef.current = null
+      setListenAddress(null)
       addLine('system', 'Runtime stopped')
     }
   }, [addLine])
@@ -197,6 +220,24 @@ export default function OSMode() {
     }
   }, [fetchKernelStats, updateUptime])
 
+  // Only polled when the server was started with --expose
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined
+    let cancelled = false
+    fetchTunnelStatus().then(info => {
+      if (cancelled || !info?.enabled) return
+      setTunnel(info)
+      interval = setInterval(async () => {
+        const next = await fetchTunnelStatus()
+        if (next) setTunnel(next)
+      }, 3000)
+    })
+    return () => {
+      cancelled = true
+      if (interval) clearInterval(interval)
+    }
+  }, [])
+
   useEffect(() => {
     if (activePanel === 'filesystem') {
       fetchFsStats()
@@ -269,6 +310,8 @@ export default function OSMode() {
             onClear={clearConsole}
             onRun={startWasmRunner}
             onStop={stopWasmRunner}
+            listenAddress={listenAddress}
+            tunnel={tunnel}
           />
         )
 

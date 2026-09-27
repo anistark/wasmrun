@@ -6,17 +6,21 @@
 import { WasmnetClient } from 'wasmnet'
 import { InboxWriter, createInbox } from './netInbox'
 import type { VmSocketMessage } from './vm'
+import { setTunnelTarget } from './tunnel'
+import type { TunnelInfo } from './tunnel'
 
 interface NetworkStatus {
   enabled: boolean
   url?: string
   bind_ports?: string
   reason?: string
+  tunnel?: boolean
 }
 
 export interface NetBridgeCallbacks {
   onListening?: (address: string) => void
   onNetworkError?: (message: string) => void
+  onTunnel?: (tunnel: TunnelInfo) => void
 }
 
 const MAX_BIND_ATTEMPTS = 32
@@ -25,6 +29,7 @@ export class NetBridge {
   private client: WasmnetClient | null = null
   private writer: InboxWriter | null = null
   private listenerId = -1
+  private tunneled = false
   readonly inbox: SharedArrayBuffer
   address = ''
 
@@ -89,6 +94,13 @@ export class NetBridge {
     })
 
     this.callbacks.onListening?.(this.address)
+
+    if (status.tunnel) {
+      this.tunneled = true
+      setTunnelTarget(bound.port)
+        .then(tunnel => this.callbacks.onTunnel?.(tunnel))
+        .catch(err => this.callbacks.onNetworkError?.(`public tunnel: ${String(err)}`))
+    }
     return true
   }
 
@@ -110,6 +122,12 @@ export class NetBridge {
     }
     this.writer = null
     this.listenerId = -1
+    if (this.tunneled) {
+      this.tunneled = false
+      setTunnelTarget(null)
+        .then(tunnel => this.callbacks.onTunnel?.(tunnel))
+        .catch(() => {})
+    }
   }
 }
 

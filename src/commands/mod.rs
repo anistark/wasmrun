@@ -15,7 +15,7 @@ pub use agent::handle_agent_command;
 pub use clean::handle_clean_command;
 pub use compile::handle_compile_command;
 pub use exec::handle_exec_command;
-pub use os::handle_os_command;
+pub use os::{handle_os_command, OsTunnel};
 pub use plugin::run_plugin_command;
 pub use run::handle_run_command;
 pub use stop::handle_stop_command;

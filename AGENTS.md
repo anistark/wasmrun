@@ -80,7 +80,7 @@ Wasmrun has **four distinct execution modes**. They are separate systems with se
   - `src/runtime/wasi_fs.rs`: virtual filesystem (in-memory, mount points)
   - `src/runtime/project_files.rs`: project file collection for browser transfer
   - `src/runtime/runtime_cache.rs`: language runtime WASM caching (from wasmhub)
-  - `src/runtime/tunnel/`: bore tunneling for public access
+  - `src/runtime/tunnel/`: bore client that publishes the program's port on the internet (`--expose`)
   - `src/runtime/languages/`: language runtime traits (Node.js, Go, Python)
   - `src/logging/`: structured log trail system
   - `ui/src/`: Preact UI source (components, OS panels, WASI shim; builds into `templates/os/` at compile time via `build.rs`)
@@ -273,7 +273,7 @@ src/
 │   ├── project_files.rs  # [OS Mode] Project file bundling
 │   ├── runtime_cache.rs  # [OS, Agent] Wasmhub runtime caching
 │   ├── languages/        # [OS Mode] Language runtime traits
-│   ├── tunnel/           # [OS Mode] Bore tunneling
+│   ├── tunnel/           # [OS Mode] Bore client for --expose
 │   ├── registry.rs       # [OS Mode] Process/server registry
 │   └── syscalls.rs       # [OS Mode] Micro-kernel syscall interface
 ├── server/               # [Server Mode] HTTP server infrastructure
@@ -488,6 +488,8 @@ wasmrun exec --allow-net "api.example.com:443" <file.wasm>  # Allow outbound, on
 wasmrun os <path>                 # Run project in browser-based OS environment
 wasmrun os <path> --language python  # Force language detection
 wasmrun os <path> --watch --port 3000  # With file watching and custom port
+wasmrun os <path> --expose          # Publish the program's port through bore.pub
+wasmrun os <path> --expose --tunnel-server tunnel.example.com --tunnel-secret S  # Private bore server
 
 # Agent Mode
 wasmrun agent                     # Start the REST sandbox API (default port 8430)
@@ -603,6 +605,7 @@ wasmrun agent --allow-net "api.example.com:443"  # Default tenant network policy
 - **A WASI syscall change affects two modes.** `src/runtime/wasi/` is reached by `wasmrun exec` and by every agent-mode execution, so test both when touching it.
 - **A guest never binds its own port.** WASI Preview 1 has no call that creates a socket, so the *host* binds and passes the listener in as an fd (`--tcplisten` in exec mode, `POST /sessions/:id/serve` in agent mode). `sock_bind` and `sock_listen` are deliberately unimplemented. Don't add them without the `bind_ports` half of the policy meaning something first, or a sandbox gains the ability to choose a port it was never granted.
 - **The listener fd is not always 3.** Preopens are handed out in order, so a session that preopens its work directory first puts the listener on 4. Guests read `WASMHUB_LISTEN_FD`; host code should use the fd returned by `WasiEnv::add_tcp_listener` rather than assuming one.
+- **The OS mode tunnel publishes the program's port, never the OS server's.** The OS server's APIs read and write project files, so publishing them would hand the project to anyone with the URL. wasmnet binds the program's port on the page's behalf and has no hook the host can watch, so the page reports the port with `POST /api/tunnel/target`. That endpoint refuses the OS server's and the proxy's ports (both sit inside the default `bind_ports` range of `3000-9999`), any port outside `bind_ports` or with nothing listening, and any `Origin` other than the OS page's own. Keep all four checks.
 - **A sandbox has no network unless configured.** `NetworkAccess::denied()` is the default in both modes; egress comes from `--allow-net` or a tenant's `[tenants.network]` table. Don't "fix" a failing connection by widening the default.
 
 ---

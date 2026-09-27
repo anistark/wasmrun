@@ -154,15 +154,25 @@ fn main() {
             watch,
             verbose,
             allow_cors,
+            expose,
+            tunnel_server,
+            tunnel_secret,
         }) => {
             debug_println!(
-                "Processing os command: port={}, language={:?}, watch={}, verbose={}, allow_cors={}",
+                "Processing os command: port={}, language={:?}, watch={}, verbose={}, allow_cors={}, expose={}",
                 port,
                 language,
                 watch,
                 verbose,
-                allow_cors
+                allow_cors,
+                expose
             );
+            let tunnel = expose.then(|| commands::OsTunnel {
+                server: tunnel_server.clone(),
+                secret: tunnel_secret
+                    .clone()
+                    .or_else(|| std::env::var("WASMRUN_TUNNEL_SECRET").ok()),
+            });
             commands::handle_os_command(
                 path,
                 positional_path,
@@ -171,6 +181,7 @@ fn main() {
                 *watch,
                 *verbose,
                 *allow_cors,
+                tunnel,
             )
             .map_err(|e| match e {
                 WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,
