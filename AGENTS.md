@@ -28,7 +28,7 @@ Wasmrun has **four distinct execution modes**. They are separate systems with se
 - **Trigger:** `wasmrun run ./project` or just `wasmrun ./project`
 - **What it does:** Detects project language → compiles to WASM via plugins → starts a dev session on loopback. What it serves depends on the build:
   - **A module** goes to the console UI on the UI port (`--port`, default 8420), which loads it and lists its exports
-  - **A web app** (the project has an `index.html`, or the build emitted JS glue) runs natively in the browser from its own page on the app port (`--app-port`, default the first free port above `--port`). The UI port becomes a control center that frames the app and shows its console, requests, build log, module and metrics
+  - **A web app** (the project has an `index.html`, or the build emitted JS glue) runs natively in the browser from its own page on the app port (`--app-port`, default the first free port in `8500-8599`, independent of the UI port). The UI port becomes a control center that frames the app and shows its console, requests, build log, module and metrics
   - With `--watch`, a source change rebuilds and pages reload themselves; a page or asset change reloads without building; a failed build keeps the last good one served
 - **Key files:**
   - `src/commands/run.rs`: command handler; picks the builder, builds once, hands a rebuild closure to the dev session

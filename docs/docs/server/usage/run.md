@@ -55,7 +55,7 @@ wasmrun -P 8080
 ```
 
 - Default: `8420`
-- Range: `1–65535`
+- Range: `1-65535`
 
 If the port is already in use, wasmrun picks the next free port within ten above it.
 
@@ -67,8 +67,8 @@ Port for a web app's own page. Only used when the project is a web app.
 wasmrun ./examples/web-leptos --app-port 9100
 ```
 
-- Default: the first free port above `--port`, within twenty
-- Must differ from `--port`
+- Default: the first free port in `8500-8599`, whatever the UI port is, skipping the UI port if `--port` points into that range
+- An explicit `--app-port` must differ from `--port`, and if something is already listening on it, wasmrun fails to start rather than picking another
 
 ### `-l, --language <LANGUAGE>`
 
@@ -169,7 +169,7 @@ wasmrun ./my-go-project --verbose
 A project with an `index.html`, or whose build emits JS glue, runs as a web app:
 
 ```sh
-# UI on 8420, the app itself on 8421
+# UI on 8420, the app itself on 8500
 wasmrun ./examples/web-leptos
 
 # Pre-built wasm-bindgen output: the _bg.wasm with its .js beside it
@@ -221,7 +221,7 @@ If port 8420 (or your specified port) is already in use:
 # wasmrun detects the conflict and moves up
 wasmrun --port 8420
 # ⚠️  Port 8420 is already in use
-# 🔄 Trying alternative port: 8421
+# 🔄 Using port 8421 for the UI
 ```
 
 ## See Also

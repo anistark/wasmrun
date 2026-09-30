@@ -6,4 +6,3 @@ mod lifecycle;
 pub mod utils;
 
 pub use lifecycle::{is_server_running, stop_existing_server};
-pub use utils::ServerUtils;

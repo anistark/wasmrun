@@ -16,7 +16,7 @@ wasmrun ./examples/web-leptos
   🅦 Wasmrun  web-leptos (web_leptos_bg.wasm, 733.3 KB)
 
   🎛️  UI:  http://127.0.0.1:8420
-  🌐 App: http://127.0.0.1:8421
+  🌐 App: http://127.0.0.1:8500
 ```
 
 Two ports, both on loopback:
@@ -24,7 +24,7 @@ Two ports, both on loopback:
 | Port | Serves |
 |---|---|
 | **UI** (`--port`, default `8420`) | The control center: the app in a frame, with its console, requests, build and module beside it |
-| **App** (`--app-port`, default the first free port above the UI port) | The app itself, exactly as it would be deployed. Open it in its own tab whenever you like |
+| **App** (`--app-port`, default the first free port in `8500-8599`) | The app itself, exactly as it would be deployed. Open it in its own tab whenever you like |
 
 ## What counts as a web app
 

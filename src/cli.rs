@@ -41,7 +41,7 @@ pub struct Args {
     )]
     pub port: u16,
 
-    /// Port for a web app's own page (default: the first free port above --port)
+    /// Port for a web app's own page (default: the first free port from 8500)
     #[arg(
         long,
         value_parser = clap::value_parser!(u16).range(1..=65535),
@@ -182,7 +182,7 @@ pub enum Commands {
         )]
         port: u16,
 
-        /// Port for a web app's own page (default: the first free port above --port)
+        /// Port for a web app's own page (default: the first free port from 8500)
         #[arg(
             long,
             value_parser = clap::value_parser!(u16).range(1..=65535),

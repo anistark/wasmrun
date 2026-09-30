@@ -40,4 +40,4 @@ wasmrun ./output.wasm
 wasmrun ./my-project --watch --port 3000
 ```
 
-The server starts at `http://127.0.0.1:8420` by default. A web app gets a second port, `8421` by default, for its own page.
+The server starts at `http://127.0.0.1:8420` by default. A web app gets a second port, from `8500` upward, for its own page.

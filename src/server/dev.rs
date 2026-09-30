@@ -21,7 +21,10 @@ use crate::template::{TemplateManager, TemplateType};
 use crate::watcher::{Change, ProjectWatcher};
 
 const MAX_LOG_ENTRIES: usize = 1000;
-const APP_PORT_SCAN: u16 = 20;
+/// The app gets a range of its own, so its URL does not move with the UI port
+const APP_PORTS: std::ops::RangeInclusive<u16> = 8500..=8599;
+/// How far above `--port` the UI may move when it is taken
+const UI_PORT_SCAN: u16 = 10;
 
 /// What a build produced
 #[derive(Debug, Clone)]
@@ -345,13 +348,12 @@ pub fn run(config: DevConfig, initial: Artifacts, rebuild: Option<Rebuild>) -> R
     let project_path = config.project_path.as_deref().map(PathBuf::from);
     let web = is_web_app(project_path.as_deref(), &initial);
 
-    let ui_port = super::ServerUtils::handle_port_conflict(config.ui_port)?;
-    let ui_server = bind(ui_port)?;
+    let (ui_server, ui_port) = bind_ui(config.ui_port)?;
     let ui_url = format!("http://127.0.0.1:{ui_port}");
 
     let app_server = if web {
-        let port = pick_app_port(ui_port, config.app_port)?;
-        Some((bind(port)?, format!("http://127.0.0.1:{port}")))
+        let (server, port) = bind_app(ui_port, config.app_port)?;
+        Some((server, format!("http://127.0.0.1:{port}")))
     } else {
         None
     };
@@ -412,26 +414,49 @@ fn bind(port: u16) -> Result<Server> {
     })
 }
 
-fn pick_app_port(ui_port: u16, requested: Option<u16>) -> Result<u16> {
+/// The first port that binds. Binding is the check: probing first would race, and a probe on
+/// another address can pass while `127.0.0.1` is taken
+fn bind_first(ports: impl IntoIterator<Item = u16>) -> Option<(Server, u16)> {
+    ports
+        .into_iter()
+        .find_map(|port| Server::http(("127.0.0.1", port)).ok().map(|s| (s, port)))
+}
+
+fn bind_ui(port: u16) -> Result<(Server, u16)> {
+    if let Some(bound) = bind_first([port]) {
+        return Ok(bound);
+    }
+    println!("⚠️  Port {port} is already in use");
+    let above = (1..=UI_PORT_SCAN).filter_map(|offset| port.checked_add(offset));
+    let (server, bound) = bind_first(above).ok_or_else(|| {
+        WasmrunError::Server(ServerError::startup_failed(
+            port,
+            format!("Port {port} and the {UI_PORT_SCAN} above it are all in use; pass --port"),
+        ))
+    })?;
+    println!("🔄 Using port {bound} for the UI");
+    Ok((server, bound))
+}
+
+fn bind_app(ui_port: u16, requested: Option<u16>) -> Result<(Server, u16)> {
     if let Some(port) = requested {
         if port == ui_port {
             return Err(WasmrunError::from(format!(
                 "--app-port {port} is the same as the UI port"
             )));
         }
-        return Ok(port);
+        return Ok((bind(port)?, port));
     }
-    (1..=APP_PORT_SCAN)
-        .filter_map(|offset| ui_port.checked_add(offset))
-        .find(|&port| super::utils::is_port_available(port))
-        .ok_or_else(|| {
-            WasmrunError::Server(ServerError::startup_failed(
-                ui_port,
-                format!(
-                    "No free port for the app within {APP_PORT_SCAN} of {ui_port}; pass --app-port"
-                ),
-            ))
-        })
+    bind_first(APP_PORTS).ok_or_else(|| {
+        WasmrunError::Server(ServerError::startup_failed(
+            *APP_PORTS.start(),
+            format!(
+                "No free port for the app in {}-{}; pass --app-port",
+                APP_PORTS.start(),
+                APP_PORTS.end()
+            ),
+        ))
+    })
 }
 
 fn serve_ui(server: Server, state: &DevState, template_type: &TemplateType) {
@@ -638,10 +663,24 @@ mod tests {
     }
 
     #[test]
-    fn test_pick_app_port() {
-        assert!(pick_app_port(9000, Some(9000)).is_err());
-        assert_eq!(pick_app_port(9000, Some(9100)).unwrap(), 9100);
-        let port = pick_app_port(40000, None).unwrap();
-        assert!(port > 40000 && port <= 40000 + APP_PORT_SCAN);
+    fn test_bind_first_skips_a_taken_port() {
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let taken = held.local_addr().unwrap().port();
+        let free = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let (_server, port) = bind_first([taken, free]).unwrap();
+        assert_eq!(port, free);
+        assert!(bind_first([taken]).is_none());
+    }
+
+    #[test]
+    fn test_bind_app() {
+        assert!(bind_app(9000, Some(9000)).is_err());
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let taken = held.local_addr().unwrap().port();
+        assert!(bind_app(9000, Some(taken)).is_err());
     }
 }

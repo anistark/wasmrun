@@ -1,8 +1,7 @@
-use crate::config::{FileInfo, PortStatus, ServerInfo};
+use crate::config::{FileInfo, ServerInfo};
 use crate::error::Result;
 use crate::utils::CommandExecutor;
 use std::fs;
-use std::net::TcpListener;
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -40,11 +39,6 @@ pub fn find_wasm_files(dir_path: &Path) -> Vec<String> {
     }
 
     wasm_files
-}
-
-/// Check if the given port is available
-pub fn is_port_available(port: u16) -> bool {
-    TcpListener::bind(format!("0.0.0.0:{port}")).is_ok()
 }
 
 /// Wait for server to be ready and then open browser
@@ -133,47 +127,6 @@ impl ServerUtils {
             file_size,
             file_size_bytes,
         })
-    }
-
-    /// Check if a port is available
-    pub fn check_port_availability(port: u16) -> PortStatus {
-        if is_port_available(port) {
-            PortStatus::Available
-        } else {
-            // Suggest alternative ports
-            let alternatives = (port + 1..port + 10).find(|&p| is_port_available(p));
-
-            PortStatus::Unavailable {
-                alternative: alternatives,
-            }
-        }
-    }
-
-    /// Print a warning if the port is not available
-    pub fn handle_port_conflict(port: u16) -> Result<u16> {
-        match Self::check_port_availability(port) {
-            PortStatus::Available => Ok(port),
-            PortStatus::Unavailable { alternative } => {
-                println!("\n⚠️  \x1b[1;33mPort {port} is already in use\x1b[0m");
-
-                if let Some(alt_port) = alternative {
-                    println!("🔄 \x1b[1;34mTrying alternative port: {alt_port}\x1b[0m");
-                    Ok(alt_port)
-                } else {
-                    println!(
-                        "❌ \x1b[1;31mNo alternative ports available in range {}-{}\x1b[0m",
-                        port,
-                        port + 10
-                    );
-                    Err(crate::error::WasmrunError::Server(
-                        crate::error::ServerError::startup_failed(
-                            port,
-                            format!("Port {port} is in use and no alternatives found"),
-                        ),
-                    ))
-                }
-            }
-        }
     }
 }
 
@@ -288,25 +241,6 @@ mod tests {
     }
 
     #[test]
-    fn test_is_port_available() {
-        // Test with a port that's likely available (high number)
-        assert!(is_port_available(65432));
-
-        // Test multiple times to ensure consistency
-        assert!(is_port_available(65433));
-        assert!(is_port_available(65434));
-    }
-
-    #[test]
-    fn test_is_port_available_system_ports() {
-        // Test some well-known ports that might be in use
-        // These tests are not deterministic but shouldn't crash
-        let _result = is_port_available(80); // HTTP
-        let _result = is_port_available(443); // HTTPS
-        let _result = is_port_available(22); // SSH
-    }
-
-    #[test]
     fn test_determine_content_type() {
         let test_cases = vec![
             ("test.html", "text/html"),
@@ -358,34 +292,6 @@ mod tests {
                 "Failed for {filename}"
             );
         }
-    }
-
-    #[test]
-    fn test_server_utils_check_port_availability() {
-        // Test available port
-        let result = ServerUtils::check_port_availability(65435);
-        assert!(matches!(result, PortStatus::Available));
-
-        // Test pattern with higher ports
-        for port in 65400..65410 {
-            let result = ServerUtils::check_port_availability(port);
-            // Should either be available or unavailable with alternative
-            match result {
-                PortStatus::Available => {
-                    // Good
-                }
-                PortStatus::Unavailable { alternative: _ } => {
-                    // Also acceptable
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_server_utils_handle_port_conflict_available() {
-        let result = ServerUtils::handle_port_conflict(65436);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 65436);
     }
 
     #[test]

@@ -153,15 +153,6 @@ pub struct FileInfo {
     pub file_size_bytes: u64,
 }
 
-#[derive(Debug)]
-pub enum PortStatus {
-    Available,
-    #[allow(dead_code)] // TODO: Future port status with alternatives
-    Unavailable {
-        alternative: Option<u16>,
-    },
-}
-
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct NetworkPolicy {
