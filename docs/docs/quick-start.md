@@ -76,24 +76,22 @@ wasmrun . --watch
 
 Wasmrun will:
 1. Detect that this is a Rust project
-2. Compile your code to WebAssembly
-3. Start a development server at `http://localhost:8420`
-4. Watch for file changes and auto-reload
+2. Compile your code to WebAssembly, with wasm-bindgen's JavaScript glue
+3. Start the UI at `http://127.0.0.1:8420` and your app at `http://127.0.0.1:8500`
+4. Watch for file changes, rebuild, and reload the page
+
+A wasm-bindgen project runs as a [web app](./server/web-apps.md): the UI port is a control center with the app framed in it, and the app port serves the app on its own.
 
 ### Step 4: Test Your WASM Module
 
-Open your browser to `http://localhost:8420` and you'll see the Wasmrun interface. You can test your functions in the browser console:
+This project has no `index.html` of its own, so wasmrun generates a page for it that loads the module and lists its exports. Open `http://127.0.0.1:8500`, and your functions are on `window.wasm` in the browser console:
 
 ```javascript
-// Load the WASM module
-import init, { greet, add } from './my_first_wasm.js';
-
-await init();
-
-// Call your functions
-console.log(greet('World'));  // "Hello, World! Welcome to WebAssembly."
-console.log(add(5, 3));        // 8
+wasm.greet('World')  // "Hello, World! Welcome to WebAssembly."
+wasm.add(5, 3)       // 8
 ```
+
+Or open `http://127.0.0.1:8420` to see the same page in the control center, with its console output, requests and build log beside it.
 
 ### Step 5: Try Native Execution
 

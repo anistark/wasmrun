@@ -17,6 +17,6 @@ pub use compile::handle_compile_command;
 pub use exec::handle_exec_command;
 pub use os::{handle_os_command, OsTunnel};
 pub use plugin::run_plugin_command;
-pub use run::handle_run_command;
+pub use run::{handle_run_command, RunOptions};
 pub use stop::handle_stop_command;
 pub use verify::{handle_inspect_command, handle_verify_command, verify_wasm, VerificationResult};

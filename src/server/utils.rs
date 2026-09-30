@@ -1,8 +1,7 @@
-use crate::config::{FileInfo, PortStatus, ServerInfo};
+use crate::config::{FileInfo, ServerInfo};
 use crate::error::Result;
 use crate::utils::CommandExecutor;
 use std::fs;
-use std::net::TcpListener;
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -40,11 +39,6 @@ pub fn find_wasm_files(dir_path: &Path) -> Vec<String> {
     }
 
     wasm_files
-}
-
-/// Check if the given port is available
-pub fn is_port_available(port: u16) -> bool {
-    TcpListener::bind(format!("0.0.0.0:{port}")).is_ok()
 }
 
 /// Wait for server to be ready and then open browser
@@ -86,19 +80,6 @@ pub fn open_browser_when_ready(port: u16) {
     });
 }
 
-/// Check if assets directory exists
-pub fn check_assets_directory() {
-    if let Ok(metadata) = fs::metadata("./assets") {
-        if metadata.is_dir() {
-            eprintln!("📁 The assets directory exists, but the specific file wasn't found");
-        } else {
-            eprintln!("❌ Found 'assets' but it's not a directory!");
-        }
-    } else {
-        eprintln!("❌ The assets directory doesn't exist at the expected location!");
-    }
-}
-
 /// Function to determine content type based on file extension
 pub fn determine_content_type(path: &Path) -> &'static str {
     match path.extension().and_then(|ext| ext.to_str()) {
@@ -122,105 +103,6 @@ pub fn determine_content_type(path: &Path) -> &'static str {
 pub struct ServerUtils;
 
 impl ServerUtils {
-    pub fn print_initial_project_detection(project_path: &str) {
-        println!("\n\x1b[1;34m╭\x1b[0m");
-        println!("  🔍 \x1b[1;34mAnalyzing project:\x1b[0m \x1b[1;33m{project_path}\x1b[0m");
-
-        let lang = crate::compiler::detect_project_language(project_path);
-
-        match crate::plugin::manager::PluginManager::new() {
-            Ok(plugin_manager) => {
-                if let Some(plugin) = plugin_manager.find_plugin_for_project(project_path) {
-                    println!(
-                        "  🔌 \x1b[1;34mPlugin:\x1b[0m \x1b[1;32m{} v{}\x1b[0m",
-                        plugin.info().name,
-                        plugin.info().version
-                    );
-
-                    if matches!(
-                        plugin.info().plugin_type,
-                        crate::plugin::PluginType::External
-                    ) {
-                        println!("  📦 \x1b[1;34mType:\x1b[0m \x1b[1;36mExternal Plugin\x1b[0m");
-                    } else {
-                        println!("  📦 \x1b[1;34mType:\x1b[0m \x1b[1;35mBuilt-in Plugin\x1b[0m");
-                    }
-                } else {
-                    match lang {
-                        crate::compiler::ProjectLanguage::Rust => {
-                            println!("\n  ⚠️  \x1b[1;33mRust plugin not found\x1b[0m");
-                            println!("  💡 \x1b[1;33mInstall the wasmrust plugin:\x1b[0m");
-                            println!("     \x1b[1;37mwasmrun plugin install wasmrust\x1b[0m");
-                            println!("\n  ℹ️  \x1b[1;34mAfter installation, wasmrust will be auto-detected\x1b[0m");
-                            println!("\x1b[1;34m╰\x1b[0m\n");
-                            return;
-                        }
-                        crate::compiler::ProjectLanguage::C
-                        | crate::compiler::ProjectLanguage::Asc => {
-                            println!("  🔧 \x1b[1;34mUsing built-in plugin\x1b[0m");
-                        }
-                        crate::compiler::ProjectLanguage::Python => {
-                            println!("\n  ⚠️  \x1b[1;33mPython plugin not found\x1b[0m");
-                            println!("  💡 \x1b[1;33mInstall the waspy plugin:\x1b[0m");
-                            println!("     \x1b[1;37mwasmrun plugin install waspy\x1b[0m");
-                            println!("\n  ℹ️  \x1b[1;34mAfter installation, waspy will be auto-detected\x1b[0m");
-                            println!("\x1b[1;34m╰\x1b[0m\n");
-                            return;
-                        }
-                        _ => {}
-                    }
-                }
-
-                let (builtin_count, external_count, _enabled_count) =
-                    plugin_manager.plugin_counts();
-                if external_count > 0 {
-                    println!(
-                        "  📊 \x1b[1;34mPlugins:\x1b[0m {builtin_count} built-in, {external_count} external"
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("  ⚠️ Warning: Failed to initialize plugin manager: {e}");
-            }
-        }
-
-        use crate::utils::PathResolver;
-
-        let temp_output_dir = match PathResolver::create_temp_directory("wasmrun_temp") {
-            Ok(dir) => dir,
-            Err(e) => {
-                println!("  ❌ \x1b[1;31mFailed to create temporary directory: {e}\x1b[0m");
-                println!("\x1b[1;34m╰\x1b[0m");
-                return;
-            }
-        };
-
-        println!("  📁 \x1b[1;34mOutput Directory:\x1b[0m \x1b[1;33m{temp_output_dir}\x1b[0m");
-        println!("\x1b[1;34m╰\x1b[0m\n");
-
-        if matches!(
-            lang,
-            crate::compiler::ProjectLanguage::C
-                | crate::compiler::ProjectLanguage::Asc
-                | crate::compiler::ProjectLanguage::Python
-        ) {
-            crate::compiler::print_system_info();
-            let os = crate::compiler::detect_operating_system();
-            let missing_tools = crate::compiler::get_missing_tools(&lang, &os);
-            if !missing_tools.is_empty() {
-                println!("\n\x1b[1;34m╭\x1b[0m");
-                println!("  ⚠️  \x1b[1;33mMissing Required Tools:\x1b[0m");
-                for tool in &missing_tools {
-                    println!("     \x1b[1;31m• {tool}\x1b[0m");
-                }
-                println!(
-                    "\n  \x1b[0;37mPlease install the required tools to compile this project.\x1b[0m"
-                );
-                println!("\x1b[1;34m╰\x1b[0m\n");
-            }
-        }
-    }
-
     #[allow(dead_code)] // TODO: Future file metadata system
     pub fn get_file_info(path: &str) -> Result<FileInfo> {
         let path_obj = Path::new(path);
@@ -245,47 +127,6 @@ impl ServerUtils {
             file_size,
             file_size_bytes,
         })
-    }
-
-    /// Check if a port is available
-    pub fn check_port_availability(port: u16) -> PortStatus {
-        if is_port_available(port) {
-            PortStatus::Available
-        } else {
-            // Suggest alternative ports
-            let alternatives = (port + 1..port + 10).find(|&p| is_port_available(p));
-
-            PortStatus::Unavailable {
-                alternative: alternatives,
-            }
-        }
-    }
-
-    /// Print a warning if the port is not available
-    pub fn handle_port_conflict(port: u16) -> Result<u16> {
-        match Self::check_port_availability(port) {
-            PortStatus::Available => Ok(port),
-            PortStatus::Unavailable { alternative } => {
-                println!("\n⚠️  \x1b[1;33mPort {port} is already in use\x1b[0m");
-
-                if let Some(alt_port) = alternative {
-                    println!("🔄 \x1b[1;34mTrying alternative port: {alt_port}\x1b[0m");
-                    Ok(alt_port)
-                } else {
-                    println!(
-                        "❌ \x1b[1;31mNo alternative ports available in range {}-{}\x1b[0m",
-                        port,
-                        port + 10
-                    );
-                    Err(crate::error::WasmrunError::Server(
-                        crate::error::ServerError::startup_failed(
-                            port,
-                            format!("Port {port} is in use and no alternatives found"),
-                        ),
-                    ))
-                }
-            }
-        }
     }
 }
 
@@ -400,25 +241,6 @@ mod tests {
     }
 
     #[test]
-    fn test_is_port_available() {
-        // Test with a port that's likely available (high number)
-        assert!(is_port_available(65432));
-
-        // Test multiple times to ensure consistency
-        assert!(is_port_available(65433));
-        assert!(is_port_available(65434));
-    }
-
-    #[test]
-    fn test_is_port_available_system_ports() {
-        // Test some well-known ports that might be in use
-        // These tests are not deterministic but shouldn't crash
-        let _result = is_port_available(80); // HTTP
-        let _result = is_port_available(443); // HTTPS
-        let _result = is_port_available(22); // SSH
-    }
-
-    #[test]
     fn test_determine_content_type() {
         let test_cases = vec![
             ("test.html", "text/html"),
@@ -470,52 +292,6 @@ mod tests {
                 "Failed for {filename}"
             );
         }
-    }
-
-    #[test]
-    fn test_check_assets_directory_no_directory() {
-        // This function prints to stderr, so we just test it doesn't crash
-        check_assets_directory();
-        // Should complete without panicking
-    }
-
-    #[test]
-    fn test_server_utils_check_port_availability() {
-        // Test available port
-        let result = ServerUtils::check_port_availability(65435);
-        assert!(matches!(result, PortStatus::Available));
-
-        // Test pattern with higher ports
-        for port in 65400..65410 {
-            let result = ServerUtils::check_port_availability(port);
-            // Should either be available or unavailable with alternative
-            match result {
-                PortStatus::Available => {
-                    // Good
-                }
-                PortStatus::Unavailable { alternative: _ } => {
-                    // Also acceptable
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_server_utils_handle_port_conflict_available() {
-        let result = ServerUtils::handle_port_conflict(65436);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 65436);
-    }
-
-    #[test]
-    fn test_server_utils_print_initial_project_detection() {
-        let temp_dir = tempdir().unwrap();
-
-        // Should not crash even with invalid directory
-        ServerUtils::print_initial_project_detection(temp_dir.path().to_str().unwrap());
-
-        // Should not crash with non-existent directory
-        ServerUtils::print_initial_project_detection("/nonexistent/directory");
     }
 
     #[test]

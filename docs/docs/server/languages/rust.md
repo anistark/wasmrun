@@ -173,8 +173,8 @@ wasmrun . --watch
 This will:
 1. Detect your Rust project
 2. Compile to WebAssembly
-3. Start server at `http://localhost:8420`
-4. Auto-reload on file changes
+3. Start the UI at `http://127.0.0.1:8420`, and for a wasm-bindgen project the app itself at `http://127.0.0.1:8500` (see [Web Apps](../web-apps.md))
+4. Rebuild and reload on file changes
 
 ### Specify Port
 
@@ -266,6 +266,8 @@ See [`examples/web-leptos`](https://github.com/anistark/wasmrun/tree/main/exampl
 cd wasmrun/examples/web-leptos
 wasmrun . --watch
 ```
+
+The app runs from its own `index.html` on the app port (`8500`), and the UI port (`8420`) frames it with its console, requests and build. See [Web Apps](../web-apps.md).
 
 ## Native Execution
 

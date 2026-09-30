@@ -3,8 +3,7 @@ mod detect;
 
 pub use builder::build_wasm_project;
 pub use detect::{
-    detect_operating_system, detect_project_language, get_missing_tools, print_system_info,
-    ProjectLanguage,
+    detect_operating_system, detect_project_language, get_missing_tools, ProjectLanguage,
 };
 
 use crate::error::{Result, WasmrunError};

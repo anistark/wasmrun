@@ -17,7 +17,12 @@ Running is the default mode, so no subcommand is needed. `wasmrun run`, `wasmrun
 
 ## Description
 
-The `run` command is wasmrun's primary development workflow. It detects your project type, compiles source code to WebAssembly using the appropriate plugin, and starts an HTTP server that serves the compiled module in a browser-based inspection UI.
+The `run` command is wasmrun's primary development workflow. It detects your project type, compiles source code to WebAssembly using the appropriate plugin, and starts a development server.
+
+What the server shows depends on what the build produced:
+
+- **A module** is loaded into the console UI, which lists its exports and lets you call them.
+- **A web app** (the project has an `index.html`, or the build emitted JS glue) runs from its own page on a second port, and the UI port becomes a control center around it. See [Web Apps](../web-apps.md).
 
 When given a `.wasm` file directly, it skips compilation and serves immediately.
 
@@ -50,9 +55,20 @@ wasmrun -P 8080
 ```
 
 - Default: `8420`
-- Range: `1–65535`
+- Range: `1-65535`
 
-If the port is already in use, wasmrun will prompt or auto-select an available port.
+If the port is already in use, wasmrun picks the next free port within ten above it.
+
+### `--app-port <PORT>`
+
+Port for a web app's own page. Only used when the project is a web app.
+
+```sh
+wasmrun ./examples/web-leptos --app-port 9100
+```
+
+- Default: the first free port in `8500-8599`, whatever the UI port is, skipping the UI port if `--port` points into that range
+- An explicit `--app-port` must differ from `--port`, and if something is already listening on it, wasmrun fails to start rather than picking another
 
 ### `-l, --language <LANGUAGE>`
 
@@ -77,7 +93,7 @@ Without this flag, wasmrun auto-detects based on project files:
 
 ### `--watch`
 
-Enable file watching and auto-recompilation. When source files change, wasmrun recompiles and the browser refreshes automatically.
+Enable file watching and auto-recompilation. When source files change, wasmrun recompiles and the page reloads once the new build is ready. A build that fails leaves the last good build running.
 
 ```sh
 wasmrun --watch
@@ -106,9 +122,9 @@ wasmrun --serve
 1. **Path resolution**: resolves the input path (positional or `-p` flag)
 2. **Type detection**: if it's a `.wasm` file, skip to step 5. If it's a directory, continue.
 3. **Plugin matching**: checks installed plugins for one that handles this project type. Falls back to built-in language detection.
-4. **Compilation**: the matched plugin compiles source to `.wasm` (and optional `.js` glue for wasm-bindgen projects)
-5. **Server startup**: starts an HTTP server on the configured port
-6. **Browser UI**: serves an HTML page that loads the WASM module and displays its exports, memory layout, sections, and plugin info
+4. **Compilation**: the matched plugin compiles source to `.wasm` (and optional `.js` glue for wasm-bindgen projects) in a build directory of its own under the system temp directory
+5. **Server startup**: starts the UI server on the configured port, and for a web app the app server beside it. Both bind `127.0.0.1` only
+6. **Browser UI**: for a module, a page that loads it and displays its exports, memory layout, sections, and plugin info; for a web app, the control center with the app framed in it
 
 ## Examples
 
@@ -148,19 +164,19 @@ wasmrun ./my-go-project
 wasmrun ./my-go-project --verbose
 ```
 
-### wasm-bindgen Projects
+### Web Apps and wasm-bindgen Projects
 
-wasmrun automatically detects wasm-bindgen output:
+A project with an `index.html`, or whose build emits JS glue, runs as a web app:
 
 ```sh
-# Detects _bg.wasm + .js glue files
-wasmrun ./pkg/my_lib_bg.wasm
+# UI on 8420, the app itself on 8500
+wasmrun ./examples/web-leptos
 
-# Or point to the JS file
-wasmrun ./pkg/my_lib.js
+# Pre-built wasm-bindgen output: the _bg.wasm with its .js beside it
+wasmrun ./pkg/my_lib_bg.wasm
 ```
 
-Both the WASM binary and JavaScript glue code are served together.
+See [Web Apps](../web-apps.md) for how files are resolved and what the control center shows.
 
 ### Development Workflow
 
@@ -169,7 +185,7 @@ Both the WASM binary and JavaScript glue code are served together.
 wasmrun ./my-project --watch --serve --port 3000
 
 # In another terminal, make changes to source files
-# Browser refreshes automatically after recompilation
+# The page reloads once the rebuild succeeds
 ```
 
 ### CI/CD Usage
@@ -192,20 +208,25 @@ The served page provides:
 This data is also available via JSON endpoints:
 - `GET /api/module-info`: module analysis
 - `GET /api/version`: wasmrun version
+- `GET /api/dev`: the current build (status, generation, error, `.wasm` size), both URLs, and request metrics
+- `GET /api/logs?since=N`: build, file-change and request log entries after sequence `N`
+
+A web app gets the control center instead; see [Web Apps](../web-apps.md#the-control-center).
 
 ## Port Conflicts
 
 If port 8420 (or your specified port) is already in use:
 
 ```sh
-# wasmrun detects the conflict and offers alternatives
+# wasmrun detects the conflict and moves up
 wasmrun --port 8420
-# ⚠️ Port 8420 already in use
-# Using port 8421 instead
+# ⚠️  Port 8420 is already in use
+# 🔄 Using port 8421 for the UI
 ```
 
 ## See Also
 
 - [compile](./compile.md): compile without serving
+- [Web Apps](../web-apps.md): the app port and the control center
 - [Live Reload](../live-reload.md): details on `--watch` behavior
 - [Plugins](/docs/plugins): install language plugins

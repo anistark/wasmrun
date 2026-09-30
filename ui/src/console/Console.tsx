@@ -6,6 +6,7 @@ import { ModuleInfo } from '@/components/ModuleInfo'
 import { LogEntry, ExportedFunction, WasmModuleInfo, TabItem } from '@/types'
 import { log, loadWasmModule, analyzeWasmModule, fetchModuleInspection } from '@/utils/wasm'
 import { parseCommand } from '@/utils/commandParser'
+import { useLiveReload } from '@/hooks/useLiveReload'
 
 // These will be replaced by the Rust template processor
 declare const FILENAME: string
@@ -115,6 +116,7 @@ export function Console() {
   const [exportedFunctions, setExportedFunctions] = useState<ExportedFunction[]>([])
   const [wasmInstance, setWasmInstance] = useState<WebAssembly.Instance | null>(null)
   const [activeTab, setActiveTab] = useState('console')
+  useLiveReload()
 
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
     const logEntry = log(message, type)

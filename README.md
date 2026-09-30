@@ -64,7 +64,7 @@ See the [Quick Start Guide](https://wasmrun.readthedocs.io/en/latest/docs/quick-
 
 | Mode | Command | What it does |
 |------|---------|--------------|
-| **[Server](https://wasmrun.readthedocs.io/en/latest/docs/server)** | `wasmrun ./my-project` | Compile and serve a project with a dev server, live reload, and browser-based module inspection |
+| **[Server](https://wasmrun.readthedocs.io/en/latest/docs/server)** | `wasmrun ./my-project` | Compile and serve a project with a dev server and live reload: a module in the browser inspector, or a web app from its own page beside a control center |
 | **[Exec](https://wasmrun.readthedocs.io/en/latest/docs/exec)** | `wasmrun exec ./program.wasm` | Run a WASM file natively through the built-in interpreter with WASI. No browser, no server |
 | **[Agent](https://wasmrun.readthedocs.io/en/latest/docs/agent)** | `wasmrun agent` | A REST sandbox API for AI agents. No Docker, no daemon |
 | **[OS](https://wasmrun.readthedocs.io/en/latest/docs/os)** | `wasmrun os ./my-project` | Browser-based VM with a virtual filesystem and multi-language runtimes |

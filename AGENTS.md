@@ -26,18 +26,23 @@ Wasmrun has **four distinct execution modes**. They are separate systems with se
 **Philosophy:** A development server that compiles source code to WASM and serves it in a browser with a UI.
 
 - **Trigger:** `wasmrun run ./project` or just `wasmrun ./project`
-- **What it does:** Detects project language → compiles to WASM via plugins → starts HTTP server → serves browser UI that loads and runs the WASM
+- **What it does:** Detects project language → compiles to WASM via plugins → starts a dev session on loopback. What it serves depends on the build:
+  - **A module** goes to the console UI on the UI port (`--port`, default 8420), which loads it and lists its exports
+  - **A web app** (the project has an `index.html`, or the build emitted JS glue) runs natively in the browser from its own page on the app port (`--app-port`, default the first free port in `8500-8599`, independent of the UI port). The UI port becomes a control center that frames the app and shows its console, requests, build log, module and metrics
+  - With `--watch`, a source change rebuilds and pages reload themselves; a page or asset change reloads without building; a failed build keeps the last good one served
 - **Key files:**
-  - `src/commands/run.rs`: command handler
-  - `src/config/server.rs`: server config, `run_server()`
-  - `src/server/`: HTTP server infrastructure (handler, API, wasm serving, lifecycle)
+  - `src/commands/run.rs`: command handler; picks the builder, builds once, hands a rebuild closure to the dev session
+  - `src/server/dev.rs`: the dev session: `DevState` shared by both servers and the rebuild loop (artifacts, build generation, log ring, metrics), `run()` which binds the ports and runs the watch loop
+  - `src/server/app.rs`: the app port: path resolution (`/pkg/` from the build first, then the project, then the build root), containment, the injected dev client, the generated page for a wasm-bindgen library with none
+  - `src/server/handler.rs`: the UI port: template page, `/api/dev`, `/api/logs`, `/api/module-info`, embedded assets
+  - `src/server/`: also `api.rs` (module info, version, assets), `utils.rs` (ports, content types), `lifecycle.rs`
   - `src/compiler/`: project compilation
   - `src/plugin/`: plugin system (compile plugins)
-  - `src/watcher.rs`: live reload file watching
-  - `src/template.rs`: HTML template injection
-  - `ui/src/`: Preact UI source (builds into `templates/app/`, `templates/console/` at compile time via `build.rs`)
+  - `src/watcher.rs`: file watching; classifies a change as rebuild, reload, or ignored
+  - `src/template.rs`: the `console` and `app` templates, compiled into the binary with `include_str!`
+  - `ui/src/console/`: the module console; `ui/src/app/`: the control center. Built into `templates/console/` and `templates/app/` at compile time via `build.rs`
 - **Uses plugins:** Yes. Plugins provide compilation (wasmrust, wasmgo, waspy, wasmasc)
-- **Uses browser:** Yes. Serves HTML + JS that loads WASM via `WebAssembly.instantiate()`
+- **Uses browser:** Yes. A module is loaded via `WebAssembly.instantiate()` in the console; a web app runs from its own page. Never through OS mode's browser VM, which is a WASI worker with no DOM
 - **Docs:** `docs/docs/server/`
 
 ### 2. Exec Mode (`wasmrun exec`)
@@ -276,11 +281,17 @@ src/
 │   ├── tunnel/           # [OS Mode] Bore client for --expose
 │   ├── registry.rs       # [OS Mode] Process/server registry
 │   └── syscalls.rs       # [OS Mode] Micro-kernel syscall interface
-├── server/               # [Server Mode] HTTP server infrastructure
+├── server/               # [Server Mode] Dev session: UI port, app port, rebuild loop
+│   ├── dev.rs            #   DevState, run(), watch loop
+│   ├── app.rs            #   App port: a web app's page, files and build output
+│   ├── handler.rs        #   UI port: console or control center, JSON APIs
+│   ├── api.rs            #   Module info, version, embedded assets
+│   ├── utils.rs          #   Ports, content types
+│   └── lifecycle.rs      #   PID-file based stop
 ├── utils/                # [Shared] Path resolution, WASM analysis
-├── template.rs           # [Server Mode] HTML template engine
+├── template.rs           # [Server Mode] Embedded console/app templates
 ├── ui.rs                 # UI asset embedding
-└── watcher.rs            # [Server Mode] File watcher for live reload
+└── watcher.rs            # [Server Mode] File watcher: rebuild, reload, or ignore
 ```
 
 ### Key Architectural Patterns
@@ -289,7 +300,7 @@ src/
 - **Self-contained WASM interpreter (Exec Mode):** The `runtime/core/` module is a from-scratch WASM bytecode interpreter, with no dependency on wasmtime/wasmer.
 - **WASI syscalls** are implemented as host functions linked via `Linker`, operating on `LinearMemory`. Used by Exec Mode.
 - **Virtual filesystem (OS Mode):** `wasi_fs.rs` provides an in-memory filesystem with mount points, used by the OS mode kernel and dev server.
-- **UI is embedded:** The `build.rs` script compiles the Preact UI (`ui/`) into `templates/` which get embedded in the binary.
+- **UI is embedded:** The `build.rs` script compiles the Preact UI (`ui/`) into `templates/`, and every mode compiles its pages from there with `include_str!`/`include_bytes!` (`src/template.rs`, `src/server/api.rs`, `src/runtime/os_server.rs`). Nothing is read from disk at runtime, so an installed binary needs no files beside it.
 - **Error handling:** Uses `thiserror` + `anyhow`. Custom `WasmrunError` enum in `src/error.rs` with sub-error types.
 
 ---
@@ -303,7 +314,8 @@ docs/docs/
 ├── server/               # Server Mode documentation
 │   ├── index.md          #   Overview
 │   ├── features.md       #   Feature list
-│   ├── live-reload.md    #   Live reload explanation
+│   ├── web-apps.md       #   App port, control center, file resolution
+│   ├── live-reload.md    #   What --watch rebuilds, reloads, and ignores
 │   └── usage/            #   Commands: run, compile, verify, inspect, stop, clean
 ├── exec/                 # Exec Mode documentation
 │   ├── index.md          #   Overview
@@ -471,6 +483,8 @@ test: description          # Adding/fixing tests
 # Server Mode
 wasmrun <path>                    # Default: compile + serve with dev server
 wasmrun run <path>                # Explicit run (same as default)
+wasmrun run <path> --watch        # Rebuild on change, reload the page
+wasmrun run <path> --app-port 9100  # A web app's own page on 9100, the UI on --port
 wasmrun compile <path>            # Compile project to WASM only
 wasmrun verify <file.wasm>        # Validate WASM binary structure
 wasmrun inspect <file.wasm>       # Analyze WASM binary (exports, imports, sections)
@@ -511,6 +525,8 @@ wasmrun agent --allow-net "api.example.com:443"  # Default tenant network policy
 | `src/main.rs` | All | Command dispatch; maps CLI args to handlers |
 | `src/error.rs` | All | All error types; extend here for new error categories |
 | `src/commands/run.rs` | Server | Server mode entry point |
+| `src/server/dev.rs` | Server | Dev session: shared state, both ports, watch loop |
+| `src/server/app.rs` | Server | App port; where a web app's file paths are resolved and contained |
 | `src/commands/exec.rs` | Exec | Exec mode entry point |
 | `src/commands/os.rs` | OS | OS mode entry point |
 | `src/commands/agent.rs` | Agent | Agent mode entry point |
@@ -582,9 +598,9 @@ wasmrun agent --allow-net "api.example.com:443"  # Default tenant network policy
 3. Register in `src/plugin/manager.rs`
 4. Update docs in `docs/docs/plugins/`
 
-### Modifying the UI (OS Mode)
+### Modifying the UI
 
-1. Edit components in `ui/src/`
+1. Edit components in `ui/src/` (`console/` and `app/` are server mode, `os/` is OS mode)
 2. Test with `cd ui && pnpm dev`
 3. The `build.rs` will rebuild templates on `cargo build`
 4. Three template modes: `app`, `console`, `os`: controlled via `VITE_TEMPLATE`
@@ -601,11 +617,13 @@ wasmrun agent --allow-net "api.example.com:443"  # Default tenant network policy
 - **clippy must pass with zero warnings**: the CI enforces `-D warnings`.
 - **Version must stay in sync** across `Cargo.toml`, `ui/package.json`, and `docs/package.json`. Use `just sync-version`.
 - **Two different WASI systems exist:** `src/runtime/wasi/` is for Exec and Agent Mode (host functions linked to the interpreter). `src/runtime/wasi_fs.rs` is for OS Mode (virtual filesystem in browser). Don't confuse them.
-- **Three different "server" concepts:** Server Mode's HTTP server (`src/server/`) serves WASM files for browser execution. OS Mode's HTTP server (`src/runtime/os_server.rs`) serves the OS UI and APIs. Agent Mode's HTTP server (`src/agent/server.rs`) serves the REST sandbox API. They are independent.
+- **Three different "server" concepts:** Server Mode's HTTP servers (`src/server/`) serve a module to the console or a web app from its own page, on two loopback ports. OS Mode's HTTP server (`src/runtime/os_server.rs`) serves the OS UI and APIs. Agent Mode's HTTP server (`src/agent/server.rs`) serves the REST sandbox API. They are independent.
 - **A WASI syscall change affects two modes.** `src/runtime/wasi/` is reached by `wasmrun exec` and by every agent-mode execution, so test both when touching it.
 - **A guest never binds its own port.** WASI Preview 1 has no call that creates a socket, so the *host* binds and passes the listener in as an fd (`--tcplisten` in exec mode, `POST /sessions/:id/serve` in agent mode). `sock_bind` and `sock_listen` are deliberately unimplemented. Don't add them without the `bind_ports` half of the policy meaning something first, or a sandbox gains the ability to choose a port it was never granted.
 - **The listener fd is not always 3.** Preopens are handed out in order, so a session that preopens its work directory first puts the listener on 4. Guests read `WASMHUB_LISTEN_FD`; host code should use the fd returned by `WasiEnv::add_tcp_listener` rather than assuming one.
 - **The OS mode tunnel publishes the program's port, never the OS server's.** The OS server's APIs read and write project files, so publishing them would hand the project to anyone with the URL. wasmnet binds the program's port on the page's behalf and has no hook the host can watch, so the page reports the port with `POST /api/tunnel/target`. That endpoint refuses the OS server's and the proxy's ports (both sit inside the default `bind_ports` range of `3000-9999`), any port outside `bind_ports` or with nothing listening, and any `Origin` other than the OS page's own. Keep all four checks.
+- **Server mode's app port serves the project directory.** That is why both server-mode ports bind `127.0.0.1` and why `app.rs` refuses dotfiles and any path that leaves the project or build directory, including through a symlink. Keep the loopback bind and the `file_under` containment check; a request for `/.env` or `/../x` must stay a 404.
+- **Server mode's dev client posts only to the UI's origin.** The script the app port injects forwards the page's console with `postMessage`, targeting the framing origin it finds in `location.ancestorOrigins` or the referrer, and only if that is the UI port. Never target `'*'`: the app's console output would go to whatever page frames it.
 - **A sandbox has no network unless configured.** `NetworkAccess::denied()` is the default in both modes; egress comes from `--allow-net` or a tenant's `[tenants.network]` table. Don't "fix" a failing connection by widening the default.
 
 ---

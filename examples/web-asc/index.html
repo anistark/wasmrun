@@ -133,13 +133,14 @@
     </div>
 
     <script type="module">
-        import { instantiate } from "./build/optimized.js";
+        // --bindings esm instantiates the module on import and exports its functions
+        import * as bindings from "./build/optimized.js";
 
         let wasm;
         
         async function init() {
             try {
-                wasm = await instantiate();
+                wasm = bindings;
                 console.log("✅ AssemblyScript WebAssembly module loaded successfully!");
                 
                 // Make functions globally available

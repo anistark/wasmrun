@@ -13,9 +13,8 @@ Server mode is a development tool that:
 
 1. **Detects** your project language (Rust, Go, C/C++, Python, AssemblyScript)
 2. **Compiles** source code to WebAssembly using the appropriate plugin
-3. **Serves** the compiled `.wasm` file via a local HTTP server
-4. **Opens** a browser UI showing your module's exports, memory layout, and execution
-5. **Watches** for file changes and auto-recompiles (with `--watch`)
+3. **Serves** the result on loopback: a module in a browser UI showing its exports, memory layout, and execution; a [web app](./web-apps.md) from its own page, with a control center beside it
+4. **Watches** for file changes, rebuilds, and reloads the page (with `--watch`)
 
 ```sh
 wasmrun ./my-rust-project --watch
@@ -24,7 +23,7 @@ wasmrun ./my-rust-project --watch
 ## When to Use
 
 - Developing WebAssembly modules that target the browser
-- Testing wasm-bindgen projects with JavaScript glue
+- Running a WebAssembly web app (Leptos, Yew, AssemblyScript) with its console and requests in view
 - Iterating on WASM libraries with instant feedback
 - Inspecting module structure (exports, memory, sections) in a visual UI
 
@@ -41,4 +40,4 @@ wasmrun ./output.wasm
 wasmrun ./my-project --watch --port 3000
 ```
 
-The server starts at `http://localhost:8420` by default, serving an HTML page that loads and runs your WASM module.
+The server starts at `http://127.0.0.1:8420` by default. A web app gets a second port, from `8500` upward, for its own page.
