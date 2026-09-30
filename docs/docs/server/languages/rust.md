@@ -267,6 +267,8 @@ cd wasmrun/examples/web-leptos
 wasmrun . --watch
 ```
 
+The app runs from its own `index.html` on the app port (`8421`), and the UI port (`8420`) frames it with its console, requests and build. See [Web Apps](../web-apps.md).
+
 ## Native Execution
 
 For native execution without a browser:

@@ -92,3 +92,40 @@ export interface ThemeContextType {
   theme: Theme
   toggleTheme: () => void
 }
+
+export interface DevBuild {
+  generation: number
+  status: 'building' | 'ready' | 'failed'
+  builds: number
+  error: string | null
+  duration_ms: number | null
+  finished_at: number | null
+  wasm_file: string
+  wasm_size: number
+}
+
+export interface DevMetrics {
+  requests: number
+  bytes_sent: number
+  not_found: number
+  errors: number
+}
+
+export interface DevSnapshot {
+  project: string
+  project_path: string | null
+  watch: boolean
+  ui_url: string
+  app_url: string | null
+  js_file: string | null
+  build: DevBuild
+  metrics: DevMetrics
+}
+
+export interface DevLogEntry {
+  seq: number
+  time: number
+  source: 'build' | 'http' | 'server'
+  level: 'info' | 'success' | 'warning' | 'error'
+  message: string
+}

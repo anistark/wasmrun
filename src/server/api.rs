@@ -1,9 +1,12 @@
 use std::fs;
 use tiny_http::{Request, Response};
 
-use super::utils::{check_assets_directory, content_type_header};
+use super::utils::content_type_header;
 use crate::commands::verify_wasm;
 use crate::plugin::manager::PluginManager;
+
+const ASSET_LOGO_PNG: &[u8] = include_bytes!("../../templates/assets/logo.png");
+const ASSET_LOGO_TEXT_PNG: &[u8] = include_bytes!("../../templates/assets/logo-text.png");
 
 /// Serve WASM module information as JSON
 pub fn serve_module_info(request: Request, wasm_path: &str, project_path: Option<&str>) {
@@ -12,12 +15,9 @@ pub fn serve_module_info(request: Request, wasm_path: &str, project_path: Option
             // Get plugin information for the project
             let plugin_info = if let Ok(plugin_manager) = PluginManager::new() {
                 if let Some(project_path) = project_path {
-                    println!("🔍 Looking for plugin for project: {project_path}");
-
                     // Find the plugin used for this project
                     if let Some(plugin) = plugin_manager.find_plugin_for_project(project_path) {
                         let info = plugin.info();
-                        println!("✅ Found plugin: {} v{}", info.name, info.version);
                         Some(serde_json::json!({
                             "name": info.name,
                             "version": info.version,
@@ -51,15 +51,12 @@ pub fn serve_module_info(request: Request, wasm_path: &str, project_path: Option
                             }
                         }))
                     } else {
-                        println!("❌ No plugin found for project: {project_path}");
                         None
                     }
                 } else {
-                    println!("❌ No project path provided, unable to detect plugin");
                     None
                 }
             } else {
-                println!("❌ Failed to create plugin manager");
                 None
             };
 
@@ -87,8 +84,6 @@ pub fn serve_module_info(request: Request, wasm_path: &str, project_path: Option
             if let Some(plugin) = plugin_info {
                 json_response["plugin"] = plugin;
             }
-
-            println!("📊 Serving module info for: {wasm_path}");
 
             let response = Response::from_string(json_response.to_string())
                 .with_header(content_type_header("application/json"))
@@ -134,8 +129,6 @@ pub fn serve_version_info(request: Request) {
         "version": version
     });
 
-    println!("📊 Serving version info: {name} v{version}");
-
     let response = Response::from_string(version_response.to_string())
         .with_header(content_type_header("application/json"))
         .with_header(
@@ -151,12 +144,6 @@ pub fn serve_version_info(request: Request) {
 pub fn serve_file(request: Request, file_path: &str, content_type: &str) {
     match fs::read(file_path) {
         Ok(file_bytes) => {
-            println!(
-                "🔄 Serving file: {} ({} bytes, content-type: {})",
-                file_path,
-                file_bytes.len(),
-                content_type
-            );
             let response =
                 Response::from_data(file_bytes).with_header(content_type_header(content_type));
             if let Err(e) = request.respond(response) {
@@ -175,51 +162,24 @@ pub fn serve_file(request: Request, file_path: &str, content_type: &str) {
     }
 }
 
-/// Serve a static asset file
+/// Serve a static asset embedded in the binary
 pub fn serve_asset(request: Request, url: &str) {
-    let asset_filename = url.strip_prefix("/assets/").unwrap_or("");
-    let asset_path = format!("./assets/{asset_filename}");
-
-    let content_type = if url.ends_with(".png") {
-        "image/png"
-    } else if url.ends_with(".jpg") || url.ends_with(".jpeg") {
-        "image/jpeg"
-    } else if url.ends_with(".svg") {
-        "image/svg+xml"
-    } else if url.ends_with(".gif") {
-        "image/gif"
-    } else if url.ends_with(".css") {
-        "text/css"
-    } else if url.ends_with(".js") {
-        "application/javascript"
-    } else {
-        "application/octet-stream"
-    };
-
-    match fs::read(&asset_path) {
-        Ok(asset_bytes) => {
-            println!(
-                "🖼️ Successfully serving asset: {} ({} bytes)",
-                asset_path,
-                asset_bytes.len()
-            );
-            let response =
-                Response::from_data(asset_bytes).with_header(content_type_header(content_type));
-            if let Err(e) = request.respond(response) {
-                eprintln!("‼️ Error sending asset response: {e}");
-            }
-        }
-        Err(e) => {
-            eprintln!("‼️ Error reading asset file {asset_path}: {e} (does the file exist?)");
-
-            check_assets_directory();
-
-            let response = Response::from_string(format!("Asset not found: {e}"))
+    let (content, content_type): (&[u8], &str) = match url.strip_prefix("/assets/") {
+        Some("logo.png") => (ASSET_LOGO_PNG, "image/png"),
+        Some("logo-text.png") => (ASSET_LOGO_TEXT_PNG, "image/png"),
+        _ => {
+            let response = Response::from_string("Asset not found")
                 .with_status_code(404)
                 .with_header(content_type_header("text/plain"));
             if let Err(e) = request.respond(response) {
                 eprintln!("‼️ Error sending asset error response: {e}");
             }
+            return;
         }
+    };
+    let response =
+        Response::from_data(content.to_vec()).with_header(content_type_header(content_type));
+    if let Err(e) = request.respond(response) {
+        eprintln!("‼️ Error sending asset response: {e}");
     }
 }

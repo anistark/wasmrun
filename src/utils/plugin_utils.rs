@@ -1,4 +1,3 @@
-use crate::compiler::ProjectLanguage;
 use crate::error::{Result, WasmrunError};
 use crate::plugin::registry::PluginRegistry;
 use crate::plugin::Plugin;
@@ -246,16 +245,6 @@ impl PluginUtils {
         }
     }
 
-    /// Get the primary (first) language supported by a plugin
-    /// Returns the main language that the plugin is designed for
-    pub fn get_primary_language(plugin: &dyn Plugin) -> String {
-        let languages = Self::get_supported_languages(plugin);
-        languages
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "unknown".to_string())
-    }
-
     /// Check if a plugin supports a specific language
     /// Case-insensitive comparison
     pub fn supports_language(plugin: &dyn Plugin, language: &str) -> bool {
@@ -265,26 +254,6 @@ impl PluginUtils {
         supported_languages
             .iter()
             .any(|lang| lang.to_lowercase() == target_lang)
-    }
-
-    /// Map plugin to ProjectLanguage enum for compatibility with existing code
-    /// This function handles the mapping from plugin languages to the ProjectLanguage enum
-    pub fn map_plugin_to_project_language(
-        plugin: &dyn Plugin,
-        project_path: &str,
-    ) -> ProjectLanguage {
-        let primary_language = Self::get_primary_language(plugin);
-
-        match primary_language.to_lowercase().as_str() {
-            "rust" => ProjectLanguage::Rust,
-            "go" => ProjectLanguage::Go,
-            "c" | "cpp" | "c++" => ProjectLanguage::C,
-            "assemblyscript" | "asc" => ProjectLanguage::Asc,
-            _ => {
-                // Unknown language, fallback to project detection
-                crate::compiler::detect_project_language(project_path)
-            }
-        }
     }
 
     /// Check if a plugin can handle projects of a specific language

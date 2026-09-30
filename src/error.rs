@@ -71,10 +71,6 @@ pub enum WasmError {
     /// WASM module validation failed
     #[error("WASM module validation failed: {reason}")]
     ValidationFailed { reason: String },
-
-    /// wasm-bindgen detection
-    #[error("wasm-bindgen module detected but JavaScript file not found")]
-    WasmBindgenJsNotFound,
 }
 
 /// Compilation-related errors
@@ -126,10 +122,6 @@ pub enum ServerError {
     /// Server startup failed
     #[error("Failed to start server on port {port}: {reason}")]
     StartupFailed { port: u16, reason: String },
-
-    /// Request handling failed
-    #[error("Failed to handle request: {reason}")]
-    RequestHandlingFailed { reason: String },
 
     /// Server not running
     #[error("No server is currently running")]
@@ -250,9 +242,6 @@ impl WasmrunError {
                     "Missing required tools: {}\n💡 Please install these tools to continue",
                     tools.join(", ")
                 )
-            }
-            WasmrunError::Wasm(WasmError::WasmBindgenJsNotFound) => {
-                "This appears to be a wasm-bindgen module\n💡 Try running the corresponding .js file instead".to_string()
             }
             _ => self.to_string(),
         }

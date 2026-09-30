@@ -352,12 +352,12 @@
 <body>
     <div id="root"></div>
     <script type="module">
-        import init, { main } from './pkg/web_leptos.js';
+        import init from './pkg/web_leptos.js';
         
         async function run() {
             try {
+                // init() runs main(), which is #[wasm_bindgen(start)]
                 await init();
-                main();
                 console.log("🦀 Leptos WebAssembly application loaded successfully!");
             } catch (error) {
                 console.error("Failed to load WebAssembly module:", error);

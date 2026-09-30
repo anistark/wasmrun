@@ -50,6 +50,14 @@ EOF
 wasmrun . --watch
 ```
 
+## Web Apps
+
+Add an `index.html` that imports the bindings `asc --bindings esm` writes to `build/`, and wasmrun serves the project as a web app: the page on the app port, with a control center on the UI port. See [`examples/web-asc`](https://github.com/anistark/wasmrun/tree/main/examples/web-asc) and [Web Apps](../web-apps.md).
+
+```sh
+wasmrun ./examples/web-asc
+```
+
 ## Project Structure
 
 ```

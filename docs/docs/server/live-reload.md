@@ -1,206 +1,55 @@
 ---
 sidebar_position: 4
 title: Live Reload
-description: Instant development feedback with file watching
+description: Rebuild on change and reload the browser
 ---
 
 # Live Reload
 
-Wasmrun provides built-in file watching and live reload capabilities for instant development feedback. Changes to your source files automatically trigger recompilation and browser refresh.
-
-## How It Works
-
-The live reload system monitors your project directory for changes and:
-
-1. **Detects** file modifications using the file system watcher
-2. **Recompiles** your project when source files change
-3. **Refreshes** the browser automatically with the new build
-4. **Preserves** browser state when possible (hot module replacement)
-
-## Enabling Live Reload
-
-### Using the `--watch` Flag
+With `--watch`, wasmrun watches the project directory, rebuilds when source changes, and the page in the browser reloads itself once the new build is ready.
 
 ```sh
-# Enable live reload during development
-wasmrun ./my-project --watch
-
-# With custom port
-wasmrun ./my-project --watch --port 3000
-
-# Specify language explicitly
-wasmrun ./my-project --watch --language rust
-```
-
-### Default Behavior
-
-By default, `wasmrun` starts the development server **without** live reload. You must explicitly enable it with `--watch`.
-
-```sh
-# No live reload (manual refresh needed)
-wasmrun ./my-project
-
-# With live reload (auto refresh on changes)
 wasmrun ./my-project --watch
 ```
 
-## Supported File Types
+Without `--watch`, the server serves the build it started with until it is stopped.
 
-Live reload monitors changes to:
+## What a change does
 
-### Source Files
-- **Rust**: `*.rs`
-- **Go**: `*.go`
-- **Python**: `*.py`
-- **C/C++**: `*.c`, `*.cpp`, `*.h`, `*.hpp`
-- **AssemblyScript**: `*.ts`
+| Changed | What happens |
+|---|---|
+| **Source**: `*.rs`, `*.go`, `*.c`, `*.cc`, `*.cpp`, `*.h`, `*.hpp`, `*.ts`, `*.js`, `*.mjs`, `*.py`, `*.toml`, `*.mod`, `Makefile`, `package.json`, `asconfig.json` | Rebuild, then reload |
+| **Page and assets**: `*.html`, `*.css`, `*.json`, images, fonts | Reload, no build |
+| **Anything under** `target/`, `node_modules/`, `pkg/`, `build/`, `dist/`, or a hidden file or directory | Nothing: these are build output, and watching them would rebuild on every build |
 
-### Configuration Files
-- `Cargo.toml` (Rust)
-- `go.mod`, `go.sum` (Go)
-- `Makefile` (C/C++)
-- `package.json`, `tsconfig.json` (AssemblyScript)
-- `.wasmrun.toml` (Project config)
+Changes are debounced by half a second, so saving several files at once builds once.
 
-### Asset Files
-- `*.html`, `*.css`, `*.js`
-- `*.wasm` (pre-built modules)
-- `*.json`, `*.toml`, `*.yaml`
+## How the page reloads
 
-## Performance Considerations
+Every build that succeeds, and every page or asset change, moves a build *generation* forward. Pages poll for it once a second and reload when it changes:
 
-### Fast Recompilation
+- **A web app** reloads from the script the app port injects into its page, whether it is open in the control center's frame or in its own tab. The control center marks the reload in its Console panel.
+- **A module** in the console page reloads the console.
 
-Live reload is most effective with:
-
-- **Incremental compilation** (Rust, Go)
-- **Small projects** (< 10,000 LOC)
-- **Fast compilers** (TinyGo, waspy)
-
-### Optimization Strategies
-
-```sh
-# Use debug builds during development (faster compilation)
-wasmrun ./my-project --watch --optimization debug
-
-# Use release builds for final testing
-wasmrun ./my-project --optimization release
-```
-
-### Large Projects
-
-For large projects:
-
-1. **Split into modules**: Smaller compile units rebuild faster
-2. **Use debug mode**: Release mode optimization takes longer
-3. **Exclude unnecessary files**: Reduce watcher overhead
-4. **Disable in production**: Use `compile` command for final builds
-
-## Browser Integration
-
-### Auto-Refresh
-
-When live reload is enabled, wasmrun injects a WebSocket client into your page that:
-- Connects to the wasmrun WebSocket server
-- Listens for rebuild events
-- Refreshes the page when builds complete
-- Shows build errors in the browser console
-
-### Build Status
-
-The browser console shows live reload status:
+The terminal shows the same events:
 
 ```
-[Wasmrun] Connected to live reload server
-[Wasmrun] File changed: src/lib.rs
-[Wasmrun] Rebuilding...
-[Wasmrun] Build complete (2.3s)
-[Wasmrun] Reloading...
+📂 src/lib.rs changed, rebuilding...
+✅ Rebuilt in 206 ms
+📂 index.html changed, reloading
 ```
 
-## Error Handling
+## When a build fails
 
-### Build Failures
+The page keeps running the last build that succeeded, and nothing reloads. The compiler's output is printed in the terminal and, for a web app, shown over the app in the control center, with the Build panel marked. Fix the error and save: the next successful build clears it and reloads.
 
-When compilation fails:
+## Limits
 
-1. **Error displayed** in terminal with detailed output
-2. **Browser not refreshed** (keeps current working version)
-3. **Notification shown** in browser console
-4. **Retry automatic** when files change again
-
-```
-[Wasmrun] Build failed: compilation error
-[Wasmrun] Fix the errors and save to rebuild
-```
-
-### Recovery
-
-Fix the error and save the file - wasmrun automatically:
-1. Detects the change
-2. Attempts rebuild
-3. Refreshes on success
-
-## CLI Examples
-
-```sh
-# Basic live reload
-wasmrun ./rust-project --watch
-
-# With specific port and language
-wasmrun ./my-project --watch --port 8080 --language go
-
-# Verbose output to see all file changes
-wasmrun ./my-project --watch --verbose
-
-# Debug mode for faster rebuilds
-wasmrun ./my-project --watch --optimization debug
-```
-
-## OS Mode with Live Reload
-
-Live reload also works in OS mode:
-
-```sh
-# Node.js with live reload
-wasmrun os ./node-app --watch --language nodejs
-
-# Python with live reload
-wasmrun os ./python-app --watch --language python
-```
-
-See [OS Mode](../os/) for more details.
-
-## Troubleshooting
-
-### Changes Not Detected
-
-```sh
-# Check if watcher is running (verbose mode shows file changes)
-wasmrun ./my-project --watch --verbose
-
-# Verify file is in watched directories
-```
-
-### Slow Rebuilds
-
-```sh
-# Use debug optimization for faster builds
-wasmrun ./my-project --watch --optimization debug
-
-# Check project size and split into modules
-# Consider using incremental compilation in Cargo.toml
-```
-
-### Browser Not Refreshing
-
-1. **Check WebSocket connection** in browser console
-2. **Verify port is not blocked** by firewall
-3. **Try different browser** (Chrome/Firefox recommended)
-4. **Check terminal** for build errors
+- `--watch` applies to project directories. For a `.wasm` passed directly there is nothing to rebuild, and the flag is ignored with a note.
+- A reload starts the page over. There is no hot module replacement, so in-page state is lost.
+- OS mode accepts `--watch` but does not act on it yet; see [OS Mode](../os/).
 
 ## See Also
 
-- [run command](./usage/run.md) - Full `run` command reference
-- [Quick Start](../quick-start.md) - Getting started guide
-- [Troubleshooting](../contributing/troubleshooting.md) - Common issues and solutions
+- [Web Apps](./web-apps.md): the app port and the control center
+- [run command](./usage/run.md): full `run` command reference

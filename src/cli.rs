@@ -32,7 +32,6 @@ pub struct Args {
     pub positional_path: Option<String>,
 
     /// Port to serve (default: 8420)
-    // TODO: Apply to web server as well if provided.
     #[arg(
         short = 'P',
         long,
@@ -41,6 +40,14 @@ pub struct Args {
         help = "Server port number"
     )]
     pub port: u16,
+
+    /// Port for a web app's own page (default: the first free port above --port)
+    #[arg(
+        long,
+        value_parser = clap::value_parser!(u16).range(1..=65535),
+        help = "Port a web app is served on, beside the UI"
+    )]
+    pub app_port: Option<u16>,
 
     /// Interpret path as a WebAssembly file (instead of a project directory)
     #[arg(short = 'w', long, help = "Run WASM file directly")]
@@ -174,6 +181,14 @@ pub enum Commands {
             help = "Development server port"
         )]
         port: u16,
+
+        /// Port for a web app's own page (default: the first free port above --port)
+        #[arg(
+            long,
+            value_parser = clap::value_parser!(u16).range(1..=65535),
+            help = "Port a web app is served on, beside the UI"
+        )]
+        app_port: Option<u16>,
 
         /// Language to use for compilation (auto-detect if not specified)
         #[arg(
@@ -606,6 +621,7 @@ pub enum PluginSubcommands {
 pub struct ResolvedArgs {
     pub path: String,
     pub port: u16,
+    pub app_port: Option<u16>,
     pub wasm: bool,
     pub watch: bool,
     #[allow(dead_code)] // TODO: Used for debug output control
@@ -624,6 +640,7 @@ impl ResolvedArgs {
         Ok(Self {
             path: resolved_path,
             port: args.port,
+            app_port: args.app_port,
             wasm: args.wasm,
             watch: args.watch,
             debug: args.debug,

@@ -100,9 +100,10 @@ fn main() {
             path,
             positional_path,
             port,
+            app_port,
             language,
             watch,
-            verbose: _verbose,
+            verbose,
             serve,
         }) => {
             debug_println!(
@@ -115,11 +116,14 @@ fn main() {
             commands::handle_run_command(
                 path,
                 positional_path,
-                *port,
-                language,
-                *watch,
-                false,
-                *serve,
+                commands::RunOptions {
+                    port: *port,
+                    app_port: *app_port,
+                    language: language.clone(),
+                    watch: *watch,
+                    verbose: *verbose,
+                    serve: *serve,
+                },
             )
             .map_err(|e| match e {
                 WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,
@@ -291,11 +295,14 @@ fn main() {
             commands::handle_run_command(
                 &None,
                 &Some(resolved_args.path),
-                resolved_args.port,
-                &resolved_args.language,
-                resolved_args.watch,
-                false, // verbose mode for default command
-                resolved_args.serve,
+                commands::RunOptions {
+                    port: resolved_args.port,
+                    app_port: resolved_args.app_port,
+                    language: resolved_args.language,
+                    watch: resolved_args.watch,
+                    verbose: false,
+                    serve: resolved_args.serve,
+                },
             )
             .map_err(|e| match e {
                 WasmrunError::Command(_) | WasmrunError::Server(_) | WasmrunError::Path { .. } => e,

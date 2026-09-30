@@ -185,19 +185,6 @@ impl PathResolver {
         Ok(CommandExecutor::format_file_size(metadata.len()))
     }
 
-    /// Create and ensure a temporary directory for wasmrun operations
-    pub fn create_temp_directory(name: &str) -> Result<String> {
-        let temp_dir = std::env::temp_dir().join(name);
-
-        if !temp_dir.exists() {
-            std::fs::create_dir_all(&temp_dir).map_err(|e| {
-                WasmrunError::add_context(format!("Creating temporary directory {name}"), e)
-            })?;
-        }
-
-        Ok(temp_dir.to_str().unwrap_or("/tmp").to_string())
-    }
-
     /// Clean up temporary directory used by wasmrun operations
     pub fn cleanup_temp_directory(name: &str) -> Result<()> {
         let temp_dir = std::env::temp_dir().join(name);
@@ -507,13 +494,5 @@ mod tests {
             CommandExecutor::format_file_size(1536 * 1024 * 1024),
             "1.50 GB"
         );
-    }
-
-    #[test]
-    fn test_create_temp_directory() {
-        let result = PathResolver::create_temp_directory("wasmrun_test");
-        assert!(result.is_ok());
-        let path = result.unwrap();
-        assert!(Path::new(&path).exists());
     }
 }
