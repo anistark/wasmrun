@@ -86,7 +86,7 @@ Output:
 ```
 
 ### Server Operations
-Logs HTTP server startup and request handling:
+Server mode logs its startup decisions (the command, the plugin that picked up the project) and nothing per request. Requests to a web app's port show in the control center's Requests tab and in `GET /api/logs`:
 
 ```sh
 wasmrun --debug run ./project --port 3000
@@ -94,11 +94,10 @@ wasmrun --debug run ./project --port 3000
 
 Output:
 ```
-🚪 ENTER [server/mod.rs:77] run_project
-🔍 DEBUG [server/mod.rs:112] Starting server on port 3000
-🔍 DEBUG [server/handler.rs:34] Handling request: GET /
-🔍 DEBUG [server/wasm.rs:67] Serving WASM file: output.wasm
-⏱️ TIME  [server/handler.rs:89] Request handled in 12ms
+🔍 DEBUG [main.rs:113] Processing run command: port=3000, language=None, watch=false, serve=false
+🚪 ENTER [manager.rs:35] PluginManager::new
+🔍 DEBUG [manager.rs:59] Plugin manager initialized with 4 builtin and 0 external plugins
+🚶 EXIT  [manager.rs:65] PluginManager::new
 ```
 
 ### Compilation

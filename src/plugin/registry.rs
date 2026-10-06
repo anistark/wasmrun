@@ -92,21 +92,7 @@ impl PluginRegistry {
         if plugin_name.is_empty() {
             return Ok(false);
         }
-
-        // Check crates.io for the plugin
-        let output = std::process::Command::new("cargo")
-            .args(["search", plugin_name, "--limit", "1"])
-            .output()
-            .map_err(|e| {
-                crate::error::WasmrunError::from(format!("Failed to search crates.io: {e}"))
-            })?;
-
-        if !output.status.success() {
-            return Ok(false);
-        }
-
-        let search_output = String::from_utf8_lossy(&output.stdout);
-        Ok(!search_output.trim().is_empty())
+        Ok(crate::utils::SystemUtils::get_latest_crates_version(plugin_name).is_some())
     }
 
     /// Gets plugin metadata from crates.io

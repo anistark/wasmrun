@@ -138,7 +138,7 @@ wasmhub's nodejs runtime implements `net` and `http` **servers**. Outbound is no
 | `net.connect`, `http.request`, `fetch` | Throws `ERR_NOT_SUPPORTED` |
 | `https`, `dgram`, `tls` | Present but throwing |
 
-The syscalls to support outbound exist in wasmrun; the runtime has not been built against them. Tracked in [wasmhub#22](https://github.com/anistark/wasmhub/issues/22).
+The syscalls to support outbound exist in wasmrun, in the interpreter and in OS mode's browser VM alike; the runtime has not been built against them. Tracked in [wasmhub#22](https://github.com/anistark/wasmhub/issues/22).
 
 ## See also
 

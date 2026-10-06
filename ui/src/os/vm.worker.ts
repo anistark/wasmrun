@@ -28,6 +28,7 @@ async function run(start: VmStartMessage): Promise<void> {
         poll: () => inbox!.drain(),
         send: (id, bytes) => post({ type: 'sock', op: 'send', id, bytes: bytes.slice() }),
         close: id => post({ type: 'sock', op: 'close', id }),
+        connect: (id, host, port) => post({ type: 'sock', op: 'connect', id, host, port }),
       }
     : undefined
 
@@ -46,7 +47,7 @@ async function run(start: VmStartMessage): Promise<void> {
 
   // The runtime finds its listener the way it does under `exec --tcplisten`
   // and agent serve: a descriptor number and address in the environment
-  if (start.net) {
+  if (start.net && wasi.listenFd() >= 0) {
     env.WASMHUB_LISTEN_FD = String(wasi.listenFd())
     env.WASMHUB_LISTEN_ADDR = start.net.address
   }

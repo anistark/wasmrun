@@ -1013,19 +1013,24 @@ pub fn create_wasi_linker(env: Arc<Mutex<WasiEnv>>) -> Linker {
     );
 
     // fd_fdstat_set_flags
-    linker.register(
-        WASI_MODULE,
-        "fd_fdstat_set_flags",
-        Box::new(ClosureHostFunction::new(
-            |args, _mem| {
-                let fd = i32_arg(&args, 0)? as u32;
-                let flags = i32_arg(&args, 1)? as u16;
-                Ok(vec![Value::I32(syscalls::fd_fdstat_set_flags(fd, flags))])
-            },
-            2,
-            1,
-        )),
-    );
+    {
+        let env = env.clone();
+        linker.register(
+            WASI_MODULE,
+            "fd_fdstat_set_flags",
+            Box::new(ClosureHostFunction::new(
+                move |args, _mem| {
+                    let fd = i32_arg(&args, 0)? as u32;
+                    let flags = i32_arg(&args, 1)? as u16;
+                    Ok(vec![Value::I32(syscalls::fd_fdstat_set_flags(
+                        fd, flags, &env,
+                    ))])
+                },
+                2,
+                1,
+            )),
+        );
+    }
 
     // path_filestat_set_times
     {

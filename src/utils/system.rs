@@ -32,24 +32,25 @@ impl SystemUtils {
             .unwrap_or(false)
     }
 
-    /// Get the latest version of a crate from crates.io
+    /// Get the latest version of a crate from crates.io, or `None` when no crate has that name.
+    /// `cargo search` matches loosely and lists whatever ranks first, so the name is compared
+    /// rather than trusting the first line; crates.io treats `-` and `_` as the same.
     pub fn get_latest_crates_version(crate_name: &str) -> Option<String> {
-        if let Ok(output) = Command::new("cargo")
-            .args(["search", crate_name, "--limit", "1"])
+        let output = Command::new("cargo")
+            .args(["search", crate_name, "--limit", "10"])
             .output()
-        {
-            if output.status.success() {
-                let search_output = String::from_utf8_lossy(&output.stdout);
-                if let Some(line) = search_output.lines().next() {
-                    if let Some(start) = line.find(" = \"") {
-                        if let Some(end) = line[start + 4..].find('"') {
-                            return Some(line[start + 4..start + 4 + end].to_string());
-                        }
-                    }
-                }
-            }
+            .ok()?;
+        if !output.status.success() {
+            return None;
         }
-        None
+        let wanted = crate_name.replace('_', "-");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find_map(|line| {
+                let (name, rest) = line.split_once(" = \"")?;
+                (name.trim().replace('_', "-") == wanted)
+                    .then(|| rest.split('"').next().map(str::to_string))?
+            })
     }
 
     /// Detect version from Cargo.toml content

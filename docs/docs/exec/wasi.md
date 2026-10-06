@@ -27,7 +27,7 @@ Wasmrun's exec mode provides WASI Preview 1 support, enabling WASM modules to in
 | `proc_exit` | Exit with a status code (terminates execution cleanly) | ✅ |
 | `poll_oneoff` | Wait on clock and file descriptor subscriptions. This is what `thread::sleep` and every timer lowers to | ✅ |
 | `sched_yield` | Yield the rest of the time slice | ✅ |
-| `path_open` | Open (or create) a file by path | ✅ |
+| `path_open` | Open (or create) a file by path, honoring the `append` fdflag | ✅ |
 | `path_filestat_get` | Stat a path | ✅ |
 | `path_create_directory` | Create a directory | ✅ |
 | `path_remove_directory` | Remove a directory | ✅ |
@@ -35,7 +35,7 @@ Wasmrun's exec mode provides WASI Preview 1 support, enabling WASM modules to in
 | `path_rename` | Rename / move a path | ✅ |
 | `fd_readdir` | Read directory entries | ✅ |
 | `fd_filestat_get` | Stat an open file descriptor | ✅ |
-| `fd_fdstat_set_flags` | Set file descriptor flags | ✅ |
+| `fd_fdstat_set_flags` | Turn `append` on or off for an open file | ✅ |
 | `path_filestat_set_times` | Set a path's access and modification times | ✅ |
 | `path_readlink` | Read a symlink's target | ✅ |
 | `path_symlink` | Create a symlink | ⬜ Returns `ENOSYS` |
@@ -119,5 +119,6 @@ Exec mode bridges the executor to wasmrun's `WasiFilesystem`, so modules can ope
 - **Preopened directories**: host directories mounted to a virtual path, surfaced via `fd_prestat_get` / `fd_prestat_dir_name`
 - **Path traversal protection**: every guest path is resolved and confined to its mount; `..` escapes are rejected
 - **Read-only mode**: when enabled, writes and creates fail instead of mutating the host
+- **Append**: a file opened with the `append` fdflag, which is what `fopen(path, "a")` and Node's `fs.appendFileSync` ask for, writes every chunk at the file's current end, never where the fd's offset was left
 - **File size limit**: a write larger than the configured per-file cap is rejected with `EFBIG`
 - **Disk quota**: in the agent, a write that would push the session's total on-disk footprint past `--max-disk` is rejected with `EDQUOT` (see [Agent API](../agent/index.md))

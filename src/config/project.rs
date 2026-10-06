@@ -92,14 +92,40 @@ impl NetworkConfig {
     /// tenant's `[tenants.network]` table have the same shape, and a message
     /// that names the wrong one sends the reader to the wrong file.
     pub fn to_policy_config_named(&self, table: &str) -> Result<PolicyConfig> {
+        self.to_policy_config_labelled(
+            &format!("[{table}] allow"),
+            &format!("[{table}] deny"),
+            table,
+        )
+    }
+
+    /// The policy `--allow-net` asks for: exactly the rules given, with no
+    /// inherited deny list, so `--allow-net 127.0.0.0/8` is not refused by a
+    /// default it never asked for. `wasmrun exec` and `wasmrun agent` share
+    /// it, and an error names the flag rather than a table nobody wrote.
+    pub fn from_allow_net(rules: &[String]) -> Result<PolicyConfig> {
+        Self {
+            allow: Some(rules.to_vec()),
+            deny: Some(Vec::new()),
+            ..Default::default()
+        }
+        .to_policy_config_labelled("--allow-net", "--allow-net", "--allow-net")
+    }
+
+    fn to_policy_config_labelled(
+        &self,
+        allow_label: &str,
+        deny_label: &str,
+        table: &str,
+    ) -> Result<PolicyConfig> {
         let mut network = NetworkPolicy::default();
 
         if let Some(allow) = &self.allow {
-            validate_rules(table, "allow", allow)?;
+            validate_rules(allow_label, allow)?;
             network.allow = allow.clone();
         }
         if let Some(deny) = &self.deny {
-            validate_rules(table, "deny", deny)?;
+            validate_rules(deny_label, deny)?;
             network.deny = deny.clone();
         }
         if let Some(bind_ports) = &self.bind_ports {
@@ -135,7 +161,8 @@ fn invalid(message: impl Into<String>) -> crate::error::WasmrunError {
 /// becomes a *hostname* that no address ever matches, and a `deny` written
 /// that way is a rule the user believes in and does not have. Both mistakes
 /// are caught here, where there is a file and a line to point at.
-fn validate_rules(table: &str, field: &str, rules: &[String]) -> Result<()> {
+/// `label` names where the rules came from, `[os.network] allow` or `--allow-net`.
+fn validate_rules(label: &str, rules: &[String]) -> Result<()> {
     for rule in rules {
         if rule == "*" {
             continue;
@@ -143,12 +170,12 @@ fn validate_rules(table: &str, field: &str, rules: &[String]) -> Result<()> {
 
         if rule.trim().is_empty() {
             return Err(invalid(format!(
-                "[{table}] {field}: an empty rule matches nothing; remove it or use \"*\""
+                "{label}: an empty rule matches nothing; remove it or use \"*\""
             )));
         }
 
         if let Some((addr, prefix)) = rule.split_once('/') {
-            validate_cidr(table, field, rule, addr, prefix)?;
+            validate_cidr(label, rule, addr, prefix)?;
             continue;
         }
 
@@ -157,7 +184,7 @@ fn validate_rules(table: &str, field: &str, rules: &[String]) -> Result<()> {
         let host = split_host(rule);
         if host.parse::<IpAddr>().is_ok() {
             return Err(invalid(format!(
-                "[{table}] {field}: \"{rule}\" is a bare IP address, which is matched as a \
+                "{label}: \"{rule}\" is a bare IP address, which is matched as a \
                  hostname and never matches a connection. Write it as a CIDR range instead, \
                  for example \"{host}/32\" (\"/128\" for IPv6)"
             )));
@@ -165,7 +192,7 @@ fn validate_rules(table: &str, field: &str, rules: &[String]) -> Result<()> {
 
         if host.contains(char::is_whitespace) {
             return Err(invalid(format!(
-                "[{table}] {field}: \"{rule}\" is not a valid host pattern"
+                "{label}: \"{rule}\" is not a valid host pattern"
             )));
         }
     }
@@ -173,24 +200,24 @@ fn validate_rules(table: &str, field: &str, rules: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn validate_cidr(table: &str, field: &str, rule: &str, addr: &str, prefix: &str) -> Result<()> {
+fn validate_cidr(label: &str, rule: &str, addr: &str, prefix: &str) -> Result<()> {
     let ip: IpAddr = addr.parse().map_err(|_| {
         invalid(format!(
-            "[{table}] {field}: \"{rule}\" looks like a CIDR range but \"{addr}\" is not an \
+            "{label}: \"{rule}\" looks like a CIDR range but \"{addr}\" is not an \
              IP address"
         ))
     })?;
 
     let bits: u8 = prefix.parse().map_err(|_| {
         invalid(format!(
-            "[{table}] {field}: \"{rule}\" has a prefix length that is not a number"
+            "{label}: \"{rule}\" has a prefix length that is not a number"
         ))
     })?;
 
     let max = if ip.is_ipv4() { 32 } else { 128 };
     if bits > max {
         return Err(invalid(format!(
-            "[{table}] {field}: \"{rule}\" has a prefix length above /{max}"
+            "{label}: \"{rule}\" has a prefix length above /{max}"
         )));
     }
 
@@ -377,6 +404,38 @@ connection_timeout_secs = 15
             .unwrap_err()
             .to_string();
         assert!(err.contains("bare IP address"), "{err}");
+    }
+
+    #[test]
+    fn a_table_error_names_the_table_and_field() {
+        let dir = write_config("[os.network]\ndeny = [\"10.0.0/8\"]\n");
+        let err = ProjectConfig::load(dir.path())
+            .unwrap()
+            .network_policy()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("[os.network] deny: \"10.0.0/8\""), "{err}");
+    }
+
+    #[test]
+    fn an_allow_net_error_names_the_flag() {
+        let err = NetworkConfig::from_allow_net(&["127.0.0.1".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("--allow-net: \"127.0.0.1\" is a bare IP"),
+            "{err}"
+        );
+        assert!(!err.contains("os.network"), "{err}");
+    }
+
+    #[test]
+    fn allow_net_keeps_only_the_rules_given() {
+        let policy = NetworkConfig::from_allow_net(&["127.0.0.0/8".to_string()])
+            .unwrap()
+            .network;
+        assert_eq!(policy.allow, vec!["127.0.0.0/8".to_string()]);
+        assert!(policy.deny.is_empty());
     }
 
     #[test]

@@ -42,7 +42,7 @@ Project files are served via `GET /api/project/files` as a base64-encoded JSON b
 A program in the VM has no network of its own. What it gets goes through a local proxy under a policy the project sets in `wasmrun.toml`:
 
 - A port from the policy's `bind_ports` range is bound for the program when it starts, so `server.listen()` in a Node project answers requests on `localhost`
-- Outbound connections are not wired up yet
+- Outbound connections go through the same proxy and policy, for a program that calls `sock_open` and `sock_connect`. Node's `net.connect` and `fetch` do not call them yet
 
 See [Network Policy](./network-isolation.md) and [Serving a Port](./port-forwarding.md).
 

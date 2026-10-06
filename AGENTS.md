@@ -35,14 +35,14 @@ Wasmrun has **four distinct execution modes**. They are separate systems with se
   - `src/server/dev.rs`: the dev session: `DevState` shared by both servers and the rebuild loop (artifacts, build generation, log ring, metrics), `run()` which binds the ports and runs the watch loop
   - `src/server/app.rs`: the app port: path resolution (`/pkg/` from the build first, then the project, then the build root), containment, the injected dev client, the generated page for a wasm-bindgen library with none
   - `src/server/handler.rs`: the UI port: template page, `/api/dev`, `/api/logs`, `/api/module-info`, embedded assets
-  - `src/server/`: also `api.rs` (module info, version, assets), `utils.rs` (ports, content types), `lifecycle.rs`
+  - `src/server/`: also `api.rs` (module info, version, assets), `utils.rs` (ports, content types), `lifecycle.rs` (one registry entry per running session, which `wasmrun stop` reads)
   - `src/compiler/`: project compilation
   - `src/plugin/`: plugin system (compile plugins)
   - `src/watcher.rs`: file watching; classifies a change as rebuild, reload, or ignored
   - `src/template.rs`: the `console` and `app` templates, compiled into the binary with `include_str!`
-  - `ui/src/console/`: the module console; `ui/src/app/`: the control center. Built into `templates/console/` and `templates/app/` at compile time via `build.rs`
+  - `ui/src/console/`: the module console, with `imports.ts` stubbing every import so a module from any toolchain instantiates; `ui/src/app/`: the control center. Built into `templates/console/` and `templates/app/` at compile time via `build.rs`
 - **Uses plugins:** Yes. Plugins provide compilation (wasmrust, wasmgo, waspy, wasmasc)
-- **Uses browser:** Yes. A module is loaded via `WebAssembly.instantiate()` in the console; a web app runs from its own page. Never through OS mode's browser VM, which is a WASI worker with no DOM
+- **Uses browser:** Yes. A module is compiled and instantiated in the console, with a stub for every import; a web app runs from its own page. Never through OS mode's browser VM, which is a WASI worker with no DOM
 - **Docs:** `docs/docs/server/`
 
 ### 2. Exec Mode (`wasmrun exec`)
@@ -89,6 +89,10 @@ Wasmrun has **four distinct execution modes**. They are separate systems with se
   - `src/runtime/languages/`: language runtime traits (Node.js, Go, Python)
   - `src/logging/`: structured log trail system
   - `ui/src/`: Preact UI source (components, OS panels, WASI shim; builds into `templates/os/` at compile time via `build.rs`)
+    - `ui/src/wasi/wasmrun_wasi_impl.js`: the browser WASI shim the VM runs on
+    - `ui/src/os/vm.worker.ts`: the VM, in a worker so a guest can block on `Atomics.wait`
+    - `ui/src/os/NetBridge.ts`: the page's end of the network: the wasmnet client, the bound port, outbound connects
+    - `ui/src/os/netInbox.ts`: the shared ring that carries socket events from the page to the worker
 - **Uses plugins:** No (uses its own language detection and wasmhub runtimes)
 - **Uses browser:** Yes. Full Preact UI with console, filesystem, kernel panels
 - **Docs:** `docs/docs/os/`
@@ -137,7 +141,7 @@ Wasmrun has **four distinct execution modes**. They are separate systems with se
 |--------|---------|---------|
 | `src/error.rs` | All | Unified error types |
 | `src/utils/` | All | Path resolution, WASM analysis, system utils |
-| `src/config/constants.rs` | Server, OS | Port defaults, paths |
+| `src/config/constants.rs` | Server, OS, Agent | Port defaults (`AGENT_DEFAULT_PORT`, which the server UI steps over), WASM magic |
 | `src/runtime/core/` | Exec, Agent | WASM interpreter engine (`module.rs` also used by Verify/Inspect) |
 | `src/runtime/wasi/` | Exec, Agent | WASI syscall host functions for interpreter |
 | `src/runtime/runtime_cache.rs` | OS, Agent | wasmhub language runtime fetching + caching |
@@ -246,7 +250,7 @@ src/
 │   ├── agent.rs         #   [Agent Mode] REST sandbox server
 │   ├── compile.rs       #   [Server Mode] compile only
 │   ├── verify.rs        #   [Shared] WASM binary verification
-│   ├── stop.rs          #   [Server Mode] stop running server
+│   ├── stop.rs          #   [Server Mode] stop every running dev session
 │   ├── clean.rs         #   [Shared] clean build artifacts
 │   ├── plugin.rs        #   [Server Mode] plugin management
 │   ├── module_display.rs #  [Shared] WASM module display formatting
@@ -287,7 +291,7 @@ src/
 │   ├── handler.rs        #   UI port: console or control center, JSON APIs
 │   ├── api.rs            #   Module info, version, embedded assets
 │   ├── utils.rs          #   Ports, content types
-│   └── lifecycle.rs      #   PID-file based stop
+│   └── lifecycle.rs      #   Per-session registry that `wasmrun stop` reads
 ├── utils/                # [Shared] Path resolution, WASM analysis
 ├── template.rs           # [Server Mode] Embedded console/app templates
 ├── ui.rs                 # UI asset embedding
@@ -418,7 +422,7 @@ pnpm typecheck      # TypeScript check
 
 - **Unit tests** live alongside source code (standard Rust `#[cfg(test)]` modules).
 - **Integration tests** are in `tests/` (currently `tests/exec_integration_tests.rs`).
-- **Test count:** ~950 tests across unit and integration suites.
+- **Test count:** ~960 tests across unit and integration suites.
 - **Network-gated tests** are `#[ignore]`d so the suite stays offline-friendly; run them with `cargo test -- --ignored` (use `--test-threads=1` the first time, while `~/.wasmrun/runtimes` is cold).
 - Always run `cargo test` before committing.
 - The CI expects zero clippy warnings: `cargo clippy --all-targets --all-features -- -D warnings`.
@@ -488,7 +492,7 @@ wasmrun run <path> --app-port 9100  # A web app's own page on 9100, the UI on --
 wasmrun compile <path>            # Compile project to WASM only
 wasmrun verify <file.wasm>        # Validate WASM binary structure
 wasmrun inspect <file.wasm>       # Analyze WASM binary (exports, imports, sections)
-wasmrun stop                      # Stop running server
+wasmrun stop                      # Stop every running dev session
 wasmrun clean <path>              # Clean build artifacts
 wasmrun plugin list|install|update|uninstall  # Plugin management
 
@@ -616,7 +620,7 @@ wasmrun agent --allow-net "api.example.com:443"  # Default tenant network policy
 - **Division by zero** in WASM should trap (return error), not panic.
 - **clippy must pass with zero warnings**: the CI enforces `-D warnings`.
 - **Version must stay in sync** across `Cargo.toml`, `ui/package.json`, and `docs/package.json`. Use `just sync-version`.
-- **Two different WASI systems exist:** `src/runtime/wasi/` is for Exec and Agent Mode (host functions linked to the interpreter). `src/runtime/wasi_fs.rs` is for OS Mode (virtual filesystem in browser). Don't confuse them.
+- **Two different WASI systems exist:** `src/runtime/wasi/` is for Exec and Agent Mode (host functions linked to the interpreter). OS Mode's VM runs on the browser shim in `ui/src/wasi/wasmrun_wasi_impl.js`, with `src/runtime/wasi_fs.rs` as its host-side virtual filesystem. Don't confuse them, but keep their behaviour the same: a syscall bug in one is usually in the other (append and truncate were missing from both).
 - **Three different "server" concepts:** Server Mode's HTTP servers (`src/server/`) serve a module to the console or a web app from its own page, on two loopback ports. OS Mode's HTTP server (`src/runtime/os_server.rs`) serves the OS UI and APIs. Agent Mode's HTTP server (`src/agent/server.rs`) serves the REST sandbox API. They are independent.
 - **A WASI syscall change affects two modes.** `src/runtime/wasi/` is reached by `wasmrun exec` and by every agent-mode execution, so test both when touching it.
 - **A guest never binds its own port.** WASI Preview 1 has no call that creates a socket, so the *host* binds and passes the listener in as an fd (`--tcplisten` in exec mode, `POST /sessions/:id/serve` in agent mode). `sock_bind` and `sock_listen` are deliberately unimplemented. Don't add them without the `bind_ports` half of the policy meaning something first, or a sandbox gains the ability to choose a port it was never granted.
@@ -624,6 +628,9 @@ wasmrun agent --allow-net "api.example.com:443"  # Default tenant network policy
 - **The OS mode tunnel publishes the program's port, never the OS server's.** The OS server's APIs read and write project files, so publishing them would hand the project to anyone with the URL. wasmnet binds the program's port on the page's behalf and has no hook the host can watch, so the page reports the port with `POST /api/tunnel/target`. That endpoint refuses the OS server's and the proxy's ports (both sit inside the default `bind_ports` range of `3000-9999`), any port outside `bind_ports` or with nothing listening, and any `Origin` other than the OS page's own. Keep all four checks.
 - **Server mode's app port serves the project directory.** That is why both server-mode ports bind `127.0.0.1` and why `app.rs` refuses dotfiles and any path that leaves the project or build directory, including through a symlink. Keep the loopback bind and the `file_under` containment check; a request for `/.env` or `/../x` must stay a 404.
 - **Server mode's dev client posts only to the UI's origin.** The script the app port injects forwards the page's console with `postMessage`, targeting the framing origin it finds in `location.ancestorOrigins` or the referrer, and only if that is the UI port. Never target `'*'`: the app's console output would go to whatever page frames it.
+- **Outbound sockets have one ABI in two places.** `sock_open` and `sock_connect` are wasmrun extensions (Preview 1 has neither), implemented in `src/runtime/wasi/syscalls.rs` and again in the browser shim. The host is a string so the policy sees the name, and a refused destination is `EACCES`. Change both together. The shim's `sock_connect` blocks on `Atomics.wait` until the page answers through `netInbox.ts`, so it only works inside the VM worker.
+- **`wasmrun stop` finds sessions through a registry, not a PID file.** Each dev session writes `<temp>/wasmrun/servers/<pid>` holding its UI URL and removes it on exit (Ctrl+C or SIGTERM through a `ctrlc` handler). An entry counts only while its process is a `wasmrun` and its port answers; keep both checks, or `stop` can signal a reused PID.
+- **`cargo search` is fuzzy.** It lists whatever ranks first, so `SystemUtils::get_latest_crates_version` compares the crate name (treating `-` and `_` as equal) before trusting a version. `plugin install` relies on that to refuse a name crates.io does not have.
 - **A sandbox has no network unless configured.** `NetworkAccess::denied()` is the default in both modes; egress comes from `--allow-net` or a tenant's `[tenants.network]` table. Don't "fix" a failing connection by widening the default.
 
 ---

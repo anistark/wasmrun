@@ -20,11 +20,13 @@ For `wasmrun exec` and agent mode, where wasmrun runs the program itself, see [e
 | The [wasmnet](https://github.com/anistark/wasmnet) proxy runs beside the OS server, under the project's policy | Working |
 | `[os.network]` in `wasmrun.toml` configures that policy, and a malformed rule stops the server starting | Working |
 | A program in the VM can **serve**: the page binds a port from `bind_ports` and the program accepts connections on it | Working |
-| A program in the VM can **connect out** | Not yet |
+| A program in the VM can **connect out**: `sock_open` and `sock_connect` reach the proxy, which applies `allow` and `deny` | Working, with no Node caller yet |
 
 Inbound is the half a project usually needs, and it works end to end: `http.createServer(...).listen()` in a Node project answers a `curl` from the host. See [Serving a Port](./port-forwarding.md).
 
-Outbound is not wired. The proxy can open connections under the `allow` and `deny` rules below, and the VM's WASI shim does not ask it to yet, so a program in the VM cannot `connect`. wasmhub's `net.connect` and `http.request` throw `ERR_NOT_SUPPORTED` for the same reason. The rules are still worth writing now, since the proxy enforces them the moment something calls it. Tracked in [wasmrun#99](https://github.com/anistark/wasmrun/issues/99).
+Outbound works at the socket level. A program that calls `sock_open` and `sock_connect` gets a connection the proxy opened under the `allow` and `deny` rules below, with the same calls and the same answers as [`wasmrun exec`](../exec/networking.md): a refused destination is `EACCES`, and the reason is printed in the Console panel as `network: connection to HOST:PORT refused: ...`. It works with no free port in `bind_ports` too, since connecting out needs none.
+
+Node projects cannot use it yet. wasmhub's `net.connect`, `http.request` and `fetch` throw `ERR_NOT_SUPPORTED`, because the runtime is not built against these two calls ([wasmhub#22](https://github.com/anistark/wasmhub/issues/22)). The rules are still worth writing now, since the proxy enforces them on every connection.
 
 ## The proxy
 

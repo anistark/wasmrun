@@ -64,7 +64,14 @@ wasmrun exec ./hello.wasm
 
 - **stdout** (fd 1): printed normally
 - **stderr** (fd 2): printed to stderr
-- **Exit code**: returned as the process exit code
+- **Exit code**: returned as the process exit code, so a script or CI job sees a failing program fail
+
+```sh
+wasmrun exec ./tests.wasm
+# ❌ Program exited with code 3
+echo $?
+# 3
+```
 
 ## File Validation
 

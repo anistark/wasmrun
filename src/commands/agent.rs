@@ -61,12 +61,7 @@ pub fn handle_agent_command(
     let default_network = if allow_net.is_empty() {
         None
     } else {
-        let network = crate::config::project::NetworkConfig {
-            allow: Some(allow_net.to_vec()),
-            deny: Some(Vec::new()),
-            ..Default::default()
-        };
-        let policy = network.to_policy_config()?;
+        let policy = crate::config::project::NetworkConfig::from_allow_net(allow_net)?;
         println!("🌐 Default network for tenants: {}", allow_net.join(", "));
         Some(policy)
     };

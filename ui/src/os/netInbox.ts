@@ -1,4 +1,4 @@
-// Inbound network events, page to worker, over shared memory. A message to a
+// Network events, page to worker, over shared memory. A message to a
 // worker is only delivered when its event loop turns, and a worker running a
 // guest never turns it, so the bytes have to be somewhere the guest's own
 // WASI calls can look: a ring buffer in a SharedArrayBuffer. The page is the
@@ -23,11 +23,17 @@ const TAIL = 2
 const KIND_ACCEPTED = 1
 const KIND_DATA = 2
 const KIND_CLOSED = 3
+const KIND_CONNECTED = 4
+const KIND_REFUSED = 5
 
+// `connected` and `refused` answer an outbound connect, so their id is the
+// worker's request number rather than a socket id
 export type InboxFrame =
   | { kind: 'accepted'; id: number; connId: number; remote: string }
   | { kind: 'data'; id: number; bytes: Uint8Array }
   | { kind: 'closed'; id: number }
+  | { kind: 'connected'; id: number; connId: number }
+  | { kind: 'refused'; id: number; errno: number }
 
 export function createInbox(capacity = 1 << 20): SharedArrayBuffer {
   return new SharedArrayBuffer(HEADER_BYTES + capacity)
@@ -85,6 +91,14 @@ export class InboxWriter extends Ring {
 
   closed(id: number): void {
     this.push(KIND_CLOSED, id, new Uint8Array(0))
+  }
+
+  connected(request: number, connId: number): void {
+    this.push(KIND_CONNECTED, request, u32(connId))
+  }
+
+  refused(request: number, errno: number): void {
+    this.push(KIND_REFUSED, request, u32(errno))
   }
 
   private push(kind: number, id: number, payload: Uint8Array): void {
@@ -160,7 +174,21 @@ function decode(kind: number, id: number, payload: Uint8Array): InboxFrame {
     }
     case KIND_DATA:
       return { kind: 'data', id, bytes: payload }
+    case KIND_CONNECTED:
+      return { kind: 'connected', id, connId: readU32(payload) }
+    case KIND_REFUSED:
+      return { kind: 'refused', id, errno: readU32(payload) }
     default:
       return { kind: 'closed', id }
   }
+}
+
+function u32(value: number): Uint8Array {
+  const bytes = new Uint8Array(4)
+  new DataView(bytes.buffer).setUint32(0, value, true)
+  return bytes
+}
+
+function readU32(payload: Uint8Array): number {
+  return new DataView(payload.buffer, payload.byteOffset).getUint32(0, true)
 }

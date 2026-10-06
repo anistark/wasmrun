@@ -40,6 +40,10 @@ fn main() {
 
     debug_enter!("main", "args = {:?}", args);
 
+    // The process exit code when every command succeeded. Only `exec` sets it,
+    // to the program's own code, so a script can tell a failing program apart.
+    let mut exit_code = 0;
+
     let result = match &args.command {
         Some(Commands::Stop) => commands::handle_stop_command(),
 
@@ -144,10 +148,7 @@ fn main() {
                 call
             );
             commands::handle_exec_command(wasm_file, call, tcplisten, allow_net, args.clone())
-                .map_err(|e| match e {
-                    WasmrunError::Command(_) | WasmrunError::Path { .. } => e,
-                    _ => e,
-                })
+                .map(|code| exit_code = code)
         }
 
         Some(Commands::Os {
@@ -324,6 +325,13 @@ fn main() {
 
         debug_exit!("main", "exit code: 1");
         std::process::exit(1);
+    }
+
+    if exit_code != 0 {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        debug_exit!("main", exit_code);
+        std::process::exit(exit_code);
     }
 
     debug_exit!("main", "exit code: 0");

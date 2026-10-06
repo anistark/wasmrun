@@ -137,39 +137,20 @@ pub fn execute_wasm_bytes_with(
 
     let wasm_args = convert_string_args_to_values(&args);
 
-    match execute_function(&mut executor, func_idx, wasm_args) {
-        Ok(()) => {
-            // Print captured stdout
-            if let Ok(env) = wasi_env.lock() {
-                let out = env.get_stdout();
-                if !out.is_empty() {
-                    print!("{}", String::from_utf8_lossy(&out));
-                }
-                let err_out = env.get_stderr();
-                if !err_out.is_empty() {
-                    eprint!("{}", String::from_utf8_lossy(&err_out));
-                }
-            }
-            Ok(0)
+    let result = execute_function(&mut executor, func_idx, wasm_args);
+
+    // stdout is buffered, so it is printed here whatever the outcome, a trap
+    // included. stderr is not: `fd_write` already passed it through as written.
+    if let Ok(env) = wasi_env.lock() {
+        let out = env.get_stdout();
+        if !out.is_empty() {
+            print!("{}", String::from_utf8_lossy(&out));
         }
-        Err(e) => {
-            if let Some(code) = extract_proc_exit(&e) {
-                // Print captured output even on proc_exit
-                if let Ok(env) = wasi_env.lock() {
-                    let out = env.get_stdout();
-                    if !out.is_empty() {
-                        print!("{}", String::from_utf8_lossy(&out));
-                    }
-                    let err_out = env.get_stderr();
-                    if !err_out.is_empty() {
-                        eprint!("{}", String::from_utf8_lossy(&err_out));
-                    }
-                }
-                Ok(code)
-            } else {
-                Err(e)
-            }
-        }
+    }
+
+    match result {
+        Ok(()) => Ok(0),
+        Err(e) => extract_proc_exit(&e).ok_or(e),
     }
 }
 

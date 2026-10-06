@@ -23,7 +23,6 @@ pub fn App() -> impl IntoView {
     provide_meta_context();
 
     view! {
-        <Stylesheet id="leptos" href="/pkg/web-leptos.css"/>
         <Title text="Leptos WebAssembly App"/>
         <Router>
             <main>

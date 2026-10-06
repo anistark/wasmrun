@@ -11,11 +11,12 @@ pub fn handle_stop_command() -> Result<()> {
 
     print_status("Stopping Wasmrun server...");
 
-    match server::stop_existing_server() {
-        Ok(()) => {
-            print_success("Wasmrun Server Stopped", "Server terminated successfully");
-            Ok(())
-        }
-        Err(e) => Err(e),
-    }
+    let stopped = server::stop_running_servers()?;
+    let detail = stopped
+        .iter()
+        .map(|s| format!("{} (PID {})", s.url, s.pid))
+        .collect::<Vec<_>>()
+        .join(", ");
+    print_success("Wasmrun Server Stopped", &detail);
+    Ok(())
 }

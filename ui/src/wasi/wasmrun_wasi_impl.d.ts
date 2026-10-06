@@ -9,18 +9,23 @@ export interface WasiOptions {
   sockets?: SocketBridge
 }
 
-/** Inbound sockets from the host. See ui/src/os/netInbox.ts */
+/** Sockets from the host. See ui/src/os/netInbox.ts */
 export interface SocketBridge {
+  /** The listening socket the program is handed, or -1 when it has none */
   listenerId: number
   poll(): SocketEvent[]
   send(id: number, bytes: Uint8Array): void
   close(id: number): void
+  /** Ask for an outbound connection; answered by a `connected` or `refused` event */
+  connect(request: number, host: string, port: number): void
 }
 
 export type SocketEvent =
   | { kind: 'accepted'; id: number; connId: number; remote: string }
   | { kind: 'data'; id: number; bytes: Uint8Array }
   | { kind: 'closed'; id: number }
+  | { kind: 'connected'; id: number; connId: number }
+  | { kind: 'refused'; id: number; errno: number }
 
 export declare class WasiFS {
   mkdir(path: string): number

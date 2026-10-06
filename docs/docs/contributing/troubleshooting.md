@@ -214,10 +214,12 @@ wasmrun --version
 
 **Solution**:
 
-Option 1: Stop existing wasmrun server
+Option 1: Stop the running wasmrun dev sessions (all of them)
 ```sh
 wasmrun stop
 ```
+
+A dev session whose `--port` is taken already moves to the next free one, so this is mostly for getting a specific port back. `wasmrun stop` does not reach `wasmrun os` or `wasmrun agent`; stop those with Ctrl+C.
 
 Option 2: Use a different port
 ```sh
