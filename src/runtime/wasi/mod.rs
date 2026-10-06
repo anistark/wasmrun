@@ -103,6 +103,10 @@ pub struct WasiEnv {
     /// timeout stops a running execution, and the executor can only check it
     /// between instructions, which is never while a host function is blocked.
     cancel: Option<Arc<AtomicBool>>,
+    /// Also write guest stderr to the host's stderr as it arrives. `wasmrun
+    /// exec` wants that, so errors show up live; agent mode must not, or one
+    /// tenant's output lands in the server's own logs. Captured either way.
+    stderr_passthrough: bool,
 }
 
 impl WasiEnv {
@@ -158,7 +162,18 @@ impl WasiEnv {
             max_disk_bytes: None,
             disk_used: 0,
             cancel: None,
+            stderr_passthrough: false,
         }
+    }
+
+    /// Echo guest stderr to the host's stderr as well as capturing it.
+    pub fn with_stderr_passthrough(mut self) -> Self {
+        self.stderr_passthrough = true;
+        self
+    }
+
+    pub fn stderr_passthrough(&self) -> bool {
+        self.stderr_passthrough
     }
 
     pub fn with_args(mut self, args: Vec<String>) -> Self {
@@ -1433,6 +1448,16 @@ mod tests {
             .parse()
             .unwrap();
         assert_eq!(code, 1);
+    }
+
+    /// Capture-only unless asked: an agent session's env is built with `new()`,
+    /// and its tenants' stderr must not reach the server's terminal
+    #[test]
+    fn test_stderr_passthrough_is_opt_in() {
+        assert!(!WasiEnv::new().stderr_passthrough());
+        assert!(WasiEnv::new()
+            .with_stderr_passthrough()
+            .stderr_passthrough());
     }
 
     #[test]

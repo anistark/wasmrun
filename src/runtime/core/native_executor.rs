@@ -101,7 +101,10 @@ pub fn execute_wasm_bytes_with(
     let module = Module::parse(wasm_bytes)
         .map_err(|e| WasmrunError::from(format!("Failed to parse WASM module: {e}")))?;
 
-    let mut env = WasiEnv::new().with_args(args.clone());
+    // A terminal run: stderr shows as it is written, stdout once it ends
+    let mut env = WasiEnv::new()
+        .with_args(args.clone())
+        .with_stderr_passthrough();
     env.set_network(network);
     for listener in listeners {
         env = env.with_tcp_listener(listener);
@@ -140,7 +143,8 @@ pub fn execute_wasm_bytes_with(
     let result = execute_function(&mut executor, func_idx, wasm_args);
 
     // stdout is buffered, so it is printed here whatever the outcome, a trap
-    // included. stderr is not: `fd_write` already passed it through as written.
+    // included. stderr is not: `fd_write` already passed it through as written,
+    // since this env asked for that.
     if let Ok(env) = wasi_env.lock() {
         let out = env.get_stdout();
         if !out.is_empty() {
