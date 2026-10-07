@@ -380,4 +380,61 @@ mod exec_integration_tests {
             "Should not error on file access"
         );
     }
+
+    /// Write a WASI module that calls `proc_exit(code)` and return its path.
+    fn proc_exit_module(dir: &std::path::Path, code: i32) -> PathBuf {
+        let src = format!(
+            r#"(module
+                (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+                (memory (export "memory") 1)
+                (func (export "_start") (call $exit (i32.const {code}))))"#
+        );
+        write_module(dir, &format!("exit_{code}.wasm"), &src)
+    }
+
+    fn write_module(dir: &std::path::Path, name: &str, src: &str) -> PathBuf {
+        let buf = wast::parser::ParseBuffer::new(src).unwrap();
+        let mut wat: wast::Wat = wast::parser::parse(&buf).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, wat.encode().unwrap()).unwrap();
+        path
+    }
+
+    // Test: the process exits with the program's exit code (#124)
+    #[test]
+    fn test_exec_exits_with_the_programs_code() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let failing = proc_exit_module(tmp.path(), 5);
+        let output = run_wasmrun_exec(vec!["exec", failing.to_str().unwrap()]);
+        assert_eq!(output.status.code(), Some(5));
+        let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");
+        assert!(stdout.contains("exited with code 5"), "got: {stdout}");
+
+        let passing = proc_exit_module(tmp.path(), 0);
+        let output = run_wasmrun_exec(vec!["exec", passing.to_str().unwrap()]);
+        assert_eq!(output.status.code(), Some(0));
+    }
+
+    // Test: stderr is printed once, as written, not again when the program ends
+    #[test]
+    fn test_exec_prints_stderr_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wasm = write_module(
+            tmp.path(),
+            "stderr.wasm",
+            r#"(module
+                (import "wasi_snapshot_preview1" "fd_write"
+                  (func $write (param i32 i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 100) "to-stderr\n")
+                (func (export "_start")
+                  (i32.store (i32.const 0) (i32.const 100))
+                  (i32.store (i32.const 4) (i32.const 10))
+                  (drop (call $write (i32.const 2) (i32.const 0) (i32.const 1) (i32.const 20)))))"#,
+        );
+        let output = run_wasmrun_exec(vec!["exec", wasm.to_str().unwrap()]);
+        let stderr = std::str::from_utf8(&output.stderr).unwrap_or("");
+        assert_eq!(stderr.matches("to-stderr").count(), 1, "got: {stderr}");
+    }
 }

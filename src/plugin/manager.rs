@@ -339,33 +339,9 @@ impl PluginManager {
     }
 
     fn get_latest_crates_io_version(&self, crate_name: &str) -> Result<String> {
-        // Use cargo search to find the latest version
-        let output = std::process::Command::new("cargo")
-            .args(["search", crate_name, "--limit", "1"])
-            .output()
-            .map_err(|e| WasmrunError::from(format!("Failed to run cargo search: {e}")))?;
-
-        if !output.status.success() {
-            return Err(WasmrunError::from(format!(
-                "cargo search failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
-        }
-
-        let search_output = String::from_utf8_lossy(&output.stdout);
-        if let Some(line) = search_output.lines().next() {
-            // Parse output like: wasmrust = "0.3.0"    # Rust to WebAssembly compiler
-            if let Some(start) = line.find('"') {
-                if let Some(end) = line[start + 1..].find('"') {
-                    let version = &line[start + 1..start + 1 + end];
-                    return Ok(version.to_string());
-                }
-            }
-        }
-
-        Err(WasmrunError::from(format!(
-            "Could not parse version from cargo search output for {crate_name}"
-        )))
+        crate::utils::SystemUtils::get_latest_crates_version(crate_name).ok_or_else(|| {
+            WasmrunError::from(format!("No crate named '{crate_name}' found on crates.io"))
+        })
     }
 
     fn detect_plugin_version_from_directory(&self, plugin_name: &str) -> Option<String> {
@@ -712,22 +688,8 @@ impl PluginManager {
             }
         }
 
-        if let Ok(output) = std::process::Command::new("cargo")
-            .args(["search", plugin_name, "--limit", "1"])
-            .output()
-        {
-            if output.status.success() {
-                let search_output = String::from_utf8_lossy(&output.stdout);
-                if let Some(line) = search_output.lines().next() {
-                    if let Ok(re) = regex::Regex::new(r#"=\s*"([^"]+)""#) {
-                        if let Some(cap) = re.captures(line) {
-                            if let Some(version) = cap.get(1) {
-                                return version.as_str().to_string();
-                            }
-                        }
-                    }
-                }
-            }
+        if let Some(version) = crate::utils::SystemUtils::get_latest_crates_version(plugin_name) {
+            return version;
         }
 
         if let Ok(output) = std::process::Command::new("cargo")

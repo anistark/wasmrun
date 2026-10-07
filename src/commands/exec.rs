@@ -14,7 +14,7 @@ pub fn handle_exec_command(
     tcplisten: &[String],
     allow_net: &[String],
     args: Vec<String>,
-) -> Result<()> {
+) -> Result<i32> {
     let wasm_path = wasm_file
         .as_ref()
         .ok_or_else(|| WasmrunError::from("WASM file path is required".to_string()))?;
@@ -41,12 +41,7 @@ fn network_from_rules(allow_net: &[String]) -> Result<NetworkAccess> {
         return Ok(NetworkAccess::denied());
     }
 
-    let config = NetworkConfig {
-        allow: Some(allow_net.to_vec()),
-        deny: Some(Vec::new()),
-        ..Default::default()
-    };
-    let policy = config.to_policy_config()?;
+    let policy = NetworkConfig::from_allow_net(allow_net)?;
     println!("🌐 Network allowed: {}", allow_net.join(", "));
     Ok(NetworkAccess::with_policy(&policy))
 }
@@ -82,7 +77,7 @@ fn execute_wasm_with_args(
     tcplisten: &[String],
     allow_net: &[String],
     args: Vec<String>,
-) -> Result<()> {
+) -> Result<i32> {
     if !Path::new(wasm_path).exists() {
         return Err(WasmrunError::from(format!(
             "WASM file not found: {wasm_path}"
@@ -109,12 +104,12 @@ fn execute_wasm_with_args(
     let exit_code =
         native_executor::execute_wasm_file_with_sockets(wasm_path, call, args, listeners, network)?;
     if exit_code != 0 {
-        println!("✅ Execution completed (exit code: {exit_code})");
+        println!("❌ Program exited with code {exit_code}");
     } else {
         println!("✅ Execution completed");
     }
 
-    Ok(())
+    Ok(exit_code)
 }
 
 #[cfg(test)]

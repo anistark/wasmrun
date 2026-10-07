@@ -332,7 +332,7 @@ pub enum Commands {
         #[arg(
             short = 'P',
             long,
-            default_value_t = 8430,
+            default_value_t = crate::config::AGENT_DEFAULT_PORT,
             value_parser = clap::value_parser!(u16).range(1..=65535),
             help = "Agent API server port"
         )]

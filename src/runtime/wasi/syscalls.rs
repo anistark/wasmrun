@@ -51,6 +51,10 @@ const WASI_O_DIRECTORY: u32 = 2;
 const WASI_O_EXCL: u32 = 4;
 const WASI_O_TRUNC: u32 = 8;
 
+/// `fdflags`: how writes and reads behave on an open fd.
+const WASI_FDFLAG_APPEND: u16 = 0x0001;
+const WASI_FDFLAG_NONBLOCK: u16 = 0x0004;
+
 const WASI_WHENCE_SET: u32 = 0;
 const WASI_WHENCE_CUR: u32 = 1;
 const WASI_WHENCE_END: u32 = 2;
@@ -126,9 +130,10 @@ pub fn fd_write(
                 }
             }
             WASI_STDERR_FD => {
-                // Pass stderr through immediately so error messages are visible
-                eprint!("{}", String::from_utf8_lossy(&bytes));
                 if let Ok(mut e) = env.lock() {
+                    if e.stderr_passthrough() {
+                        eprint!("{}", String::from_utf8_lossy(&bytes));
+                    }
                     e.write_stderr(&bytes);
                 }
             }
@@ -139,13 +144,20 @@ pub fn fd_write(
                 };
                 let max_file_size = e.max_file_size();
                 let max_disk = e.max_disk_bytes();
-                let (host_path, offset) = match e.get_fd(fd) {
-                    Some(entry) if entry.kind == FdKind::File => {
-                        (entry.host_path.clone(), entry.offset)
-                    }
+                let (host_path, mut offset, append) = match e.get_fd(fd) {
+                    Some(entry) if entry.kind == FdKind::File => (
+                        entry.host_path.clone(),
+                        entry.offset,
+                        entry.flags & WASI_FDFLAG_APPEND != 0,
+                    ),
                     Some(_) => return WASI_EISDIR,
                     None => return WASI_EBADF,
                 };
+                // An append fd writes at the end of the file as it is now, not
+                // where its offset was left, so another writer's bytes survive.
+                if append {
+                    offset = std::fs::metadata(&host_path).map(|m| m.len()).unwrap_or(0);
+                }
                 // Enforce the per-file and total-disk caps. The file's resulting
                 // size is the larger of its current size and the end of this
                 // write; the disk delta is just the growth beyond the old size.
@@ -168,7 +180,7 @@ pub fn fd_write(
                 match write_file_at(&host_path, offset, &bytes) {
                     Ok(n) => {
                         if let Some(fe) = e.get_fd_mut(fd) {
-                            fe.offset += n as u64;
+                            fe.offset = offset + n as u64;
                         }
                         if max_disk.is_some() {
                             e.add_disk_used(disk_delta);
@@ -400,7 +412,7 @@ pub fn fd_fdstat_get(
         FdKind::Stdin => (WASI_FILETYPE_CHARACTER_DEVICE, 0u16, 0x200u64),
         FdKind::Stdout | FdKind::Stderr => (WASI_FILETYPE_CHARACTER_DEVICE, 1u16, 0x400u64),
         FdKind::PreopenDir | FdKind::Directory => (WASI_FILETYPE_DIRECTORY, 0u16, 0x0FFF_FFFFu64),
-        FdKind::File => (WASI_FILETYPE_REGULAR_FILE, 0u16, 0x0FFF_FFFFu64),
+        FdKind::File => (WASI_FILETYPE_REGULAR_FILE, entry.flags, 0x0FFF_FFFFu64),
         FdKind::SocketListener | FdKind::SocketStream => {
             (WASI_FILETYPE_SOCKET_STREAM, 0u16, 0x0FFF_FFFFu64)
         }
@@ -535,7 +547,7 @@ pub fn path_open(
     path_ptr: u32,
     path_len: u32,
     oflags: u32,
-    _fdflags: u32,
+    fdflags: u32,
     fd_out_ptr: u32,
     memory: &mut LinearMemory,
     env: &Arc<Mutex<WasiEnv>>,
@@ -612,7 +624,7 @@ pub fn path_open(
         host_path,
         guest_path: path,
         offset: 0,
-        flags: 0,
+        flags: fdflags as u16 & (WASI_FDFLAG_APPEND | WASI_FDFLAG_NONBLOCK),
     });
 
     if memory.write_i32(fd_out_ptr as usize, fd as i32).is_err() {
@@ -1026,14 +1038,26 @@ pub fn clock_time_get(
     WASI_ESUCCESS
 }
 
-/// fd_fdstat_set_flags: set file descriptor flags (WASI Preview 1).
-/// Most WASM runtimes ignore this silently; return success.
-pub fn fd_fdstat_set_flags(_fd: u32, _flags: u16) -> i32 {
-    WASI_ESUCCESS
+/// fd_fdstat_set_flags: change an open file's `append` and `nonblock` flags.
+///
+/// The other fdflags (`dsync`, `rsync`, `sync`) ask for durability the host
+/// file already gives, so they are accepted and not kept. Any other fd keeps
+/// its flags as they are, which is what the call has always answered.
+pub fn fd_fdstat_set_flags(fd: u32, flags: u16, env: &Arc<Mutex<WasiEnv>>) -> i32 {
+    let mut e = match env.lock() {
+        Ok(e) => e,
+        Err(_) => return WASI_EIO,
+    };
+    match e.get_fd_mut(fd) {
+        Some(entry) if entry.kind == FdKind::File => {
+            entry.flags = flags & (WASI_FDFLAG_APPEND | WASI_FDFLAG_NONBLOCK);
+            WASI_ESUCCESS
+        }
+        Some(_) => WASI_ESUCCESS,
+        None => WASI_EBADF,
+    }
 }
 
-/// path_filestat_set_times: set file timestamps. Return ENOSYS since we
-/// don't have a mutable host FS. Callers treat ENOSYS as non-fatal.
 /// path_filestat_set_times: set a file's access and modification times.
 ///
 /// `fst_flags` picks which of the two to set and whether to take the value from
@@ -1526,7 +1550,7 @@ fn stream_for(fd: u32, env: &Arc<Mutex<WasiEnv>>) -> std::result::Result<Arc<Tcp
 
 /// sock_accept: take the next connection on a listening fd.
 ///
-/// `flags` carries `fdflags`, of which only `nonblock` (bit 0) means anything
+/// `flags` carries `fdflags`, of which only `nonblock` (bit 2) means anything
 /// here: with it set the call reports `EAGAIN` rather than waiting.
 pub fn sock_accept(
     fd: u32,
@@ -1535,8 +1559,7 @@ pub fn sock_accept(
     memory: &mut LinearMemory,
     env: &Arc<Mutex<WasiEnv>>,
 ) -> i32 {
-    const FDFLAG_NONBLOCK: u32 = 0x0004;
-    let nonblocking = flags & FDFLAG_NONBLOCK != 0;
+    let nonblocking = flags as u16 & WASI_FDFLAG_NONBLOCK != 0;
 
     let listener = {
         let mut e = match env.lock() {
@@ -2840,6 +2863,74 @@ mod tests {
         mem.write_i32(0, 400).unwrap(); // iovec buf_ptr
         mem.write_i32(4, data.len() as i32).unwrap(); // iovec buf_len
         fd_write(fd, 0, 1, 300, mem, env)
+    }
+
+    /// `fopen(path, "a")`: every write lands at the end, whatever came before.
+    #[test]
+    fn test_path_open_append_writes_at_end() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"hello").unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        mem.write_bytes(100, b"a.txt").unwrap();
+        let fdflags = WASI_FDFLAG_APPEND as u32;
+        assert_eq!(
+            path_open(3, 100, 5, WASI_O_CREAT, fdflags, 200, &mut mem, &env),
+            WASI_ESUCCESS
+        );
+        let fd = mem.read_i32(200).unwrap() as u32;
+
+        assert_eq!(write_bytes_to(fd, b" world", &env, &mut mem), WASI_ESUCCESS);
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"hello world"
+        );
+
+        // A write by someone else in between is kept, not overwritten.
+        std::fs::write(tmp.path().join("a.txt"), b"hello world!").unwrap();
+        assert_eq!(write_bytes_to(fd, b"?", &env, &mut mem), WASI_ESUCCESS);
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"hello world!?"
+        );
+        assert_eq!(env.lock().unwrap().get_fd(fd).unwrap().offset, 13);
+    }
+
+    /// Without the flag, an fd starts at 0 and overwrites, as it always has.
+    #[test]
+    fn test_path_open_without_append_overwrites() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"hello").unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        let fd = open_create("a.txt", &env, &mut mem);
+        assert_eq!(write_bytes_to(fd, b"J", &env, &mut mem), WASI_ESUCCESS);
+        assert_eq!(std::fs::read(tmp.path().join("a.txt")).unwrap(), b"Jello");
+    }
+
+    #[test]
+    fn test_fdstat_reports_and_sets_append() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"abc").unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", tmp.path())));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        let fd = open_create("a.txt", &env, &mut mem);
+        assert_eq!(fd_fdstat_get(fd, 500, &mut mem, &env), WASI_ESUCCESS);
+        assert_eq!(mem.read_u16(502).unwrap(), 0);
+
+        assert_eq!(
+            fd_fdstat_set_flags(fd, WASI_FDFLAG_APPEND, &env),
+            WASI_ESUCCESS
+        );
+        assert_eq!(fd_fdstat_get(fd, 500, &mut mem, &env), WASI_ESUCCESS);
+        assert_eq!(mem.read_u16(502).unwrap(), WASI_FDFLAG_APPEND);
+        assert_eq!(write_bytes_to(fd, b"d", &env, &mut mem), WASI_ESUCCESS);
+        assert_eq!(std::fs::read(tmp.path().join("a.txt")).unwrap(), b"abcd");
+
+        assert_eq!(fd_fdstat_set_flags(99, 0, &env), WASI_EBADF);
     }
 
     #[test]

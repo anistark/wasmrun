@@ -281,8 +281,10 @@ mod tests {
             .as_secs();
         let plugin_name = format!("invalid_plugin_name_{timestamp}");
         let result = run_plugin_install(&plugin_name);
-        // Plugin installer creates a template even for non-existent plugins, so this succeeds
-        assert!(result.is_ok());
+        // No such crate, so nothing is installed and nothing is left behind
+        assert!(result.is_err());
+        let plugin_dir = crate::utils::PluginUtils::get_plugin_directory(&plugin_name);
+        assert!(!plugin_dir.unwrap().exists());
     }
 
     #[test]

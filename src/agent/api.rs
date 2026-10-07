@@ -57,8 +57,9 @@ pub struct ExecRequest {
     /// object the buffered response would have returned.
     pub stream: Option<bool>,
     /// Text the program reads from standard input; absent means immediate
-    /// EOF. Reaches programs reading fd 0 through WASI, so `wasm_path` only:
-    /// the JS runtime's `process.stdin` is still a stub.
+    /// EOF. Reaches any program reading fd 0 through WASI: a `wasm_path`, and
+    /// `source` or `files` through the JS runtime's `process.stdin` and
+    /// `fs.readFileSync(0)`.
     pub stdin: Option<String>,
     /// Shell command line to execute via the built-in shell emulator.
     /// Supports pipes (`|`), redirection (`>`, `>>`, `<`), and sequencing

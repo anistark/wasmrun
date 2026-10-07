@@ -2,13 +2,22 @@
 const WASI = {
   // Error codes
   ERRNO_SUCCESS: 0,
+  ERRNO_ACCES: 2,
   ERRNO_AGAIN: 6,
   ERRNO_BADF: 8,
+  ERRNO_EXIST: 20,
   ERRNO_INVAL: 28,
   ERRNO_IO: 29,
+  ERRNO_ISCONN: 30,
   ERRNO_NOENT: 44,
   ERRNO_NOSYS: 52,
+  ERRNO_NOTCONN: 53,
+  ERRNO_NOTDIR: 54,
   ERRNO_NOTSOCK: 57,
+  ERRNO_TIMEDOUT: 73,
+
+  // fdflags
+  FDFLAGS_APPEND: 1,
 
   // File descriptors
   FD_STDIN: 0,
@@ -296,7 +305,7 @@ class WasiFS {
     // Regular file handling
     if (fileDesc.type === FILETYPE.REGULAR_FILE && fileDesc.content) {
       const position = fileDesc.position
-      const content = fileDesc.content
+      const content = this._content(fileDesc)
 
       // Check if we've reached the end of the file
       if (position >= content.byteLength) {
@@ -348,25 +357,23 @@ class WasiFS {
 
     // Regular file handling
     if (fileDesc.type === FILETYPE.REGULAR_FILE) {
-      const position = fileDesc.position
+      const file = this.files.get(fileDesc.path)
+      let content = this._content(fileDesc)
+      // An append fd writes at the end as it is now, not where it last was
+      const position = fileDesc.flags & WASI.FDFLAGS_APPEND ? content.byteLength : fileDesc.position
 
-      // If the file content array is too small, resize it
-      if (fileDesc.content.byteLength < position + length) {
-        const newContent = new Uint8Array(position + length)
-        newContent.set(fileDesc.content)
-        fileDesc.content = newContent
-
-        // Also update the file in the filesystem
-        if (fileDesc.path && this.files.has(fileDesc.path)) {
-          this.files.get(fileDesc.path).content = fileDesc.content
-        }
+      if (content.byteLength < position + length) {
+        const grown = new Uint8Array(position + length)
+        grown.set(content)
+        content = grown
       }
+      content.set(buffer.subarray(offset, offset + length), position)
 
-      // Copy the data to the file
-      fileDesc.content.set(buffer.subarray(offset, offset + length), position)
-
-      // Update file position
-      fileDesc.position += length
+      // Every fd on the path shares the one copy, so a write through one is
+      // what a read through another sees
+      fileDesc.content = content
+      if (file) file.content = content
+      fileDesc.position = position + length
 
       return { bytesWritten: length, errno: WASI.ERRNO_SUCCESS }
     }
@@ -401,7 +408,7 @@ class WasiFS {
       }
       // SEEK_END
       else if (whence === 2) {
-        newPosition = fileDesc.content.byteLength + offset
+        newPosition = this._content(fileDesc).byteLength + offset
       } else {
         return { position: 0, errno: WASI.ERRNO_INVAL }
       }
@@ -432,9 +439,16 @@ class WasiFS {
       filetype: fileDesc.type,
       rights_base: fileDesc.rights,
       rights_inheriting: 0n,
-      flags: 0,
+      flags: fileDesc.flags || 0,
       errno: WASI.ERRNO_SUCCESS,
     }
+  }
+
+  // What a file holds now. The descriptor's own copy goes stale once the
+  // path is rewritten, by writeFile or a truncating open
+  _content(fileDesc) {
+    const file = fileDesc.path && this.files.get(fileDesc.path)
+    return file && file.type === FILETYPE.REGULAR_FILE ? file.content : fileDesc.content
   }
 
   // Helper: Normalize path
@@ -493,10 +507,11 @@ class WASIImplementation {
       // Blocks the calling thread for `ms`. Only a worker can supply one
       // (Atomics.wait); without it poll_oneoff cannot wait and returns at once
       wait: options.wait || null,
-      // Inbound sockets, when the host can provide them. `poll()` returns the
-      // events that arrived since the last call, `send`/`close` go the other
-      // way, and `listenerId` names the one listening socket the program is
-      // handed. See ui/src/os/netInbox.ts for where the events come from
+      // Sockets, when the host can provide them. `poll()` returns the events
+      // that arrived since the last call, `send`/`close`/`connect` go the
+      // other way, and `listenerId` names the one listening socket the
+      // program is handed, or is -1 when it has none. See
+      // ui/src/os/netInbox.ts for where the events come from
       sockets: options.sockets || null,
       ...options,
     }
@@ -508,8 +523,9 @@ class WASIImplementation {
     // Initialize virtual filesystem
     this.fs = new WasiFS()
 
-    // Socket state: connections by bridge id, and the accept queue
-    this.net = { byId: new Map(), accepts: [], listenFd: -1 }
+    // Socket state: connections by bridge id, the accept queue, and outbound
+    // connects waiting on an answer from the bridge, by request number
+    this.net = { byId: new Map(), accepts: [], listenFd: -1, connects: new Map(), nextConnect: 1 }
 
     // Set up any preopen directories. fd_prestat_get advertises them from fd 3
     // up, so each one has to be a real open descriptor at that number or the
@@ -519,7 +535,7 @@ class WASIImplementation {
       this.fs.open(guest)
     }
 
-    if (this.options.sockets) {
+    if (this.options.sockets && this.options.sockets.listenerId >= 0) {
       this.net.listenFd = this.fs.openSocket(this.options.sockets.listenerId)
     }
   }
@@ -632,18 +648,12 @@ class WASIImplementation {
           this.sock_send(fd, si_data, si_data_len, si_flags, so_datalen),
         sock_shutdown: (fd, how) => this.sock_shutdown(fd, how),
 
-        // These are additional socket-related functions that might be needed
-        sock_open: (af, socktype, protocol, fd) => {
-          // Return ENOSYS (function not implemented)
-          return WASI.ERRNO_NOSYS
-        },
+        // Outbound: wasmrun extensions, with the same shape as exec mode's
+        // (src/runtime/wasi/syscalls.rs), since Preview 1 cannot open a socket
+        sock_open: (af, socktype, protocol, fd) => this.sock_open(af, socktype, protocol, fd),
+        sock_connect: (fd, addr, addr_len, port) => this.sock_connect(fd, addr, addr_len, port),
 
         sock_bind: (fd, addr, port) => {
-          // Return ENOSYS (function not implemented)
-          return WASI.ERRNO_NOSYS
-        },
-
-        sock_connect: (fd, addr, port) => {
           // Return ENOSYS (function not implemented)
           return WASI.ERRNO_NOSYS
         },
@@ -815,7 +825,7 @@ class WASIImplementation {
   // WASI implementation: fd_close
   fd_close(fd) {
     const socket = this._socket(fd)
-    if (socket) {
+    if (socket && socket.socketId >= 0) {
       this.options.sockets.close(socket.socketId)
       this.net.byId.delete(socket.socketId)
     }
@@ -847,9 +857,14 @@ class WASIImplementation {
     return WASI.ERRNO_SUCCESS
   }
 
-  // WASI implementation: fd_fdstat_set_flags
+  // WASI implementation: fd_fdstat_set_flags. Only `append` changes how a
+  // descriptor here behaves; the sync flags have nothing to flush to
   fd_fdstat_set_flags(fd, flags) {
-    // Not fully implemented in browser environment
+    const desc = this.fs.fileDescriptors.get(fd)
+    if (!desc) return WASI.ERRNO_BADF
+    if (desc.type === FILETYPE.REGULAR_FILE) {
+      desc.flags = flags & WASI.FDFLAGS_APPEND
+    }
     return WASI.ERRNO_SUCCESS
   }
 
@@ -1340,13 +1355,18 @@ class WASIImplementation {
     const basePath = fileDesc.path || '/'
     const fullPath = this._resolvePath(basePath, pathStr)
 
-    // Check if the path exists
-    const pathExists = this.fs.files.has(fullPath)
+    const O_CREAT = 1
+    const O_EXCL = 4
+    const O_TRUNC = 8
 
-    // Handle create flag
-    if (!pathExists && oflags & 1) {
-      // Create an empty file
+    const existing = this.fs.files.get(this.fs._normalizePath(fullPath))
+    if (existing && oflags & O_EXCL) {
+      return WASI.ERRNO_EXIST
+    }
+    if (!existing && oflags & O_CREAT) {
       this.fs.writeFile(fullPath, new Uint8Array(0))
+    } else if (existing && existing.type === FILETYPE.REGULAR_FILE && oflags & O_TRUNC) {
+      existing.content = new Uint8Array(0)
     }
 
     // Open the file
@@ -1355,6 +1375,7 @@ class WASIImplementation {
     if (errno !== WASI.ERRNO_SUCCESS) {
       return errno
     }
+    this.fs.fileDescriptors.get(newFd).flags = fdflags & WASI.FDFLAGS_APPEND
 
     // Write the file descriptor
     this.view.setUint32(opened_fd, newFd, true)
@@ -1482,10 +1503,12 @@ class WASIImplementation {
 
   // ── Sockets ──────────────────────────────────────────────────────────────
   //
-  // Inbound only, and non-blocking: the one listening socket arrives from the
+  // Non-blocking once connected: the one listening socket arrives from the
   // host, accept and recv answer EAGAIN when nothing is pending, and the
   // program is expected to poll. That is how the wasmhub nodejs runtime
-  // drives its servers, on a timer that lowers to poll_oneoff above.
+  // drives its servers, on a timer that lowers to poll_oneoff above. Only
+  // sock_connect blocks, since a connect has to know whether it worked.
+  // A socket from sock_open has socketId -1 until it connects.
 
   _socket(fd) {
     const desc = this.fs.fileDescriptors.get(fd)
@@ -1500,6 +1523,16 @@ class WASIImplementation {
       if (frame.kind === 'accepted') {
         this.net.byId.set(frame.connId, { fd: -1, recv: [], closed: false })
         this.net.accepts.push(frame.connId)
+      } else if (frame.kind === 'connected' || frame.kind === 'refused') {
+        if (this.net.connects.has(frame.id)) {
+          this.net.connects.set(frame.id, frame)
+          if (frame.kind === 'connected') {
+            this.net.byId.set(frame.connId, { fd: -1, recv: [], closed: false })
+          }
+        } else if (frame.kind === 'connected') {
+          // The connect already gave up waiting; nobody holds this one
+          this.options.sockets.close(frame.connId)
+        }
       } else {
         const conn = this.net.byId.get(frame.id)
         if (!conn) continue
@@ -1515,6 +1548,7 @@ class WASIImplementation {
     if (type === EVENTTYPE_FD_WRITE) return true
     if (fd === this.net.listenFd) return this.net.accepts.length > 0
     const conn = this.net.byId.get(this._socket(fd).socketId)
+    // A socket that never connected has nothing to wait for; recv says why
     return !conn || conn.recv.length > 0 || conn.closed
   }
 
@@ -1538,6 +1572,7 @@ class WASIImplementation {
     this.refreshMemory()
     const socket = this._socket(fd)
     if (!socket) return WASI.ERRNO_NOTSOCK
+    if (socket.socketId < 0) return WASI.ERRNO_NOTCONN
     this._pumpSockets()
     const conn = this.net.byId.get(socket.socketId)
     if (!conn) return WASI.ERRNO_BADF
@@ -1570,6 +1605,7 @@ class WASIImplementation {
     this.refreshMemory()
     const socket = this._socket(fd)
     if (!socket) return WASI.ERRNO_NOTSOCK
+    if (socket.socketId < 0) return WASI.ERRNO_NOTCONN
 
     const parts = []
     let total = 0
@@ -1601,8 +1637,62 @@ class WASIImplementation {
     const SHUT_WR = 2
     const socket = this._socket(fd)
     if (!socket) return WASI.ERRNO_NOTSOCK
+    if (socket.socketId < 0) return WASI.ERRNO_NOTCONN
     if (how & SHUT_WR) this.options.sockets.close(socket.socketId)
     return WASI.ERRNO_SUCCESS
+  }
+
+  // sock_open: a stream socket for sock_connect. Refused outright with no
+  // bridge, as exec mode refuses it with no network, so a program without
+  // one never holds a descriptor it can do nothing with
+  sock_open(af, socktype, protocol, fd_out) {
+    this.refreshMemory()
+    const SOCK_STREAM = 1
+    if (socktype !== SOCK_STREAM) return WASI.ERRNO_NOSYS
+    if (!this.options.sockets) return WASI.ERRNO_ACCES
+
+    const fd = this.fs.openSocket(-1)
+    this.view.setUint32(fd_out, fd, true)
+    return WASI.ERRNO_SUCCESS
+  }
+
+  // sock_connect: connect an opened socket to `host:port`. The host is a
+  // string, name or literal, so the proxy's policy sees what the program
+  // asked for rather than an address it resolved itself. Blocks until the
+  // page answers, which is why it needs `wait` and so only works in a worker
+  sock_connect(fd, addr_ptr, addr_len, port) {
+    this.refreshMemory()
+    const CONNECT_TIMEOUT_MS = 10000
+
+    const socket = this._socket(fd)
+    if (!socket) return this.fs.fileDescriptors.has(fd) ? WASI.ERRNO_NOTSOCK : WASI.ERRNO_BADF
+    if (socket.socketId >= 0) return WASI.ERRNO_ISCONN
+    if (!port || port > 65535) return WASI.ERRNO_INVAL
+    if (!this.options.wait) return WASI.ERRNO_NOSYS
+
+    const host = this.readString(addr_ptr, addr_len)
+    const request = this.net.nextConnect++
+    this.net.connects.set(request, null)
+    this.options.sockets.connect(request, host, port)
+
+    const deadline = Date.now() + CONNECT_TIMEOUT_MS
+    for (;;) {
+      this._pumpSockets()
+      const answer = this.net.connects.get(request)
+      if (answer) {
+        this.net.connects.delete(request)
+        if (answer.kind === 'refused') return answer.errno
+        socket.socketId = answer.connId
+        this.net.byId.get(answer.connId).fd = fd
+        return WASI.ERRNO_SUCCESS
+      }
+      const left = deadline - Date.now()
+      if (left <= 0) {
+        this.net.connects.delete(request)
+        return WASI.ERRNO_TIMEDOUT
+      }
+      this.options.wait(Math.min(left, 1000))
+    }
   }
 
   // WASI implementation: proc_exit

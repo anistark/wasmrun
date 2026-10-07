@@ -122,26 +122,9 @@ impl PluginMetadata {
         }
 
         // Basic search
-        let output = std::process::Command::new("cargo")
-            .args(["search", crate_name, "--limit", "1"])
-            .output()
-            .map_err(|e| WasmrunError::from(format!("Failed to search crates.io: {e}")))?;
-
-        if !output.status.success() {
-            return Err(WasmrunError::from(format!(
-                "Plugin '{crate_name}' not found on crates.io"
-            )));
-        }
-
-        let search_output = String::from_utf8_lossy(&output.stdout);
-        if search_output.trim().is_empty() {
-            return Err(WasmrunError::from(format!(
-                "Plugin '{crate_name}' not found on crates.io"
-            )));
-        }
-
-        let version = SystemUtils::get_latest_crates_version(crate_name)
-            .unwrap_or_else(|| "unknown".to_string());
+        let version = SystemUtils::get_latest_crates_version(crate_name).ok_or_else(|| {
+            WasmrunError::from(format!("Plugin '{crate_name}' not found on crates.io"))
+        })?;
 
         Ok(Self::create_fallback_metadata(
             crate_name.to_string(),

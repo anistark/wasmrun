@@ -59,7 +59,7 @@ Each command is implemented in its own file:
 | **plugin.rs** | `wasmrun plugin` | Plugin management (install, list, info) |
 | **verify.rs** | `wasmrun verify` | WASM verification and validation |
 | **clean.rs** | `wasmrun clean` | Build artifact cleanup |
-| **stop.rs** | `wasmrun stop` | Server management |
+| **stop.rs** | `wasmrun stop` | Stop every running dev session |
 | **os.rs** | `wasmrun os` | OS mode for multi-language execution |
 | **init.rs** | `wasmrun init` | Project initialization |
 
@@ -124,20 +124,19 @@ HTTP server for development and web apps:
 
 ```
 src/server/
-├── mod.rs          # Server initialization and configuration
-├── runner.rs       # Server startup and management
-├── handler.rs      # HTTP request routing and handling
-├── wasm.rs         # WASM file serving
-├── api.rs          # API endpoints
-├── lifecycle.rs    # Server lifecycle management
-└── utils.rs        # Server utilities
+├── dev.rs          # The dev session: shared state, both ports, the --watch loop
+├── app.rs          # App port: a web app's page, files and build output
+├── handler.rs      # UI port: module console or control center, JSON APIs
+├── api.rs          # Module info, version, embedded assets
+├── lifecycle.rs    # Per-session registry that `wasmrun stop` reads
+└── utils.rs        # Ports, content types
 ```
 
 Key features:
-- Serves WASM files and web apps
-- Live reload functionality
-- WebSocket connections for OS mode
-- Static file serving
+- A module goes to the console on the UI port; a web app runs from its own page on the app port, framed by a control center on the UI port
+- With `--watch`, a source change rebuilds and the page reloads itself
+- Both ports bind `127.0.0.1`, and the app port refuses dotfiles and any path outside the project or build directory
+- Each session records itself in the system temp directory, so `wasmrun stop` can stop every running one
 - Template rendering
 
 ### Runtime Module (src/runtime/)
@@ -298,7 +297,7 @@ User runs: wasmrun exec file.wasm -c function arg1 arg2
 6. Results returned
    - Output to stdout
    - Return values printed
-   - Exit code set
+   - wasmrun exits with the program's exit code
 ```
 
 ### Plugin Installation Flow
@@ -309,6 +308,7 @@ User runs: wasmrun plugin install wasmrust
 1. Plugin command starts (commands/plugin.rs)
    ↓
 2. Plugin installer invoked (plugin/installer.rs)
+   - Refuses a name crates.io does not have
    ↓
 3. Download from crates.io
    - Uses cargo install

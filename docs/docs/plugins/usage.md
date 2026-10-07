@@ -27,6 +27,8 @@ wasmrun plugin install wasmrust
 wasmrun plugin install wasmrust --version 0.5.0
 ```
 
+A name crates.io does not have is refused, and nothing is installed or registered: check the spelling, or that crates.io is reachable.
+
 ### Uninstall
 
 ```sh

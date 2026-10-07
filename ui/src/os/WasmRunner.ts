@@ -95,8 +95,9 @@ export class WasmRunner {
 
       const entryFile = this.detectEntryFile(runtimeInfo.detected_language, projectFiles.files)
 
-      // A port for the program, if the proxy is up and the policy has one.
-      // Without it the program still runs; it just cannot listen
+      // The network, if the proxy is up: outbound connects, and a port to
+      // listen on if the policy has one free. Without it the program still
+      // runs; it just has no network
       const net = new NetBridge({
         onListening: address => this.callbacks.onListening?.(address),
         onTunnel: tunnel => this.callbacks.onTunnel?.(tunnel),

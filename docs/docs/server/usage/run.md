@@ -57,7 +57,7 @@ wasmrun -P 8080
 - Default: `8420`
 - Range: `1-65535`
 
-If the port is already in use, wasmrun picks the next free port within ten above it.
+If the port is already in use, wasmrun picks the next free port within ten above it, stepping over 8430 so an agent server (`wasmrun agent`) can still start on its default.
 
 ### `--app-port <PORT>`
 

@@ -7,13 +7,15 @@ import { LogEntry, ExportedFunction, WasmModuleInfo, TabItem } from '@/types'
 import { log, loadWasmModule, analyzeWasmModule, fetchModuleInspection } from '@/utils/wasm'
 import { parseCommand } from '@/utils/commandParser'
 import { useLiveReload } from '@/hooks/useLiveReload'
+import { buildImports, readAsString } from './imports'
 
 // These will be replaced by the Rust template processor
 declare const FILENAME: string
 
-// Helper function to identify internal WASM functions that should be hidden from UI
+// Exports that are a toolchain's plumbing rather than the module's API:
+// wasm-bindgen's allocator and AssemblyScript's runtime (__new, __pin, ...)
 const isInternalFunction = (name: string) => {
-  return name === 'memory' || name === 'main' || name.startsWith('__wbindgen')
+  return name === 'memory' || name === 'main' || name.startsWith('__')
 }
 
 // Detect if a function expects string parameters (wasm-bindgen string functions)
@@ -130,57 +132,14 @@ export function Console() {
       const module = await loadWasmModule(FILENAME)
       const analysis = analyzeWasmModule(module)
 
-      // Instantiate the WASM module to create a runnable instance
-      // For wasm-bindgen modules, we need to provide the proper imports
-      let instance: WebAssembly.Instance
-
-      try {
-        // Try to instantiate without imports first
-        instance = new WebAssembly.Instance(module, {})
-      } catch {
-        // If that fails, try with basic imports for wasm-bindgen
-        const imports = {
-          wbg: {
-            __wbg_log_8b68cfc62b396cc3: (arg0: number, arg1: number) => {
-              // This will be called after the instance is created
-              // For now, just store the arguments - we'll extract the string later
-              if (instance && instance.exports.memory) {
-                try {
-                  const memory = instance.exports.memory as WebAssembly.Memory
-                  const ptr = arg0
-                  const len = arg1
-                  const bytes = new Uint8Array(memory.buffer, ptr, len)
-                  const message = new TextDecoder().decode(bytes)
-                  addLog(message, 'info')
-                } catch {
-                  addLog(`WASM log: ${arg0}, ${arg1}`, 'info')
-                }
-              } else {
-                // Store for later processing
-                setTimeout(() => {
-                  if (instance && instance.exports.memory) {
-                    try {
-                      const memory = instance.exports.memory as WebAssembly.Memory
-                      const ptr = arg0
-                      const len = arg1
-                      const bytes = new Uint8Array(memory.buffer, ptr, len)
-                      const message = new TextDecoder().decode(bytes)
-                      addLog(message, 'info')
-                    } catch {
-                      addLog(`WASM log: ${arg0}, ${arg1}`, 'info')
-                    }
-                  }
-                }, 0)
-              }
-            },
-            __wbindgen_init_externref_table: () => {
-              // Initialize external reference table
-            },
-          },
-        }
-
-        instance = new WebAssembly.Instance(module, imports)
-      }
+      // Every import is stubbed, so a module from any toolchain instantiates
+      let instance: WebAssembly.Instance | undefined
+      const imports = buildImports(
+        module,
+        () => instance?.exports.memory as WebAssembly.Memory | undefined,
+        (message, type = 'info') => addLog(message, type)
+      )
+      instance = new WebAssembly.Instance(module, imports)
 
       // Debug: log all exports to understand the actual WASM interface
       // const allExports = Object.keys(instance.exports)
@@ -297,6 +256,27 @@ export function Console() {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error'
             addLog(`❌ ${functionName}() failed: ${errorMessage}`, 'error')
             throw error
+          }
+        }
+
+        // AssemblyScript strings: allocated through its runtime, and a string
+        // comes back as a pointer to one
+        if (isStringFunction(functionName) && args.length > 0 && exports.__new && exports.__pin) {
+          const memory = exports.memory as WebAssembly.Memory
+          const text = String(args[0])
+          const STRING_ID = 2
+          const ptr = exports.__pin(exports.__new(text.length * 2, STRING_ID))
+          const view = new DataView(memory.buffer)
+          for (let i = 0; i < text.length; i++) {
+            view.setUint16(ptr + i * 2, text.charCodeAt(i), true)
+          }
+          try {
+            const resultPtr = func(ptr)
+            const result = readAsString(memory, resultPtr) ?? resultPtr
+            addLog(`✅ ${result}`, 'success')
+            return result
+          } finally {
+            exports.__unpin?.(ptr)
           }
         }
 

@@ -25,6 +25,11 @@ export interface NetBridgeCallbacks {
 
 const MAX_BIND_ATTEMPTS = 32
 
+// WASI errnos for a refused connect, matching exec mode: a policy denial is
+// EACCES, anything else the proxy reports is EIO
+const ERRNO_ACCES = 2
+const ERRNO_IO = 29
+
 export class NetBridge {
   private client: WasmnetClient | null = null
   private writer: InboxWriter | null = null
@@ -42,7 +47,8 @@ export class NetBridge {
   }
 
   // Connect to the proxy and bind a port the policy allows. Returns false,
-  // after reporting why, when the program will have to run without one
+  // after reporting why, when the program will have to run without a
+  // network. With the proxy up and no port to bind it can still connect out
   async open(): Promise<boolean> {
     let status: NetworkStatus
     try {
@@ -73,18 +79,18 @@ export class NetBridge {
         lastError = err instanceof Error ? err.message : String(err)
       }
     }
+    this.client = client
+    this.writer = new InboxWriter(this.inbox)
+
     if (!bound) {
-      client.disconnect()
       this.callbacks.onNetworkError?.(
         `no port to bind in "${status.bind_ports}" (${candidates.length} tried): ${lastError}`
       )
-      return false
+      return true
     }
 
-    this.client = client
     this.listenerId = bound.id
     this.address = `127.0.0.1:${bound.port}`
-    this.writer = new InboxWriter(this.inbox)
 
     client.listen(bound.id)
     client.onAccept(bound.id, (connId, remote) => {
@@ -109,9 +115,35 @@ export class NetBridge {
     if (!this.client) return
     if (message.op === 'send') {
       this.client.send(message.id, message.bytes)
+    } else if (message.op === 'connect') {
+      this.connect(message.id, message.host, message.port)
     } else {
       this.client.close(message.id)
     }
+  }
+
+  // The proxy applies the policy, resolving the name itself, so a denial
+  // arrives here as a rejection. Its reason never reaches the program, which
+  // only gets an errno, so it goes to the console
+  private connect(request: number, host: string, port: number): void {
+    const client = this.client!
+    client
+      .connect(host, port)
+      .then(connId => {
+        if (this.client !== client || !this.writer) {
+          client.close(connId)
+          return
+        }
+        this.writer.connected(request, connId)
+        client.onData(connId, bytes => this.writer?.data(connId, bytes))
+        client.onClose(connId, () => this.writer?.closed(connId))
+      })
+      .catch(err => {
+        const reason = err instanceof Error ? err.message : String(err)
+        this.callbacks.onNetworkError?.(`connection to ${host}:${port} refused: ${reason}`)
+        const denied = /blocked|not in allow list/.test(reason)
+        this.writer?.refused(request, denied ? ERRNO_ACCES : ERRNO_IO)
+      })
   }
 
   close(): void {

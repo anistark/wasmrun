@@ -16,6 +16,7 @@ use tiny_http::Server;
 
 use super::{app, handler};
 use crate::compiler::builder::BuildResult;
+use crate::config::AGENT_DEFAULT_PORT;
 use crate::error::{Result, ServerError, WasmrunError};
 use crate::template::{TemplateManager, TemplateType};
 use crate::watcher::{Change, ProjectWatcher};
@@ -380,6 +381,8 @@ pub fn run(config: DevConfig, initial: Artifacts, rebuild: Option<Rebuild>) -> R
         });
     }
 
+    let _registration = super::lifecycle::register(&ui_url);
+
     print_startup(&state);
     if config.open_browser {
         super::utils::open_browser_when_ready(ui_port);
@@ -427,8 +430,7 @@ fn bind_ui(port: u16) -> Result<(Server, u16)> {
         return Ok(bound);
     }
     println!("⚠️  Port {port} is already in use");
-    let above = (1..=UI_PORT_SCAN).filter_map(|offset| port.checked_add(offset));
-    let (server, bound) = bind_first(above).ok_or_else(|| {
+    let (server, bound) = bind_first(ui_fallback_ports(port)).ok_or_else(|| {
         WasmrunError::Server(ServerError::startup_failed(
             port,
             format!("Port {port} and the {UI_PORT_SCAN} above it are all in use; pass --port"),
@@ -436,6 +438,14 @@ fn bind_ui(port: u16) -> Result<(Server, u16)> {
     })?;
     println!("🔄 Using port {bound} for the UI");
     Ok((server, bound))
+}
+
+/// The ports above `port` to try when it is taken, stepping over agent mode's default
+fn ui_fallback_ports(port: u16) -> impl Iterator<Item = u16> {
+    (1..)
+        .map_while(move |offset| port.checked_add(offset))
+        .filter(|&p| p != AGENT_DEFAULT_PORT)
+        .take(UI_PORT_SCAN as usize)
 }
 
 fn bind_app(ui_port: u16, requested: Option<u16>) -> Result<(Server, u16)> {
@@ -545,6 +555,16 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_ui_fallback_steps_over_the_agent_port() {
+        let ports: Vec<u16> = ui_fallback_ports(8420).collect();
+        assert_eq!(ports.len(), UI_PORT_SCAN as usize);
+        assert!(!ports.contains(&AGENT_DEFAULT_PORT));
+        assert_eq!(ports.first(), Some(&8421));
+        assert_eq!(ports.last(), Some(&8431));
+        assert_eq!(ui_fallback_ports(u16::MAX).count(), 0);
+    }
 
     fn artifacts(dir: &Path, js: bool) -> Artifacts {
         let wasm = dir.join("demo_bg.wasm");

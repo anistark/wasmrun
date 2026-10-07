@@ -57,16 +57,16 @@ impl PluginInstaller {
     pub fn install_external_plugin(plugin_name: &str) -> Result<InstallationResult> {
         let mut result = InstallationResult::new(plugin_name);
 
-        // Check if supported, but don't fail - allow fallback to template creation
-        let is_supported = Self::is_supported_plugin(plugin_name);
-        if !is_supported {
-            println!("⚠️  Plugin '{plugin_name}' not found on crates.io - will create template");
-        }
-
         if !SystemUtils::is_tool_available("cargo") {
             return Err(WasmrunError::from(
                 "cargo is required for plugin installation but was not found",
             ));
+        }
+
+        if !Self::is_supported_plugin(plugin_name) {
+            return Err(WasmrunError::from(format!(
+                "Plugin '{plugin_name}' was not found on crates.io. Check the name, or that crates.io is reachable"
+            )));
         }
 
         let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
@@ -432,6 +432,7 @@ crate-type = ["cdylib", "rlib"]
 
         let mut result = InstallationResult::new(plugin_name);
 
+        let created_dir = !plugin_dir.exists();
         std::fs::create_dir_all(plugin_dir)
             .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {e}")))?;
 
@@ -482,121 +483,18 @@ crate-type = ["cdylib", "rlib"]
                 return Self::install_library_plugin(plugin_name, plugin_dir);
             }
 
-            println!("Direct cargo install failed: {stderr}");
-            println!("Setting up as development plugin template...");
-            Self::setup_plugin_from_source(plugin_name, plugin_dir)?;
-
-            result.version = "0.1.0".to_string();
-            result.binary_installed = false;
+            // Nothing usable was installed, so leave nothing behind to be
+            // mistaken for a plugin
+            if created_dir {
+                let _ = std::fs::remove_dir_all(plugin_dir);
+            }
+            return Err(WasmrunError::from(format!(
+                "cargo install {plugin_name} failed:\n{}",
+                stderr.trim()
+            )));
         }
 
         Ok(result)
-    }
-
-    fn setup_plugin_from_source(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
-        println!("Setting up {plugin_name} plugin template...");
-
-        let (extensions, entry_files, dependencies) =
-            if let Ok(metadata) = PluginRegistry::get_plugin_metadata(plugin_name) {
-                (
-                    metadata.extensions,
-                    metadata.entry_files,
-                    metadata.dependencies.tools,
-                )
-            } else {
-                Self::infer_plugin_details(plugin_name)
-            };
-
-        let cargo_toml_content = format!(
-            r#"[package]
-name = "{plugin_name}"
-version = "0.1.0"
-edition = "2021"
-description = "WebAssembly plugin for wasmrun"
-
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-serde = {{ version = "1.0", features = ["derive"] }}
-toml = "0.8"
-
-[package.metadata.wasm_plugin]
-name = "{plugin_name}"
-extensions = {extensions:?}
-entry_files = {entry_files:?}
-
-[package.metadata.wasm_plugin.capabilities]
-compile_wasm = true
-compile_webapp = false
-live_reload = false
-optimization = false
-custom_targets = []
-
-[package.metadata.wasm_plugin.dependencies]
-tools = {dependencies:?}
-"#
-        );
-
-        let cargo_toml_path = plugin_dir.join("Cargo.toml");
-        std::fs::write(&cargo_toml_path, cargo_toml_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to create Cargo.toml: {e}")))?;
-
-        let src_dir = plugin_dir.join("src");
-        std::fs::create_dir_all(&src_dir)
-            .map_err(|e| WasmrunError::from(format!("Failed to create src directory: {e}")))?;
-
-        let plugin_name_pascal = Self::to_pascal_case(plugin_name);
-        let lib_rs_content = format!(
-            r#"// {plugin_name} WebAssembly plugin for wasmrun
-use std::path::Path;
-
-pub struct {plugin_name_pascal}Builder;
-
-impl {plugin_name_pascal}Builder {{
-    pub fn new() -> Self {{
-        Self
-    }}
-
-    pub fn build(&self, project_path: &Path, output_path: &Path) -> Result<(), String> {{
-        // Basic implementation that delegates to system tools
-        let project_path_str = project_path.to_str().ok_or("Invalid project path")?;
-        let output_path_str = output_path.to_str().ok_or("Invalid output path")?;
-        
-        println!("Building {{}} project at: {{}}", "{plugin_name}", project_path_str);
-        println!("Output will be written to: {{}}", output_path_str);
-        
-        // TODO: Implement actual build logic for {plugin_name}
-        // This is a basic template - customize for specific language requirements
-        
-        Err("Build logic not yet implemented for this plugin".to_string())
-    }}
-}}
-
-#[no_mangle]
-pub extern "C" fn create_wasm_builder() -> *mut {plugin_name_pascal}Builder {{
-    Box::into_raw(Box::new({plugin_name_pascal}Builder::new()))
-}}
-
-#[no_mangle]
-pub extern "C" fn can_handle_project(path: *const std::ffi::c_char) -> bool {{
-    false
-}}
-"#,
-        );
-
-        let lib_rs_path = src_dir.join("lib.rs");
-        std::fs::write(&lib_rs_path, lib_rs_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to create lib.rs: {e}")))?;
-
-        println!("📦 Created plugin template");
-        println!("⚠️  Note: This plugin template needs implementation to be functional");
-        println!(
-            "   Edit {}/src/lib.rs to add your compilation logic",
-            plugin_dir.display()
-        );
-
-        Ok(())
     }
 
     fn infer_plugin_details(plugin_name: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
@@ -632,20 +530,6 @@ pub extern "C" fn can_handle_project(path: *const std::ffi::c_char) -> bool {{
                 vec![],
             ),
         }
-    }
-
-    fn to_pascal_case(s: &str) -> String {
-        s.split(['-', '_'])
-            .map(|word| {
-                let mut chars = word.chars();
-                match chars.next() {
-                    None => String::new(),
-                    Some(first) => {
-                        first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
-                    }
-                }
-            })
-            .collect()
     }
 
     /// Fetch plugin metadata from crates.io and store in plugin directory
