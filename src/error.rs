@@ -43,11 +43,6 @@ pub enum WasmrunError {
     #[error(transparent)]
     Config(#[from] ConfigError),
 
-    /// Language detection errors
-    #[error("Language detection failed: {message}")]
-    #[allow(dead_code)] // TODO: Use for advanced language detection
-    LanguageDetection { message: String },
-
     /// Multiple tools missing
     #[error("Missing required tools: {tools:?}")]
     MissingTools { tools: Vec<String> },
@@ -106,14 +101,6 @@ pub enum CompilationError {
     /// Output directory creation failed
     #[error("Failed to create output directory: {path}")]
     OutputDirectoryCreationFailed { path: String },
-
-    /// Optimization level invalid
-    #[error("Invalid optimization level: {level}. Valid options: {valid_options:?}")]
-    #[allow(dead_code)]
-    InvalidOptimizationLevel {
-        level: String,
-        valid_options: Vec<String>,
-    },
 }
 
 /// Server-related errors
@@ -192,14 +179,6 @@ impl WasmrunError {
         }
     }
 
-    /// language detection error
-    #[allow(dead_code)] // TODO: Use for advanced language detection
-    pub fn language_detection(message: impl Into<String>) -> Self {
-        Self::LanguageDetection {
-            message: message.into(),
-        }
-    }
-
     /// missing tools error
     pub fn missing_tools(tools: Vec<String>) -> Self {
         Self::MissingTools { tools }
@@ -215,58 +194,6 @@ impl WasmrunError {
             source: Box::new(error),
         }
     }
-
-    /// Check if this error is recoverable
-    #[allow(dead_code)] // TODO: Future error recovery features
-    pub fn is_recoverable(&self) -> bool {
-        match self {
-            WasmrunError::FileNotFound { .. } => false,
-            WasmrunError::DirectoryNotFound { .. } => false,
-            WasmrunError::MissingTools { .. } => false,
-            _ => false,
-        }
-    }
-
-    /// Get user-friendly error message
-    #[allow(dead_code)] // TODO: Future user-friendly error messages
-    pub fn user_message(&self) -> String {
-        match self {
-            WasmrunError::FileNotFound { path } => {
-                format!("File not found: {path}\n💡 Check the file path and try again")
-            }
-            WasmrunError::DirectoryNotFound { path } => {
-                format!("Directory not found: {path}\n💡 Check the directory path and try again")
-            }
-            WasmrunError::MissingTools { tools } => {
-                format!(
-                    "Missing required tools: {}\n💡 Please install these tools to continue",
-                    tools.join(", ")
-                )
-            }
-            _ => self.to_string(),
-        }
-    }
-
-    /// Get suggested actions for the error
-    #[allow(dead_code)] // TODO: Future error suggestions system
-    pub fn suggestions(&self) -> Vec<String> {
-        match self {
-            WasmrunError::MissingTools { tools } => tools
-                .iter()
-                .map(|tool| format!("Install {tool} using your package manager"))
-                .collect(),
-            WasmrunError::Compilation(CompilationError::MissingEntryFile {
-                candidates, ..
-            }) => {
-                vec![
-                    format!("Create one of these entry files: {}", candidates.join(", ")),
-                    "Check your project structure".to_string(),
-                    "Refer to the language documentation".to_string(),
-                ]
-            }
-            _ => vec![],
-        }
-    }
 }
 
 impl WasmError {
@@ -278,16 +205,7 @@ impl WasmError {
     }
 }
 
-impl CompilationError {
-    /// new build failed error
-    #[allow(dead_code)] // TODO: Use for compilation error handling
-    pub fn build_failed(language: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::BuildFailed {
-            language: language.into(),
-            reason: reason.into(),
-        }
-    }
-}
+impl CompilationError {}
 
 impl ServerError {
     /// new startup failed error
@@ -366,17 +284,6 @@ mod tests {
     }
 
     #[test]
-    fn test_wasmrun_error_language_detection() {
-        let error = WasmrunError::language_detection("could not detect language");
-        match error {
-            WasmrunError::LanguageDetection { message } => {
-                assert_eq!(message, "could not detect language");
-            }
-            _ => panic!("Expected LanguageDetection error variant"),
-        }
-    }
-
-    #[test]
     fn test_wasmrun_error_missing_tools() {
         let tools = vec!["cargo".to_string(), "rustup".to_string()];
         let error = WasmrunError::missing_tools(tools.clone());
@@ -386,21 +293,6 @@ mod tests {
             }
             _ => panic!("Expected MissingTools error variant"),
         }
-    }
-
-    #[test]
-    fn test_wasmrun_error_is_recoverable() {
-        assert!(!WasmrunError::file_not_found("test").is_recoverable());
-        assert!(!WasmrunError::directory_not_found("test").is_recoverable());
-        assert!(!WasmrunError::missing_tools(vec!["tool".to_string()]).is_recoverable());
-    }
-
-    #[test]
-    fn test_wasmrun_error_user_message() {
-        let error = WasmrunError::file_not_found("test.wasm");
-        let message = error.user_message();
-        assert!(message.contains("test.wasm"));
-        assert!(message.contains("💡"));
     }
 
     #[test]
@@ -422,18 +314,6 @@ mod tests {
                 assert_eq!(reason, "invalid magic bytes");
             }
             _ => panic!("Expected ValidationFailed error variant"),
-        }
-    }
-
-    #[test]
-    fn test_compilation_error_build_failed() {
-        let error = CompilationError::build_failed("Rust", "cargo build failed");
-        match error {
-            CompilationError::BuildFailed { language, reason } => {
-                assert_eq!(language, "Rust");
-                assert_eq!(reason, "cargo build failed");
-            }
-            _ => panic!("Expected BuildFailed error variant"),
         }
     }
 

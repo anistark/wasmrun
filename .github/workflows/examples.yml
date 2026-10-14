@@ -22,11 +22,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-latest is temporarily disabled: external/library plugins
-        # (e.g. waspy for python) can't be dynamically loaded on Windows yet,
-        # so plugin-based examples can't pass there. Tracked in #85.
-        # Re-add 'windows-latest' once dynamic loading works on Windows.
-        os: [ubuntu-latest]
+        # windows-latest is back now that plugin libraries load there (#85).
+        os: [ubuntu-latest, windows-latest]
         example:
           - name: rust-hello
             lang: rust

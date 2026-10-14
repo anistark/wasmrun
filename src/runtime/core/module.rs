@@ -408,7 +408,7 @@ fn parse_type_section(data: &[u8]) -> Result<Vec<FunctionType>, String> {
     let mut cursor = Cursor::new(data);
     let count = read_leb128_u32(&mut cursor)? as usize;
 
-    let mut types = Vec::with_capacity(count);
+    let mut types = Vec::with_capacity(bounded(count, data));
     for _ in 0..count {
         let form = read_u8(&mut cursor)?;
         if form != 0x60 {
@@ -416,14 +416,14 @@ fn parse_type_section(data: &[u8]) -> Result<Vec<FunctionType>, String> {
         }
 
         let param_count = read_leb128_u32(&mut cursor)? as usize;
-        let mut params = Vec::with_capacity(param_count);
+        let mut params = Vec::with_capacity(bounded(param_count, data));
         for _ in 0..param_count {
             let val_type = read_value_type(&mut cursor)?;
             params.push(val_type);
         }
 
         let result_count = read_leb128_u32(&mut cursor)? as usize;
-        let mut results = Vec::with_capacity(result_count);
+        let mut results = Vec::with_capacity(bounded(result_count, data));
         for _ in 0..result_count {
             let val_type = read_value_type(&mut cursor)?;
             results.push(val_type);
@@ -440,7 +440,7 @@ fn parse_import_section(data: &[u8], _types: &[FunctionType]) -> Result<Vec<Impo
     let mut cursor = Cursor::new(data);
     let count = read_leb128_u32(&mut cursor)? as usize;
 
-    let mut imports = Vec::with_capacity(count);
+    let mut imports = Vec::with_capacity(bounded(count, data));
     for _ in 0..count {
         let module = read_string(&mut cursor)?;
         let name = read_string(&mut cursor)?;
@@ -501,7 +501,7 @@ fn parse_function_section(data: &[u8]) -> Result<Vec<Function>, String> {
     let mut cursor = Cursor::new(data);
     let count = read_leb128_u32(&mut cursor)? as usize;
 
-    let mut functions = Vec::with_capacity(count);
+    let mut functions = Vec::with_capacity(bounded(count, data));
     for _ in 0..count {
         let type_index = read_leb128_u32(&mut cursor)?;
         // Don't parse locals here - they're in the Code section
@@ -522,32 +522,54 @@ struct FunctionBody {
 }
 
 /// Parse Code section (function bodies)
+/// Most locals one function may declare, as wasmparser allows.
+const MAX_FUNCTION_LOCALS: u64 = 50_000;
+
+/// A capacity for `count` items read from `data`. Every item takes at least
+/// one byte, so a count beyond the bytes there is a lie, and believing it
+/// would let a few bytes of input ask the allocator for gigabytes; that is an
+/// abort, not a recoverable error.
+fn bounded(count: usize, data: &[u8]) -> usize {
+    count.min(data.len())
+}
+
 fn parse_code_section(data: &[u8]) -> Result<Vec<FunctionBody>, String> {
     let mut cursor = Cursor::new(data);
     let count = read_leb128_u32(&mut cursor)? as usize;
 
-    let mut bodies = Vec::with_capacity(count);
+    let mut bodies = Vec::with_capacity(bounded(count, data));
     for _ in 0..count {
         let body_size = read_leb128_u32(&mut cursor)? as usize;
         let body_start = cursor.position() as usize;
-        let body_end = body_start + body_size;
-
-        if body_end > data.len() {
-            return Err("Code section overflow".to_string());
-        }
+        let body_end = body_start
+            .checked_add(body_size)
+            .filter(|&end| end <= data.len())
+            .ok_or_else(|| "Code section overflow".to_string())?;
 
         // Parse locals
         let locals_count = read_leb128_u32(&mut cursor)? as usize;
-        let mut locals = Vec::with_capacity(locals_count);
+        let mut locals = Vec::with_capacity(bounded(locals_count, data));
+        let mut total_locals: u64 = 0;
 
         for _ in 0..locals_count {
             let count = read_leb128_u32(&mut cursor)?;
             let value_type = read_value_type(&mut cursor)?;
+            // Every local is a slot allocated on each call, so the count a
+            // module declares is a size it chooses; wasmparser's ceiling.
+            total_locals += u64::from(count);
+            if total_locals > MAX_FUNCTION_LOCALS {
+                return Err(format!(
+                    "function declares more than {MAX_FUNCTION_LOCALS} locals"
+                ));
+            }
             locals.push((count, value_type));
         }
 
         // The rest of the body is the actual instruction code
         let code_start = cursor.position() as usize;
+        if code_start > body_end {
+            return Err("function locals run past the end of its body".to_string());
+        }
         let code = data[code_start..body_end].to_vec();
 
         bodies.push(FunctionBody { locals, code });
@@ -563,7 +585,7 @@ fn parse_table_section(data: &[u8]) -> Result<Vec<TableType>, String> {
     let mut cursor = Cursor::new(data);
     let count = read_leb128_u32(&mut cursor)? as usize;
 
-    let mut tables = Vec::with_capacity(count);
+    let mut tables = Vec::with_capacity(bounded(count, data));
     for _ in 0..count {
         let elem_byte = read_u8(&mut cursor)?; // 0x70 for funcref, 0x6f for externref
         let element_type = match elem_byte {
@@ -608,7 +630,7 @@ fn parse_global_section(data: &[u8]) -> Result<Vec<GlobalValue>, String> {
     let section_end = data.len();
     let count = read_leb128_u32(&mut cursor)? as usize;
 
-    let mut globals = Vec::with_capacity(count);
+    let mut globals = Vec::with_capacity(bounded(count, data));
     for idx in 0..count {
         let byte = read_u8(&mut cursor)?;
         let val_type = ValueType::from_byte(byte)
@@ -634,7 +656,7 @@ fn parse_export_section(data: &[u8]) -> Result<HashMap<String, ExportDesc>, Stri
     let count = read_leb128_u32(&mut cursor)
         .map_err(|e| format!("Failed to read export count: {e}"))? as usize;
 
-    let mut exports = HashMap::with_capacity(count);
+    let mut exports = HashMap::with_capacity(bounded(count, data));
     for i in 0..count {
         let name = read_string(&mut cursor)
             .map_err(|e| format!("Failed to read export[{i}] name: {e}"))?;
@@ -670,7 +692,7 @@ fn parse_element_section(data: &[u8]) -> Result<Vec<ElementSegment>, String> {
     let section_end = data.len();
     let count = read_leb128_u32(&mut cursor)? as usize;
 
-    let mut elements = Vec::with_capacity(count);
+    let mut elements = Vec::with_capacity(bounded(count, data));
     for _ in 0..count {
         let flags = read_leb128_u32(&mut cursor)?;
         if flags > 7 {
@@ -707,7 +729,7 @@ fn parse_element_section(data: &[u8]) -> Result<Vec<ElementSegment>, String> {
         }
 
         let item_count = read_leb128_u32(&mut cursor)? as usize;
-        let mut function_indices = Vec::with_capacity(item_count);
+        let mut function_indices = Vec::with_capacity(bounded(item_count, data));
         for _ in 0..item_count {
             if uses_expressions {
                 let expr = parse_expression(&mut cursor, section_end)?;
@@ -752,7 +774,7 @@ fn parse_data_section(data: &[u8]) -> Result<Vec<DataSegment>, String> {
     let section_end = data.len();
     let count = read_leb128_u32(&mut cursor)? as usize;
 
-    let mut segments = Vec::with_capacity(count);
+    let mut segments = Vec::with_capacity(bounded(count, data));
     for _ in 0..count {
         let flags = read_leb128_u32(&mut cursor)?;
 

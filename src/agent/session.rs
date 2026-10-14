@@ -410,7 +410,7 @@ impl Session {
     }
 
     /// Get captured stdout from the session's WASI environment.
-    #[allow(dead_code)] // TODO: Used by agent tools/shell
+    #[cfg(test)]
     pub fn get_stdout(&self) -> Vec<u8> {
         self.wasi_env
             .lock()
@@ -419,7 +419,7 @@ impl Session {
     }
 
     /// Get captured stderr from the session's WASI environment.
-    #[allow(dead_code)] // TODO: Used by agent tools/shell
+    #[cfg(test)]
     pub fn get_stderr(&self) -> Vec<u8> {
         self.wasi_env
             .lock()
@@ -428,7 +428,7 @@ impl Session {
     }
 
     /// Clear captured stdout/stderr buffers (e.g., between exec calls).
-    #[allow(dead_code)] // TODO: Used by agent tools/shell
+    #[cfg(test)]
     pub fn clear_output(&self) {
         if let Ok(mut env) = self.wasi_env.lock() {
             env.clear_stdout();
@@ -509,7 +509,7 @@ impl SessionManager {
     /// Create a new session with the default timeout and default limits.
     ///
     /// Returns the session ID on success.
-    #[allow(dead_code)] // Used by tests; HTTP path uses create_session_with_limits.
+    #[cfg(test)]
     pub fn create_session(&self) -> Result<String, SessionError> {
         self.create_session_with_limits(
             self.config.default_timeout,
@@ -522,7 +522,7 @@ impl SessionManager {
     /// Create a new session with a custom timeout and the default limits.
     ///
     /// Returns the session ID on success.
-    #[allow(dead_code)] // Used by tests; HTTP path uses create_session_with_limits.
+    #[cfg(test)]
     pub fn create_session_with_timeout(&self, timeout: Duration) -> Result<String, SessionError> {
         self.create_session_with_limits(timeout, self.config.limits.clone(), None, None)
     }
@@ -783,9 +783,10 @@ impl SessionManager {
         sessions.clear(); // Drop handles cleanup for each session
         Ok(count)
     }
+}
 
-    /// Get session configuration.
-    #[allow(dead_code)] // TODO: Used by agent status endpoint
+impl SessionManager {
+    #[cfg(test)]
     pub fn config(&self) -> &SessionConfig {
         &self.config
     }

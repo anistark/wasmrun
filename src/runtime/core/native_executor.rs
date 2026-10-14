@@ -7,7 +7,7 @@ use crate::runtime::wasi::network::NetworkAccess;
 use crate::runtime::wasi::{create_wasi_linker, WasiEnv};
 use std::fs;
 use std::net::TcpListener;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -21,6 +21,19 @@ pub struct ExecLimits {
     pub max_memory_pages: Option<u32>,
     /// Instruction budget; execution aborts once exhausted.
     pub max_fuel: Option<u64>,
+}
+
+impl ExecLimits {
+    /// From operator units, `0` meaning no cap, as the CLI flags take them.
+    pub fn from_flags(max_memory_mb: Option<u32>, max_fuel: Option<u64>) -> Self {
+        Self {
+            // 16 pages of 64 KiB to the MiB
+            max_memory_pages: max_memory_mb
+                .filter(|&mb| mb > 0)
+                .map(|mb| mb.saturating_mul(16)),
+            max_fuel: max_fuel.filter(|&f| f > 0),
+        }
+    }
 }
 
 pub fn execute_wasm_file(wasm_path: &str) -> Result<i32> {
@@ -58,6 +71,36 @@ pub fn execute_wasm_file_with_sockets(
     listeners: Vec<TcpListener>,
     network: NetworkAccess,
 ) -> Result<i32> {
+    execute_wasm_file_with_options(
+        wasm_path,
+        ExecOptions {
+            function,
+            args,
+            listeners,
+            network,
+            ..Default::default()
+        },
+    )
+}
+
+/// Everything `wasmrun exec` can hand a program besides its bytes.
+#[derive(Default)]
+pub struct ExecOptions {
+    pub function: Option<String>,
+    /// argv after the program name, which is the wasm path.
+    pub args: Vec<String>,
+    /// Host-bound listeners, passed in after the preopens.
+    pub listeners: Vec<TcpListener>,
+    pub network: NetworkAccess,
+    /// Directories the program may use, as (guest path, host path).
+    pub preopens: Vec<(String, PathBuf)>,
+    pub env: Vec<(String, String)>,
+    pub limits: ExecLimits,
+}
+
+/// Run a file with [`ExecOptions`]. Output streams to the terminal as the
+/// program writes it.
+pub fn execute_wasm_file_with_options(wasm_path: &str, options: ExecOptions) -> Result<i32> {
     if !Path::new(wasm_path).exists() {
         return Err(WasmrunError::from(format!(
             "WASM file not found: {wasm_path}"
@@ -69,8 +112,8 @@ pub fn execute_wasm_file_with_sockets(
     // The bare args from the CLI don't include a program name, but WASI programs
     // (e.g. QuickJS) index into argv[1] for their first real argument.
     let mut wasi_args = vec![wasm_path.to_string()];
-    wasi_args.extend(args.iter().cloned());
-    execute_wasm_bytes_with(&wasm_bytes, function, wasi_args, listeners, network)
+    wasi_args.extend(options.args.iter().cloned());
+    run_with_options(&wasm_bytes, wasi_args, options)
 }
 
 pub fn execute_wasm_bytes(wasm_bytes: &[u8]) -> Result<i32> {
@@ -98,22 +141,69 @@ pub fn execute_wasm_bytes_with(
     listeners: Vec<TcpListener>,
     network: NetworkAccess,
 ) -> Result<i32> {
-    let module = Module::parse(wasm_bytes)
-        .map_err(|e| WasmrunError::from(format!("Failed to parse WASM module: {e}")))?;
+    run_with_options(
+        wasm_bytes,
+        args,
+        ExecOptions {
+            function,
+            listeners,
+            network,
+            ..Default::default()
+        },
+    )
+}
 
-    // A terminal run: stderr shows as it is written, stdout once it ends
+fn run_with_options(wasm_bytes: &[u8], args: Vec<String>, options: ExecOptions) -> Result<i32> {
+    let ExecOptions {
+        function,
+        listeners,
+        network,
+        preopens,
+        env: env_vars,
+        limits,
+        ..
+    } = options;
+    let mut module = Module::parse(wasm_bytes)
+        .map_err(|e| WasmrunError::from(format!("Failed to parse WASM module: {e}")))?;
+    cap_memory(&mut module, limits.max_memory_pages);
+
+    // A terminal run: output shows as it is written, and nothing is kept
     let mut env = WasiEnv::new()
         .with_args(args.clone())
-        .with_stderr_passthrough();
+        .with_stdio_passthrough();
     env.set_network(network);
+    // Directories first, then listeners: fds are handed out in that order.
+    for (guest, host) in &preopens {
+        env = env.with_preopen(guest, host);
+    }
+    for (key, value) in env_vars.iter() {
+        env.add_env(key.clone(), value.clone());
+    }
+    // The first listener's fd and address, the way wasmhub runtimes find it,
+    // unless the caller already set them.
+    let mut first_listener = None;
     for listener in listeners {
-        env = env.with_tcp_listener(listener);
+        let addr = listener.local_addr().ok();
+        let fd = env.add_tcp_listener(listener);
+        if first_listener.is_none() {
+            first_listener = Some((fd, addr));
+        }
+    }
+    if let Some((fd, addr)) = first_listener {
+        let set = |k: &str| env_vars.iter().any(|(key, _)| key == k);
+        if !set("WASMHUB_LISTEN_FD") {
+            env.add_env("WASMHUB_LISTEN_FD".into(), fd.to_string());
+        }
+        if let (false, Some(addr)) = (set("WASMHUB_LISTEN_ADDR"), addr) {
+            env.add_env("WASMHUB_LISTEN_ADDR".into(), addr.to_string());
+        }
     }
     let wasi_env = Arc::new(Mutex::new(env));
     let wasi_linker = create_wasi_linker(wasi_env.clone());
 
     let mut executor = Executor::new_with_linker(module, wasi_linker)
         .map_err(|e| WasmrunError::from(format!("Failed to initialize executor: {e}")))?;
+    executor.set_fuel(limits.max_fuel);
 
     let func_idx = if let Some(func_name) = function {
         find_export_function(executor.module(), &func_name)
@@ -142,19 +232,22 @@ pub fn execute_wasm_bytes_with(
 
     let result = execute_function(&mut executor, func_idx, wasm_args);
 
-    // stdout is buffered, so it is printed here whatever the outcome, a trap
-    // included. stderr is not: `fd_write` already passed it through as written,
-    // since this env asked for that.
-    if let Ok(env) = wasi_env.lock() {
-        let out = env.get_stdout();
-        if !out.is_empty() {
-            print!("{}", String::from_utf8_lossy(&out));
-        }
-    }
-
+    // Nothing to print here: `fd_write` passed the output through as written.
     match result {
         Ok(()) => Ok(0),
         Err(e) => extract_proc_exit(&e).ok_or(e),
+    }
+}
+
+/// Lower a module's declared memory maximum to `cap` pages, so `memory.grow`
+/// past it fails the way the module itself would have.
+fn cap_memory(module: &mut Module, cap: Option<u32>) {
+    if let (Some(cap), Some(mem)) = (cap, module.memory.as_mut()) {
+        match mem.max {
+            Some(m) if m > cap => mem.max = Some(cap),
+            None => mem.max = Some(cap),
+            _ => {}
+        }
     }
 }
 
@@ -173,15 +266,7 @@ pub fn execute_wasm_bytes_with_env(
     let mut module = Module::parse(wasm_bytes)
         .map_err(|e| WasmrunError::from(format!("Failed to parse WASM module: {e}")))?;
 
-    if let Some(cap) = limits.max_memory_pages {
-        if let Some(ref mut mem) = module.memory {
-            match mem.max {
-                Some(m) if m > cap => mem.max = Some(cap),
-                None => mem.max = Some(cap),
-                _ => {}
-            }
-        }
-    }
+    cap_memory(&mut module, limits.max_memory_pages);
 
     if let Ok(mut env) = wasi_env.lock() {
         env.set_args(args.clone());

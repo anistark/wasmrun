@@ -12,7 +12,7 @@ use crate::runtime::core::values::Value;
 use crate::runtime::wasi::network::NetworkAccess;
 use std::collections::{HashMap, VecDeque};
 use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -103,10 +103,12 @@ pub struct WasiEnv {
     /// timeout stops a running execution, and the executor can only check it
     /// between instructions, which is never while a host function is blocked.
     cancel: Option<Arc<AtomicBool>>,
-    /// Also write guest stderr to the host's stderr as it arrives. `wasmrun
-    /// exec` wants that, so errors show up live; agent mode must not, or one
-    /// tenant's output lands in the server's own logs. Captured either way.
-    stderr_passthrough: bool,
+    /// Write guest stdout and stderr straight to the host's, as they arrive,
+    /// instead of capturing them. `wasmrun exec` wants that: output shows up
+    /// live, and a server that runs for days does not grow a buffer the whole
+    /// time. Agent mode must not, or one tenant's output lands in the server's
+    /// own logs, and it reads the captured output back for the response.
+    stdio_passthrough: bool,
 }
 
 impl WasiEnv {
@@ -162,18 +164,18 @@ impl WasiEnv {
             max_disk_bytes: None,
             disk_used: 0,
             cancel: None,
-            stderr_passthrough: false,
+            stdio_passthrough: false,
         }
     }
 
     /// Echo guest stderr to the host's stderr as well as capturing it.
-    pub fn with_stderr_passthrough(mut self) -> Self {
-        self.stderr_passthrough = true;
+    pub fn with_stdio_passthrough(mut self) -> Self {
+        self.stdio_passthrough = true;
         self
     }
 
-    pub fn stderr_passthrough(&self) -> bool {
-        self.stderr_passthrough
+    pub fn stdio_passthrough(&self) -> bool {
+        self.stdio_passthrough
     }
 
     pub fn with_args(mut self, args: Vec<String>) -> Self {
@@ -181,7 +183,7 @@ impl WasiEnv {
         self
     }
 
-    #[allow(dead_code)] // TODO: Used by agent session builder
+    #[cfg(test)]
     pub fn with_env(mut self, key: String, value: String) -> Self {
         self.env_vars.push((key, value));
         self
@@ -212,6 +214,7 @@ impl WasiEnv {
     /// same shape as a preopened directory. The listener is put in
     /// non-blocking mode here: `sock_accept` waits in slices so it can watch
     /// the cancellation flag, which it could not do inside a blocking accept.
+    #[cfg(test)]
     pub fn with_tcp_listener(mut self, listener: TcpListener) -> Self {
         self.add_tcp_listener(listener);
         self
@@ -525,32 +528,53 @@ impl WasiEnv {
             _ => return Err(format!("fd {dir_fd} is not a directory")),
         }
 
-        let resolved = dir_entry.host_path.join(path);
+        // Lexically first, so this fails closed: a `..` that climbs above the
+        // directory is refused before anything on disk is consulted. Checking
+        // only canonical paths fails open whenever part of the path does not
+        // exist yet, and `create_dir_all` would then build the way out
+        // (`x/../../escape` creates `x`, after which `x/../..` is outside).
+        let mut parts: Vec<&std::ffi::OsStr> = Vec::new();
+        for component in Path::new(path).components() {
+            match component {
+                Component::Normal(part) => parts.push(part),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if parts.pop().is_none() {
+                        return Err("Path escapes preopen directory".to_string());
+                    }
+                }
+                // WASI paths are relative to their directory; a leading `/`
+                // means that directory, not the host's root.
+                Component::RootDir | Component::Prefix(_) => parts.clear(),
+            }
+        }
+        let resolved = parts
+            .iter()
+            .fold(dir_entry.host_path.clone(), |acc, part| acc.join(part));
 
-        // Prevent path traversal
-        if let (Ok(canon_base), Ok(canon_resolved)) = (
-            std::fs::canonicalize(&dir_entry.host_path),
-            if resolved.exists() {
-                std::fs::canonicalize(&resolved)
-            } else if let Some(parent) = resolved.parent() {
-                std::fs::canonicalize(parent)
-                    .map(|p| p.join(resolved.file_name().unwrap_or_default()))
-            } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "no parent",
-                ))
-            },
-        ) {
-            if !canon_resolved.starts_with(&canon_base) {
-                return Err("Path escapes preopen directory".to_string());
+        // Then symlinks: the deepest part of the path that exists must still
+        // be inside once every link along it is followed.
+        let canon_base = std::fs::canonicalize(&dir_entry.host_path)
+            .map_err(|e| format!("preopen directory is gone: {e}"))?;
+        let mut probe = resolved.as_path();
+        loop {
+            if probe.exists() {
+                let canon = std::fs::canonicalize(probe).map_err(|e| e.to_string())?;
+                if !canon.starts_with(&canon_base) {
+                    return Err("Path escapes preopen directory".to_string());
+                }
+                break;
+            }
+            match probe.parent() {
+                Some(parent) => probe = parent,
+                None => break,
             }
         }
 
         Ok(resolved)
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn preopens(&self) -> &[(String, PathBuf)] {
         &self.preopens
     }
@@ -1453,11 +1477,9 @@ mod tests {
     /// Capture-only unless asked: an agent session's env is built with `new()`,
     /// and its tenants' stderr must not reach the server's terminal
     #[test]
-    fn test_stderr_passthrough_is_opt_in() {
-        assert!(!WasiEnv::new().stderr_passthrough());
-        assert!(WasiEnv::new()
-            .with_stderr_passthrough()
-            .stderr_passthrough());
+    fn test_stdio_passthrough_is_opt_in() {
+        assert!(!WasiEnv::new().stdio_passthrough());
+        assert!(WasiEnv::new().with_stdio_passthrough().stdio_passthrough());
     }
 
     #[test]

@@ -38,7 +38,6 @@ export default function KernelStatusPanel({
                 value={`v${kernelStats?.kernel_version || '0.0.0'}`}
               />
               <InfoRow label="Filesystem Mounts" value={kernelStats?.filesystem_mounts || 0} />
-              <InfoRow label="Dev Servers" value={kernelStats?.active_dev_servers || 0} />
             </div>
           </div>
 

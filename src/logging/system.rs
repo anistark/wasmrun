@@ -41,16 +41,6 @@ impl LogTrailSystem {
             .rev()
             .collect()
     }
-
-    #[allow(dead_code)]
-    pub fn clear(&self) {
-        self.entries.lock().unwrap().clear();
-    }
-
-    #[allow(dead_code)]
-    pub fn count(&self) -> usize {
-        self.entries.lock().unwrap().len()
-    }
 }
 
 impl Default for LogTrailSystem {

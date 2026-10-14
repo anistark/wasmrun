@@ -62,9 +62,9 @@ wasmrun exec ./hello.wasm
 # Hello, World!
 ```
 
-- **stdout** (fd 1): printed normally
-- **stderr** (fd 2): printed to stderr
+- **stdout** (fd 1) and **stderr** (fd 2): written to the terminal as the program writes them, so a long-running server's log lines show up live, and nothing is kept in memory
 - **Exit code**: returned as the process exit code, so a script or CI job sees a failing program fail
+- `-q` / `--quiet` leaves out wasmrun's own lines (`🎯 Running ...`, `✅ Execution completed`), so the output is only the program's
 
 ```sh
 wasmrun exec ./tests.wasm
@@ -72,6 +72,33 @@ wasmrun exec ./tests.wasm
 echo $?
 # 3
 ```
+
+## Files, environment and limits
+
+A program sees no host directory and no environment variables unless they are given:
+
+```sh
+# The project directory as /, so the program can open its own files
+wasmrun exec --dir ./app nodejs-20.wasm run /server.js
+
+# A directory somewhere else in the program's view
+wasmrun exec --dir ./data:/data tool.wasm
+
+# Environment variables, one --env each
+wasmrun exec --env LOG=debug --env PORT=8080 server.wasm
+
+# Cap its linear memory, and the instructions it may run
+wasmrun exec --max-memory-mb 64 --max-fuel 100000000 untrusted.wasm
+```
+
+| Flag | What |
+|---|---|
+| `--dir HOST[:GUEST]` | Preopen the host directory `HOST`, seen as `GUEST` (default `/`). Repeatable. Paths are contained: nothing outside `HOST` can be reached through it |
+| `--env KEY=VALUE` | Set an environment variable. Repeatable |
+| `--max-memory-mb MB` | Lower the module's memory maximum to `MB`, so `memory.grow` past it fails as the module itself would. `0` is no cap |
+| `--max-fuel N` | Stop the program after `N` WASM instructions. `0` is no cap |
+
+Directories are handed out as file descriptors from 3, in the order given, and `--tcplisten` listeners after them. wasmrun sets `WASMHUB_LISTEN_FD` and `WASMHUB_LISTEN_ADDR` to the first listener, so a program that reads them (wasmhub's runtimes do) finds it whatever came first.
 
 ## File Validation
 

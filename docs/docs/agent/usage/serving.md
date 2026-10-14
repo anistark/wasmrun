@@ -123,7 +123,7 @@ A server also stops when its session is deleted or expires, and when the agent s
 
 A server gets its session's tenant network policy, like any other execution: it may well need to reach a database to answer a request. See [exec networking](../../exec/networking.md) for `--allow-net` and the `[tenants.network]` table.
 
-Outbound HTTP from JavaScript is a separate matter. wasmhub's runtime implements `net` and `http` **servers** only; `net.connect`, `http.request` and `fetch` throw `ERR_NOT_SUPPORTED`, because WASI Preview 1 has no call that opens a socket and the runtime has not yet been built against wasmrun's extensions for it.
+JavaScript reaches out with `net.connect`, `http.request` or `fetch` (`http:` only) on wasmhub's `20-net` nodejs build, which wasmrun uses whenever the wasmhub release it is pinned to has it (v0.6.0 and later). A destination the tenant's policy does not allow fails with `EACCES`.
 
 ## How it works
 

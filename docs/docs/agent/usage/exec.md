@@ -209,7 +209,8 @@ Note the `require()`: your own code is CommonJS either way, so a default export 
 **Limitations:**
 
 - Pure-JS packages only: anything with an install script, `binding.gyp`, or prebuilt `.node` binaries is rejected with an error naming the package (native code can't run in the sandbox)
-- A package needing a Node built-in the runtime does not implement still fails at `require()` time, whatever its module format. `http`, `https` and `net` are the notable absences; `zlib`, `child_process` and `worker_threads` resolve but throw `ERR_NOT_SUPPORTED` when actually called
+- A package needing a Node built-in the runtime does not implement still fails at `require()` time, whatever its module format. `https`, `tls` and `dgram` resolve but throw; so do `zlib`, `child_process` and `worker_threads`
+- Package metadata is checked the way npm 7+ checks it, but reported rather than refused: a package whose `os`, `cpu` or `engines.node` leaves out the sandbox (`wasi`, `wasm32`, Node 20) is installed, with a line in the response's `warnings`. A missing peer dependency is installed beside the package that wants it; one present at a version outside its range is kept and reported there too
 - Conversion parses ESM sources as TypeScript, which is a superset of JavaScript. Sources containing JSX or Flow types are rejected
 - An uploaded `package.json` is inert unless you set `install_package_json`, so no execution turns into an unrequested network fetch. `devDependencies` need `install_dev_dependencies`, which implies `install_package_json`: dev dependencies without the runtime ones cannot run anything. A package listed in both fields resolves to the dev range
 
@@ -315,14 +316,14 @@ JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io
 - Node-style module wrapper: `module.exports`, `require.cache`, `require.resolve`, `require.main`, `__filename`, `__dirname`
 - JSON loading via `require('./data.json')`
 
-**Built-in modules:** `path`, `fs`, `fs/promises` (and `fs.promises`), `os`, `events`, `util`, `assert`, `stream`, `buffer`, `crypto`, `url`, `querystring`, `string_decoder`, `timers`, `timers/promises`, `process`, `tty`. Every one is also reachable through its `node:` prefixed alias, so `require('node:fs/promises')` works. `require('node:process')` hands back the same object as the `process` global, so the two cannot drift apart.
+**Built-in modules:** `path`, `fs`, `fs/promises` (and `fs.promises`), `os`, `events`, `util`, `assert`, `stream`, `buffer`, `crypto`, `url`, `querystring`, `string_decoder`, `timers`, `timers/promises`, `process`, `tty`, `net`, `http`, `async_hooks`. Every one is also reachable through its `node:` prefixed alias, so `require('node:fs/promises')` works. `require('node:process')` hands back the same object as the `process` global, so the two cannot drift apart.
 
 `node:test` is the built-in test runner, and is reachable under that name only: a bare `require('test')` still resolves to an npm package called `test`. See [Running tests](#running-tests).
 
 `zlib`, `child_process` and `worker_threads` are present but throw a named `ERR_NOT_SUPPORTED` error when used: the sandbox has no compression library, no process table, and one thread. They resolve rather than being absent so a package that merely imports one keeps loading.
 
-:::note Hashing is pure JavaScript
-`crypto.createHash`/`createHmac` are implemented in JS, with no libcrypto in the runtime, so they cost roughly 1.5 s per 64-byte block under the interpreter. Fine for a short digest, impractical for hashing a large file. `crypto.getRandomValues`/`randomUUID` are native and cheap: they go through the WASI `random_get` syscall.
+:::note Hashing
+From wasmhub v0.6.0, `crypto.createHash`, `createHmac` and `pbkdf2` run on digests compiled into the runtime (md5, sha1, sha224, sha256, sha384, sha512): 64 KiB of sha256 takes about a tenth of a second under the interpreter. Earlier runtimes hashed in JavaScript, at about 1.5 s per 64-byte block. `crypto.getRandomValues`/`randomUUID` go through the WASI `random_get` syscall.
 :::
 
 **Globals & event loop:** `process`, `setTimeout`/`setInterval`/`setImmediate`, `queueMicrotask`, `process.nextTick`, async/await with full Promise resolution (pending timers and microtasks are drained before exit), `Buffer`, `TextEncoder`/`TextDecoder`, `atob`/`btoa`.
@@ -331,10 +332,10 @@ JavaScript executes in the [wasmhub `nodejs` runtime](https://anistark.github.io
 - `URL` / `URLSearchParams`: WHATWG parsing, relative resolution against a base, `searchParams` kept in sync with the URL
 - `crypto.getRandomValues` / `crypto.randomUUID`: entropy comes from the WASI `random_get` syscall
 - `structuredClone`: deep clone with cycles, `Map`/`Set`/`Date`/`RegExp`/`ArrayBuffer`/TypedArrays; functions and symbols throw `DataCloneError`, matching the spec
-- `fetch` is **defined but always rejects** with a clear `network access is not supported` error (`code: 'ERR_NETWORK_UNSUPPORTED'`): sandboxed code has no sockets yet, and a documented rejection beats a bare `ReferenceError`
+- `fetch`, with `Headers`, `Request`, `Response` and `AbortController`: on the `20-net` runtime it reaches the destinations the tenant's policy allows, over `http:`; elsewhere it rejects with `ERR_NETWORK_UNSUPPORTED`
 
 **Not yet available:**
-- Network I/O: `fetch` and sockets are deferred to the wasmnet milestone (see above for the interim `fetch` behavior)
+- TLS: `https`, `tls` and `fetch` to `https:` URLs. The runtime has no TLS library
 - Native extensions / C addons: pure JS only
 - npm installation from inside the sandbox: there is no package manager in it; declare packages with the [`dependencies` field](#npm-dependencies) (vendored host-side) or ship a `node_modules` tree via `files`
 
@@ -501,6 +502,7 @@ Execution is bounded by the per-session resource limits and server-wide ingress 
 |---------------|---------|
 | `error` contains `"instruction limit"` | The execution exceeded `--max-fuel` and was aborted (`exit_code: -1`) |
 | `output_truncated: true` | Captured stdout+stderr hit `--max-output`; output in the response is truncated (the field is omitted when `false`) |
+| `warnings: [...]` | Vendoring installed something with a caveat: a package whose `os`, `cpu` or `engines.node` leaves out the sandbox, or a peer dependency at a version outside its range. The run went ahead; the field is omitted when there are none |
 | `error` contains `"File size limit"` / `"Disk usage limit"` | A file write from the sandbox exceeded `--max-file-size` or the session's `--max-disk` quota |
 
 **As an HTTP error status** (the request was rejected before or instead of running):

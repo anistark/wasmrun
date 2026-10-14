@@ -7,6 +7,7 @@ mod debug;
 mod error;
 mod logging;
 mod plugin;
+mod ps;
 mod runtime;
 mod server;
 mod template;
@@ -140,6 +141,11 @@ fn main() {
             call,
             tcplisten,
             allow_net,
+            dir,
+            env,
+            max_memory_mb,
+            max_fuel,
+            quiet,
             args,
         }) => {
             debug_println!(
@@ -147,7 +153,16 @@ fn main() {
                 args.len(),
                 call
             );
-            commands::handle_exec_command(wasm_file, call, tcplisten, allow_net, args.clone())
+            let flags = commands::ExecFlags {
+                tcplisten: tcplisten.clone(),
+                allow_net: allow_net.clone(),
+                dirs: dir.clone(),
+                env: env.clone(),
+                max_memory_mb: *max_memory_mb,
+                max_fuel: *max_fuel,
+                quiet: *quiet,
+            };
+            commands::handle_exec_command_with(wasm_file, call, &flags, args.clone())
                 .map(|code| exit_code = code)
         }
 
@@ -258,6 +273,14 @@ fn main() {
                 allow_net,
             )
         }
+
+        Some(Commands::Init {
+            name,
+            template,
+            directory,
+        }) => commands::handle_init_command(name, template, directory),
+
+        Some(Commands::Ps(ps_cmd)) => commands::handle_ps_command(ps_cmd),
 
         Some(Commands::Plugin(plugin_cmd)) => {
             commands::run_plugin_command(plugin_cmd).map_err(|e| match e {

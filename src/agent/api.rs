@@ -119,6 +119,11 @@ pub struct ExecResponse {
     /// versions. Omitted when the exec installed nothing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lockfile: Option<crate::agent::vendor::Lockfile>,
+    /// What vendoring noticed and did not refuse: a package whose `os`, `cpu`
+    /// or `engines.node` leaves out the sandbox, or a peer dependency at a
+    /// version outside its range. Omitted when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub warnings: Vec<String>,
 }
 
 /// Start a long-lived server inside a session.
@@ -243,8 +248,6 @@ pub enum ApiError {
     /// The request conflicts with state that already exists, such as starting a
     /// second server in a session that is already serving.
     Conflict(String),
-    #[allow(dead_code)] // TODO: Used when exec timeout triggers API-level error
-    Timeout,
     Internal(String),
 }
 
@@ -260,7 +263,6 @@ impl ApiError {
             ApiError::Conflict(_) => 409,
             ApiError::Unauthorized(_) => 401,
             ApiError::PayloadTooLarge(_) => 413,
-            ApiError::Timeout => 408,
             ApiError::Internal(_) => 500,
         }
     }
@@ -290,7 +292,6 @@ impl std::fmt::Display for ApiError {
             }
             ApiError::RateLimited(reason) => write!(f, "Rate limit exceeded: {reason}"),
             ApiError::Conflict(msg) => write!(f, "Conflict: {msg}"),
-            ApiError::Timeout => write!(f, "Execution timed out"),
             ApiError::Internal(msg) => write!(f, "Internal error: {msg}"),
         }
     }

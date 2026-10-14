@@ -5,13 +5,14 @@ use crate::logging::{LogEntry, LogSource, LogTrailSystem};
 use crate::runtime::multilang_kernel::{MultiLanguageKernel, OsRunConfig};
 use crate::runtime::network::NetworkServer;
 use crate::runtime::project_files::ProjectFilesCollector;
-use crate::runtime::runtime_cache::RuntimeCache;
+use crate::runtime::runtime_cache::{RuntimeCache, WasmhubManifest};
 use crate::runtime::tunnel::bore::{self, BoreClient, BoreServer, TunnelStatus};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server};
 use wasmnet::policy::{NetworkPolicy, Policy, PolicyConfig};
 
@@ -44,6 +45,17 @@ pub struct OsServer {
     /// The port this server is listening on, set by `start`.
     os_port: u16,
     runtime_cache: RuntimeCache,
+    /// The wasmhub manifest, fetched once. A failure is remembered too, for
+    /// `MANIFEST_RETRY`: the server answers one request at a time, so a slow
+    /// or unreachable GitHub would otherwise stall every request behind it.
+    wasmhub_manifest: RwLock<Option<(Instant, Option<WasmhubManifest>)>>,
+    /// The project's `wasmrun.toml`, read once at startup.
+    project_config: ProjectConfig,
+    /// `[os] entry`, checked.
+    os_entry: Option<String>,
+    /// Bumped on every project change under `--watch`. The page polls it and
+    /// restarts the program when it moves.
+    project_generation: Arc<AtomicU64>,
     cors_origin: String,
     /// The wasmnet proxy's port, once it is up. `None` until `start` runs it,
     /// and if it failed to start: OS mode still serves everything else.
@@ -63,6 +75,10 @@ impl OsServer {
         };
         let runtime_cache = RuntimeCache::new()?;
         let os_port = config.port.unwrap_or(8420);
+        // A wasmrun.toml that does not parse stops the server here, before
+        // anything binds: it was written to be obeyed
+        let project_config = ProjectConfig::load(&config.project_path)?;
+        let os_entry = project_config.os_entry()?;
         let mut server = Self {
             kernel: Arc::new(RwLock::new(kernel)),
             config,
@@ -73,6 +89,10 @@ impl OsServer {
             tunnel_target: Arc::new(RwLock::new(None)),
             os_port,
             runtime_cache,
+            wasmhub_manifest: RwLock::new(None),
+            project_config,
+            os_entry,
+            project_generation: Arc::new(AtomicU64::new(0)),
             cors_origin,
             network_port: Arc::new(RwLock::new(None)),
             network_bind_ports: Arc::new(RwLock::new(String::new())),
@@ -166,6 +186,11 @@ impl OsServer {
 
     /// Detect the project language
     fn detect_project_language(&self) -> Result<String> {
+        // `--language` or `[os] language` decided it already
+        if let Some(language) = &self.config.language {
+            return Ok(language.clone());
+        }
+
         // Check for package.json (Node.js)
         if Path::new(&self.config.project_path)
             .join("package.json")
@@ -193,6 +218,14 @@ impl OsServer {
             || project_path.join("pyproject.toml").exists()
         {
             return Ok("python".to_string());
+        }
+
+        // A script with no manifest, which the kernel runs as Node.js too
+        if ["index.js", "server.js", "app.js", "main.js"]
+            .iter()
+            .any(|f| project_path.join(f).exists())
+        {
+            return Ok("nodejs".to_string());
         }
 
         // Default to unknown
@@ -228,6 +261,10 @@ impl OsServer {
         // Start the project in the kernel
         self.start_project()?;
 
+        if self.config.hot_reload {
+            self.watch_project();
+        }
+
         // Handle HTTP requests
         for request in server.incoming_requests() {
             match self.handle_request(request) {
@@ -246,7 +283,7 @@ impl OsServer {
     /// that cannot be read is a policy that cannot be honored, and starting
     /// anyway would run the project under settings nobody chose.
     fn network_policy(&self) -> Result<PolicyConfig> {
-        let config = ProjectConfig::load(&self.config.project_path)?;
+        let config = &self.project_config;
         let policy = config.network_policy()?;
 
         if config.has_network_config() {
@@ -258,6 +295,43 @@ impl OsServer {
         }
 
         Ok(policy)
+    }
+
+    /// `--watch`: bump the project generation whenever a file changes. The
+    /// page does the restarting, since the program runs there: it re-fetches
+    /// the project files and starts the VM again.
+    fn watch_project(&self) {
+        let watcher = match crate::watcher::ProjectWatcher::new(&self.config.project_path) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("⚠️ --watch disabled: {e}");
+                return;
+            }
+        };
+        let generation = Arc::clone(&self.project_generation);
+        let log_system = Arc::clone(&self.log_system);
+        let root = std::path::PathBuf::from(&self.config.project_path);
+        std::thread::spawn(move || {
+            while let Some(events) = watcher.wait_for_change() {
+                let Ok(events) = events else { continue };
+                let changed = watcher.changed_paths(&events);
+                let Some(first) = changed.first() else {
+                    continue;
+                };
+                let shown = first
+                    .strip_prefix(&root)
+                    .unwrap_or(first)
+                    .display()
+                    .to_string();
+                generation.fetch_add(1, Ordering::SeqCst);
+                log_system.log(LogEntry::info(
+                    LogSource::Kernel,
+                    format!("Project changed ({shown}); the page restarts the program"),
+                ));
+                println!("🔄 {shown} changed; restarting the program in the page");
+            }
+        });
+        println!("👀 Watching the project; a change restarts the program in the page");
     }
 
     /// Start the wasmnet proxy alongside the OS server.
@@ -470,6 +544,14 @@ impl OsServer {
             }
 
             // API endpoint for project files bundle (base64-encoded)
+            (Method::Get, "/api/project/version") => {
+                let body = serde_json::json!({
+                    "watch": self.config.hot_reload,
+                    "generation": self.project_generation.load(Ordering::SeqCst),
+                });
+                self.send_json(request, 200, body)?;
+            }
+
             (Method::Get, "/api/project/files") => {
                 self.handle_project_files_request(request)?;
             }
@@ -522,55 +604,6 @@ impl OsServer {
                 self.handle_restart_project(request)?;
             }
 
-            // API endpoints for port forwarding
-            (Method::Get, path)
-                if path.starts_with("/api/processes/") && path.ends_with("/ports") =>
-            {
-                let parts: Vec<&str> = path.split('/').collect();
-                if parts.len() >= 4 {
-                    if let Ok(pid) = parts[3].parse::<u32>() {
-                        self.handle_list_ports_request(request, pid)?;
-                    } else {
-                        self.send_error(request, "Invalid PID")?;
-                    }
-                } else {
-                    self.send_404(request)?;
-                }
-            }
-
-            (Method::Post, path)
-                if path.starts_with("/api/processes/") && path.contains("/forward") =>
-            {
-                let parts: Vec<&str> = path.split('/').collect();
-                if parts.len() >= 4 {
-                    if let Ok(pid) = parts[3].parse::<u32>() {
-                        self.handle_create_port_forward_request(request, pid)?;
-                    } else {
-                        self.send_error(request, "Invalid PID")?;
-                    }
-                } else {
-                    self.send_404(request)?;
-                }
-            }
-
-            (Method::Delete, path)
-                if path.starts_with("/api/processes/") && path.contains("/forward/") =>
-            {
-                let parts: Vec<&str> = path.split('/').collect();
-                if parts.len() >= 6 {
-                    if let (Ok(pid), Ok(guest_port)) =
-                        (parts[3].parse::<u32>(), parts[5].parse::<u16>())
-                    {
-                        self.handle_delete_port_forward_request(request, pid, guest_port)?;
-                    } else {
-                        self.send_error(request, "Invalid PID or port")?;
-                    }
-                } else {
-                    self.send_404(request)?;
-                }
-            }
-
-            // API endpoint for logs
             (Method::Get, "/api/logs") => {
                 self.handle_logs_request(request)?;
             }
@@ -600,12 +633,6 @@ impl OsServer {
             // Serve static assets
             (Method::Get, path) if path.starts_with("/assets/") => {
                 self.serve_asset(request, &path[8..])?; // Remove "/assets/" prefix
-            }
-
-            // Proxy requests to project dev server
-            (Method::Get, path) if path.starts_with("/app/") => {
-                let project_path = &path[5..]; // Remove "/app/" prefix
-                self.proxy_to_dev_server(request, project_path)?;
             }
 
             // Default: serve 404
@@ -708,7 +735,6 @@ impl OsServer {
             "active_processes": stats.active_processes,
             "total_memory_usage": stats.total_memory_usage,
             "active_runtimes": stats.active_runtimes,
-            "active_dev_servers": stats.active_dev_servers,
             "project_pid": project_pid,
             // System information
             "os": stats.os,
@@ -729,148 +755,6 @@ impl OsServer {
         request
             .respond(response)
             .map_err(|e| WasmrunError::from(e.to_string()))?;
-        Ok(())
-    }
-
-    fn handle_list_ports_request(&self, request: Request, pid: u32) -> Result<()> {
-        let kernel = self.kernel.read().unwrap();
-
-        let all_network_stats = kernel.get_network_stats();
-        if let Some(network_stats) = all_network_stats.get(&pid) {
-            let mappings = if let Some(ns) = kernel.get_network_namespace(pid) {
-                ns.list_port_mappings()
-            } else {
-                vec![]
-            };
-
-            let response_json = serde_json::json!({
-                "success": true,
-                "pid": pid,
-                "port_mappings": mappings.iter().map(|m| {
-                    serde_json::json!({
-                        "guest_port": m.guest_port,
-                        "host_port": m.host_port,
-                        "protocol": format!("{:?}", m.protocol),
-                        "created_at": m.created_at.duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default().as_secs()
-                    })
-                }).collect::<Vec<_>>(),
-                "network_stats": {
-                    "base_port": network_stats.base_port,
-                    "allocated_ports": network_stats.allocated_ports,
-                    "total_connections": network_stats.total_connections,
-                    "active_connections": network_stats.active_connections,
-                    "listening_sockets": network_stats.listening_sockets,
-                }
-            });
-
-            let response = Response::from_string(response_json.to_string())
-                .with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                )
-                .with_header(self.cors_header());
-
-            request
-                .respond(response)
-                .map_err(|e| WasmrunError::from(e.to_string()))?;
-        } else {
-            self.send_error(request, &format!("Process with PID {pid} not found"))?;
-        }
-        Ok(())
-    }
-
-    fn handle_create_port_forward_request(&self, mut request: Request, pid: u32) -> Result<()> {
-        let mut content = String::new();
-        let mut reader = request.as_reader();
-        if let Err(e) = std::io::Read::read_to_string(&mut reader, &mut content) {
-            return self.send_error(request, &format!("Failed to read request body: {e}"));
-        }
-
-        let body: serde_json::Value = match serde_json::from_str(&content) {
-            Ok(v) => v,
-            Err(e) => return self.send_error(request, &format!("Invalid JSON: {e}")),
-        };
-
-        let guest_port = match body.get("guest_port").and_then(|v| v.as_u64()) {
-            Some(p) if p <= u16::MAX as u64 => p as u16,
-            _ => return self.send_error(request, "Invalid guest_port"),
-        };
-
-        let protocol = match body.get("protocol").and_then(|v| v.as_str()) {
-            Some("tcp") | Some("Tcp") => crate::runtime::network_namespace::SocketProtocol::Tcp,
-            Some("udp") | Some("Udp") => crate::runtime::network_namespace::SocketProtocol::Udp,
-            _ => return self.send_error(request, "Invalid protocol (must be 'tcp' or 'udp')"),
-        };
-
-        let kernel = self.kernel.read().unwrap();
-        if let Some(ns) = kernel.get_network_namespace(pid) {
-            match ns.allocate_port(guest_port, protocol) {
-                Ok(host_port) => {
-                    let response_json = serde_json::json!({
-                        "success": true,
-                        "pid": pid,
-                        "guest_port": guest_port,
-                        "host_port": host_port,
-                        "protocol": format!("{:?}", protocol)
-                    });
-
-                    let response = Response::from_string(response_json.to_string())
-                        .with_header(
-                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                                .unwrap(),
-                        )
-                        .with_header(self.cors_header());
-
-                    request
-                        .respond(response)
-                        .map_err(|e| WasmrunError::from(e.to_string()))?;
-                }
-                Err(e) => {
-                    self.send_error(request, &format!("Failed to allocate port: {e}"))?;
-                }
-            }
-        } else {
-            self.send_error(request, &format!("Process with PID {pid} not found"))?;
-        }
-        Ok(())
-    }
-
-    fn handle_delete_port_forward_request(
-        &self,
-        request: Request,
-        pid: u32,
-        guest_port: u16,
-    ) -> Result<()> {
-        let kernel = self.kernel.read().unwrap();
-
-        if let Some(ns) = kernel.get_network_namespace(pid) {
-            match ns.deallocate_port(guest_port) {
-                Ok(()) => {
-                    let response_json = serde_json::json!({
-                        "success": true,
-                        "pid": pid,
-                        "guest_port": guest_port,
-                        "message": "Port mapping removed successfully"
-                    });
-
-                    let response = Response::from_string(response_json.to_string())
-                        .with_header(
-                            Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                                .unwrap(),
-                        )
-                        .with_header(self.cors_header());
-
-                    request
-                        .respond(response)
-                        .map_err(|e| WasmrunError::from(e.to_string()))?;
-                }
-                Err(e) => {
-                    self.send_error(request, &format!("Failed to remove port mapping: {e}"))?;
-                }
-            }
-        } else {
-            self.send_error(request, &format!("Process with PID {pid} not found"))?;
-        }
         Ok(())
     }
 
@@ -929,6 +813,23 @@ impl OsServer {
         Ok(())
     }
 
+    /// The wasmhub manifest, from memory after the first fetch.
+    fn wasmhub_manifest(&self) -> Option<WasmhubManifest> {
+        const MANIFEST_RETRY: Duration = Duration::from_secs(60);
+        if let Ok(cached) = self.wasmhub_manifest.read() {
+            match &*cached {
+                Some((_, Some(manifest))) => return Some(manifest.clone()),
+                Some((at, None)) if at.elapsed() < MANIFEST_RETRY => return None,
+                _ => {}
+            }
+        }
+        let fetched = self.runtime_cache.fetch_manifest().ok();
+        if let Ok(mut cached) = self.wasmhub_manifest.write() {
+            *cached = Some((Instant::now(), fetched.clone()));
+        }
+        fetched
+    }
+
     fn handle_runtimes_list_request(&self, request: Request) -> Result<()> {
         let detected_language = self.detect_project_language()?;
         let wasmhub_lang = crate::runtime::runtime_cache::wasmhub_language(&detected_language);
@@ -938,9 +839,14 @@ impl OsServer {
             "wasmhub_runtime": wasmhub_lang,
             "cached": self.runtime_cache.is_cached(wasmhub_lang),
             "cached_version": self.runtime_cache.cached_version(wasmhub_lang),
+            // `[os] entry` and `[os.limits]`, which the page applies to the VM
+            "os": {
+                "entry": self.os_entry,
+                "limits": self.project_config.os_limits(),
+            },
         });
 
-        if let Ok(manifest) = self.runtime_cache.fetch_manifest() {
+        if let Some(manifest) = self.wasmhub_manifest() {
             response_json["wasmhub_version"] = serde_json::Value::String(manifest.version);
             response_json["available_languages"] =
                 serde_json::json!(manifest.languages.keys().collect::<Vec<_>>());
@@ -1046,114 +952,6 @@ impl OsServer {
         Ok(())
     }
 
-    /// Proxy requests to the project's dev server
-    fn proxy_to_dev_server(&self, request: Request, path: &str) -> Result<()> {
-        // Get the dev server port for the project
-        let project_pid = *self.project_pid.read().unwrap();
-        if let Some(pid) = project_pid {
-            let kernel = self.kernel.read().unwrap();
-            let dev_server_port = kernel.get_dev_server_status(pid).and_then(|status| {
-                if let crate::runtime::registry::DevServerStatus::Running(port) = status {
-                    Some(port)
-                } else {
-                    None
-                }
-            });
-
-            if let Some(port) = dev_server_port {
-                // Forward the request to the dev server
-                let target_url = format!(
-                    "http://127.0.0.1:{}{}",
-                    port,
-                    if path.is_empty() { "/" } else { path }
-                );
-
-                match self.fetch_from_dev_server(&target_url) {
-                    Ok((content, content_type)) => {
-                        let response = Self::document_response(content, &content_type);
-                        request
-                            .respond(response)
-                            .map_err(|e| WasmrunError::from(e.to_string()))?;
-                    }
-                    Err(e) => {
-                        let error_html = format!(
-                            "<html><body><h1>Dev Server Error</h1><p>{e}</p></body></html>"
-                        );
-                        let response = Self::document_response(error_html, "text/html");
-                        request
-                            .respond(response)
-                            .map_err(|e| WasmrunError::from(e.to_string()))?;
-                    }
-                }
-            } else {
-                let error_html = format!(
-                    "<html><body><h1>No Dev Server</h1><p>No dev server running for PID {pid}</p></body></html>"
-                );
-                let response = Self::document_response(error_html, "text/html");
-                request
-                    .respond(response)
-                    .map_err(|e| WasmrunError::from(e.to_string()))?;
-            }
-        } else {
-            let error_html = "<html><body><h1>No Project Running</h1><p>No project is currently running</p></body></html>";
-            let response = Self::document_response(error_html.to_string(), "text/html");
-            request
-                .respond(response)
-                .map_err(|e| WasmrunError::from(e.to_string()))?;
-        }
-        Ok(())
-    }
-
-    /// Fetch content from the dev server
-    fn fetch_from_dev_server(&self, url: &str) -> Result<(String, String)> {
-        use std::io::Read;
-        use std::net::TcpStream;
-
-        // Parse the URL to get host and path
-        let url_without_scheme = url.strip_prefix("http://").unwrap_or(url);
-        let parts: Vec<&str> = url_without_scheme.splitn(2, '/').collect();
-        let host = parts[0];
-        let path = if parts.len() > 1 {
-            format!("/{}", parts[1])
-        } else {
-            "/".to_string()
-        };
-
-        // Connect to the dev server
-        let mut stream = TcpStream::connect(host)
-            .map_err(|e| WasmrunError::from(format!("Failed to connect to dev server: {e}")))?;
-
-        // Send HTTP request
-        let request = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
-        std::io::Write::write_all(&mut stream, request.as_bytes())
-            .map_err(|e| WasmrunError::from(format!("Failed to send request: {e}")))?;
-
-        // Read response
-        let mut response = String::new();
-        stream
-            .read_to_string(&mut response)
-            .map_err(|e| WasmrunError::from(format!("Failed to read response: {e}")))?;
-
-        // Parse HTTP response
-        if let Some(header_end) = response.find("\r\n\r\n") {
-            let headers = &response[..header_end];
-            let body = &response[header_end + 4..];
-
-            // Extract content type from headers
-            let content_type = headers
-                .lines()
-                .find(|line| line.to_lowercase().starts_with("content-type:"))
-                .and_then(|line| line.split(':').nth(1))
-                .map(|ct| ct.trim().to_string())
-                .unwrap_or_else(|| "text/html".to_string());
-
-            Ok((body.to_string(), content_type))
-        } else {
-            Err(WasmrunError::from("Invalid HTTP response"))
-        }
-    }
-
-    /// Serve static assets from embedded data
     fn serve_asset(&self, request: Request, asset_path: &str) -> Result<()> {
         let (content, content_type): (&[u8], &str) = match asset_path {
             "logo.png" => (ASSET_LOGO_PNG, "image/png"),

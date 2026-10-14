@@ -246,6 +246,46 @@ pub enum Commands {
         )]
         allow_net: Vec<String>,
 
+        /// Let the program use a host directory
+        #[arg(
+            long = "dir",
+            value_name = "HOST[:GUEST]",
+            help = "Give the program the host directory HOST, seen as GUEST (default /). Repeatable"
+        )]
+        dir: Vec<String>,
+
+        /// Set an environment variable for the program
+        #[arg(
+            long = "env",
+            value_name = "KEY=VALUE",
+            help = "Set KEY=VALUE in the program's environment. Repeatable"
+        )]
+        env: Vec<String>,
+
+        /// Cap the program's linear memory
+        #[arg(
+            long = "max-memory-mb",
+            value_name = "MB",
+            help = "Cap the program's linear memory at MB megabytes (0: no cap)"
+        )]
+        max_memory_mb: Option<u32>,
+
+        /// Cap the instructions the program may run
+        #[arg(
+            long = "max-fuel",
+            value_name = "N",
+            help = "Stop the program after N WASM instructions (0: no cap)"
+        )]
+        max_fuel: Option<u64>,
+
+        /// Print only the program's own output
+        #[arg(
+            short = 'q',
+            long,
+            help = "Print only the program's own output, no wasmrun status lines"
+        )]
+        quiet: bool,
+
         /// Arguments to pass to the WASM program (after the WASM file)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -507,34 +547,37 @@ pub enum Commands {
     #[command(subcommand)]
     Plugin(PluginSubcommands),
 
-    // TODO: Implement project initialization command
-    // This will create new WebAssembly projects from templates (rust, go, c, asc, python)
-    // /// Initialize a new Wasmrun project from template
-    // #[command(alias = "new")]
-    // Init {
-    //     /// Project name
-    //     #[arg(index = 1, help = "Name of the new project")]
-    //     name: Option<String>,
+    /// Keep WASM programs running: a supervisor with restarts and logs
+    #[command(subcommand)]
+    Ps(PsSubcommands),
 
-    //     /// Template to use (rust, go, c, asc)
-    //     #[arg(
-    //         short = 't',
-    //         long,
-    //         default_value = "rust",
-    //         value_parser = ["rust", "go", "c", "asc", "python"],
-    //         help = "Project template to use"
-    //     )]
-    //     template: String,
+    /// Create a new project from a template
+    #[command(alias = "new")]
+    Init {
+        /// Project name
+        #[arg(index = 1, help = "Name of the new project")]
+        name: Option<String>,
 
-    //     /// Target directory (default: project name)
-    //     #[arg(
-    //         short = 'd',
-    //         long,
-    //         value_hint = clap::ValueHint::DirPath,
-    //         help = "Directory to create project in"
-    //     )]
-    //     directory: Option<String>,
-    // },
+        /// Template to use
+        #[arg(
+            short = 't',
+            long,
+            default_value = "rust",
+            value_parser = ["rust", "go", "c", "asc", "python", "nodejs", "wasi"],
+            help = "Project template: rust, go, c, asc or python (server mode), nodejs (OS and agent mode), wasi (exec mode)"
+        )]
+        template: String,
+
+        /// Target directory (default: project name)
+        #[arg(
+            short = 'd',
+            long,
+            value_hint = clap::ValueHint::DirPath,
+            help = "Directory to create project in"
+        )]
+        directory: Option<String>,
+    },
+
     /// Clean build artifacts and temporary files
     #[command(aliases = ["clear", "reset"])]
     Clean {
@@ -608,12 +651,70 @@ pub enum PluginSubcommands {
         /// Plugin name
         plugin: String,
     },
-    // TODO: Implement plugin search with proper plugin registry system
-    // /// Search for available plugins
-    // Search {
-    //     /// Search query
-    //     query: String,
-    // },
+}
+
+/// `wasmrun ps`: the process manager.
+#[derive(Subcommand, Debug, Clone)]
+pub enum PsSubcommands {
+    /// Start the programs in a processes.toml, or one stopped program by name
+    Start {
+        /// The processes file (default ./processes.toml)
+        #[arg(short = 'c', long, value_hint = clap::ValueHint::FilePath)]
+        config: Option<String>,
+
+        /// Run the supervisor in this terminal instead of in the background
+        #[arg(long)]
+        foreground: bool,
+
+        /// A supervised program to start again
+        name: Option<String>,
+    },
+
+    /// Stop one program, or the supervisor and everything it runs
+    Stop {
+        /// The program to stop (default: all of them, and the supervisor)
+        name: Option<String>,
+    },
+
+    /// Stop a program and start it again
+    Restart { name: String },
+
+    /// Every supervised program: status, PID, uptime, restarts, memory
+    #[command(alias = "ls")]
+    List {
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// One program in detail, with its recent exits
+    Status {
+        name: String,
+
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// A program's log
+    Logs {
+        name: String,
+
+        /// Keep printing as it grows
+        #[arg(short = 'f', long)]
+        follow: bool,
+
+        /// How many lines to print first
+        #[arg(short = 'n', long, default_value_t = 50)]
+        lines: usize,
+    },
+
+    /// Run the supervisor itself (what `ps start` starts in the background)
+    #[command(hide = true)]
+    Supervise {
+        #[arg(long)]
+        config: String,
+    },
 }
 
 /// Argument resolution with validation
@@ -622,12 +723,7 @@ pub struct ResolvedArgs {
     pub path: String,
     pub port: u16,
     pub app_port: Option<u16>,
-    pub wasm: bool,
     pub watch: bool,
-    #[allow(dead_code)] // TODO: Used for debug output control
-    pub debug: bool,
-    #[allow(dead_code)] // TODO: Used for command validation and processing
-    pub command: Option<Commands>,
     pub serve: bool,
     pub language: Option<String>,
 }
@@ -641,109 +737,10 @@ impl ResolvedArgs {
             path: resolved_path,
             port: args.port,
             app_port: args.app_port,
-            wasm: args.wasm,
             watch: args.watch,
-            debug: args.debug,
-            command: args.command,
             serve: args.serve,
             language: args.language,
         })
-    }
-
-    /// Validate the resolved arguments
-    #[allow(dead_code)] // TODO: Future argument validation system
-    pub fn validate(&self) -> Result<()> {
-        // Validate port range
-        if self.port == 0 {
-            return Err(WasmrunError::from(format!(
-                "Invalid port number: {}. Must be between 1-65535",
-                self.port
-            )));
-        }
-
-        // Validate path based on context
-        match &self.command {
-            Some(Commands::Verify { .. }) | Some(Commands::Inspect { .. }) => {
-                // These commands expect WASM files
-                PathResolver::validate_wasm_file(&self.path)?;
-            }
-            Some(Commands::Compile { .. })
-            | Some(Commands::Run { .. })
-            | Some(Commands::Os { .. })
-            | Some(Commands::Clean { .. }) => {
-                // These commands expect project directories
-                PathResolver::validate_directory_exists(&self.path)?;
-            }
-            _ => {
-                // For default run command, validate based on wasm flag
-                if self.wasm {
-                    PathResolver::validate_wasm_file(&self.path)?;
-                } else {
-                    // Could be either file or directory
-                    if !std::path::Path::new(&self.path).exists() {
-                        return Err(WasmrunError::path(format!("Path not found: {}", self.path)));
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// Command-specific argument resolution
-pub trait CommandArgs {
-    #[allow(dead_code)] // TODO: Future path resolution trait implementation
-    fn resolve_path(&self) -> String;
-}
-
-impl CommandArgs for Commands {
-    fn resolve_path(&self) -> String {
-        match self {
-            Commands::Compile {
-                path,
-                positional_path,
-                ..
-            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
-            Commands::Verify {
-                path,
-                positional_path,
-                ..
-            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
-            Commands::Inspect {
-                path,
-                positional_path,
-                ..
-            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
-            Commands::Run {
-                path,
-                positional_path,
-                ..
-            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
-            Commands::Exec { wasm_file, .. } => {
-                PathResolver::resolve_input_path(wasm_file.clone(), None)
-            }
-            Commands::Os {
-                path,
-                positional_path,
-                ..
-            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
-            Commands::Clean {
-                path,
-                positional_path,
-                ..
-            } => PathResolver::resolve_input_path(positional_path.clone(), path.clone()),
-            // TODO: Implement Init command
-            // Commands::Init {
-            //     name, directory, ..
-            // } => directory.clone().unwrap_or_else(|| {
-            //     name.clone()
-            //         .unwrap_or_else(|| "my-wasmrun-project".to_string())
-            // }),
-            Commands::Agent { .. } => "./".to_string(),
-            Commands::Plugin(_) => "./".to_string(),
-            Commands::Stop => "./".to_string(),
-        }
     }
 }
 
@@ -751,21 +748,6 @@ impl CommandArgs for Commands {
 pub struct CommandValidator;
 
 impl CommandValidator {
-    #[allow(dead_code)] // TODO: Future compile command validation
-    pub fn validate_compile_args(
-        path: &Option<String>,
-        positional_path: &Option<String>,
-        output: &Option<String>,
-    ) -> Result<(String, String)> {
-        let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
-        let output_dir = output.clone().unwrap_or_else(|| ".".to_string());
-
-        PathResolver::validate_directory_exists(&project_path)?;
-        PathResolver::ensure_output_directory(&output_dir)?;
-
-        Ok((project_path, output_dir))
-    }
-
     pub fn validate_verify_args(
         path: &Option<String>,
         positional_path: &Option<String>,
@@ -775,24 +757,6 @@ impl CommandValidator {
         Ok(wasm_path)
     }
 
-    #[allow(dead_code)] // TODO: Future run command validation
-    pub fn validate_run_args(
-        path: &Option<String>,
-        positional_path: &Option<String>,
-        port: u16,
-    ) -> Result<(String, u16)> {
-        let project_path = PathResolver::resolve_input_path(positional_path.clone(), path.clone());
-
-        if !std::path::Path::new(&project_path).exists() {
-            return Err(WasmrunError::path(format!(
-                "Path not found: {project_path}"
-            )));
-        }
-
-        Ok((project_path, port))
-    }
-
-    #[allow(dead_code)] // TODO: Future init command validation
     pub fn validate_init_args(
         name: &Option<String>,
         template: &str,
@@ -803,7 +767,7 @@ impl CommandValidator {
             .unwrap_or_else(|| "my-wasmrun-project".to_string());
         let target_dir = directory.clone().unwrap_or_else(|| project_name.clone());
 
-        let valid_templates = ["rust", "go", "c", "asc", "python"];
+        let valid_templates = crate::commands::init_template_names();
         if !valid_templates.contains(&template) {
             return Err(WasmrunError::from(format!(
                 "Invalid template '{}'. Valid templates: {}",
@@ -856,14 +820,6 @@ fn print_styled_version() {
 }
 
 /// Argument parsing with validation
-#[allow(dead_code)] // TODO: Future validated argument parsing system
-pub fn get_validated_args() -> Result<ResolvedArgs> {
-    let args = get_args();
-    let resolved = ResolvedArgs::from_args(args)?;
-    resolved.validate()?;
-    Ok(resolved)
-}
-
 // Helper function for error conversion
 impl From<String> for WasmrunError {
     fn from(message: String) -> Self {

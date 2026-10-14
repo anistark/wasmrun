@@ -42,6 +42,20 @@ const wasmrunPrismDark: PrismTheme = {
 const isReadTheDocs = process.env.READTHEDOCS === 'True';
 const rtdLanguage = process.env.READTHEDOCS_LANGUAGE || 'en';
 const rtdVersion = process.env.READTHEDOCS_VERSION || 'latest';
+// Every Read the Docs build but `stable` says which one the reader is on and
+// links to the released docs. `latest` follows main, so it can describe
+// features no release has yet; a tag build is an older release.
+const versionBanner =
+  isReadTheDocs && rtdVersion !== 'stable'
+    ? {
+        id: `version-${rtdVersion}`,
+        content:
+          rtdVersion === 'latest'
+            ? `These docs follow <code>main</code> and may describe unreleased changes. <a href="/${rtdLanguage}/stable/">Read the docs for the latest release</a>.`
+            : `These docs are for wasmrun ${rtdVersion}. <a href="/${rtdLanguage}/stable/">Read the docs for the latest release</a>.`,
+        isCloseable: true,
+      }
+    : undefined;
 
 // The crate version, read from the workspace manifest at build time so the
 // footer of the mobile drawer never drifts from the released version.
@@ -99,6 +113,7 @@ const config: Config = {
   ],
 
   themeConfig: {
+    announcementBar: versionBanner,
     colorMode: {
       defaultMode: 'dark',
       respectPrefersColorScheme: false,
@@ -133,6 +148,12 @@ const config: Config = {
           sidebarId: 'agent',
           position: 'left',
           label: 'Agent',
+        },
+        {
+          type: 'docSidebar',
+          sidebarId: 'ps',
+          position: 'left',
+          label: 'PS',
         },
         {
           type: 'docSidebar',
@@ -195,6 +216,7 @@ const config: Config = {
             { label: 'Exec Mode', to: '/docs/exec' },
             { label: 'OS Mode', to: '/docs/os' },
             { label: 'Agent Mode', to: '/docs/agent' },
+            { label: 'Process Manager', to: '/docs/ps' },
             { label: 'Changelog', to: '/docs/contributing/changelog' },
           ],
         },

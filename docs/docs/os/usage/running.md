@@ -139,7 +139,7 @@ Python projects are detected (`requirements.txt`, `pyproject.toml`) and accepted
 
 ### Development Workflow
 
-The page fetches the project's files each time you press **Run**, so the loop is: edit, **Stop**, **Run**. `--watch` is accepted but does not restart the VM on its own yet.
+The page fetches the project's files each time you press **Run**. With `--watch`, a saved edit restarts a program you have run on the new files by itself; without it the loop is edit, **Stop**, **Run**.
 
 ```sh
 wasmrun os ./my-project --verbose

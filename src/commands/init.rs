@@ -1,9 +1,134 @@
+//! [Shared] `wasmrun init`: a new project from a template.
+//!
+//! Each template is one of the repository's examples, compiled into the binary,
+//! so a scaffold is a project CI already builds and runs. The example's own
+//! name is replaced with the new project's wherever it appears.
+
 use crate::cli::CommandValidator;
 use crate::error::{Result, WasmrunError};
 use crate::ui::print_init_info;
+use std::path::Path;
+
+/// One template: the example it comes from, the files it writes, and how to
+/// run the result.
+struct Template {
+    name: &'static str,
+    /// The example's name as its files spell it, replaced by the project's.
+    example: &'static str,
+    /// Other names the example goes by (a package.json `name`), replaced too.
+    aliases: &'static [&'static str],
+    files: &'static [(&'static str, &'static str)],
+    mode: &'static str,
+    next: &'static [&'static str],
+}
+
+macro_rules! example_file {
+    ($example:literal, $path:literal) => {
+        (
+            $path,
+            include_str!(concat!("../../examples/", $example, "/", $path)),
+        )
+    };
+}
+
+const TEMPLATES: &[Template] = &[
+    Template {
+        name: "rust",
+        aliases: &[],
+        example: "rust-hello",
+        files: &[
+            example_file!("rust-hello", "Cargo.toml"),
+            example_file!("rust-hello", "src/lib.rs"),
+            example_file!("rust-hello", "README.md"),
+            example_file!("rust-hello", ".gitignore"),
+        ],
+        mode: "server mode",
+        next: &["wasmrun {dir}"],
+    },
+    Template {
+        name: "go",
+        aliases: &[],
+        example: "go-hello",
+        files: &[
+            example_file!("go-hello", "go.mod"),
+            example_file!("go-hello", "main.go"),
+            example_file!("go-hello", "README.md"),
+        ],
+        mode: "server mode",
+        next: &["wasmrun {dir}"],
+    },
+    Template {
+        name: "c",
+        aliases: &[],
+        example: "c-hello",
+        files: &[
+            example_file!("c-hello", "Makefile"),
+            example_file!("c-hello", "main.c"),
+            example_file!("c-hello", "README.md"),
+        ],
+        mode: "server mode",
+        next: &["wasmrun {dir}"],
+    },
+    Template {
+        name: "asc",
+        aliases: &[],
+        example: "asc-hello",
+        files: &[
+            example_file!("asc-hello", "package.json"),
+            example_file!("asc-hello", "asconfig.json"),
+            example_file!("asc-hello", "assembly/index.ts"),
+            example_file!("asc-hello", "README.md"),
+        ],
+        mode: "server mode",
+        next: &["wasmrun {dir}"],
+    },
+    Template {
+        name: "python",
+        aliases: &[],
+        example: "python-hello",
+        files: &[
+            example_file!("python-hello", "main.py"),
+            example_file!("python-hello", "README.md"),
+        ],
+        mode: "server mode",
+        next: &["wasmrun {dir}"],
+    },
+    Template {
+        name: "nodejs",
+        aliases: &["wasmrun-http-api-example"],
+        example: "nodejs-http-api",
+        files: &[
+            example_file!("nodejs-http-api", "package.json"),
+            example_file!("nodejs-http-api", "index.js"),
+            example_file!("nodejs-http-api", "public/index.html"),
+            example_file!("nodejs-http-api", "README.md"),
+            example_file!("nodejs-http-api", ".gitignore"),
+        ],
+        mode: "OS mode, or agent mode's serve",
+        next: &["wasmrun os {dir}"],
+    },
+    Template {
+        name: "wasi",
+        aliases: &[],
+        example: "native-rust",
+        files: &[
+            example_file!("native-rust", "Cargo.toml"),
+            example_file!("native-rust", "src/main.rs"),
+        ],
+        mode: "exec mode",
+        next: &[
+            "cd {dir} && cargo build --release --target wasm32-wasip1",
+            "wasmrun exec target/wasm32-wasip1/release/{crate}.wasm",
+        ],
+    },
+];
+
+/// Every template name, for `--template` and its error message.
+pub fn template_names() -> Vec<&'static str> {
+    TEMPLATES.iter().map(|t| t.name).collect()
+}
 
 /// Handle init command
-#[allow(dead_code)]
 pub fn handle_init_command(
     name: &Option<String>,
     template: &str,
@@ -11,246 +136,101 @@ pub fn handle_init_command(
 ) -> Result<()> {
     let (project_name, template_name, target_dir) =
         CommandValidator::validate_init_args(name, template, directory)?;
+    let template = TEMPLATES
+        .iter()
+        .find(|t| t.name == template_name)
+        .expect("validated above");
 
     print_init_info(&project_name, &template_name, &target_dir);
+    let written = scaffold(template, &project_name, Path::new(&target_dir))?;
+    for file in &written {
+        println!("  + {file}");
+    }
 
-    println!("📦 Creating new {template_name} project: {project_name}");
-    println!("📂 Target directory: {target_dir}");
-
-    // Create the project directory
-    std::fs::create_dir_all(&target_dir)
-        .map_err(|e| WasmrunError::from(format!("Failed to create directory {target_dir}: {e}")))?;
-
-    // Create project files based on template
-    // match template_name.as_str() {
-    //     "rust" => create_rust_project(&target_dir, &project_name)?,
-    //     "go" => create_go_project(&target_dir, &project_name)?,
-    //     "c" => create_c_project(&target_dir, &project_name)?,
-    //     "asc" => create_asc_project(&target_dir, &project_name)?,
-    //     "python" => create_python_project(&target_dir, &project_name)?,
-    //     _ => {
-    //         return Err(WasmrunError::from(format!(
-    //             "Unknown template: {template_name}"
-    //         )));
-    //     }
-    // }
-
-    // println!("✅ Project '{project_name}' created successfully!");
-    // println!("🚀 To get started:");
-    // println!("   cd {target_dir}");
-    // println!("   wasmrun");
-
-    println!("🛠️  Project file generation feature coming soon!");
-
+    let crate_name = project_name.replace('-', "_");
+    println!(
+        "\n✅ Created {project_name} from the {template_name} template ({}). Next:",
+        template.mode
+    );
+    for step in template.next {
+        println!(
+            "   {}",
+            step.replace("{dir}", &target_dir)
+                .replace("{crate}", &crate_name)
+        );
+    }
     Ok(())
 }
 
-// fn create_rust_project(target_dir: &str, project_name: &str) -> Result<()> {
-//     // Create Cargo.toml
-//     let cargo_toml = format!(
-//         r#"[package]
-// name = "{project_name}"
-// version = "0.1.0"
-// edition = "2021"
+/// Write a template's files under `dir`, which must not exist yet, and return
+/// their relative paths.
+fn scaffold(template: &Template, project_name: &str, dir: &Path) -> Result<Vec<String>> {
+    let underscored_example = template.example.replace('-', "_");
+    let underscored_name = project_name.replace('-', "_");
+    let mut written = Vec::new();
+    for (path, content) in template.files {
+        let mut content = content
+            .replace(
+                &format!("examples/{}", template.example),
+                &dir.display().to_string(),
+            )
+            .replace(template.example, project_name)
+            .replace(&underscored_example, &underscored_name);
+        for alias in template.aliases {
+            content = content.replace(alias, project_name);
+        }
+        let dest = dir.join(path);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                WasmrunError::from(format!("Failed to create {}: {e}", parent.display()))
+            })?;
+        }
+        std::fs::write(&dest, content)
+            .map_err(|e| WasmrunError::from(format!("Failed to write {}: {e}", dest.display())))?;
+        written.push(path.to_string());
+    }
+    Ok(written)
+}
 
-// [lib]
-// crate-type = ["cdylib"]
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-// [dependencies]
-// wasm-bindgen = "0.2"
+    #[test]
+    fn every_template_scaffolds_with_the_project_name() {
+        for template in TEMPLATES {
+            let root = tempfile::tempdir().unwrap();
+            let dir = root.path().join("my-app");
+            let written = scaffold(template, "my-app", &dir).unwrap();
+            assert_eq!(written.len(), template.files.len(), "{}", template.name);
+            for file in written {
+                let content = std::fs::read_to_string(dir.join(&file)).unwrap();
+                for old in std::iter::once(&template.example).chain(template.aliases) {
+                    assert!(
+                        !content.contains(old),
+                        "{} still names {old} in {file}",
+                        template.name
+                    );
+                }
+            }
+        }
+    }
 
-// [dependencies.web-sys]
-// version = "0.3"
-// features = [
-//   "console",
-// ]
-// "#
-//     );
-//     std::fs::write(format!("{target_dir}/Cargo.toml"), cargo_toml)
-//         .map_err(|e| WasmrunError::from(format!("Failed to write Cargo.toml: {e}")))?;
+    #[test]
+    fn a_rust_template_takes_the_crate_name() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("hello-wasm");
+        let rust = TEMPLATES.iter().find(|t| t.name == "rust").unwrap();
+        scaffold(rust, "hello-wasm", &dir).unwrap();
+        let cargo = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+        assert!(cargo.contains("name = \"hello-wasm\""), "{cargo}");
+    }
 
-//     // Create src directory and lib.rs
-//     std::fs::create_dir_all(format!("{target_dir}/src"))
-//         .map_err(|e| WasmrunError::from(format!("Failed to create src directory: {e}")))?;
-
-//     let lib_rs = r#"use wasm_bindgen::prelude::*;
-
-// // Import the `console.log` function from the browser
-// #[wasm_bindgen]
-// extern "C" {
-//     #[wasm_bindgen(js_namespace = console)]
-//     fn log(s: &str);
-// }
-
-// // Define a macro to make it easier to call console.log
-// macro_rules! console_log {
-//     ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
-// }
-
-// // Export a `greet` function from Rust to JavaScript
-// #[wasm_bindgen]
-// pub fn greet(name: &str) {
-//     console_log!("Hello, {}!", name);
-// }
-
-// // Export an `add` function
-// #[wasm_bindgen]
-// pub fn add(a: i32, b: i32) -> i32 {
-//     a + b
-// }
-// "#;
-//     std::fs::write(format!("{target_dir}/src/lib.rs"), lib_rs)
-//         .map_err(|e| WasmrunError::from(format!("Failed to write lib.rs: {e}")))?;
-
-//     Ok(())
-// }
-
-// fn create_go_project(target_dir: &str, project_name: &str) -> Result<()> {
-//     // Create go.mod
-//     let go_mod = format!("module {project_name}\n\ngo 1.19\n");
-//     std::fs::write(format!("{target_dir}/go.mod"), go_mod)
-//         .map_err(|e| WasmrunError::from(format!("Failed to write go.mod: {e}")))?;
-
-//     // Create main.go
-//     let main_go = r#"package main
-
-// import "fmt"
-
-// //export add
-// func add(x, y int) int {
-//     return x + y
-// }
-
-// //export greet
-// func greet(name string) {
-//     fmt.Printf("Hello, %s!\n", name)
-// }
-
-// func main() {
-//     // Main function required but not used in WASM
-// }
-// "#;
-//     std::fs::write(format!("{target_dir}/main.go"), main_go)
-//         .map_err(|e| WasmrunError::from(format!("Failed to write main.go: {e}")))?;
-
-//     Ok(())
-// }
-
-// fn create_c_project(target_dir: &str, project_name: &str) -> Result<()> {
-//     // Create Makefile
-//     let makefile = format!(
-//         r#"CC = clang
-// TARGET = {project_name}.wasm
-// SOURCE = main.c
-
-// $(TARGET): $(SOURCE)
-// 	$(CC) --target=wasm32 -O3 -flto -nostdlib -Wl,--no-entry -Wl,--export-all -o $(TARGET) $(SOURCE)
-
-// clean:
-// 	rm -f $(TARGET)
-
-// .PHONY: clean
-// "#
-//     );
-//     std::fs::write(format!("{target_dir}/Makefile"), makefile)
-//         .map_err(|e| WasmrunError::from(format!("Failed to write Makefile: {e}")))?;
-
-//     // Create main.c
-//     let main_c = r#"// Simple C WASM example
-
-// int add(int a, int b) {
-//     return a + b;
-// }
-
-// int multiply(int a, int b) {
-//     return a * b;
-// }
-
-// int factorial(int n) {
-//     if (n <= 1) return 1;
-//     return n * factorial(n - 1);
-// }
-// "#;
-//     std::fs::write(format!("{target_dir}/main.c"), main_c)
-//         .map_err(|e| WasmrunError::from(format!("Failed to write main.c: {e}")))?;
-
-//     Ok(())
-// }
-
-// fn create_asc_project(target_dir: &str, project_name: &str) -> Result<()> {
-//     // Create package.json
-//     let package_json = format!(
-//         r#"{{
-//   "name": "{project_name}",
-//   "version": "1.0.0",
-//   "description": "AssemblyScript WASM project",
-//   "scripts": {{
-//     "build": "asc assembly/index.ts --target release"
-//   }},
-//   "devDependencies": {{
-//     "assemblyscript": "^0.20.0"
-//   }}
-// }}
-// "#
-//     );
-//     std::fs::write(format!("{target_dir}/package.json"), package_json)
-//         .map_err(|e| WasmrunError::from(format!("Failed to write package.json: {e}")))?;
-
-//     // Create assembly directory and index.ts
-//     std::fs::create_dir_all(format!("{target_dir}/assembly"))
-//         .map_err(|e| WasmrunError::from(format!("Failed to create assembly directory: {e}")))?;
-
-//     let index_ts = r#"// AssemblyScript WASM example
-
-// export function add(a: i32, b: i32): i32 {
-//   return a + b;
-// }
-
-// export function multiply(a: i32, b: i32): i32 {
-//   return a * b;
-// }
-
-// export function fibonacci(n: i32): i32 {
-//   if (n <= 1) return n;
-//   return fibonacci(n - 1) + fibonacci(n - 2);
-// }
-// "#;
-//     std::fs::write(format!("{target_dir}/assembly/index.ts"), index_ts)
-//         .map_err(|e| WasmrunError::from(format!("Failed to write index.ts: {e}")))?;
-
-//     Ok(())
-// }
-
-// fn create_python_project(target_dir: &str, project_name: &str) -> Result<()> {
-//     // Create main.py
-//     let main_py = format!(
-//         r#"# {project_name} - Python to WASM project
-
-// def add(a, b):
-//     """Add two numbers."""
-//     return a + b
-
-// def multiply(a, b):
-//     """Multiply two numbers."""
-//     return a * b
-
-// def greet(name):
-//     """Greet a person."""
-//     print(f"Hello, {{name}}!")
-
-// if __name__ == "__main__":
-//     print("Python WASM project created!")
-//     print(f"2 + 3 = {{add(2, 3)}}")
-//     greet("World")
-// "#
-//     );
-//     std::fs::write(format!("{target_dir}/main.py"), main_py)
-//         .map_err(|e| WasmrunError::from(format!("Failed to write main.py: {e}")))?;
-
-//     // Create requirements.txt
-//     let requirements = "# Python WASM requirements\n# Add your dependencies here\n";
-//     std::fs::write(format!("{target_dir}/requirements.txt"), requirements)
-//         .map_err(|e| WasmrunError::from(format!("Failed to write requirements.txt: {e}")))?;
-
-//     Ok(())
-// }
+    #[test]
+    fn template_names_cover_every_mode() {
+        let names = template_names();
+        for expected in ["rust", "go", "c", "asc", "python", "nodejs", "wasi"] {
+            assert!(names.contains(&expected), "{expected}");
+        }
+    }
+}

@@ -23,20 +23,6 @@ pub trait ProjectDetector {
 
     /// Get the list of entry files that indicate a project of this type
     fn get_entry_files(&self) -> &[&str];
-
-    /// Check if a file has a supported extension
-    fn has_supported_extension(&self, file_path: &str) -> bool {
-        let path = Path::new(file_path);
-        if let Some(extension) = path.extension() {
-            if let Some(ext_str) = extension.to_str() {
-                return self.get_supported_extensions().contains(&ext_str);
-            }
-        }
-        false
-    }
-
-    /// Get the list of supported file extensions
-    fn get_supported_extensions(&self) -> &[&str];
 }
 
 /// Helper functions for project bundling
@@ -135,27 +121,4 @@ pub trait ProjectBundler {
 
     /// Get language-specific dependencies from the project
     fn extract_dependencies(&self, project_path: &str) -> Result<Vec<String>>;
-}
-
-/// Default implementations for common project operations
-pub struct DefaultProjectOps;
-
-impl ProjectDetector for DefaultProjectOps {
-    fn get_entry_files(&self) -> &[&str] {
-        &[]
-    }
-
-    fn get_supported_extensions(&self) -> &[&str] {
-        &[]
-    }
-}
-
-impl ProjectBundler for DefaultProjectOps {
-    fn should_include_file(&self, _file_path: &str) -> bool {
-        true
-    }
-
-    fn extract_dependencies(&self, _project_path: &str) -> Result<Vec<String>> {
-        Ok(vec![])
-    }
 }

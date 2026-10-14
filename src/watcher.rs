@@ -1,4 +1,6 @@
-//! [Server Mode] File watching for `--watch`
+//! File watching for `--watch`: server mode rebuilds or reloads by what
+//! changed (`classify`), OS mode restarts the program on any change
+//! (`changed_paths`). The ignore rules are the same for both.
 
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer, DebouncedEvent, DebouncedEventKind};
@@ -66,6 +68,16 @@ impl ProjectWatcher {
         self.receiver.recv().ok()
     }
 
+    /// Every changed path outside build output and hidden directories.
+    pub fn changed_paths(&self, events: &[DebouncedEvent]) -> Vec<PathBuf> {
+        events
+            .iter()
+            .filter(|e| e.kind == DebouncedEventKind::Any)
+            .map(|e| e.path.clone())
+            .filter(|p| !is_ignored(&self.root, p))
+            .collect()
+    }
+
     pub fn classify(&self, events: &[DebouncedEvent]) -> Change {
         classify_paths(
             &self.root,
@@ -77,14 +89,19 @@ impl ProjectWatcher {
     }
 }
 
+/// Build output, or anything under a hidden directory or file.
+fn is_ignored(root: &Path, path: &Path) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    relative.components().any(|c| {
+        let s = c.as_os_str().to_string_lossy();
+        IGNORED_DIRS.contains(&s.as_ref()) || s.starts_with('.')
+    })
+}
+
 fn classify_paths<'a>(root: &Path, paths: impl Iterator<Item = &'a Path>) -> Change {
     let mut change = Change::None;
     for path in paths {
-        let relative = path.strip_prefix(root).unwrap_or(path);
-        if relative.components().any(|c| {
-            let s = c.as_os_str().to_string_lossy();
-            IGNORED_DIRS.contains(&s.as_ref()) || s.starts_with('.')
-        }) {
+        if is_ignored(root, path) {
             continue;
         }
 

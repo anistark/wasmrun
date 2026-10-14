@@ -103,7 +103,7 @@ spec-suite-fetch:
 
 # Run the spec suite and print the per-file table.
 spec-suite: spec-suite-fetch
-    cargo test --release --bin wasmrun test_spec_core_subset_runs -- --nocapture
+    cargo test --release --bin wasmrun test_spec_core_meets_baseline -- --nocapture
 
 # Check code formatting
 check-format:
@@ -551,3 +551,12 @@ publish-help:
     @echo "  just publish-tag X - Custom tag release (v{{version}}-X)"
     @echo ""
     @echo "Current version: {{version}}"
+
+# The performance baseline: fixed workloads through the release binary.
+# WASMRUN_BENCH_NODEJS names a nodejs runtime for the JavaScript rows.
+bench:
+    cargo test --release --test benchmark -- --ignored --nocapture
+
+# A longer fuzzing run than `just test` does: `just fuzz 200000 7`.
+fuzz iters="50000" seed="1":
+    WASMRUN_FUZZ_ITERS={{iters}} WASMRUN_FUZZ_SEED={{seed}} cargo test --release --bin wasmrun fuzz -- --nocapture

@@ -113,50 +113,11 @@ fn answers(url: &str) -> bool {
         .is_ok_and(|addr| TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok())
 }
 
-#[cfg(unix)]
-fn is_wasmrun(pid: u32) -> bool {
-    std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "comm="])
-        .output()
-        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).contains("wasmrun"))
-}
+use crate::utils::process::is_wasmrun;
 
-#[cfg(windows)]
-fn is_wasmrun(pid: u32) -> bool {
-    std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-        .output()
-        .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).contains("wasmrun"))
-}
-
-#[cfg(unix)]
 fn terminate(pid: u32) -> Result<()> {
-    run_kill(pid, std::process::Command::new("kill").arg(pid.to_string()))
-}
-
-#[cfg(windows)]
-fn terminate(pid: u32) -> Result<()> {
-    run_kill(
-        pid,
-        std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]),
-    )
-}
-
-fn run_kill(pid: u32, command: &mut std::process::Command) -> Result<()> {
-    let output = command.output().map_err(|e| {
-        WasmrunError::Server(ServerError::StopFailed {
-            pid,
-            reason: e.to_string(),
-        })
-    })?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(WasmrunError::Server(ServerError::StopFailed {
-            pid,
-            reason: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        }))
-    }
+    crate::utils::process::terminate(pid)
+        .map_err(|reason| WasmrunError::Server(ServerError::StopFailed { pid, reason }))
 }
 
 #[cfg(test)]

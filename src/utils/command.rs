@@ -48,40 +48,6 @@ impl CommandExecutor {
             })
     }
 
-    /// Execute a command with live output
-    #[allow(dead_code)]
-    pub fn execute_command_with_output(
-        command: &str,
-        args: &[&str],
-        working_dir: &str,
-    ) -> CompilationResult<()> {
-        println!("🔧 Executing: {} {}", command, args.join(" "));
-
-        let status = std::process::Command::new(command)
-            .args(args)
-            .current_dir(working_dir)
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .status()
-            .map_err(|e| CompilationError::ToolExecutionFailed {
-                tool: command.to_string(),
-                reason: e.to_string(),
-            })?;
-
-        if !status.success() {
-            return Err(CompilationError::BuildFailed {
-                language: "Unknown".to_string(),
-                reason: format!(
-                    "Command '{}' failed with exit code: {:?}",
-                    command,
-                    status.code()
-                ),
-            });
-        }
-
-        Ok(())
-    }
-
     /// Copy output file to the target directory
     pub fn copy_to_output(
         source: &str,

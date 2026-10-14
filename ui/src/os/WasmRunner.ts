@@ -29,12 +29,23 @@ interface ProjectFilesResponse {
   skipped: Array<{ path: string; reason: string }>
 }
 
+// `[os.limits]` from the project's wasmrun.toml, defaults applied by the
+// server. 0 means no cap
+interface OsLimits {
+  max_memory_mb: number
+  max_output_mb: number
+  timeout_secs: number
+}
+
 interface RuntimeInfoResponse {
   detected_language: string
   wasmhub_runtime: string
   cached: boolean
   cached_version?: string
+  os?: { entry: string | null; limits: OsLimits }
 }
+
+const MB = 1024 * 1024
 
 const ENTRY_CANDIDATES: Record<string, string[]> = {
   nodejs: [
@@ -70,6 +81,9 @@ export class WasmRunner {
   private callbacks: WasmRunnerCallbacks
   private worker: Worker | null = null
   private net: NetBridge | null = null
+  private timeout: ReturnType<typeof setTimeout> | null = null
+  private outputLeft = Infinity
+  private outputCapped = false
 
   constructor(callbacks: WasmRunnerCallbacks = {}) {
     this.callbacks = callbacks
@@ -93,7 +107,12 @@ export class WasmRunner {
         this.fetchProjectFiles(),
       ])
 
-      const entryFile = this.detectEntryFile(runtimeInfo.detected_language, projectFiles.files)
+      const limits = runtimeInfo.os?.limits
+      const entryFile =
+        runtimeInfo.os?.entry ??
+        this.detectEntryFile(runtimeInfo.detected_language, projectFiles.files)
+      this.outputLeft = limits?.max_output_mb ? limits.max_output_mb * MB : Infinity
+      this.outputCapped = false
 
       // The network, if the proxy is up: outbound connects, and a port to
       // listen on if the policy has one free. Without it the program still
@@ -115,11 +134,21 @@ export class WasmRunner {
         runtimeBytes,
         args: runtimeArgs(runtimeLang, entryFile),
         files: projectFiles.files,
+        maxMemoryBytes: (limits?.max_memory_mb ?? 0) * MB,
         net: this.net
           ? { inbox: this.net.inbox, listenerId: this.net.listener, address: this.net.address }
           : undefined,
       }
       worker.postMessage(message, [runtimeBytes])
+
+      if (limits?.timeout_secs) {
+        this.timeout = setTimeout(() => {
+          this.callbacks.onStderr?.(
+            `Stopped: the program ran past [os.limits] timeout_secs = ${limits.timeout_secs}\n`
+          )
+          this.stop()
+        }, limits.timeout_secs * 1000)
+      }
     } catch (err) {
       this.fail(err instanceof Error ? err : new Error(String(err)))
     }
@@ -128,12 +157,36 @@ export class WasmRunner {
   // Terminating the worker is what makes this work mid-run: the program owns
   // its thread, so nothing cooperative could interrupt it
   stop(): void {
+    this.clearTimeout()
     if (this.worker) {
       this.worker.terminate()
       this.worker = null
     }
     this.closeNet()
     this.setStatus('stopped')
+  }
+
+  private clearTimeout(): void {
+    if (this.timeout) {
+      clearTimeout(this.timeout)
+      this.timeout = null
+    }
+  }
+
+  // [os.limits] max_output_mb: output past the cap is dropped, after one line
+  // saying so, so a runaway loop cannot fill the page's memory
+  private output(text: string, write?: (text: string) => void): void {
+    if (this.outputCapped) return
+    const size = new TextEncoder().encode(text).length
+    if (size > this.outputLeft) {
+      this.outputCapped = true
+      this.callbacks.onStderr?.(
+        '\n[output limit reached: [os.limits] max_output_mb; the rest is dropped]\n'
+      )
+      return
+    }
+    this.outputLeft -= size
+    write?.(text)
   }
 
   private closeNet(): void {
@@ -144,21 +197,23 @@ export class WasmRunner {
   private onWorkerMessage(message: VmToPage): void {
     switch (message.type) {
       case 'stdout':
-        this.callbacks.onStdout?.(message.text)
+        this.output(message.text, this.callbacks.onStdout)
         break
       case 'stderr':
-        this.callbacks.onStderr?.(message.text)
+        this.output(message.text, this.callbacks.onStderr)
         break
       case 'status':
         this.setStatus(message.status, message.detail)
         break
       case 'exit':
+        this.clearTimeout()
         this.worker = null
         this.closeNet()
         this.setStatus('stopped')
         this.callbacks.onExit?.(message.code)
         break
       case 'error':
+        this.clearTimeout()
         this.worker = null
         this.closeNet()
         this.fail(new Error(message.message))

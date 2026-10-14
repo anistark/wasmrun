@@ -1,9 +1,10 @@
 //! Project-level `wasmrun.toml`: configuration that sits next to the code it
 //! describes, as opposed to the global `~/.wasmrun/config.toml`.
 //!
-//! Only `[os.network]` is read today. Unknown tables are ignored on purpose so
-//! the file can grow (`[os]`, `[os.permissions]`) without every older wasmrun
-//! rejecting a project it could otherwise run.
+//! Read today: `[os]` (`language`, `entry`), `[os.limits]` and `[os.network]`.
+//! Unknown tables are ignored on purpose so the file can grow without every
+//! older wasmrun rejecting a project it could otherwise run; unknown keys
+//! inside a table wasmrun does read are an error.
 
 use crate::error::{ConfigError, Result};
 use serde::Deserialize;
@@ -22,7 +23,47 @@ pub struct ProjectConfig {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct OsConfig {
+    /// The language to run the project as, when detection would pick wrong.
+    /// `--language` wins over it.
+    pub language: Option<String>,
+    /// The file the VM runs, relative to the project root. Without it the
+    /// page picks one (package.json `main`, then the usual names).
+    pub entry: Option<String>,
+    pub limits: Option<OsLimitsConfig>,
     pub network: Option<NetworkConfig>,
+}
+
+/// `[os.limits]`: what the program in the browser VM may use. The same units
+/// and the same `0`-means-unlimited convention as agent mode's flags.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OsLimitsConfig {
+    pub max_memory_mb: Option<u32>,
+    pub max_output_mb: Option<u32>,
+    pub timeout_secs: Option<u64>,
+}
+
+/// `[os.limits]` with every default applied, as the page receives it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct OsLimits {
+    /// The VM's linear memory, checked at every WASI call. 0: no cap.
+    pub max_memory_mb: u32,
+    /// Console output kept before the rest is dropped. 0: no cap.
+    pub max_output_mb: u32,
+    /// How long the program may run. 0, the default: until it is stopped,
+    /// since an OS mode project is usually a server.
+    pub timeout_secs: u64,
+}
+
+impl Default for OsLimits {
+    /// Agent mode's defaults for the two it shares.
+    fn default() -> Self {
+        Self {
+            max_memory_mb: 256,
+            max_output_mb: 10,
+            timeout_secs: 0,
+        }
+    }
 }
 
 /// The `[os.network]` table, mapped onto wasmnet's policy.
@@ -73,6 +114,41 @@ impl ProjectConfig {
             Some(network) => network.to_policy_config(),
             None => Ok(PolicyConfig::default()),
         }
+    }
+
+    /// `[os.limits]`, defaults filled in.
+    pub fn os_limits(&self) -> OsLimits {
+        let defaults = OsLimits::default();
+        match &self.os.limits {
+            None => defaults,
+            Some(l) => OsLimits {
+                max_memory_mb: l.max_memory_mb.unwrap_or(defaults.max_memory_mb),
+                max_output_mb: l.max_output_mb.unwrap_or(defaults.max_output_mb),
+                timeout_secs: l.timeout_secs.unwrap_or(defaults.timeout_secs),
+            },
+        }
+    }
+
+    /// `[os] entry`, checked: a path inside the project, as the VM sees it
+    /// (`/src/server.js`). A path that leaves the project is an error, not
+    /// something to quietly ignore.
+    pub fn os_entry(&self) -> Result<Option<String>> {
+        let Some(entry) = &self.os.entry else {
+            return Ok(None);
+        };
+        let trimmed = entry.trim_start_matches("./");
+        if trimmed.is_empty()
+            || trimmed.starts_with('/')
+            || trimmed.split(['/', '\\']).any(|part| part == "..")
+        {
+            return Err(ConfigError::ParseError {
+                message: format!(
+                    "[os] entry: '{entry}' must be a path inside the project, like 'src/server.js'"
+                ),
+            }
+            .into());
+        }
+        Ok(Some(format!("/{trimmed}")))
     }
 
     /// Whether the project asked for a policy of its own, which is worth
@@ -276,6 +352,49 @@ fn validate_bind_ports(table: &str, spec: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse(toml_text: &str) -> ProjectConfig {
+        toml::from_str(toml_text).unwrap()
+    }
+
+    #[test]
+    fn os_language_entry_and_limits_are_read() {
+        let config = parse(
+            "[os]\nlanguage = \"nodejs\"\nentry = \"./src/server.js\"\n\n[os.limits]\nmax_memory_mb = 64\ntimeout_secs = 30\n",
+        );
+        assert_eq!(config.os.language.as_deref(), Some("nodejs"));
+        assert_eq!(
+            config.os_entry().unwrap().as_deref(),
+            Some("/src/server.js")
+        );
+        assert_eq!(
+            config.os_limits(),
+            OsLimits {
+                max_memory_mb: 64,
+                max_output_mb: 10,
+                timeout_secs: 30
+            }
+        );
+    }
+
+    #[test]
+    fn os_limits_default_without_a_table() {
+        assert_eq!(parse("").os_limits(), OsLimits::default());
+        assert_eq!(parse("").os_entry().unwrap(), None);
+    }
+
+    #[test]
+    fn an_entry_outside_the_project_is_refused() {
+        for bad in ["../x.js", "/etc/passwd", "a/../../b.js", ""] {
+            let config = parse(&format!("[os]\nentry = \"{bad}\"\n"));
+            assert!(config.os_entry().is_err(), "{bad} should be refused");
+        }
+    }
+
+    #[test]
+    fn an_unknown_limit_is_an_error_not_a_no_op() {
+        assert!(toml::from_str::<ProjectConfig>("[os.limits]\nmax_memroy_mb = 1\n").is_err());
+    }
     use std::fs;
     use tempfile::TempDir;
 

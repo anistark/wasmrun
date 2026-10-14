@@ -3,7 +3,6 @@ export interface KernelStats {
   active_processes: number
   total_memory_usage: number
   active_runtimes: string[]
-  active_dev_servers: number
   project_pid: number | null
   // System information
   os: string
@@ -18,7 +17,6 @@ export interface KernelStats {
 export interface FilesystemStats {
   total_mounts: number
   total_size: number
-  open_fds: number
   mounts: Array<{
     guest_path: string
     host_path: string

@@ -1,7 +1,7 @@
 use crate::error::{Result, WasmrunError};
 use crate::plugin::registry::PluginRegistry;
 use crate::utils::{PluginUtils, SystemUtils};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Candidate dynamic-library file names for a plugin, in platform-preferred order.
 ///
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 /// the MSVC and MinGW toolchains drop the `lib` prefix and emit `<name>.dll`.
 /// Checking only `lib<name>.dll` is why `plugin install` failed on Windows with
 /// "Dynamic library not found after build".
-fn dynamic_lib_candidates(plugin_name: &str) -> Vec<String> {
+pub(crate) fn dynamic_lib_candidates(plugin_name: &str) -> Vec<String> {
     if cfg!(target_os = "windows") {
         vec![
             format!("{plugin_name}.dll"),
@@ -26,17 +26,14 @@ pub struct PluginInstaller;
 
 #[derive(Debug, Clone)]
 pub struct InstallationResult {
-    #[allow(dead_code)]
-    pub plugin_name: String,
     pub version: String,
     pub binary_installed: bool,
     pub binary_already_installed: bool,
 }
 
 impl InstallationResult {
-    pub fn new(plugin_name: &str) -> Self {
+    pub fn new() -> Self {
         Self {
-            plugin_name: plugin_name.to_string(),
             version: String::new(),
             binary_installed: false,
             binary_already_installed: false,
@@ -44,18 +41,9 @@ impl InstallationResult {
     }
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct PluginVerificationResult {
-    pub is_functional: bool,
-    pub version: String,
-    pub missing_dependencies: Vec<String>,
-    pub install_path: String,
-}
-
 impl PluginInstaller {
     pub fn install_external_plugin(plugin_name: &str) -> Result<InstallationResult> {
-        let mut result = InstallationResult::new(plugin_name);
+        let mut result = InstallationResult::new();
 
         if !SystemUtils::is_tool_available("cargo") {
             return Err(WasmrunError::from(
@@ -121,21 +109,6 @@ impl PluginInstaller {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn setup_plugin_directory(plugin_name: &str) -> Result<PathBuf> {
-        let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
-
-        std::fs::create_dir_all(&plugin_dir)
-            .map_err(|e| WasmrunError::from(format!("Failed to create plugin directory: {e}")))?;
-
-        Self::create_plugin_manifest(plugin_name, &plugin_dir)?;
-        let version = SystemUtils::get_latest_crates_version(plugin_name)
-            .unwrap_or_else(|| "unknown".to_string());
-        PluginUtils::create_metadata_file(plugin_name, &plugin_dir, &version)?;
-
-        Ok(plugin_dir)
-    }
-
     pub fn remove_plugin_directory(plugin_name: &str) -> Result<()> {
         let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
         if plugin_dir.exists() {
@@ -143,78 +116,6 @@ impl PluginInstaller {
                 WasmrunError::from(format!("Failed to remove plugin directory: {e}"))
             })?;
         }
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn verify_plugin_installation(plugin_name: &str) -> Result<PluginVerificationResult> {
-        let validation = PluginUtils::validate_plugin_installation(plugin_name)?;
-
-        Ok(PluginVerificationResult {
-            is_functional: validation.is_functional,
-            version: validation.version.unwrap_or_else(|| "unknown".to_string()),
-            missing_dependencies: validation.missing_dependencies,
-            install_path: validation.install_path.unwrap_or_default(),
-        })
-    }
-
-    #[allow(dead_code)]
-    pub fn update_generic_plugin(plugin_name: &str) -> Result<()> {
-        println!("🔄 Updating {plugin_name}...");
-
-        let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
-
-        let output = std::process::Command::new("cargo")
-            .args([
-                "install",
-                plugin_name,
-                "--force",
-                "--root",
-                &plugin_dir.to_string_lossy(),
-                "--features",
-                "cli",
-            ])
-            .output()
-            .map_err(|e| WasmrunError::from(format!("Failed to update plugin: {e}")))?;
-
-        if output.status.success() {
-            println!("✅ Plugin {plugin_name} updated successfully");
-
-            if let Some(latest_version) = SystemUtils::get_latest_crates_version(plugin_name) {
-                Self::update_plugin_metadata(plugin_name, &latest_version)?;
-            }
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(WasmrunError::from(format!(
-                "Plugin update failed: {stderr}"
-            )));
-        }
-
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn cleanup_generic_plugin(plugin_name: &str) -> Result<()> {
-        let plugin_dir = PluginUtils::get_plugin_directory(plugin_name)?;
-
-        if plugin_dir.exists() {
-            let target_dir = plugin_dir.join("target");
-            if target_dir.exists() {
-                std::fs::remove_dir_all(&target_dir).map_err(|e| {
-                    WasmrunError::from(format!("Failed to clean target directory: {e}"))
-                })?;
-            }
-
-            let pkg_dir = plugin_dir.join("pkg");
-            if pkg_dir.exists() {
-                std::fs::remove_dir_all(&pkg_dir).map_err(|e| {
-                    WasmrunError::from(format!("Failed to clean pkg directory: {e}"))
-                })?;
-            }
-
-            println!("✅ Cleaned {plugin_name} build artifacts");
-        }
-
         Ok(())
     }
 
@@ -263,7 +164,7 @@ impl PluginInstaller {
     fn install_library_plugin(plugin_name: &str, plugin_dir: &Path) -> Result<InstallationResult> {
         println!("📚 Installing library-only plugin: {plugin_name}");
 
-        let mut result = InstallationResult::new(plugin_name);
+        let mut result = InstallationResult::new();
 
         // Download the crate source
         println!("📥 Downloading {plugin_name} from crates.io...");
@@ -430,7 +331,7 @@ crate-type = ["cdylib", "rlib"]
     fn install_generic_plugin(plugin_name: &str, plugin_dir: &Path) -> Result<InstallationResult> {
         println!("Installing {plugin_name} plugin via cargo...");
 
-        let mut result = InstallationResult::new(plugin_name);
+        let mut result = InstallationResult::new();
 
         let created_dir = !plugin_dir.exists();
         std::fs::create_dir_all(plugin_dir)
@@ -604,32 +505,6 @@ dependencies = {dependencies:?}
 
         std::fs::write(&metadata_path, metadata_content)
             .map_err(|e| WasmrunError::from(format!("Failed to write basic metadata: {e}")))?;
-
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    fn create_plugin_manifest(plugin_name: &str, plugin_dir: &Path) -> Result<()> {
-        let manifest_content = format!(
-            r#"[plugin]
-name = "{plugin_name}"
-version = "0.1.0"
-description = "WebAssembly plugin for wasmrun"
-type = "external"
-
-[build]
-command = "cargo"
-args = ["build", "--release"]
-
-[install]
-method = "cargo"
-source = "crates.io"
-"#
-        );
-
-        let manifest_path = plugin_dir.join("wasmrun.toml");
-        std::fs::write(&manifest_path, manifest_content)
-            .map_err(|e| WasmrunError::from(format!("Failed to create plugin manifest: {e}")))?;
 
         Ok(())
     }

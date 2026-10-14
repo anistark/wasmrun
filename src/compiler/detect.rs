@@ -16,7 +16,7 @@ pub enum ProjectLanguage {
 
 /// Supported OS
 #[derive(Debug, PartialEq)]
-#[allow(dead_code)] // TODO: Future OS-specific compilation features
+#[allow(dead_code)] // each variant is only constructed on its own target_os
 pub enum OperatingSystem {
     Windows,
     MacOS,
@@ -208,13 +208,6 @@ pub fn is_tool_installed(tool_name: &str) -> bool {
 /// Get missing tools for a given language
 pub fn get_missing_tools(language: &ProjectLanguage, os: &OperatingSystem) -> Vec<String> {
     get_recommended_tools(language, os)
-}
-
-/// Print system information
-#[allow(dead_code)] // TODO: Use for debugging/verbose output
-pub fn print_system_info() {
-    let os = detect_operating_system();
-    println!("💻 System: {os:?}");
 }
 
 impl fmt::Display for ProjectLanguage {

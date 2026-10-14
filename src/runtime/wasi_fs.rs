@@ -10,23 +10,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-/// WASI file descriptor type
-pub type WasiFd = u32;
-
 /// WASI filesystem manager for OS mode
-#[allow(dead_code)]
 pub struct WasiFilesystem {
     mounts: Arc<RwLock<HashMap<String, PathBuf>>>,
-    fd_table: Arc<RwLock<HashMap<WasiFd, OpenFile>>>,
-    next_fd: Arc<RwLock<WasiFd>>,
     config: WasiConfig,
 }
 
 /// WASI filesystem configuration
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct WasiConfig {
-    pub allow_host_access: bool,
     pub read_only: bool,
     pub max_file_size: usize,
 }
@@ -34,40 +26,8 @@ pub struct WasiConfig {
 impl Default for WasiConfig {
     fn default() -> Self {
         Self {
-            allow_host_access: true,
             read_only: false,
             max_file_size: 100 * 1024 * 1024, // 100 MB
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-struct OpenFile {
-    path: PathBuf,
-    flags: OpenFlags,
-    offset: usize,
-    virtual_path: String,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
-pub struct OpenFlags {
-    pub read: bool,
-    pub write: bool,
-    pub append: bool,
-    pub create: bool,
-    pub truncate: bool,
-}
-
-impl Default for OpenFlags {
-    fn default() -> Self {
-        Self {
-            read: true,
-            write: false,
-            append: false,
-            create: false,
-            truncate: false,
         }
     }
 }
@@ -78,7 +38,6 @@ impl Default for WasiFilesystem {
     }
 }
 
-#[allow(dead_code)]
 impl WasiFilesystem {
     /// Create a new WASI filesystem manager
     pub fn new() -> Self {
@@ -89,8 +48,6 @@ impl WasiFilesystem {
     pub fn with_config(config: WasiConfig) -> Self {
         Self {
             mounts: Arc::new(RwLock::new(HashMap::new())),
-            fd_table: Arc::new(RwLock::new(HashMap::new())),
-            next_fd: Arc::new(RwLock::new(3)), // 0, 1, 2 reserved for stdin, stdout, stderr
             config,
         }
     }
@@ -126,167 +83,6 @@ impl WasiFilesystem {
         Ok(())
     }
 
-    /// Unmount a virtual path
-    pub fn unmount(&self, guest_path: &str) -> Option<PathBuf> {
-        let mut mounts = self.mounts.write().unwrap();
-        mounts.remove(guest_path)
-    }
-
-    /// List all current mounts
-    pub fn list_mounts(&self) -> Vec<(String, PathBuf)> {
-        let mounts = self.mounts.read().unwrap();
-        mounts.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-    }
-
-    /// WASI path_open - Open or create a file
-    pub fn path_open(&self, virtual_path: &str, flags: OpenFlags) -> Result<WasiFd> {
-        if self.config.read_only && (flags.write || flags.create) {
-            anyhow::bail!("Filesystem is in read-only mode");
-        }
-
-        let host_path = self.resolve_path(virtual_path)?;
-
-        // Create the file if needed
-        if flags.create && !host_path.exists() {
-            if let Some(parent) = host_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::File::create(&host_path)?;
-        }
-
-        // Verify the file exists
-        if !host_path.exists() {
-            anyhow::bail!("File not found: {virtual_path}");
-        }
-
-        // Truncate if requested
-        if flags.truncate && host_path.is_file() {
-            fs::File::create(&host_path)?;
-        }
-
-        // Allocate a file descriptor
-        let fd = {
-            let mut next_fd = self.next_fd.write().unwrap();
-            let fd = *next_fd;
-            *next_fd += 1;
-            fd
-        };
-
-        // Store the open file information
-        let mut fd_table = self.fd_table.write().unwrap();
-        fd_table.insert(
-            fd,
-            OpenFile {
-                path: host_path,
-                flags,
-                offset: 0, // Will be set to end in first write for append mode
-                virtual_path: virtual_path.to_string(),
-            },
-        );
-
-        Ok(fd)
-    }
-
-    /// WASI fd_read - Read from a file descriptor
-    pub fn fd_read(&self, fd: WasiFd, count: usize) -> Result<Vec<u8>> {
-        let mut fd_table = self.fd_table.write().unwrap();
-        let open_file = fd_table
-            .get_mut(&fd)
-            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {fd}"))?;
-
-        if !open_file.flags.read {
-            anyhow::bail!("File not open for reading");
-        }
-
-        let data = fs::read(&open_file.path)?;
-        let start = open_file.offset.min(data.len());
-        let end = (start + count).min(data.len());
-        let result = data[start..end].to_vec();
-
-        open_file.offset = end;
-        Ok(result)
-    }
-
-    /// WASI fd_write - Write to a file descriptor
-    pub fn fd_write(&self, fd: WasiFd, data: &[u8]) -> Result<usize> {
-        if self.config.read_only {
-            anyhow::bail!("Filesystem is in read-only mode");
-        }
-
-        if data.len() > self.config.max_file_size {
-            anyhow::bail!("File size exceeds maximum allowed size");
-        }
-
-        let mut fd_table = self.fd_table.write().unwrap();
-        let open_file = fd_table
-            .get_mut(&fd)
-            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {fd}"))?;
-
-        if !open_file.flags.write {
-            anyhow::bail!("File not open for writing");
-        }
-
-        if open_file.flags.append {
-            // Append mode: write to end of file
-            let mut file = fs::OpenOptions::new().append(true).open(&open_file.path)?;
-            std::io::Write::write_all(&mut file, data)?;
-            open_file.offset += data.len();
-        } else {
-            // Write mode: write at current offset
-            let mut content = if open_file.path.exists() {
-                fs::read(&open_file.path)?
-            } else {
-                Vec::new()
-            };
-
-            // Expand content if needed
-            if open_file.offset + data.len() > content.len() {
-                content.resize(open_file.offset + data.len(), 0);
-            }
-
-            // Write data at offset
-            content[open_file.offset..open_file.offset + data.len()].copy_from_slice(data);
-            fs::write(&open_file.path, &content)?;
-            open_file.offset += data.len();
-        }
-
-        Ok(data.len())
-    }
-
-    /// WASI fd_close - Close a file descriptor
-    pub fn fd_close(&self, fd: WasiFd) -> Result<()> {
-        let mut fd_table = self.fd_table.write().unwrap();
-        fd_table
-            .remove(&fd)
-            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {fd}"))?;
-        Ok(())
-    }
-
-    /// WASI fd_seek - Seek to a position in a file
-    pub fn fd_seek(&self, fd: WasiFd, offset: i64, whence: SeekWhence) -> Result<usize> {
-        let mut fd_table = self.fd_table.write().unwrap();
-        let open_file = fd_table
-            .get_mut(&fd)
-            .ok_or_else(|| anyhow::anyhow!("Invalid file descriptor: {fd}"))?;
-
-        let file_size = fs::metadata(&open_file.path)?.len() as usize;
-
-        let new_offset = match whence {
-            SeekWhence::Start => offset.max(0) as usize,
-            SeekWhence::Current => {
-                let current = open_file.offset as i64;
-                (current + offset).max(0) as usize
-            }
-            SeekWhence::End => {
-                let end = file_size as i64;
-                (end + offset).max(0) as usize
-            }
-        };
-
-        open_file.offset = new_offset;
-        Ok(new_offset)
-    }
-
     /// WASI path_create_directory - Create a directory
     pub fn path_create_directory(&self, virtual_path: &str) -> Result<()> {
         if self.config.read_only {
@@ -296,18 +92,6 @@ impl WasiFilesystem {
         let host_path = self.resolve_path(virtual_path)?;
         fs::create_dir_all(&host_path)
             .with_context(|| format!("Failed to create directory: {virtual_path}"))?;
-        Ok(())
-    }
-
-    /// WASI path_remove_directory - Remove a directory
-    pub fn path_remove_directory(&self, virtual_path: &str) -> Result<()> {
-        if self.config.read_only {
-            anyhow::bail!("Filesystem is in read-only mode");
-        }
-
-        let host_path = self.resolve_path(virtual_path)?;
-        fs::remove_dir(&host_path)
-            .with_context(|| format!("Failed to remove directory: {virtual_path}"))?;
         Ok(())
     }
 
@@ -341,28 +125,6 @@ impl WasiFilesystem {
             .collect();
 
         entries
-    }
-
-    /// WASI path_filestat_get - Get file/directory metadata
-    pub fn path_filestat_get(&self, virtual_path: &str) -> Result<FileStats> {
-        let host_path = self.resolve_path(virtual_path)?;
-        let metadata = fs::metadata(&host_path)?;
-
-        Ok(FileStats {
-            is_file: metadata.is_file(),
-            is_dir: metadata.is_dir(),
-            size: metadata.len(),
-            accessed: metadata.accessed().ok(),
-            modified: metadata.modified().ok(),
-            created: metadata.created().ok(),
-        })
-    }
-
-    /// Check if a path exists
-    pub fn path_exists(&self, virtual_path: &str) -> bool {
-        self.resolve_path(virtual_path)
-            .map(|p| p.exists())
-            .unwrap_or(false)
     }
 
     /// Read entire file contents (helper function)
@@ -407,13 +169,9 @@ impl WasiFilesystem {
             .filter_map(|path| Self::calculate_dir_size(path).ok())
             .sum();
 
-        let fd_table = self.fd_table.read().unwrap();
-        let open_fds = fd_table.len();
-
         WasiFilesystemStats {
             total_mounts,
             total_size,
-            open_fds,
             mounts: mounts
                 .iter()
                 .map(|(k, v)| MountInfo {
@@ -492,15 +250,6 @@ impl WasiFilesystem {
     }
 }
 
-/// Seek position reference
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SeekWhence {
-    Start,
-    Current,
-    End,
-}
-
 /// Directory entry information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirEntry {
@@ -510,23 +259,11 @@ pub struct DirEntry {
     pub size: u64,
 }
 
-/// File statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileStats {
-    pub is_file: bool,
-    pub is_dir: bool,
-    pub size: u64,
-    pub accessed: Option<std::time::SystemTime>,
-    pub modified: Option<std::time::SystemTime>,
-    pub created: Option<std::time::SystemTime>,
-}
-
 /// Statistics about the WASI filesystem
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WasiFilesystemStats {
     pub total_mounts: usize,
     pub total_size: u64,
-    pub open_fds: usize,
     pub mounts: Vec<MountInfo>,
 }
 
@@ -546,7 +283,7 @@ mod tests {
     #[test]
     fn test_wasi_filesystem_creation() {
         let fs = WasiFilesystem::new();
-        assert_eq!(fs.list_mounts().len(), 0);
+        assert_eq!(fs.get_stats().total_mounts, 0);
     }
 
     #[test]
@@ -555,9 +292,9 @@ mod tests {
         let temp = tempdir().unwrap();
 
         fs.mount("/test", temp.path()).unwrap();
-        let mounts = fs.list_mounts();
+        let mounts = fs.get_stats().mounts;
         assert_eq!(mounts.len(), 1);
-        assert_eq!(mounts[0].0, "/test");
+        assert_eq!(mounts[0].guest_path, "/test");
     }
 
     #[test]
@@ -565,19 +302,6 @@ mod tests {
         let fs = WasiFilesystem::new();
         let result = fs.mount("/test", "/nonexistent/path");
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_unmount() {
-        let fs = WasiFilesystem::new();
-        let temp = tempdir().unwrap();
-
-        fs.mount("/test", temp.path()).unwrap();
-        assert_eq!(fs.list_mounts().len(), 1);
-
-        let unmounted = fs.unmount("/test");
-        assert!(unmounted.is_some());
-        assert_eq!(fs.list_mounts().len(), 0);
     }
 
     #[test]
@@ -602,53 +326,17 @@ mod tests {
 
         // Create directory
         fs.path_create_directory("/test/subdir").unwrap();
-        assert!(fs.path_exists("/test/subdir"));
+        assert!(temp.path().join("subdir").is_dir());
 
         // Write file in subdirectory
         fs.write_file("/test/subdir/file.txt", b"content").unwrap();
-
-        // Check file stats
-        let stats = fs.path_filestat_get("/test/subdir/file.txt").unwrap();
-        assert!(stats.is_file);
-        assert_eq!(stats.size, 7);
+        assert_eq!(fs.read_file("/test/subdir/file.txt").unwrap(), b"content");
 
         // List directory
         let entries = fs.path_readdir("/test").unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "subdir");
         assert!(entries[0].is_dir);
-    }
-
-    #[test]
-    fn test_fd_operations() {
-        let fs = WasiFilesystem::new();
-        let temp = tempdir().unwrap();
-        fs.mount("/test", temp.path()).unwrap();
-
-        // Create a file
-        fs.write_file("/test/test.txt", b"Hello, World!").unwrap();
-
-        // Open for reading
-        let fd = fs
-            .path_open(
-                "/test/test.txt",
-                OpenFlags {
-                    read: true,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-
-        // Read data
-        let data = fs.fd_read(fd, 5).unwrap();
-        assert_eq!(data, b"Hello");
-
-        // Read more
-        let data = fs.fd_read(fd, 7).unwrap();
-        assert_eq!(data, b", World");
-
-        // Close
-        fs.fd_close(fd).unwrap();
     }
 
     #[test]

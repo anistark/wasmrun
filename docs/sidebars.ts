@@ -67,6 +67,8 @@ const sidebars: SidebarsConfig = {
         },
         'exec/languages',
         'exec/wasi',
+        'exec/networking',
+        'exec/performance',
       ],
     },
   ],
@@ -88,6 +90,7 @@ const sidebars: SidebarsConfig = {
             'agent/usage/files',
             'agent/usage/environment',
             'agent/usage/observability',
+            'agent/usage/serving',
           ],
         },
         'agent/deployment',
@@ -118,6 +121,16 @@ const sidebars: SidebarsConfig = {
         'os/port-forwarding',
         'os/public-tunneling',
       ],
+    },
+  ],
+
+  ps: [
+    {
+      type: 'category',
+      label: 'Process Manager',
+      collapsed: false,
+      link: { type: 'doc', id: 'ps/index' },
+      items: ['ps/configuration', 'ps/commands'],
     },
   ],
 

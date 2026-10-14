@@ -8,9 +8,7 @@ use crate::plugin::metadata::PluginMetadata;
 use crate::plugin::{Plugin, PluginInfo};
 use crate::utils::{PluginUtils, SystemUtils};
 
-#[cfg(not(target_os = "windows"))]
 use crate::plugin::bridge::symbols;
-#[cfg(not(target_os = "windows"))]
 use libloading::Library;
 
 /// Generic wrapper for all external plugins (no hardcoding)
@@ -18,7 +16,6 @@ pub struct ExternalPluginWrapper {
     info: PluginInfo,
     plugin_name: String,
     metadata: PluginMetadata,
-    #[cfg(not(target_os = "windows"))]
     library: Option<Arc<Library>>,
 }
 
@@ -38,22 +35,19 @@ impl ExternalPluginWrapper {
 
         metadata.validate()?;
 
-        #[cfg(not(target_os = "windows"))]
         let library = Self::try_load_library(&plugin_name, &plugin_path)?;
 
         Ok(Self {
             info: entry.info,
             plugin_name,
             metadata,
-            #[cfg(not(target_os = "windows"))]
             library,
         })
     }
 
-    #[cfg(not(target_os = "windows"))]
+    /// The plugin's cdylib, if it has one: `lib<name>.so`, `lib<name>.dylib`,
+    /// or on Windows `<name>.dll`, which has no `lib` prefix.
     fn try_load_library(plugin_name: &str, plugin_path: &Path) -> Result<Option<Arc<Library>>> {
-        let lib_extensions = ["so", "dylib"];
-
         let search_paths = [
             plugin_path.to_path_buf(),
             plugin_path.join("target/release"),
@@ -61,8 +55,8 @@ impl ExternalPluginWrapper {
         ];
 
         for search_path in &search_paths {
-            for ext in &lib_extensions {
-                let path = search_path.join(format!("lib{plugin_name}.{ext}"));
+            for file in crate::plugin::installer::dynamic_lib_candidates(plugin_name) {
+                let path = search_path.join(file);
                 if path.exists() {
                     unsafe {
                         match Library::new(&path) {
@@ -122,7 +116,6 @@ impl Plugin for ExternalPluginWrapper {
     }
 
     fn can_handle_project(&self, path: &str) -> bool {
-        #[cfg(not(target_os = "windows"))]
         {
             if let Some(library) = &self.library {
                 if let Some(exports) = &self.metadata.exports {
@@ -154,7 +147,6 @@ impl Plugin for ExternalPluginWrapper {
         Box::new(ExternalWasmBuilder::new(
             self.plugin_name.clone(),
             self.metadata.clone(),
-            #[cfg(not(target_os = "windows"))]
             self.library.clone(),
         ))
     }
@@ -164,7 +156,6 @@ impl Plugin for ExternalPluginWrapper {
 pub struct ExternalWasmBuilder {
     plugin_name: String,
     metadata: PluginMetadata,
-    #[cfg(not(target_os = "windows"))]
     library: Option<Arc<Library>>,
 }
 
@@ -172,12 +163,11 @@ impl ExternalWasmBuilder {
     pub fn new(
         plugin_name: String,
         metadata: PluginMetadata,
-        #[cfg(not(target_os = "windows"))] library: Option<Arc<Library>>,
+        library: Option<Arc<Library>>,
     ) -> Self {
         Self {
             plugin_name,
             metadata,
-            #[cfg(not(target_os = "windows"))]
             library,
         }
     }
@@ -240,7 +230,6 @@ impl ExternalWasmBuilder {
 
 impl WasmBuilder for ExternalWasmBuilder {
     fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
-        #[cfg(not(target_os = "windows"))]
         {
             if let Some(library) = &self.library {
                 unsafe {
@@ -363,7 +352,6 @@ impl WasmBuilder for ExternalWasmBuilder {
     }
 
     fn clean(&self, project_path: &str) -> Result<()> {
-        #[cfg(not(target_os = "windows"))]
         {
             if let Some(library) = &self.library {
                 if let Some(exports) = &self.metadata.exports {
@@ -399,7 +387,6 @@ impl WasmBuilder for ExternalWasmBuilder {
         Box::new(ExternalWasmBuilder::new(
             self.plugin_name.clone(),
             self.metadata.clone(),
-            #[cfg(not(target_os = "windows"))]
             self.library.clone(),
         ))
     }
@@ -544,12 +531,7 @@ mod tests {
     #[test]
     fn test_external_wasm_builder_new() {
         let metadata = create_mock_metadata();
-        let builder = ExternalWasmBuilder::new(
-            "test_plugin".to_string(),
-            metadata,
-            #[cfg(not(target_os = "windows"))]
-            None,
-        );
+        let builder = ExternalWasmBuilder::new("test_plugin".to_string(), metadata, None);
 
         assert_eq!(builder.language_name(), "test_plugin");
         assert_eq!(builder.entry_file_candidates().len(), 0); // Returns empty slice
@@ -560,12 +542,7 @@ mod tests {
     fn test_external_wasm_builder_can_handle_project() {
         let temp_dir = tempdir().unwrap();
         let metadata = create_mock_metadata();
-        let builder = ExternalWasmBuilder::new(
-            "test_plugin".to_string(),
-            metadata,
-            #[cfg(not(target_os = "windows"))]
-            None,
-        );
+        let builder = ExternalWasmBuilder::new("test_plugin".to_string(), metadata, None);
 
         // Test with empty directory
         assert!(!builder.can_handle_project(temp_dir.path().to_str().unwrap()));
@@ -580,12 +557,7 @@ mod tests {
     fn test_external_wasm_builder_can_handle_project_by_extension() {
         let temp_dir = tempdir().unwrap();
         let metadata = create_mock_metadata();
-        let builder = ExternalWasmBuilder::new(
-            "test_plugin".to_string(),
-            metadata,
-            #[cfg(not(target_os = "windows"))]
-            None,
-        );
+        let builder = ExternalWasmBuilder::new("test_plugin".to_string(), metadata, None);
 
         // Test with matching extension
         let test_file = temp_dir.path().join("example.test");
@@ -597,12 +569,7 @@ mod tests {
     fn test_external_wasm_builder_validate_project() {
         let temp_dir = tempdir().unwrap();
         let metadata = create_mock_metadata();
-        let builder = ExternalWasmBuilder::new(
-            "test_plugin".to_string(),
-            metadata,
-            #[cfg(not(target_os = "windows"))]
-            None,
-        );
+        let builder = ExternalWasmBuilder::new("test_plugin".to_string(), metadata, None);
 
         // Test with non-existent path
         let result = builder.validate_project("/nonexistent/path");
@@ -622,12 +589,7 @@ mod tests {
     #[test]
     fn test_external_wasm_builder_check_dependencies() {
         let metadata = create_mock_metadata();
-        let builder = ExternalWasmBuilder::new(
-            "test_plugin".to_string(),
-            metadata,
-            #[cfg(not(target_os = "windows"))]
-            None,
-        );
+        let builder = ExternalWasmBuilder::new("test_plugin".to_string(), metadata, None);
 
         let missing_deps = builder.check_dependencies();
         // test_tool should be missing (unless coincidentally installed)
@@ -637,12 +599,7 @@ mod tests {
     #[test]
     fn test_external_wasm_builder_clone() {
         let metadata = create_mock_metadata();
-        let builder = ExternalWasmBuilder::new(
-            "test_plugin".to_string(),
-            metadata,
-            #[cfg(not(target_os = "windows"))]
-            None,
-        );
+        let builder = ExternalWasmBuilder::new("test_plugin".to_string(), metadata, None);
 
         let cloned_builder = builder.clone_box();
         assert_eq!(builder.language_name(), cloned_builder.language_name());
@@ -652,12 +609,7 @@ mod tests {
     fn test_external_wasm_builder_clean() {
         let temp_dir = tempdir().unwrap();
         let metadata = create_mock_metadata();
-        let builder = ExternalWasmBuilder::new(
-            "test_plugin".to_string(),
-            metadata,
-            #[cfg(not(target_os = "windows"))]
-            None,
-        );
+        let builder = ExternalWasmBuilder::new("test_plugin".to_string(), metadata, None);
 
         // Create some build directories
         let target_dir = temp_dir.path().join("target");
@@ -681,12 +633,8 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let output_dir = tempdir().unwrap();
         let metadata = create_mock_metadata();
-        let builder = ExternalWasmBuilder::new(
-            "nonexistent_plugin_12345".to_string(),
-            metadata,
-            #[cfg(not(target_os = "windows"))]
-            None,
-        );
+        let builder =
+            ExternalWasmBuilder::new("nonexistent_plugin_12345".to_string(), metadata, None);
 
         let config = BuildConfig {
             project_path: temp_dir.path().to_str().unwrap().to_string(),
@@ -770,12 +718,7 @@ mod tests {
     fn test_external_plugin_path_handling() {
         let temp_dir = tempdir().unwrap();
         let metadata = create_mock_metadata();
-        let builder = ExternalWasmBuilder::new(
-            "test_plugin".to_string(),
-            metadata,
-            #[cfg(not(target_os = "windows"))]
-            None,
-        );
+        let builder = ExternalWasmBuilder::new("test_plugin".to_string(), metadata, None);
 
         // Test path handling for various scenarios
         assert!(!builder.can_handle_project(""));
@@ -791,12 +734,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let output_dir = tempdir().unwrap();
         let metadata = create_mock_metadata();
-        let builder = ExternalWasmBuilder::new(
-            "test_plugin".to_string(),
-            metadata,
-            #[cfg(not(target_os = "windows"))]
-            None,
-        );
+        let builder = ExternalWasmBuilder::new("test_plugin".to_string(), metadata, None);
 
         // Test different build configurations
         let configs = vec![
@@ -827,7 +765,6 @@ mod tests {
 }
 
 /// New API - WasmBuilder that directly interfaces with plugin library
-#[cfg(not(target_os = "windows"))]
 #[allow(clippy::items_after_test_module)]
 pub struct NewApiWasmBuilder {
     #[allow(dead_code)] // Used in clone_box() method
@@ -837,12 +774,9 @@ pub struct NewApiWasmBuilder {
     plugin_ptr: *mut std::ffi::c_void,
 }
 
-#[cfg(not(target_os = "windows"))]
 unsafe impl Send for NewApiWasmBuilder {}
-#[cfg(not(target_os = "windows"))]
 unsafe impl Sync for NewApiWasmBuilder {}
 
-#[cfg(not(target_os = "windows"))]
 impl NewApiWasmBuilder {
     pub fn new(
         plugin_name: String,
@@ -877,7 +811,6 @@ impl NewApiWasmBuilder {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
 impl WasmBuilder for NewApiWasmBuilder {
     fn build(&self, config: &BuildConfig) -> CompilationResult<BuildResult> {
         use std::fs;
@@ -1153,7 +1086,6 @@ impl WasmBuilder for NewApiWasmBuilder {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
 impl Drop for NewApiWasmBuilder {
     fn drop(&mut self) {
         // Clean up the plugin pointer

@@ -1,16 +1,12 @@
 pub mod core;
-pub mod dev_server;
 pub mod languages;
 pub mod microkernel;
 pub mod multilang_kernel;
 pub mod network;
-pub mod network_namespace;
 pub mod os_server;
 pub mod project_files;
 pub mod registry;
 pub mod runtime_cache;
-pub mod scheduler;
-pub mod syscalls;
 pub mod tunnel;
 pub mod wasi;
 pub mod wasi_fs;
