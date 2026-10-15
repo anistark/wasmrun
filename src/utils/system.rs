@@ -19,19 +19,6 @@ impl SystemUtils {
             .unwrap_or(false)
     }
 
-    /// Check if Rust wasm32-unknown-unknown target is installed
-    #[allow(dead_code)]
-    pub fn is_wasm_target_installed() -> bool {
-        Command::new("rustup")
-            .args(["target", "list", "--installed"])
-            .output()
-            .map(|output| {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                stdout.contains("wasm32-unknown-unknown")
-            })
-            .unwrap_or(false)
-    }
-
     /// Get the latest version of a crate from crates.io, or `None` when no crate has that name.
     /// `cargo search` matches loosely and lists whatever ranks first, so the name is compared
     /// rather than trusting the first line; crates.io treats `-` and `_` as the same. Colour is
@@ -46,46 +33,6 @@ impl SystemUtils {
             return None;
         }
         version_from_search(&String::from_utf8_lossy(&output.stdout), crate_name)
-    }
-
-    /// Detect version from Cargo.toml content
-    #[allow(dead_code)]
-    pub fn detect_version_from_cargo_toml(content: &str) -> Option<String> {
-        // Try parsing with toml first
-        if let Ok(parsed) = toml::from_str::<toml::Value>(content) {
-            if let Some(package) = parsed.get("package") {
-                if let Some(version) = package.get("version") {
-                    if let Some(version_str) = version.as_str() {
-                        return Some(version_str.to_string());
-                    }
-                }
-            }
-        }
-
-        // Line-by-line parsing
-        for line in content.lines() {
-            let line = line.trim();
-            if line.starts_with("version") && line.contains('=') {
-                if let Some(start) = line.find('"') {
-                    if let Some(end) = line[start + 1..].find('"') {
-                        let version = &line[start + 1..start + 1 + end];
-                        return Some(version.to_string());
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
-    /// Check if project has wasm-bindgen dependency
-    #[allow(dead_code)]
-    pub fn has_wasm_bindgen_dependency(cargo_toml_path: &std::path::Path) -> bool {
-        if let Ok(content) = std::fs::read_to_string(cargo_toml_path) {
-            content.contains("wasm-bindgen")
-        } else {
-            false
-        }
     }
 }
 

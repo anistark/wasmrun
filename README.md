@@ -69,6 +69,8 @@ See the [Quick Start Guide](https://wasmrun.readthedocs.io/en/latest/docs/quick-
 | **[Agent](https://wasmrun.readthedocs.io/en/latest/docs/agent)** | `wasmrun agent` | A REST sandbox API for AI agents. No Docker, no daemon |
 | **[OS](https://wasmrun.readthedocs.io/en/latest/docs/os)** | `wasmrun os ./my-project` | Browser-based VM with a virtual filesystem and multi-language runtimes |
 
+And a **[process manager](https://wasmrun.readthedocs.io/en/latest/docs/ps)**, `wasmrun ps`, that keeps WASM programs running: restarts with backoff, per-program logs, memory limits. `wasmrun init` starts a new project in any of them from a template.
+
 ### 🏃 Exec Mode
 
 Run a `.wasm` file directly. Arguments after the file go to the program, and `--call` picks an exported function instead of the entry point:
@@ -78,7 +80,23 @@ wasmrun exec ./program.wasm arg1 arg2
 wasmrun exec ./math.wasm --call add 2 3
 ```
 
-The interpreter implements WASI Preview 1, so file I/O, environment variables, arguments, clocks, and randomness all work.
+The interpreter implements WASI Preview 1, so file I/O, environment variables, arguments, clocks, and randomness all work. `--dir` gives the program a directory, `--env` a variable, `--max-memory-mb` and `--max-fuel` cap it, and `--tcplisten` and `--allow-net` give it a network.
+
+### 🔁 Process Manager
+
+```sh
+wasmrun ps start            # the programs in ./processes.toml
+wasmrun ps list
+wasmrun ps logs api -f
+```
+
+```toml
+[[process]]
+name = "api"
+script = "server.js"        # JavaScript on wasmhub's nodejs runtime, or wasm = "x.wasm"
+listen = "127.0.0.1:8080"
+restart = "on-failure"
+```
 
 ### 🤖 Agent Mode
 

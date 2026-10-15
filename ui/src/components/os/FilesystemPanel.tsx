@@ -108,7 +108,7 @@ export default function FilesystemPanel({
         <div className="flex-1 flex flex-col">
           {/* Filesystem stats */}
           <div className="border-b border-green-500/20 bg-black/10 p-4">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="bg-black/30 border border-green-500/30 rounded-lg p-3">
                 <div className="text-xs text-green-400/80 mb-1">Mounted</div>
                 <div className="text-xl font-bold">{fsStats?.total_mounts || 0}</div>
@@ -116,10 +116,6 @@ export default function FilesystemPanel({
               <div className="bg-black/30 border border-green-500/30 rounded-lg p-3">
                 <div className="text-xs text-green-400/80 mb-1">Total Size</div>
                 <div className="text-xl font-bold">{formatBytes(fsStats?.total_size || 0)}</div>
-              </div>
-              <div className="bg-black/30 border border-green-500/30 rounded-lg p-3">
-                <div className="text-xs text-green-400/80 mb-1">Open FDs</div>
-                <div className="text-xl font-bold">{fsStats?.open_fds || 0}</div>
               </div>
             </div>
           </div>

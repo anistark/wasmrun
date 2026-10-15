@@ -108,7 +108,10 @@ impl LinearMemory {
 
     /// Read i32 (4 bytes, little-endian)
     pub fn read_i32(&self, addr: usize) -> Result<i32, String> {
-        if addr + 4 > self.size_bytes() {
+        if addr
+            .checked_add(4)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: read i32 at {} (size: {} bytes)",
                 addr,
@@ -127,7 +130,10 @@ impl LinearMemory {
 
     /// Write i32 (4 bytes, little-endian)
     pub fn write_i32(&mut self, addr: usize, value: i32) -> Result<(), String> {
-        if addr + 4 > self.size_bytes() {
+        if addr
+            .checked_add(4)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: write i32 at {} (size: {} bytes)",
                 addr,
@@ -144,7 +150,10 @@ impl LinearMemory {
 
     /// Read i64 (8 bytes, little-endian)
     pub fn read_i64(&self, addr: usize) -> Result<i64, String> {
-        if addr + 8 > self.size_bytes() {
+        if addr
+            .checked_add(8)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: read i64 at {} (size: {} bytes)",
                 addr,
@@ -167,7 +176,10 @@ impl LinearMemory {
 
     /// Write i64 (8 bytes, little-endian)
     pub fn write_i64(&mut self, addr: usize, value: i64) -> Result<(), String> {
-        if addr + 8 > self.size_bytes() {
+        if addr
+            .checked_add(8)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: write i64 at {} (size: {} bytes)",
                 addr,
@@ -184,7 +196,10 @@ impl LinearMemory {
 
     /// Read f32 (4 bytes, little-endian)
     pub fn read_f32(&self, addr: usize) -> Result<f32, String> {
-        if addr + 4 > self.size_bytes() {
+        if addr
+            .checked_add(4)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: read f32 at {} (size: {} bytes)",
                 addr,
@@ -203,7 +218,10 @@ impl LinearMemory {
 
     /// Write f32 (4 bytes, little-endian)
     pub fn write_f32(&mut self, addr: usize, value: f32) -> Result<(), String> {
-        if addr + 4 > self.size_bytes() {
+        if addr
+            .checked_add(4)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: write f32 at {} (size: {} bytes)",
                 addr,
@@ -220,7 +238,10 @@ impl LinearMemory {
 
     /// Read f64 (8 bytes, little-endian)
     pub fn read_f64(&self, addr: usize) -> Result<f64, String> {
-        if addr + 8 > self.size_bytes() {
+        if addr
+            .checked_add(8)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: read f64 at {} (size: {} bytes)",
                 addr,
@@ -243,7 +264,10 @@ impl LinearMemory {
 
     /// Write f64 (8 bytes, little-endian)
     pub fn write_f64(&mut self, addr: usize, value: f64) -> Result<(), String> {
-        if addr + 8 > self.size_bytes() {
+        if addr
+            .checked_add(8)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: write f64 at {} (size: {} bytes)",
                 addr,
@@ -271,7 +295,10 @@ impl LinearMemory {
 
     /// Read i16 (2 bytes, little-endian)
     pub fn read_i16(&self, addr: usize) -> Result<i16, String> {
-        if addr + 2 > self.size_bytes() {
+        if addr
+            .checked_add(2)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: read i16 at {} (size: {} bytes)",
                 addr,
@@ -285,7 +312,10 @@ impl LinearMemory {
 
     /// Write i16 (2 bytes, little-endian)
     pub fn write_i16(&mut self, addr: usize, value: i16) -> Result<(), String> {
-        if addr + 2 > self.size_bytes() {
+        if addr
+            .checked_add(2)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: write i16 at {} (size: {} bytes)",
                 addr,
@@ -302,7 +332,10 @@ impl LinearMemory {
 
     /// Read u16 (2 bytes, little-endian)
     pub fn read_u16(&self, addr: usize) -> Result<u16, String> {
-        if addr + 2 > self.size_bytes() {
+        if addr
+            .checked_add(2)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: read u16 at {} (size: {} bytes)",
                 addr,
@@ -316,7 +349,10 @@ impl LinearMemory {
 
     /// Write u16 (2 bytes, little-endian)
     pub fn write_u16(&mut self, addr: usize, value: u16) -> Result<(), String> {
-        if addr + 2 > self.size_bytes() {
+        if addr
+            .checked_add(2)
+            .is_none_or(|end| end > self.size_bytes())
+        {
             return Err(format!(
                 "Memory access out of bounds: write u16 at {} (size: {} bytes)",
                 addr,

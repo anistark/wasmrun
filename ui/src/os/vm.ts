@@ -16,6 +16,9 @@ export interface VmStartMessage {
   runtimeBytes: ArrayBuffer
   args: string[]
   files: Record<string, string>
+  // `[os.limits] max_memory_mb` in bytes, 0 for no cap. Checked at every WASI
+  // call, since the runtime exports its own memory and none can be imposed
+  maxMemoryBytes: number
   // Present when the network proxy is up. The inbox is the shared ring the
   // page writes socket events into (netInbox.ts); the worker also waits on
   // its wake word for clocks. `listenerId` is -1 when no port was bound, and

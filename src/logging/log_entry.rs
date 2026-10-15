@@ -74,18 +74,8 @@ impl LogEntry {
         self
     }
 
-    #[allow(dead_code)]
-    pub fn debug(source: LogSource, message: impl Into<String>) -> Self {
-        Self::new(LogLevel::Debug, source, message)
-    }
-
     pub fn info(source: LogSource, message: impl Into<String>) -> Self {
         Self::new(LogLevel::Info, source, message)
-    }
-
-    #[allow(dead_code)]
-    pub fn warn(source: LogSource, message: impl Into<String>) -> Self {
-        Self::new(LogLevel::Warn, source, message)
     }
 
     pub fn error(source: LogSource, message: impl Into<String>) -> Self {

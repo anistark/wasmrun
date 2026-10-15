@@ -41,9 +41,6 @@ tokio = { version = "1.53.1", default-features = false, features = [
     "sync",
 ] }
 
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-libloading = "0.9.0"
-
 [dev-dependencies]
 tempfile = "3.27.0"
 wast = { version = "257.0.1", default-features = false, features = ["wasm-module"] }

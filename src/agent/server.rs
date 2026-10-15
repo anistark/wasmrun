@@ -36,7 +36,7 @@ struct RunningExec {
     /// The session root, for resolving the `.js.map` beside a stack frame's
     /// file when the captured stderr is turned into a response.
     work_dir: std::path::PathBuf,
-    lock_slot: Arc<Mutex<Option<vendor::Lockfile>>>,
+    lock_slot: Arc<Mutex<Option<vendor::Vendored>>>,
     start: Instant,
     timeout: Duration,
     timeout_secs: u64,
@@ -184,24 +184,35 @@ fn vendor_for_exec(
     lock_in: Option<&vendor::Lockfile>,
     work_dir: &Path,
     limits: &ResourceLimits,
-    lock_out: &Mutex<Option<vendor::Lockfile>>,
+    lock_out: &Mutex<Option<vendor::Vendored>>,
 ) -> std::result::Result<(), ApiError> {
     if deps.is_none() && lock_in.is_none() {
         return Ok(());
     }
     let v = vendor::Vendor::new(registry)?;
-    let mut lock = vendor::Lockfile::new();
+    let mut out = vendor::Vendored::default();
     if let Some(l) = lock_in {
         v.vendor_locked(l, work_dir, limits)?;
-        lock.extend(l.iter().map(|(k, e)| (k.clone(), e.clone())));
+        out.lock
+            .extend(l.iter().map(|(k, e)| (k.clone(), e.clone())));
     }
     if let Some(d) = deps {
-        lock.extend(v.vendor(d, work_dir, limits)?);
+        let fresh = v.vendor_with_warnings(d, work_dir, limits)?;
+        out.lock.extend(fresh.lock);
+        out.warnings = fresh.warnings;
     }
     if let Ok(mut slot) = lock_out.lock() {
-        *slot = Some(lock);
+        *slot = Some(out);
     }
     Ok(())
+}
+
+/// A vendoring result split into the response's two fields.
+fn vendored_fields(v: Option<vendor::Vendored>) -> (Option<vendor::Lockfile>, Vec<String>) {
+    match v {
+        Some(v) => (Some(v.lock), v.warnings),
+        None => (None, Vec::new()),
+    }
 }
 
 const API_PREFIX: &str = "/api/v1";
@@ -1270,7 +1281,7 @@ impl AgentServer {
 
     // ── Session endpoints ─────────────────────────────────────────
 
-    #[allow(dead_code)] // Used by tests; the HTTP route uses the _with_body variant.
+    #[cfg(test)]
     pub fn handle_create_session(&self) -> std::result::Result<CreateSessionResponse, ApiError> {
         self.create_session_with_limits(self.config.session_config.limits.clone(), None)
     }
@@ -1494,7 +1505,7 @@ impl AgentServer {
 
         // Vendoring runs on the worker but its result belongs in the response,
         // including on timeout; a slot keeps the channel carrying the exit code.
-        let lock_slot: Arc<Mutex<Option<vendor::Lockfile>>> = Arc::new(Mutex::new(None));
+        let lock_slot: Arc<Mutex<Option<vendor::Vendored>>> = Arc::new(Mutex::new(None));
 
         let (tx, rx) = std::sync::mpsc::channel::<std::result::Result<i32, ApiError>>();
         // Cooperative cancellation: the worker runs detached, so if the
@@ -1759,7 +1770,7 @@ impl AgentServer {
             wasi_env,
             EXEC_THREAD_STACK_BYTES,
             move |cancel| {
-                let lock_out: Mutex<Option<vendor::Lockfile>> = Mutex::new(None);
+                let lock_out: Mutex<Option<vendor::Vendored>> = Mutex::new(None);
                 vendor_for_exec(
                     &registry,
                     deps.as_ref(),
@@ -2013,7 +2024,8 @@ impl AgentServer {
         if truncated {
             self.metrics.record_output_truncated();
         }
-        let lockfile = lock_slot.lock().ok().and_then(|mut l| l.take());
+        let (lockfile, warnings) =
+            vendored_fields(lock_slot.lock().ok().and_then(|mut l| l.take()));
 
         // Repeat the full output so a client that dropped a frame still has it.
         let (stdout, stderr) = (
@@ -2031,6 +2043,7 @@ impl AgentServer {
                     output_truncated: truncated,
                     error: None,
                     lockfile,
+                    warnings,
                 }
             }
             Some(Err(e)) => {
@@ -2043,6 +2056,7 @@ impl AgentServer {
                     output_truncated: truncated,
                     error: Some(e.to_string()),
                     lockfile,
+                    warnings,
                 }
             }
             None => {
@@ -2055,6 +2069,7 @@ impl AgentServer {
                     output_truncated: truncated,
                     error: Some(format!("Execution timed out after {timeout_secs}s")),
                     lockfile,
+                    warnings,
                 }
             }
         }
@@ -2072,7 +2087,7 @@ impl AgentServer {
             timeout,
             timeout_secs,
         } = run;
-        let take_lock = || lock_slot.lock().ok().and_then(|mut l| l.take());
+        let take_vendored = || vendored_fields(lock_slot.lock().ok().and_then(|mut l| l.take()));
 
         let duration_ms;
         let exec_result = match rx.recv_timeout(timeout) {
@@ -2091,6 +2106,7 @@ impl AgentServer {
                 if truncated {
                     self.metrics.record_output_truncated();
                 }
+                let (lockfile, warnings) = take_vendored();
                 return Ok(ExecResponse {
                     stdout: read_env_stdout_mapped(&wasi_env, &work_dir),
                     stderr: read_env_stderr_mapped(&wasi_env, &work_dir),
@@ -2098,12 +2114,14 @@ impl AgentServer {
                     duration_ms,
                     output_truncated: truncated,
                     error: Some(format!("Execution timed out after {timeout_secs}s")),
-                    lockfile: take_lock(),
+                    lockfile,
+                    warnings,
                 });
             }
             Err(_) => {
                 duration_ms = start.elapsed().as_millis() as u64;
                 self.metrics.record_exec_error(duration_ms);
+                let (lockfile, warnings) = take_vendored();
                 return Ok(ExecResponse {
                     stdout: String::new(),
                     stderr: String::new(),
@@ -2111,7 +2129,8 @@ impl AgentServer {
                     duration_ms,
                     output_truncated: false,
                     error: Some("Execution thread panicked".into()),
-                    lockfile: take_lock(),
+                    lockfile,
+                    warnings,
                 });
             }
         };
@@ -2120,6 +2139,7 @@ impl AgentServer {
         if truncated {
             self.metrics.record_output_truncated();
         }
+        let (lockfile, warnings) = take_vendored();
         match exec_result {
             Ok(exit_code) => {
                 self.metrics.record_exec_success(duration_ms);
@@ -2130,7 +2150,8 @@ impl AgentServer {
                     duration_ms,
                     output_truncated: truncated,
                     error: None,
-                    lockfile: take_lock(),
+                    lockfile,
+                    warnings,
                 })
             }
             Err(e) => {
@@ -2142,7 +2163,8 @@ impl AgentServer {
                     duration_ms,
                     output_truncated: truncated,
                     error: Some(e.to_string()),
-                    lockfile: take_lock(),
+                    lockfile,
+                    warnings,
                 })
             }
         }

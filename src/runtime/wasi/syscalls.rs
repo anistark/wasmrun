@@ -25,7 +25,14 @@ pub const WASI_ENOTEMPTY: i32 = 55;
 pub const WASI_ERANGE: i32 = 68;
 pub const WASI_EACCES: i32 = 2;
 pub const WASI_EAGAIN: i32 = 6;
+pub const WASI_EADDRNOTAVAIL: i32 = 4;
 pub const WASI_ECONNABORTED: i32 = 13;
+pub const WASI_ECONNREFUSED: i32 = 14;
+pub const WASI_ECONNRESET: i32 = 15;
+pub const WASI_EHOSTUNREACH: i32 = 23;
+pub const WASI_ENETUNREACH: i32 = 40;
+pub const WASI_ENOTCONN: i32 = 53;
+pub const WASI_ETIMEDOUT: i32 = 73;
 pub const WASI_EISCONN: i32 = 30;
 pub const WASI_ENOTSOCK: i32 = 57;
 pub const WASI_EPIPE: i32 = 64;
@@ -126,15 +133,23 @@ pub fn fd_write(
         match fd {
             WASI_STDOUT_FD => {
                 if let Ok(mut e) = env.lock() {
-                    e.write_stdout(&bytes);
+                    if e.stdio_passthrough() {
+                        use std::io::Write;
+                        let mut out = std::io::stdout().lock();
+                        let _ = out.write_all(&bytes).and_then(|()| out.flush());
+                    } else {
+                        e.write_stdout(&bytes);
+                    }
                 }
             }
             WASI_STDERR_FD => {
                 if let Ok(mut e) = env.lock() {
-                    if e.stderr_passthrough() {
-                        eprint!("{}", String::from_utf8_lossy(&bytes));
+                    if e.stdio_passthrough() {
+                        use std::io::Write;
+                        let _ = std::io::stderr().lock().write_all(&bytes);
+                    } else {
+                        e.write_stderr(&bytes);
                     }
-                    e.write_stderr(&bytes);
                 }
             }
             _ => {
@@ -1515,13 +1530,23 @@ fn wait_for_socket<T>(
     }
 }
 
+/// The errno a guest sees for a host socket error. A connect that fails is
+/// reported as what happened (refused, timed out, unreachable), so `net`
+/// can tell ECONNREFUSED from a policy's EACCES the way node does.
 fn io_errno(err: &std::io::Error) -> i32 {
+    use std::io::ErrorKind;
     match err.kind() {
-        std::io::ErrorKind::WouldBlock => WASI_EAGAIN,
-        std::io::ErrorKind::BrokenPipe => WASI_EPIPE,
-        std::io::ErrorKind::ConnectionAborted => WASI_ECONNABORTED,
-        std::io::ErrorKind::ConnectionReset => WASI_ECONNABORTED,
-        std::io::ErrorKind::InvalidInput => WASI_EINVAL,
+        ErrorKind::WouldBlock => WASI_EAGAIN,
+        ErrorKind::BrokenPipe => WASI_EPIPE,
+        ErrorKind::ConnectionAborted => WASI_ECONNABORTED,
+        ErrorKind::ConnectionRefused => WASI_ECONNREFUSED,
+        ErrorKind::ConnectionReset => WASI_ECONNRESET,
+        ErrorKind::NotConnected => WASI_ENOTCONN,
+        ErrorKind::TimedOut => WASI_ETIMEDOUT,
+        ErrorKind::HostUnreachable => WASI_EHOSTUNREACH,
+        ErrorKind::NetworkUnreachable => WASI_ENETUNREACH,
+        ErrorKind::AddrNotAvailable => WASI_EADDRNOTAVAIL,
+        ErrorKind::InvalidInput => WASI_EINVAL,
         _ => WASI_EIO,
     }
 }
@@ -3172,6 +3197,70 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_millis(500),
             "accept should have taken the parked connection immediately"
+        );
+    }
+
+    /// A path through a directory that does not exist yet must not reach
+    /// out of the preopen once the directories along it are created.
+    #[test]
+    fn test_paths_that_climb_out_of_a_preopen_are_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let sandbox = root.path().join("sandbox");
+        std::fs::create_dir(&sandbox).unwrap();
+        let env = Arc::new(Mutex::new(WasiEnv::new().with_preopen("/", &sandbox)));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+        let fd = crate::runtime::wasi::WASI_FIRST_PREOPEN_FD;
+
+        for path in [
+            "x/../../escape",
+            "a/b/../../../escape",
+            "../escape",
+            "/../escape",
+        ] {
+            mem.write_bytes(100, path.as_bytes()).unwrap();
+            let errno = path_create_directory(fd, 100, path.len() as u32, &mut mem, &env);
+            assert_ne!(errno, WASI_ESUCCESS, "{path} was created");
+            assert!(
+                !root.path().join("escape").exists(),
+                "{path} escaped the preopen"
+            );
+        }
+
+        // Inside, `..` that stays within is fine.
+        let inside = "a/../b";
+        mem.write_bytes(100, inside.as_bytes()).unwrap();
+        assert_eq!(
+            path_create_directory(fd, 100, inside.len() as u32, &mut mem, &env),
+            WASI_ESUCCESS
+        );
+        assert!(sandbox.join("b").is_dir());
+    }
+
+    #[test]
+    fn test_a_refused_connect_is_econnrefused_not_eio() {
+        // Bind and drop a listener so the port is known to be closed.
+        let port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+        };
+        let mut env = WasiEnv::new();
+        let network = wasmnet::policy::NetworkPolicy {
+            allow: vec!["127.0.0.1/32".to_string()],
+            deny: Vec::new(),
+            ..Default::default()
+        };
+        env.set_network(crate::runtime::wasi::network::NetworkAccess::with_policy(
+            &wasmnet::policy::PolicyConfig { network },
+        ));
+        let env = Arc::new(Mutex::new(env));
+        let mut mem = LinearMemory::new(1, None).unwrap();
+
+        assert_eq!(sock_open(0, 1, 0, 100, &mut mem, &env), WASI_ESUCCESS);
+        let fd = mem.read_i32(100).unwrap() as u32;
+        mem.write_bytes(200, b"127.0.0.1").unwrap();
+        assert_eq!(
+            sock_connect(fd, 200, 9, port as u32, &mut mem, &env),
+            WASI_ECONNREFUSED
         );
     }
 

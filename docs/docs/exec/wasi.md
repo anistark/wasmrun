@@ -80,7 +80,7 @@ WasiEnv::new()
 
 - **Arguments**: written to linear memory via `args_get` / `args_sizes_get`
 - **Environment variables**: written as `KEY=VALUE\0` strings via `environ_get` / `environ_sizes_get`
-- **Output capture**: stdout/stderr buffered in `WasiEnv` for programmatic access via `get_stdout()` / `get_stderr()`
+- **Output**: under `wasmrun exec` the env is built `with_stdio_passthrough()`, so stdout and stderr go straight to the terminal as written and are not kept. Agent mode leaves passthrough off and reads the captured output back with `get_stdout()` / `get_stderr()` for the response
 
 ## Linker Integration
 
@@ -114,7 +114,7 @@ match executor.execute_with_args(func_idx, args) {
 
 ## Filesystem
 
-Exec mode bridges the executor to wasmrun's `WasiFilesystem`, so modules can open, read, write, list, and delete files through the `path_*` / `fd_*` syscalls above. A host directory is mounted into the sandbox as a WASI preopen; the [agent API](../agent/index.md), for example, preopens each session's temp directory at `/`.
+Exec mode bridges the executor to wasmrun's `WasiFilesystem`, so modules can open, read, write, list, and delete files through the `path_*` / `fd_*` syscalls above. A host directory is mounted into the sandbox as a WASI preopen: `wasmrun exec --dir HOST[:GUEST]` does it from the command line, and the [agent API](../agent/index.md) preopens each session's temp directory at `/`.
 
 - **Preopened directories**: host directories mounted to a virtual path, surfaced via `fd_prestat_get` / `fd_prestat_dir_name`
 - **Path traversal protection**: every guest path is resolved and confined to its mount; `..` escapes are rejected

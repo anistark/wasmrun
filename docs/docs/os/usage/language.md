@@ -20,8 +20,10 @@ When no `--language` flag is provided, wasmrun detects the project language by c
 Detection is checked in this order. The first match wins.
 
 :::note Runtime availability
-The OS kernel currently registers the **Node.js runtime only**. Python (`rustpython`) and Go runtimes are scaffolded in the codebase but not yet enabled, so Node.js projects are the fully supported path today.
+OS mode runs **Node.js** projects. Python is detected but waits on wasmhub publishing its `rustpython` runtime, and wasmhub's Go and Rust artifacts are prebuilt programs rather than toolchains, so they cannot run a project's own code.
 :::
+
+`[os] language` in the project's `wasmrun.toml` sets the language the same way `--language` does, for a project that detection gets wrong. The flag wins when both are given.
 
 ```sh
 # Has package.json → detected as nodejs

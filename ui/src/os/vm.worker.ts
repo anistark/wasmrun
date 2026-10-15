@@ -56,8 +56,11 @@ async function run(start: VmStartMessage): Promise<void> {
   populateFilesystem(wasi, start.files)
 
   post({ type: 'status', status: 'starting' })
-  const { instance } = await WebAssembly.instantiate(start.runtimeBytes, wasi.getImportObject())
+  let memory: WebAssembly.Memory | undefined
+  const imports = withMemoryCap(wasi.getImportObject(), start.maxMemoryBytes, () => memory)
+  const { instance } = await WebAssembly.instantiate(start.runtimeBytes, imports)
   wasi.initialize(instance)
+  memory = instance.exports.memory as WebAssembly.Memory | undefined
 
   const startFn = instance.exports._start as (() => void) | undefined
   if (!startFn) {
@@ -67,6 +70,41 @@ async function run(start: VmStartMessage): Promise<void> {
   post({ type: 'status', status: 'running' })
   startFn()
   post({ type: 'exit', code: 0 })
+}
+
+// [os.limits] max_memory_mb. The runtime exports its memory, so no maximum
+// can be imposed when instantiating it; every WASI call checks the size
+// instead, and a program past the cap is ended there with a clear error.
+// Allocation is cheap to grow and rare to do without any WASI call between
+function withMemoryCap(
+  imports: WebAssembly.Imports,
+  maxBytes: number,
+  memory: () => WebAssembly.Memory | undefined
+): WebAssembly.Imports {
+  if (!maxBytes) return imports
+  const check = () => {
+    const size = memory()?.buffer.byteLength ?? 0
+    if (size > maxBytes) {
+      throw new Error(
+        `memory limit exceeded: ${Math.round(size / (1024 * 1024))} MB is past [os.limits] max_memory_mb = ${Math.round(maxBytes / (1024 * 1024))}`
+      )
+    }
+  }
+  const wrapped: WebAssembly.Imports = {}
+  for (const [module, fns] of Object.entries(imports)) {
+    const out: WebAssembly.ModuleImports = {}
+    for (const [name, value] of Object.entries(fns)) {
+      out[name] =
+        typeof value === 'function'
+          ? (...args: unknown[]) => {
+              check()
+              return (value as (...a: unknown[]) => unknown)(...args)
+            }
+          : value
+    }
+    wrapped[module] = out
+  }
+  return wrapped
 }
 
 function populateFilesystem(wasi: WASIImplementation, files: Record<string, string>): void {

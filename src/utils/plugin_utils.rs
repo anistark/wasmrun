@@ -1,21 +1,8 @@
 use crate::error::{Result, WasmrunError};
-use crate::plugin::registry::PluginRegistry;
 use crate::plugin::Plugin;
-use crate::utils::SystemUtils;
 use std::path::{Path, PathBuf};
 
 pub struct PluginUtils;
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct PluginValidationResult {
-    pub is_installed: bool,
-    pub is_functional: bool,
-    pub has_metadata: bool,
-    pub missing_dependencies: Vec<String>,
-    pub version: Option<String>,
-    pub install_path: Option<String>,
-}
 
 impl PluginUtils {
     pub fn get_plugin_directory(plugin_name: &str) -> Result<PathBuf> {
@@ -115,107 +102,6 @@ impl PluginUtils {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> Result<()> {
-        if !from.exists() {
-            return Ok(());
-        }
-
-        std::fs::create_dir_all(to)
-            .map_err(|e| WasmrunError::from(format!("Failed to create directory: {e}")))?;
-
-        for entry in std::fs::read_dir(from)
-            .map_err(|e| WasmrunError::from(format!("Failed to read directory: {e}")))?
-        {
-            let entry = entry
-                .map_err(|e| WasmrunError::from(format!("Failed to read directory entry: {e}")))?;
-            let file_type = entry
-                .file_type()
-                .map_err(|e| WasmrunError::from(format!("Failed to get file type: {e}")))?;
-            let from_path = entry.path();
-            let to_path = to.join(entry.file_name());
-
-            if file_type.is_dir() {
-                Self::copy_dir_recursive(&from_path, &to_path)?;
-            } else {
-                std::fs::copy(&from_path, &to_path)
-                    .map_err(|e| WasmrunError::from(format!("Failed to copy file: {e}")))?;
-            }
-        }
-
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn check_plugin_dependencies(plugin_name: &str) -> Vec<String> {
-        Self::check_generic_plugin_dependencies(plugin_name)
-    }
-
-    #[allow(dead_code)]
-    pub fn check_generic_plugin_dependencies(plugin_name: &str) -> Vec<String> {
-        let mut missing = Vec::new();
-
-        // Try to get metadata-based dependencies
-        if let Ok(metadata) = PluginRegistry::get_plugin_metadata(plugin_name) {
-            for tool in &metadata.dependencies.tools {
-                if !SystemUtils::is_tool_available(tool) {
-                    missing.push(tool.to_string()); // Fixed: changed from clone() to to_string()
-                }
-            }
-        } else if plugin_name.contains("rust") {
-            if !SystemUtils::is_tool_available("rustc") {
-                missing.push("rustc".to_string());
-            }
-            if !SystemUtils::is_tool_available("cargo") {
-                missing.push("cargo".to_string());
-            }
-        } else if plugin_name.contains("go") {
-            if !SystemUtils::is_tool_available("tinygo") {
-                missing.push("tinygo".to_string());
-            }
-        } else if plugin_name.contains("zig") {
-            if !SystemUtils::is_tool_available("zig") {
-                missing.push("zig".to_string());
-            }
-        } else if (plugin_name.contains("js") || plugin_name.contains("javascript"))
-            && !SystemUtils::is_tool_available("node")
-        {
-            missing.push("node".to_string());
-        }
-
-        missing
-    }
-
-    #[allow(dead_code)]
-    pub fn validate_plugin_installation(plugin_name: &str) -> Result<PluginValidationResult> {
-        let mut result = PluginValidationResult {
-            is_installed: false,
-            is_functional: false,
-            has_metadata: false,
-            missing_dependencies: vec![],
-            version: None,
-            install_path: None,
-        };
-
-        if let Ok(plugin_dir) = Self::get_plugin_directory(plugin_name) {
-            result.install_path = Some(plugin_dir.to_string_lossy().to_string());
-
-            result.is_installed = plugin_dir.exists();
-
-            if result.is_installed {
-                let metadata_path = plugin_dir.join(".wasmrun_metadata");
-                result.has_metadata = metadata_path.exists();
-
-                result.version = Self::detect_plugin_version_from_metadata(plugin_name);
-
-                result.missing_dependencies = Self::check_generic_plugin_dependencies(plugin_name);
-                result.is_functional = result.missing_dependencies.is_empty();
-            }
-        }
-
-        Ok(result)
-    }
-
     // Plugin Language Detection Utilities
 
     /// Extract supported languages from a plugin's capabilities
@@ -254,37 +140,5 @@ impl PluginUtils {
         supported_languages
             .iter()
             .any(|lang| lang.to_lowercase() == target_lang)
-    }
-
-    /// Check if a plugin can handle projects of a specific language
-    /// This is useful for finding plugins when you know the target language
-    #[allow(dead_code)]
-    pub fn can_handle_language(plugin: &dyn Plugin, target_language: &str) -> bool {
-        Self::supports_language(plugin, target_language)
-    }
-
-    /// Get a human-readable description of languages supported by a plugin
-    /// Returns a formatted string like "Rust, Go" or "C/C++"
-    #[allow(dead_code)]
-    pub fn get_languages_description(plugin: &dyn Plugin) -> String {
-        let languages = Self::get_supported_languages(plugin);
-
-        // Handle special cases for better formatting
-        if languages.len() == 2
-            && languages.contains(&"c".to_string())
-            && languages.contains(&"cpp".to_string())
-        {
-            return "C/C++".to_string();
-        }
-
-        if languages.len() == 2
-            && languages.contains(&"assemblyscript".to_string())
-            && languages.contains(&"asc".to_string())
-        {
-            return "AssemblyScript".to_string();
-        }
-
-        // For other cases, just join with commas
-        languages.join(", ")
     }
 }

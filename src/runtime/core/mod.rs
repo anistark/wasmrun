@@ -2,6 +2,8 @@
 
 pub mod control_flow;
 pub mod executor;
+#[cfg(test)]
+mod fuzz;
 pub mod linker;
 pub mod memory;
 pub mod module;

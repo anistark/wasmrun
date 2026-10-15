@@ -6,7 +6,7 @@ sidebar_position: 1
 
 **Wasmrun** is a WebAssembly runtime that simplifies development, compilation, and execution of WASM applications across multiple programming languages.
 
-## Four Modes
+## Four Modes, and a Process Manager
 
 ### [Server Mode](/docs/server): `wasmrun`
 
@@ -40,6 +40,16 @@ A REST API that gives AI agents isolated sandboxes to execute code in, built on 
 wasmrun agent --port 8430
 ```
 
+### [Process Manager](/docs/ps): `wasmrun ps`
+
+Keeps WASM programs running from a `processes.toml`: restarts with backoff, per-program logs, memory limits, all on exec mode's interpreter.
+
+```sh
+wasmrun ps start && wasmrun ps list
+```
+
+`wasmrun init my-app --template rust|go|c|asc|python|nodejs|wasi` starts a project for any of them.
+
 ## Key Features
 
 - **Multi-Language**: Rust, Go, Python, C/C++, AssemblyScript via [plugins](/docs/plugins)
@@ -53,4 +63,4 @@ wasmrun agent --port 8430
 
 1. [Install wasmrun](./installation.md)
 2. [Quick start guide](./quick-start.md)
-3. Pick a mode: [Server](/docs/server), [Exec](/docs/exec), [OS](/docs/os), or [Agent](/docs/agent)
+3. Pick a mode: [Server](/docs/server), [Exec](/docs/exec), [OS](/docs/os), [Agent](/docs/agent), or the [Process Manager](/docs/ps)

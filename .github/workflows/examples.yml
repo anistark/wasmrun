@@ -22,11 +22,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-latest is temporarily disabled: external/library plugins
-        # (e.g. waspy for python) can't be dynamically loaded on Windows yet,
-        # so plugin-based examples can't pass there. Tracked in #85.
-        # Re-add 'windows-latest' once dynamic loading works on Windows.
-        os: [ubuntu-latest]
+        # windows-latest is back now that plugin libraries load there (#85).
+        os: [ubuntu-latest, windows-latest]
         example:
           - name: rust-hello
             lang: rust
@@ -104,7 +101,13 @@ jobs:
         Invoke-WebRequest -Uri $url -OutFile "tinygo.zip"
         Expand-Archive -Path "tinygo.zip" -DestinationPath "."
         Add-Content $env:GITHUB_PATH "$(Get-Location)\tinygo\bin"
-      shell: powershell
+        # The Windows zip, unlike the Linux tarball, ships without wasm-opt,
+        # which TinyGo needs for wasm targets.
+        $binaryen = "version_133"
+        Invoke-WebRequest -Uri "https://github.com/WebAssembly/binaryen/releases/download/${binaryen}/binaryen-${binaryen}-x86_64-windows.tar.gz" -OutFile "binaryen.tar.gz"
+        tar -xzf "binaryen.tar.gz"
+        Add-Content $env:GITHUB_PATH "$(Get-Location)\binaryen-${binaryen}\bin"
+      shell: pwsh
 
     - name: Install Node.js
       if: matrix.example.lang == 'asc' || matrix.example.lang == 'nodejs'
@@ -135,7 +138,7 @@ jobs:
         $emsdkPath = (Get-Item ".\emsdk").FullName
         Add-Content $env:GITHUB_PATH "$emsdkPath\upstream\emscripten"
         Add-Content $env:GITHUB_PATH "$emsdkPath\node\current\bin"
-      shell: powershell
+      shell: pwsh
 
     # wasm-bindgen's bindgen format is unstable: the CLI version must exactly
     # match the wasm-bindgen crate version the example was built against. When
@@ -175,7 +178,7 @@ jobs:
     - name: Install waspy plugin (Windows)
       if: matrix.example.lang == 'python' && runner.os == 'Windows'
       run: .\target\release\wasmrun.exe plugin install waspy
-      shell: powershell
+      shell: pwsh
 
     # Test example compilation
     - name: Test ${{ matrix.example.name }} (Linux)
@@ -195,7 +198,7 @@ jobs:
         }
         & .\target\release\wasmrun.exe compile examples\${{ matrix.example.name }} -o $env:TEMP\wasmrun_test_${{ matrix.example.name }} -v
         if ($LASTEXITCODE -ne 0) { exit 1 }
-      shell: powershell
+      shell: pwsh
       timeout-minutes: 5
 
     - name: Verify output files exist (Linux)
@@ -222,7 +225,7 @@ jobs:
           exit 1
         }
         Write-Host "✓ Example ${{ matrix.example.name }} compiled successfully ($($wasmFiles.Count) wasm file(s))"
-      shell: powershell
+      shell: pwsh
 
   summary:
     name: Examples Summary

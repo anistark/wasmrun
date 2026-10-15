@@ -26,7 +26,7 @@ Inbound is the half a project usually needs, and it works end to end: `http.crea
 
 Outbound works at the socket level. A program that calls `sock_open` and `sock_connect` gets a connection the proxy opened under the `allow` and `deny` rules below, with the same calls and the same answers as [`wasmrun exec`](../exec/networking.md): a refused destination is `EACCES`, and the reason is printed in the Console panel as `network: connection to HOST:PORT refused: ...`. It works with no free port in `bind_ports` too, since connecting out needs none.
 
-Node projects cannot use it yet. wasmhub's `net.connect`, `http.request` and `fetch` throw `ERR_NOT_SUPPORTED`, because the runtime is not built against these two calls ([wasmhub#22](https://github.com/anistark/wasmhub/issues/22)). The rules are still worth writing now, since the proxy enforces them on every connection.
+Node projects use it through `net.connect`, `http.request` and `fetch`, on wasmhub's `20-net` nodejs runtime (v0.6.0 and later), which wasmrun fetches whenever its pinned release has one. Verified in headless Chrome: a `fetch` to a host server allowed by `allow = ["127.0.0.1/32"]` returned its JSON, and a connect to `10.1.2.3` came back `EACCES`.
 
 ## The proxy
 

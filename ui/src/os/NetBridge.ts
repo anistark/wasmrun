@@ -25,10 +25,27 @@ export interface NetBridgeCallbacks {
 
 const MAX_BIND_ATTEMPTS = 32
 
-// WASI errnos for a refused connect, matching exec mode: a policy denial is
-// EACCES, anything else the proxy reports is EIO
+// WASI errnos for a failed connect, matching exec mode: a policy denial is
+// EACCES, a refused, timed-out or unreachable destination says so, and
+// anything else the proxy reports is EIO
 const ERRNO_ACCES = 2
+const ERRNO_CONNREFUSED = 14
+const ERRNO_CONNRESET = 15
+const ERRNO_HOSTUNREACH = 23
 const ERRNO_IO = 29
+const ERRNO_NETUNREACH = 40
+const ERRNO_TIMEDOUT = 73
+
+/// The proxy only hands back the host's error text, so the errno is read off it.
+function connectErrno(reason: string): number {
+  if (/blocked|not in allow list/i.test(reason)) return ERRNO_ACCES
+  if (/connection refused/i.test(reason)) return ERRNO_CONNREFUSED
+  if (/connection reset/i.test(reason)) return ERRNO_CONNRESET
+  if (/timed out/i.test(reason)) return ERRNO_TIMEDOUT
+  if (/network is unreachable/i.test(reason)) return ERRNO_NETUNREACH
+  if (/host is unreachable|no route to host/i.test(reason)) return ERRNO_HOSTUNREACH
+  return ERRNO_IO
+}
 
 export class NetBridge {
   private client: WasmnetClient | null = null
@@ -141,8 +158,7 @@ export class NetBridge {
       .catch(err => {
         const reason = err instanceof Error ? err.message : String(err)
         this.callbacks.onNetworkError?.(`connection to ${host}:${port} refused: ${reason}`)
-        const denied = /blocked|not in allow list/.test(reason)
-        this.writer?.refused(request, denied ? ERRNO_ACCES : ERRNO_IO)
+        this.writer?.refused(request, connectErrno(reason))
       })
   }
 

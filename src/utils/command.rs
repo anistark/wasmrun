@@ -38,7 +38,7 @@ impl CommandExecutor {
             println!("🔧 Executing: {} {}", command, args.join(" "));
         }
 
-        std::process::Command::new(command)
+        std::process::Command::new(program(command))
             .args(args)
             .current_dir(working_dir)
             .output()
@@ -46,40 +46,6 @@ impl CommandExecutor {
                 tool: command.to_string(),
                 reason: e.to_string(),
             })
-    }
-
-    /// Execute a command with live output
-    #[allow(dead_code)]
-    pub fn execute_command_with_output(
-        command: &str,
-        args: &[&str],
-        working_dir: &str,
-    ) -> CompilationResult<()> {
-        println!("🔧 Executing: {} {}", command, args.join(" "));
-
-        let status = std::process::Command::new(command)
-            .args(args)
-            .current_dir(working_dir)
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
-            .status()
-            .map_err(|e| CompilationError::ToolExecutionFailed {
-                tool: command.to_string(),
-                reason: e.to_string(),
-            })?;
-
-        if !status.success() {
-            return Err(CompilationError::BuildFailed {
-                language: "Unknown".to_string(),
-                reason: format!(
-                    "Command '{}' failed with exit code: {:?}",
-                    command,
-                    status.code()
-                ),
-            });
-        }
-
-        Ok(())
     }
 
     /// Copy output file to the target directory
@@ -122,6 +88,40 @@ impl CommandExecutor {
     }
 }
 
+/// What to spawn for `command`. On Windows, tools installed by npm or emsdk
+/// (`npm`, `npx`, `asc`, `emcc`) are `.cmd` or `.bat` shims, and `Command`
+/// only finds `<name>.exe` on its own, so look the name up with `PATHEXT`.
+fn program(command: &str) -> std::path::PathBuf {
+    let extensions: Vec<String> = if cfg!(windows) {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string())
+            .split(';')
+            .filter(|e| !e.is_empty())
+            .map(str::to_string)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    find_with_extensions(command, &path, &extensions).unwrap_or_else(|| command.into())
+}
+
+fn find_with_extensions(
+    command: &str,
+    path: &std::ffi::OsStr,
+    extensions: &[String],
+) -> Option<std::path::PathBuf> {
+    if extensions.is_empty() || std::path::Path::new(command).extension().is_some() {
+        return None;
+    }
+    std::env::split_paths(path).find_map(|dir| {
+        extensions
+            .iter()
+            .map(|ext| dir.join(format!("{command}{ext}")))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +156,23 @@ mod tests {
         let output = result.unwrap();
         assert!(output.status.success());
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
+    }
+
+    #[test]
+    fn test_a_cmd_shim_is_found_through_pathext() {
+        let bin = tempdir().unwrap();
+        File::create(bin.path().join("npm.cmd")).unwrap();
+        let path = std::env::join_paths([bin.path()]).unwrap();
+        let exts = [".exe".to_string(), ".cmd".to_string()];
+
+        assert_eq!(
+            find_with_extensions("npm", &path, &exts),
+            Some(bin.path().join("npm.cmd"))
+        );
+        // A name with an extension, or no PATHEXT (not Windows), is left alone.
+        assert_eq!(find_with_extensions("npm.cmd", &path, &exts), None);
+        assert_eq!(find_with_extensions("npm", &path, &[]), None);
+        assert_eq!(find_with_extensions("missing", &path, &exts), None);
     }
 
     #[test]

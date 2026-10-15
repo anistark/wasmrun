@@ -6,7 +6,7 @@ use crate::plugin::languages::asc_plugin::AscPlugin;
 use crate::plugin::languages::c_plugin::CPlugin;
 use crate::plugin::languages::go_plugin::GoPlugin;
 use crate::plugin::languages::rust_plugin::RustPlugin;
-use crate::plugin::{Plugin, PluginCapabilities, PluginInfo, PluginType};
+use crate::plugin::{Plugin, PluginInfo};
 use std::sync::Arc;
 
 /// Wrapper for built-in plugins
@@ -18,40 +18,6 @@ pub struct BuiltinPlugin {
 impl BuiltinPlugin {
     pub fn new(plugin: Arc<dyn Plugin>) -> Self {
         let info = plugin.info().clone();
-        Self {
-            info,
-            inner_plugin: plugin,
-        }
-    }
-
-    #[allow(dead_code)] // TODO: Future plugin builder integration
-    pub fn from_builder(
-        name: String,
-        version: String,
-        description: String,
-        extensions: Vec<String>,
-        entry_files: Vec<String>,
-        capabilities: PluginCapabilities,
-        builder: Arc<dyn WasmBuilder>,
-    ) -> Self {
-        let info = PluginInfo {
-            name,
-            version,
-            description,
-            author: "Wasmrun Team".to_string(),
-            extensions,
-            entry_files,
-            plugin_type: PluginType::Builtin,
-            source: None,
-            dependencies: vec![],
-            capabilities,
-        };
-
-        let plugin = Arc::new(BuiltinPluginImpl {
-            info: info.clone(),
-            builder,
-        });
-
         Self {
             info,
             inner_plugin: plugin,
@@ -73,91 +39,6 @@ impl Plugin for BuiltinPlugin {
     }
 }
 
-/// Internal implementation for builder-based plugins
-struct BuiltinPluginImpl {
-    info: PluginInfo,
-    builder: Arc<dyn WasmBuilder>,
-}
-
-impl Plugin for BuiltinPluginImpl {
-    fn info(&self) -> &PluginInfo {
-        &self.info
-    }
-
-    fn can_handle_project(&self, project_path: &str) -> bool {
-        for entry_file in &self.info.entry_files {
-            let entry_path = std::path::Path::new(project_path).join(entry_file);
-            if entry_path.exists() {
-                return true;
-            }
-        }
-
-        if let Ok(entries) = std::fs::read_dir(project_path) {
-            for entry in entries.flatten() {
-                if let Some(extension) = entry.path().extension() {
-                    let ext = extension.to_string_lossy().to_lowercase();
-                    if self.info.extensions.contains(&ext) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
-    }
-
-    fn get_builder(&self) -> Box<dyn WasmBuilder> {
-        Box::new(BuiltinBuilderWrapper {
-            builder: Arc::clone(&self.builder),
-        })
-    }
-}
-
-struct BuiltinBuilderWrapper {
-    builder: Arc<dyn WasmBuilder>,
-}
-
-impl WasmBuilder for BuiltinBuilderWrapper {
-    fn language_name(&self) -> &str {
-        self.builder.language_name()
-    }
-
-    fn entry_file_candidates(&self) -> &[&str] {
-        self.builder.entry_file_candidates()
-    }
-
-    fn supported_extensions(&self) -> &[&str] {
-        self.builder.supported_extensions()
-    }
-
-    fn check_dependencies(&self) -> Vec<String> {
-        self.builder.check_dependencies()
-    }
-
-    fn build(
-        &self,
-        config: &crate::compiler::builder::BuildConfig,
-    ) -> crate::error::CompilationResult<crate::compiler::builder::BuildResult> {
-        self.builder.build(config)
-    }
-
-    fn validate_project(&self, project_path: &str) -> crate::error::CompilationResult<()> {
-        self.builder.validate_project(project_path)
-    }
-
-    fn can_handle_project(&self, project_path: &str) -> bool {
-        self.builder.can_handle_project(project_path)
-    }
-
-    fn clean(&self, project_path: &str) -> crate::error::Result<()> {
-        self.builder.clean(project_path)
-    }
-
-    fn clone_box(&self) -> Box<dyn WasmBuilder> {
-        self.builder.clone_box()
-    }
-}
-
 /// Load all built-in plugins into a vector
 pub fn load_all_builtin_plugins(plugins: &mut Vec<Box<dyn Plugin>>) -> Result<()> {
     plugins.push(Box::new(BuiltinPlugin::new(Arc::new(CPlugin::new()))));
@@ -167,27 +48,10 @@ pub fn load_all_builtin_plugins(plugins: &mut Vec<Box<dyn Plugin>>) -> Result<()
     Ok(())
 }
 
-/// Get information about all built-in plugins
-#[allow(dead_code)] // TODO: Future plugin discovery
-pub fn get_builtin_plugin_info() -> Vec<PluginInfo> {
-    vec![]
-}
-
-/// Check if a plugin name is a built-in plugin
-#[allow(dead_code)] // TODO: Future plugin validation
-pub fn is_builtin_plugin(name: &str) -> bool {
-    matches!(name, "c" | "asc" | "go" | "rust")
-}
-
-/// Get specific built-in plugin info by name
-#[allow(dead_code)] // TODO: Future plugin lookup
-pub fn get_builtin_plugin_by_name(_name: &str) -> Option<PluginInfo> {
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugin::PluginType;
     use std::fs::File;
     use tempfile::tempdir;
 
@@ -317,87 +181,5 @@ mod tests {
                 _ => {}
             }
         }
-    }
-
-    #[test]
-    fn test_is_builtin_plugin() {
-        assert!(is_builtin_plugin("c"));
-        assert!(is_builtin_plugin("asc"));
-        assert!(is_builtin_plugin("go"));
-        assert!(is_builtin_plugin("rust"));
-
-        assert!(!is_builtin_plugin("python"));
-        assert!(!is_builtin_plugin("nonexistent"));
-        assert!(!is_builtin_plugin(""));
-    }
-
-    #[test]
-    fn test_builtin_plugin_wrapper() {
-        // Test creating a builtin plugin from another plugin
-        let temp_dir = tempdir().unwrap();
-        let c_file = temp_dir.path().join("main.c");
-        File::create(&c_file).unwrap();
-
-        let c_plugin = Arc::new(CPlugin::new());
-        let wrapped_plugin = BuiltinPlugin::new(c_plugin);
-
-        // Test that wrapping preserves functionality
-        assert_eq!(wrapped_plugin.info().plugin_type, PluginType::Builtin);
-        assert!(wrapped_plugin.can_handle_project(temp_dir.path().to_str().unwrap()));
-
-        let builder = wrapped_plugin.get_builder();
-        assert!(!builder.language_name().is_empty());
-    }
-
-    #[test]
-    fn test_builtin_builder_wrapper() {
-        let mut plugins = Vec::new();
-        load_all_builtin_plugins(&mut plugins).unwrap();
-
-        let temp_dir = tempdir().unwrap();
-
-        for plugin in &plugins {
-            let builder = plugin.get_builder();
-            let cloned_builder = builder.clone_box();
-
-            // Test that cloning works
-            assert_eq!(builder.language_name(), cloned_builder.language_name());
-            assert_eq!(
-                builder.supported_extensions(),
-                cloned_builder.supported_extensions()
-            );
-            assert_eq!(
-                builder.entry_file_candidates(),
-                cloned_builder.entry_file_candidates()
-            );
-
-            // Test dependency checking doesn't crash
-            let _deps = builder.check_dependencies();
-
-            // Test project validation
-            let validation_result = builder.validate_project(temp_dir.path().to_str().unwrap());
-            // Validation may succeed or fail, but shouldn't crash
-            assert!(validation_result.is_ok() || validation_result.is_err());
-        }
-    }
-
-    #[test]
-    fn test_get_builtin_plugin_info() {
-        let info = get_builtin_plugin_info();
-        // Currently returns empty vec, but shouldn't crash
-        assert!(info.is_empty() || !info.is_empty());
-    }
-
-    #[test]
-    fn test_get_builtin_plugin_by_name() {
-        let result = get_builtin_plugin_by_name("c");
-        // Currently returns None, but shouldn't crash
-        assert!(result.is_none());
-
-        let result = get_builtin_plugin_by_name("nonexistent");
-        assert!(result.is_none());
-
-        let result = get_builtin_plugin_by_name("");
-        assert!(result.is_none());
     }
 }

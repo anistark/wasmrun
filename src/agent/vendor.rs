@@ -15,6 +15,13 @@
 //! Only pure-JS packages are supported: anything with an install script or
 //! native-binding artifacts (`binding.gyp`, `*.node`) is rejected with a
 //! clear error naming the package.
+//!
+//! Package metadata is checked the way npm 7+ checks it, but a mismatch is a
+//! warning in the exec response rather than a refusal: `os`/`cpu` that leave
+//! out the sandbox's `wasi`/`wasm32`, and an `engines.node` no Node 20 release
+//! satisfies. Peer dependencies are installed when missing, beside the package
+//! that wants them, and a peer already present at a version outside the range
+//! is a warning.
 
 use crate::agent::api::ApiError;
 use crate::agent::limits::{dir_size, ResourceLimits};
@@ -31,6 +38,20 @@ const MAX_PACKAGES_PER_REQUEST: usize = 256;
 const MAX_DEPTH: usize = 64;
 const MAX_TARBALL_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 500 * 1024 * 1024;
+
+/// What the sandbox reports as `process.platform` and `process.arch`.
+const SANDBOX_OS: &str = "wasi";
+const SANDBOX_CPU: &str = "wasm32";
+/// The Node.js the sandbox stands in for: the wasmhub runtime implements the
+/// Node 20 API, so `engines.node` is checked against the newest 20.x.
+const SANDBOX_NODE: &str = "20.19.0";
+
+/// What vendoring produced: the tree, and anything worth telling the caller.
+#[derive(Debug, Default)]
+pub struct Vendored {
+    pub lock: Lockfile,
+    pub warnings: Vec<String>,
+}
 
 pub struct Vendor {
     registry: String,
@@ -54,6 +75,78 @@ struct VersionDoc {
     dist: DistDoc,
     #[serde(rename = "hasInstallScript", default)]
     has_install_script: bool,
+    #[serde(default, deserialize_with = "string_or_list")]
+    os: Vec<String>,
+    #[serde(default, deserialize_with = "string_or_list")]
+    cpu: Vec<String>,
+    /// An object (`{"node": ">=18"}`); some old packages published a list.
+    #[serde(default)]
+    engines: serde_json::Value,
+    #[serde(rename = "peerDependencies", default)]
+    peer_dependencies: HashMap<String, String>,
+    #[serde(rename = "peerDependenciesMeta", default)]
+    peer_dependencies_meta: HashMap<String, PeerMeta>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct PeerMeta {
+    #[serde(default)]
+    optional: bool,
+}
+
+/// `os` and `cpu` are lists, but a bare string turns up in the wild.
+fn string_or_list<'de, D>(d: D) -> std::result::Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match serde_json::Value::deserialize(d)? {
+        serde_json::Value::String(s) => vec![s],
+        serde_json::Value::Array(items) => items
+            .into_iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect(),
+        _ => Vec::new(),
+    })
+}
+
+/// npm's rule for `os`/`cpu`: a `!name` entry excludes, a plain one allows,
+/// and a list of only exclusions allows everything else.
+fn platform_allows(list: &[String], ours: &str) -> bool {
+    if list.iter().any(|e| e.strip_prefix('!') == Some(ours)) {
+        return false;
+    }
+    let allowed: Vec<&String> = list.iter().filter(|e| !e.starts_with('!')).collect();
+    allowed.is_empty() || allowed.iter().any(|e| e.as_str() == ours)
+}
+
+/// Warnings for `name@version`'s platform metadata, as npm would raise them.
+fn metadata_warnings(name: &str, vdoc: &VersionDoc) -> Vec<String> {
+    let mut out = Vec::new();
+    let id = format!("{name}@{}", vdoc.version);
+    if !vdoc.os.is_empty() && !platform_allows(&vdoc.os, SANDBOX_OS) {
+        out.push(format!(
+            "{id} supports os [{}]; the sandbox is '{SANDBOX_OS}', so it may not work",
+            vdoc.os.join(", ")
+        ));
+    }
+    if !vdoc.cpu.is_empty() && !platform_allows(&vdoc.cpu, SANDBOX_CPU) {
+        out.push(format!(
+            "{id} supports cpu [{}]; the sandbox is '{SANDBOX_CPU}', so it may not work",
+            vdoc.cpu.join(", ")
+        ));
+    }
+    if let Some(node) = vdoc.engines.get("node").and_then(|v| v.as_str()) {
+        let ours = SemVer::parse(SANDBOX_NODE).expect("SANDBOX_NODE parses");
+        // A range this parser cannot read is left alone rather than reported.
+        if let Ok(range) = Range::parse(node) {
+            if !matches!(range, Range::Tag(_)) && !range.matches(&ours) {
+                out.push(format!(
+                    "{id} requires node '{node}'; the sandbox runtime implements Node 20"
+                ));
+            }
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -70,6 +163,7 @@ struct Ctx {
     docs: HashMap<String, PackageDoc>,
     installed: usize,
     lock: Lockfile,
+    warnings: Vec<String>,
 }
 
 /// A resolved dependency tree: install path (relative to the session root,
@@ -405,6 +499,7 @@ impl Vendor {
         }
     }
 
+    #[cfg(test)]
     /// Vendor `deps` (name → npm range) into `{work_dir}/node_modules`,
     /// returning a lockfile describing the tree that was resolved.
     ///
@@ -419,10 +514,22 @@ impl Vendor {
         work_dir: &Path,
         limits: &ResourceLimits,
     ) -> std::result::Result<Lockfile, ApiError> {
+        self.vendor_with_warnings(deps, work_dir, limits)
+            .map(|v| v.lock)
+    }
+
+    /// [`vendor`](Self::vendor), plus the metadata warnings it raised.
+    pub fn vendor_with_warnings(
+        &self,
+        deps: &HashMap<String, String>,
+        work_dir: &Path,
+        limits: &ResourceLimits,
+    ) -> std::result::Result<Vendored, ApiError> {
         let mut ctx = Ctx {
             docs: HashMap::new(),
             installed: 0,
             lock: Lockfile::new(),
+            warnings: Vec::new(),
         };
         let root_nm = work_dir.join("node_modules");
         let mut chain = vec![root_nm];
@@ -433,7 +540,11 @@ impl Vendor {
         for name in names {
             self.install_into(name, &deps[name], &mut chain, limits, &mut ctx, 0)?;
         }
-        Ok(ctx.lock)
+        ctx.warnings.dedup();
+        Ok(Vendored {
+            lock: ctx.lock,
+            warnings: ctx.warnings,
+        })
     }
 
     /// Install exactly the tree a previous `vendor` call recorded.
@@ -545,6 +656,8 @@ impl Vendor {
             )));
         }
 
+        ctx.warnings.extend(metadata_warnings(name, &vdoc));
+
         let integrity = vdoc.dist.integrity.as_deref().ok_or_else(|| {
             ApiError::BadRequest(format!(
                 "Package '{name}@{}' has no sha512 integrity in the registry; refusing to vendor unverifiable tarballs",
@@ -592,7 +705,59 @@ impl Vendor {
             Ok(())
         })();
         chain.pop();
-        result
+        result?;
+
+        self.install_peers(name, &vdoc, chain, limits, ctx, depth)
+    }
+
+    /// npm 7's peer handling: a missing peer is installed beside the package
+    /// that wants it (so the package and its parent see the same copy), an
+    /// optional one is left out, and one already present at a version outside
+    /// the range is kept and reported, where npm would refuse with ERESOLVE.
+    fn install_peers(
+        &self,
+        name: &str,
+        vdoc: &VersionDoc,
+        chain: &mut Vec<PathBuf>,
+        limits: &ResourceLimits,
+        ctx: &mut Ctx,
+        depth: usize,
+    ) -> std::result::Result<(), ApiError> {
+        let mut peers: Vec<&String> = vdoc.peer_dependencies.keys().collect();
+        peers.sort();
+        for peer in peers {
+            let range_text = &vdoc.peer_dependencies[peer];
+            let optional = vdoc
+                .peer_dependencies_meta
+                .get(peer)
+                .is_some_and(|m| m.optional);
+            let Ok(range) = Range::parse(range_text) else {
+                ctx.warnings.push(format!(
+                    "{name}@{} wants peer {peer}@'{range_text}', a range wasmrun cannot read; not installed",
+                    vdoc.version
+                ));
+                continue;
+            };
+            let present = chain
+                .iter()
+                .rev()
+                .find_map(|nm| installed_version(&nm.join(peer)));
+            match present {
+                Some(found) => {
+                    let satisfied = matches!(range, Range::Tag(_))
+                        || SemVer::parse(&found).is_ok_and(|v| range.matches(&v));
+                    if !satisfied {
+                        ctx.warnings.push(format!(
+                            "{name}@{} wants peer {peer}@'{range_text}', but {peer}@{found} is installed",
+                            vdoc.version
+                        ));
+                    }
+                }
+                None if optional => {}
+                None => self.install_into(peer, range_text, chain, limits, ctx, depth + 1)?,
+            }
+        }
+        Ok(())
     }
 
     /// Fetch the registry document for `name` into `ctx`, once per request.
@@ -1953,6 +2118,132 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         let vendor = Vendor::with_cache_dir(&url, cache.path().join("npm"));
         (registry, cache, vendor)
+    }
+
+    /// A registry with metadata to check: `plugin@1.0.0` peers on `host@^2`,
+    /// optionally on `extra`, and declares darwin/x64 and node >=22; `host` has
+    /// 1.0.0 and 2.1.0.
+    fn peer_registry() -> (FakeRegistry, tempfile::TempDir, Vendor) {
+        let server = std::sync::Arc::new(tiny_http::Server::http("127.0.0.1:0").unwrap());
+        let url = format!("http://{}", server.server_addr());
+        let mut docs = HashMap::new();
+
+        let plugin_tb = pkg_tarball("plugin", "1.0.0", "module.exports = require('host');");
+        let mut plugin = version_doc("plugin", "1.0.0", &url, &plugin_tb, &[], false);
+        plugin["peerDependencies"] = serde_json::json!({"host": "^2.0.0", "extra": "*"});
+        plugin["peerDependenciesMeta"] = serde_json::json!({"extra": {"optional": true}});
+        plugin["os"] = serde_json::json!(["darwin", "linux"]);
+        plugin["cpu"] = serde_json::json!("x64");
+        plugin["engines"] = serde_json::json!({"node": ">=22"});
+        docs.insert(
+            "plugin".to_string(),
+            serde_json::json!({"dist-tags": {"latest": "1.0.0"}, "versions": {"1.0.0": plugin}})
+                .to_string()
+                .into_bytes(),
+        );
+        docs.insert("tarballs/plugin-1.0.0.tgz".to_string(), plugin_tb);
+
+        let mut host_versions = serde_json::Map::new();
+        for v in ["1.0.0", "2.1.0"] {
+            let tb = pkg_tarball("host", v, "module.exports = 'host';");
+            let mut doc = version_doc("host", v, &url, &tb, &[], false);
+            // A package that excludes only windows is fine on wasi.
+            doc["os"] = serde_json::json!(["!win32"]);
+            doc["engines"] = serde_json::json!({"node": ">=14"});
+            host_versions.insert(v.to_string(), doc);
+            docs.insert(format!("tarballs/host-{v}.tgz"), tb);
+        }
+        docs.insert(
+            "host".to_string(),
+            serde_json::json!({"dist-tags": {"latest": "2.1.0"}, "versions": host_versions})
+                .to_string()
+                .into_bytes(),
+        );
+
+        let registry = serve_docs(server, url.clone(), docs);
+        let cache = tempfile::tempdir().unwrap();
+        let vendor = Vendor::with_cache_dir(&url, cache.path().join("npm"));
+        (registry, cache, vendor)
+    }
+
+    #[test]
+    fn test_a_missing_peer_is_installed_beside_the_package() {
+        let (_reg, _cache, vendor) = peer_registry();
+        let session = tempfile::tempdir().unwrap();
+        let deps = HashMap::from([("plugin".to_string(), "1.0.0".to_string())]);
+        let out = vendor
+            .vendor_with_warnings(&deps, session.path(), &ResourceLimits::default())
+            .unwrap();
+
+        // Beside it, not inside it, so the app and the plugin share one copy.
+        assert_eq!(
+            installed_version(&session.path().join("node_modules/host")).as_deref(),
+            Some("2.1.0")
+        );
+        assert!(!session
+            .path()
+            .join("node_modules/plugin/node_modules/host")
+            .exists());
+        assert!(out.lock.contains_key("node_modules/host"));
+        // The optional peer is left out.
+        assert!(!session.path().join("node_modules/extra").exists());
+    }
+
+    #[test]
+    fn test_platform_and_engines_mismatches_are_warnings_not_refusals() {
+        let (_reg, _cache, vendor) = peer_registry();
+        let session = tempfile::tempdir().unwrap();
+        let deps = HashMap::from([("plugin".to_string(), "1.0.0".to_string())]);
+        let out = vendor
+            .vendor_with_warnings(&deps, session.path(), &ResourceLimits::default())
+            .unwrap();
+
+        assert!(session.path().join("node_modules/plugin").exists());
+        let all = out.warnings.join("\n");
+        assert!(
+            all.contains("plugin@1.0.0 supports os [darwin, linux]"),
+            "{all}"
+        );
+        assert!(all.contains("plugin@1.0.0 supports cpu [x64]"), "{all}");
+        assert!(all.contains("plugin@1.0.0 requires node '>=22'"), "{all}");
+        // host's `!win32` and `>=14` are fine, so nothing about it.
+        assert!(!all.contains("host@"), "{all}");
+        assert_eq!(out.warnings.len(), 3, "{all}");
+    }
+
+    #[test]
+    fn test_a_peer_at_the_wrong_version_is_kept_and_reported() {
+        let (_reg, _cache, vendor) = peer_registry();
+        let session = tempfile::tempdir().unwrap();
+        // host@1 asked for first, at the top level, then the plugin wanting ^2.
+        let deps = HashMap::from([
+            ("host".to_string(), "1.0.0".to_string()),
+            ("plugin".to_string(), "1.0.0".to_string()),
+        ]);
+        let out = vendor
+            .vendor_with_warnings(&deps, session.path(), &ResourceLimits::default())
+            .unwrap();
+        assert_eq!(
+            installed_version(&session.path().join("node_modules/host")).as_deref(),
+            Some("1.0.0")
+        );
+        assert!(
+            out.warnings
+                .iter()
+                .any(|w| w == "plugin@1.0.0 wants peer host@'^2.0.0', but host@1.0.0 is installed"),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn test_platform_lists_follow_npm() {
+        let list = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(platform_allows(&list(&[]), "wasi"));
+        assert!(platform_allows(&list(&["!win32"]), "wasi"));
+        assert!(!platform_allows(&list(&["!wasi"]), "wasi"));
+        assert!(!platform_allows(&list(&["darwin"]), "wasi"));
+        assert!(platform_allows(&list(&["darwin", "wasi"]), "wasi"));
     }
 
     #[test]

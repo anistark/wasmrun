@@ -238,6 +238,39 @@ export default function OSMode() {
     }
   }, [])
 
+  // Only polled under --watch. The server bumps the generation on every
+  // project change; a program that has been run is started again on the new
+  // files, which the runner fetches afresh
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined
+    let cancelled = false
+    let seen: number | null = null
+    const version = async () => (await fetch('/api/project/version')).json()
+    version()
+      .then(info => {
+        if (cancelled || !info?.watch) return
+        seen = info.generation
+        interval = setInterval(async () => {
+          try {
+            const next = await version()
+            if (next.generation === seen) return
+            seen = next.generation
+            if (runnerRef.current) {
+              addLine('system', 'Project changed: restarting')
+              startWasmRunner()
+            }
+          } catch {
+            // the server is gone; the stats poll reports it
+          }
+        }, 1000)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      if (interval) clearInterval(interval)
+    }
+  }, [addLine, startWasmRunner])
+
   useEffect(() => {
     if (activePanel === 'filesystem') {
       fetchFsStats()
@@ -288,7 +321,12 @@ export default function OSMode() {
           <ApplicationPanel
             projectName={projectName}
             language={language}
-            kernelStats={kernelStats}
+            wasmStatus={wasmStatus}
+            onRun={startWasmRunner}
+            onStop={stopWasmRunner}
+            onOpenConsole={() => setActivePanel('console')}
+            listenAddress={listenAddress}
+            tunnel={tunnel}
           />
         )
 

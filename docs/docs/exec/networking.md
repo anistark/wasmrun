@@ -130,15 +130,17 @@ Upgrading from a policy written before wasmrun 0.24: a bare domain now covers su
 
 ## What JavaScript can do
 
-wasmhub's nodejs runtime implements `net` and `http` **servers**. Outbound is not there yet:
+wasmhub's nodejs runtime serves and, in its `20-net` build, connects out:
 
 | API | State |
 |---|---|
 | `http.createServer`, `net.createServer` | Works, on a host-bound listener |
-| `net.connect`, `http.request`, `fetch` | Throws `ERR_NOT_SUPPORTED` |
-| `https`, `dgram`, `tls` | Present but throwing |
+| `net.connect`, `http.request`, `http.get`, `fetch` | Works on the `20-net` build, under the same `--allow-net` rules as any program. `fetch` speaks `http:` only |
+| `https`, `tls`, `dgram` | Present but throwing: no TLS library is linked into the runtime |
 
-The syscalls to support outbound exist in wasmrun, in the interpreter and in OS mode's browser VM alike; the runtime has not been built against them. Tracked in [wasmhub#22](https://github.com/anistark/wasmhub/issues/22).
+The `20-net` build imports `sock_open` and `sock_connect`, which a stock WASI host lacks, so wasmhub publishes it beside the portable `20` build (from wasmhub v0.6.0) and wasmrun asks for it whenever the release it is pinned to has one.
+
+A failed connect reaches JavaScript as what happened: `EACCES` when the policy refuses the destination (and `fetch` rejects with `TypeError('fetch failed')`, `cause.code` `EACCES`), `ECONNREFUSED` when nothing listens there, `ETIMEDOUT`, `EHOSTUNREACH` or `ENETUNREACH` when the network says so. Anything else is `EIO`.
 
 ## See also
 

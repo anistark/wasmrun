@@ -16,13 +16,6 @@ impl PathResolver {
             .is_some_and(|ext| ext.to_string_lossy().to_lowercase() == expected_ext.to_lowercase())
     }
 
-    #[allow(dead_code)]
-    pub fn get_extension(path: &str) -> Option<String> {
-        Path::new(path)
-            .extension()
-            .map(|ext| ext.to_string_lossy().to_lowercase().to_string())
-    }
-
     /// Validate that path exists and is a file
     pub fn validate_file_exists(path: &str) -> Result<()> {
         let path_obj = Path::new(path);
@@ -69,29 +62,10 @@ impl PathResolver {
         Ok(())
     }
 
-    /// Get absolute path
-    #[allow(dead_code)]
-    pub fn get_absolute_path(path: &str) -> Result<String> {
-        fs::canonicalize(path)
-            .map(|p| p.to_string_lossy().to_string())
-            .map_err(|e| WasmrunError::add_context(format!("Getting absolute path for {path}"), e))
-    }
-
     /// Get filename from path
     pub fn get_filename(path: &str) -> Result<String> {
         Path::new(path)
             .file_name()
-            .ok_or_else(|| WasmrunError::path(format!("Invalid path: {path}")))?
-            .to_string_lossy()
-            .to_string()
-            .pipe(Ok)
-    }
-
-    /// Get file stem
-    #[allow(dead_code)]
-    pub fn get_file_stem(path: &str) -> Result<String> {
-        Path::new(path)
-            .file_stem()
             .ok_or_else(|| WasmrunError::path(format!("Invalid path: {path}")))?
             .to_string_lossy()
             .to_string()
@@ -139,39 +113,6 @@ impl PathResolver {
         }
 
         Ok(files)
-    }
-
-    /// Find common entry files for different languages
-    #[allow(dead_code)]
-    pub fn find_entry_file(project_path: &str, candidates: &[&str]) -> Option<String> {
-        for candidate in candidates {
-            let entry_path = Self::join_paths(project_path, candidate);
-            if Path::new(&entry_path).exists() {
-                return Some(entry_path);
-            }
-        }
-        None
-    }
-
-    /// Check if a path is safe to use
-    #[allow(dead_code)]
-    pub fn is_safe_path(path: &str) -> bool {
-        let path = Path::new(path);
-
-        for component in path.components() {
-            match component {
-                std::path::Component::ParentDir => return false,
-                std::path::Component::Normal(name) => {
-                    let name_str = name.to_string_lossy();
-                    if name_str.starts_with('.') && name_str.len() > 1 {
-                        continue;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        true
     }
 
     /// Get file size in a human-readable format
@@ -352,19 +293,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_extension() {
-        assert_eq!(
-            PathResolver::get_extension("test.wasm"),
-            Some("wasm".to_string())
-        );
-        assert_eq!(
-            PathResolver::get_extension("test.WASM"),
-            Some("wasm".to_string())
-        );
-        assert_eq!(PathResolver::get_extension("test"), None);
-    }
-
-    #[test]
     fn test_validate_file_exists_with_valid_file() {
         let temp_file = NamedTempFile::new().unwrap();
         let result = PathResolver::validate_file_exists(temp_file.path().to_str().unwrap());
@@ -462,25 +390,6 @@ mod tests {
         let files = result.unwrap();
         assert_eq!(files.len(), 2);
         assert!(files.iter().all(|f| f.ends_with(".wasm")));
-    }
-
-    #[test]
-    fn test_find_entry_file() {
-        let temp_dir = tempdir().unwrap();
-        File::create(temp_dir.path().join("main.rs")).unwrap();
-
-        let candidates = ["lib.rs", "main.rs", "src/main.rs"];
-        let result = PathResolver::find_entry_file(temp_dir.path().to_str().unwrap(), &candidates);
-        assert!(result.is_some());
-        assert!(result.unwrap().ends_with("main.rs"));
-    }
-
-    #[test]
-    fn test_is_safe_path() {
-        assert!(PathResolver::is_safe_path("safe/path/file.wasm"));
-        assert!(PathResolver::is_safe_path("./file.wasm"));
-        assert!(!PathResolver::is_safe_path("../dangerous/path"));
-        assert!(!PathResolver::is_safe_path("/path/../dangerous"));
     }
 
     #[test]

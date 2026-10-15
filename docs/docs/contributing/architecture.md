@@ -5,7 +5,15 @@ title: Architecture
 
 # Architecture
 
-Wasmrun is designed with a modular architecture that separates concerns clearly and enables extensibility through a powerful plugin system.
+Wasmrun is one binary with four modes and a process manager, which share an interpreter, a WASI layer and some utilities but not much else:
+
+| Mode | Command | Runs code with | Code |
+|---|---|---|---|
+| Server | `wasmrun`, `wasmrun run` | The browser, after compiling with a plugin | `src/server/`, `src/compiler/`, `src/plugin/` |
+| Exec | `wasmrun exec` | The interpreter | `src/runtime/core/`, `src/runtime/wasi/` |
+| OS | `wasmrun os` | A browser worker, on a wasmhub runtime | `src/runtime/os_server.rs` and the OS kernel, `ui/src/os/` |
+| Agent | `wasmrun agent` | The interpreter, per session | `src/agent/` |
+| Process manager | `wasmrun ps` | `wasmrun exec` child processes | `src/ps/` |
 
 ## High-Level Overview
 
@@ -53,15 +61,17 @@ Each command is implemented in its own file:
 
 | File | Command | Purpose |
 |------|---------|---------|
-| **run.rs** | `wasmrun` | Development server with live reload |
+| **run.rs** | `wasmrun`, `wasmrun run` | Development server with live reload |
 | **compile.rs** | `wasmrun compile` | Project compilation with optimization |
 | **exec.rs** | `wasmrun exec` | Native WASM execution |
+| **agent.rs** | `wasmrun agent` | The REST sandbox API for AI agents |
+| **os.rs** | `wasmrun os` | OS mode: projects in a browser VM |
+| **ps.rs** | `wasmrun ps` | The process manager's client commands |
+| **init.rs** | `wasmrun init` | A new project from a template (the repository's examples, embedded) |
 | **plugin.rs** | `wasmrun plugin` | Plugin management (install, list, info) |
-| **verify.rs** | `wasmrun verify` | WASM verification and validation |
+| **verify.rs** | `wasmrun verify`, `wasmrun inspect` | WASM verification and inspection |
 | **clean.rs** | `wasmrun clean` | Build artifact cleanup |
 | **stop.rs** | `wasmrun stop` | Stop every running dev session |
-| **os.rs** | `wasmrun os` | OS mode for multi-language execution |
-| **init.rs** | `wasmrun init` | Project initialization |
 
 ### Plugin System (src/plugin/)
 
@@ -153,17 +163,42 @@ src/runtime/
 │   ├── control_flow.rs     # Control flow operations
 │   ├── values.rs           # Value stack operations
 │   └── linker.rs           # Module linking
-├── wasi/                   # WASI implementation
-│   ├── mod.rs
+│   ├── fuzz.rs             # Mutation fuzzing of the parser, executor and memory (tests)
+│   └── spec_suite.rs       # The official spec test suite harness (tests)
+├── wasi/                   # WASI implementation (exec and agent mode)
+│   ├── mod.rs              # WasiEnv: fds, preopens, args, env, sockets
+│   ├── network.rs          # Egress policy for outbound sockets
 │   └── syscalls.rs         # WASI syscall implementation
-├── languages/              # OS mode language runtimes
-│   ├── nodejs.rs
-│   ├── python.rs
-│   └── go.rs
+├── runtime_cache.rs        # wasmhub runtime downloads (OS and agent mode)
+├── network.rs              # OS mode's wasmnet proxy
 ├── os_server.rs            # OS mode server
-├── microkernel.rs          # Microkernel implementation
-└── syscalls.rs             # System call interface
+├── multilang_kernel.rs     # OS kernel: language detection, staging, process records
+├── microkernel.rs          # OS kernel: the process table and the workspace VFS
+├── registry.rs             # OS kernel: the languages it can stage
+├── languages/              # OS kernel: Node.js detection and staging
+├── wasi_fs.rs              # OS kernel: the virtual filesystem behind /api/fs
+├── project_files.rs        # The project bundle the browser VM is given
+└── tunnel/                 # `wasmrun os --expose`: the bore client
 ```
+
+The program in OS mode runs in a browser worker, not on the host: the OS kernel records it and stages its files, and nothing in it schedules or executes code.
+
+### Agent Module (src/agent/)
+
+The REST sandbox API: sessions, auth and tenants, limits, metrics, npm vendoring, ES module lowering, the shell emulation and long-lived servers. Every execution runs on exec mode's interpreter and WASI; agent mode owns only what exec mode has no concept of. See [Agent Mode](../agent/index.md).
+
+### Process Manager (src/ps/)
+
+```
+src/ps/
+├── mod.rs          # run_supervisor: the supervisor process
+├── config.rs       # processes.toml, checked up front
+├── supervisor.rs   # One monitor thread per program: start, watch, restart with backoff
+├── control.rs      # The loopback control API and supervisor.json
+└── logs.rs         # Per-program logs, rotated by size
+```
+
+Each program runs as its own `wasmrun exec -q` process, so a crash takes down only that program. See [Process Manager](../ps/index.md).
 
 ### Compiler Module (src/compiler/)
 
@@ -186,10 +221,11 @@ Shared utilities used across the codebase:
 src/utils/
 ├── mod.rs              # Utility module exports
 ├── command.rs          # Command execution utilities
+├── http.rs             # The outbound HTTP agent (wasmhub, npm)
 ├── path.rs             # Path resolution and validation
 ├── plugin_utils.rs     # Plugin-specific utilities
-├── system.rs           # System information and detection
-└── wasm_analysis.rs    # WebAssembly file analysis
+├── process.rs          # Other processes: is it wasmrun, its memory, SIGTERM
+└── system.rs           # System information and detection
 ```
 
 ### Template System (src/template.rs)
@@ -319,7 +355,7 @@ User runs: wasmrun plugin install wasmrust
    - Copies compiled library
    - Extracts metadata
    ↓
-5. Register plugin (plugin/registry.rs)
+5. Register plugin (plugin/manager.rs)
    - Updates config.toml
    - Registers capabilities
    - Makes plugin available

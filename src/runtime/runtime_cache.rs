@@ -15,6 +15,29 @@ const WASMHUB_BASE_URL: &str = "https://github.com/anistark/wasmhub/releases/dow
 /// override-fetched artifacts never masquerade as pinned-release ones.
 const WASMHUB_URL_ENV: &str = "WASMRUN_WASMHUB_BASE_URL";
 
+/// Builds wasmrun asks for ahead of `latest`, as (language, variant suffix):
+/// the version key is `<latest>-<suffix>`. wasmhub keeps `latest` the build any
+/// WASI host can load; a variant needs imports only some hosts provide. The
+/// nodejs `-net` build imports `sock_open`/`sock_connect`, which both of
+/// wasmrun's WASI layers implement (the interpreter's and the browser shim's),
+/// and it is what makes `net.connect`, `http.request` and `fetch` work. A
+/// release without the variant falls back to `latest`.
+const PREFERRED_VARIANTS: &[(&str, &str)] = &[("nodejs", "net")];
+
+/// The version key to fetch from a language manifest.
+fn select_version(manifest: &LanguageManifest) -> &str {
+    for (language, suffix) in PREFERRED_VARIANTS {
+        if manifest.language != *language {
+            continue;
+        }
+        let key = format!("{}-{suffix}", manifest.latest);
+        if let Some((found, _)) = manifest.versions.get_key_value(key.as_str()) {
+            return found;
+        }
+    }
+    &manifest.latest
+}
+
 fn wasmhub_base_url() -> String {
     std::env::var(WASMHUB_URL_ENV).unwrap_or_else(|_| WASMHUB_BASE_URL.to_string())
 }
@@ -89,7 +112,8 @@ impl RuntimeCache {
         Ok(Self { cache_dir })
     }
 
-    pub fn cache_dir(&self) -> &PathBuf {
+    #[cfg(test)]
+    fn cache_dir(&self) -> &PathBuf {
         &self.cache_dir
     }
 
@@ -99,21 +123,37 @@ impl RuntimeCache {
         }
 
         let lang_manifest = self.fetch_language_manifest(language)?;
-        let latest = &lang_manifest.latest;
-        let version_info = lang_manifest.versions.get(latest.as_str()).ok_or_else(|| {
-            WasmrunError::from(format!("Version {latest} not found in {language} manifest"))
+        let version = select_version(&lang_manifest);
+        let version_info = lang_manifest.versions.get(version).ok_or_else(|| {
+            WasmrunError::from(format!(
+                "Version {version} not found in {language} manifest"
+            ))
         })?;
 
         let wasm_bytes = self.download_runtime(language, &version_info.file)?;
         self.validate_checksum(&wasm_bytes, &version_info.sha256, &version_info.file)?;
-        self.save_to_cache(language, latest, &wasm_bytes, &lang_manifest)?;
+        self.save_to_cache(language, version, &wasm_bytes, &lang_manifest)?;
 
         println!(
-            "✅ Cached {language} runtime v{latest} ({} bytes)",
+            "✅ Cached {language} runtime v{version} ({} bytes)",
             wasm_bytes.len()
         );
 
         Ok(wasm_bytes)
+    }
+
+    /// The runtime as a file on disk, downloading it first if it is not
+    /// cached, for a caller that hands it to another process.
+    pub fn runtime_path(&self, language: &str) -> Result<PathBuf> {
+        self.get_runtime(language)?;
+        let meta_path = self.cache_dir.join(format!("{language}.json"));
+        let meta: CacheMetadata = fs::read_to_string(&meta_path)
+            .ok()
+            .and_then(|c| serde_json::from_str(&c).ok())
+            .ok_or_else(|| {
+                WasmrunError::from(format!("No cache metadata for the {language} runtime"))
+            })?;
+        Ok(self.cache_dir.join(meta.filename))
     }
 
     pub fn fetch_manifest(&self) -> Result<WasmhubManifest> {
@@ -292,35 +332,6 @@ impl RuntimeCache {
         }
         removed
     }
-
-    pub fn clear_cache(&self, language: Option<&str>) -> Result<()> {
-        match language {
-            Some(lang) => {
-                let meta_path = self.cache_dir.join(format!("{lang}.json"));
-                if meta_path.exists() {
-                    if let Ok(content) = fs::read_to_string(&meta_path) {
-                        if let Ok(meta) = serde_json::from_str::<CacheMetadata>(&content) {
-                            let wasm_path = self.cache_dir.join(&meta.filename);
-                            let _ = fs::remove_file(&wasm_path);
-                        }
-                    }
-                    fs::remove_file(&meta_path).map_err(|e| {
-                        WasmrunError::from(format!("Failed to remove cache metadata: {e}"))
-                    })?;
-                }
-            }
-            None => {
-                if self.cache_dir.exists() {
-                    fs::remove_dir_all(&self.cache_dir)
-                        .map_err(|e| WasmrunError::from(format!("Failed to clear cache: {e}")))?;
-                    fs::create_dir_all(&self.cache_dir).map_err(|e| {
-                        WasmrunError::from(format!("Failed to recreate cache dir: {e}"))
-                    })?;
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -380,29 +391,6 @@ fn format_bytes(bytes: usize) -> String {
     }
 }
 
-#[allow(dead_code)]
-pub fn language_for_project(project_path: &str) -> Result<String> {
-    use std::path::Path;
-    let path = Path::new(project_path);
-
-    if path.join("Cargo.toml").exists() {
-        return Ok("rust".to_string());
-    }
-    if path.join("go.mod").exists() {
-        return Ok("go".to_string());
-    }
-    if path.join("package.json").exists() {
-        return Ok("nodejs".to_string());
-    }
-    if path.join("requirements.txt").exists() || path.join("pyproject.toml").exists() {
-        return Ok("python".to_string());
-    }
-
-    Err(WasmrunError::from(format!(
-        "Could not detect project language at {project_path}"
-    )))
-}
-
 /// Maps project language names to wasmhub runtime identifiers.
 pub fn wasmhub_language(language: &str) -> &str {
     match language {
@@ -415,6 +403,51 @@ pub fn wasmhub_language(language: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn manifest(language: &str, latest: &str, keys: &[&str]) -> LanguageManifest {
+        LanguageManifest {
+            language: language.into(),
+            latest: latest.into(),
+            versions: keys
+                .iter()
+                .map(|k| {
+                    (
+                        k.to_string(),
+                        VersionInfo {
+                            file: format!("{language}-{k}.wasm"),
+                            size: 0,
+                            sha256: String::new(),
+                            released: String::new(),
+                            wasi: "wasip1".into(),
+                            features: vec![],
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn nodejs_prefers_the_net_build_when_the_release_has_one() {
+        assert_eq!(
+            select_version(&manifest("nodejs", "20", &["20", "20-net"])),
+            "20-net"
+        );
+    }
+
+    #[test]
+    fn a_release_without_the_variant_falls_back_to_latest() {
+        assert_eq!(select_version(&manifest("nodejs", "20", &["20"])), "20");
+        // A variant of some other version is not the latest's.
+        assert_eq!(
+            select_version(&manifest("nodejs", "22", &["22", "20-net"])),
+            "22"
+        );
+        assert_eq!(
+            select_version(&manifest("go", "1.23", &["1.23", "1.23-net"])),
+            "1.23"
+        );
+    }
 
     #[test]
     fn test_format_bytes() {
@@ -482,53 +515,6 @@ mod tests {
     }
 
     #[test]
-    fn test_language_detection() {
-        let dir = tempfile::tempdir().unwrap();
-
-        fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-        assert_eq!(
-            language_for_project(dir.path().to_str().unwrap()).unwrap(),
-            "rust"
-        );
-    }
-
-    #[test]
-    fn test_language_detection_nodejs() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("package.json"), "{}").unwrap();
-        assert_eq!(
-            language_for_project(dir.path().to_str().unwrap()).unwrap(),
-            "nodejs"
-        );
-    }
-
-    #[test]
-    fn test_language_detection_go() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("go.mod"), "module test").unwrap();
-        assert_eq!(
-            language_for_project(dir.path().to_str().unwrap()).unwrap(),
-            "go"
-        );
-    }
-
-    #[test]
-    fn test_language_detection_python() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("requirements.txt"), "flask").unwrap();
-        assert_eq!(
-            language_for_project(dir.path().to_str().unwrap()).unwrap(),
-            "python"
-        );
-    }
-
-    #[test]
-    fn test_language_detection_unknown() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(language_for_project(dir.path().to_str().unwrap()).is_err());
-    }
-
-    #[test]
     fn test_cache_dir_creation() {
         let dir = tempfile::tempdir().unwrap();
         let cache_dir = dir.path().join("test_cache");
@@ -550,14 +536,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cache = RuntimeCache::with_cache_dir(dir.path().join("cache")).unwrap();
         assert!(cache.cached_version("rust").is_none());
-    }
-
-    #[test]
-    fn test_clear_cache_nonexistent() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = RuntimeCache::with_cache_dir(dir.path().join("cache")).unwrap();
-        assert!(cache.clear_cache(Some("rust")).is_ok());
-        assert!(cache.clear_cache(None).is_ok());
     }
 
     #[test]
@@ -680,36 +658,5 @@ mod tests {
         // Should detect corruption and return None
         let result = cache.load_from_cache("test").unwrap();
         assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_clear_specific_language() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = RuntimeCache::with_cache_dir(dir.path().join("cache")).unwrap();
-
-        let wasm_bytes = vec![0x00, 0x61, 0x73, 0x6d];
-        let manifest = LanguageManifest {
-            language: "test".to_string(),
-            latest: "1.0".to_string(),
-            versions: HashMap::from([(
-                "1.0".to_string(),
-                VersionInfo {
-                    file: "test-1.0.wasm".to_string(),
-                    size: wasm_bytes.len() as u64,
-                    sha256: sha256_hex(&wasm_bytes),
-                    released: "2026-01-01T00:00:00Z".to_string(),
-                    wasi: "wasip1".to_string(),
-                    features: vec![],
-                },
-            )]),
-        };
-
-        cache
-            .save_to_cache("test", "1.0", &wasm_bytes, &manifest)
-            .unwrap();
-        assert!(cache.is_cached("test"));
-
-        cache.clear_cache(Some("test")).unwrap();
-        assert!(!cache.is_cached("test"));
     }
 }

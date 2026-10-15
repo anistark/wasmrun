@@ -28,7 +28,22 @@ This downloads and installs the `wasmrust` plugin, which adds Rust support to Wa
 
 ### Step 2: Create a New Project
 
-Create a new directory for your project:
+`wasmrun init` writes a working project from a template:
+
+```sh
+wasmrun init my-first-wasm            # Rust, the default template
+cd my-first-wasm && wasmrun .
+```
+
+| Template | Mode | Then |
+|---|---|---|
+| `rust` (default), `go`, `c`, `asc`, `python` | Server | `wasmrun my-app` |
+| `nodejs` | OS and agent | `wasmrun os my-app` |
+| `wasi` | Exec | `cargo build --release --target wasm32-wasip1`, then `wasmrun exec` the result |
+
+`--template` (`-t`) picks one and `--directory` (`-d`) a target directory other than the name; `wasmrun new` is the same command. Each template is one of the repository's examples, compiled into wasmrun, with the example's name replaced by yours. It refuses a directory that already exists.
+
+Or build the same project by hand. Create a new directory for your project:
 
 ```sh
 mkdir my-first-wasm

@@ -4,6 +4,7 @@ use super::linker::Linker;
 use super::memory::LinearMemory;
 use super::module::{ImportKind, Module, ValueType};
 use super::values::Value;
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -770,7 +771,13 @@ pub fn decode_instruction(cursor: &mut Cursor<&[u8]>) -> Result<Instruction, Str
         0x0D => Ok(Instruction::BrIf(decode_u32_leb128(cursor)?)),
         0x0E => {
             let count = decode_u32_leb128(cursor)? as usize;
-            let mut targets = Vec::with_capacity(count);
+            // Each target is at least a byte of code, so the code left bounds
+            // what a truthful count can be.
+            let left = cursor
+                .get_ref()
+                .len()
+                .saturating_sub(cursor.position() as usize);
+            let mut targets = Vec::with_capacity(count.min(left));
             for _ in 0..count {
                 targets.push(decode_u32_leb128(cursor)?);
             }
@@ -1379,8 +1386,62 @@ pub struct Executor {
     /// instruction loop aborts with `EXECUTION_CANCELLED_ERROR` at the next
     /// check. `None` = not cancellable. Shared (`Arc`) so an outside thread —
     /// e.g. the agent server on wall-clock timeout — can trip it while we run.
-    max_call_depth: usize,
     cancel: Option<Arc<AtomicBool>>,
+    max_call_depth: usize,
+    /// Each defined function's body, shared so a call does not copy it.
+    code: Vec<Arc<[u8]>>,
+    /// Where a forward scan for a matching `end` (or `else`) lands, keyed by
+    /// function, start position and how many `end`s it skips (0 for the
+    /// else-or-end scan). A taken branch out of a block would otherwise
+    /// re-read the bytecode up to its target every time.
+    scan_targets: HashMap<(u32, u32, u32), (u32, bool)>,
+}
+
+/// Read forward to the `else` or `end` matching an `if` the cursor is just
+/// inside. True if it stopped after an `else`, false after an `end`.
+fn scan_to_else_or_end(cursor: &mut Cursor<&[u8]>) -> Result<bool, String> {
+    let mut depth = 0;
+    loop {
+        if cursor.position() >= cursor.get_ref().len() as u64 {
+            return Err("Unexpected EOF while seeking else/end".to_string());
+        }
+        match decode_instruction(cursor)? {
+            Instruction::Block(_) | Instruction::Loop(_) | Instruction::If(_) => depth += 1,
+            Instruction::Else if depth == 0 => return Ok(true),
+            Instruction::End => {
+                if depth == 0 {
+                    return Ok(false);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Read forward past `n` unmatched `end` instructions.
+fn scan_n_ends(cursor: &mut Cursor<&[u8]>, n: usize) -> Result<(), String> {
+    let mut depth: usize = 0;
+    let mut ends_found: usize = 0;
+    loop {
+        if cursor.position() >= cursor.get_ref().len() as u64 {
+            return Err("Unexpected EOF while seeking end".to_string());
+        }
+        match decode_instruction(cursor)? {
+            Instruction::Block(_) | Instruction::Loop(_) | Instruction::If(_) => depth += 1,
+            Instruction::End => {
+                if depth == 0 {
+                    ends_found += 1;
+                    if ends_found >= n {
+                        return Ok(());
+                    }
+                } else {
+                    depth -= 1;
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Executor {
@@ -1545,6 +1606,11 @@ impl Executor {
             });
         }
 
+        let code = module
+            .functions
+            .iter()
+            .map(|f| Arc::from(f.code.as_slice()))
+            .collect();
         Ok(Executor {
             context,
             module,
@@ -1556,6 +1622,8 @@ impl Executor {
             fuel: None,
             max_call_depth: DEFAULT_MAX_CALL_DEPTH,
             cancel: None,
+            code,
+            scan_targets: HashMap::new(),
         })
     }
 
@@ -1652,7 +1720,11 @@ impl Executor {
             }
 
             // Return tuple with locals, num_returns, and code
-            (locals, func_type.results.len(), func.code.clone())
+            (
+                locals,
+                func_type.results.len(),
+                Arc::clone(&self.code[defined_idx]),
+            )
         };
 
         let (locals, num_returns, code) = func;
@@ -1672,7 +1744,7 @@ impl Executor {
             .push_block(BlockArity::results_only(num_returns), false, 0, 0, false);
 
         // Execute bytecode
-        let mut cursor = Cursor::new(code.as_slice());
+        let mut cursor = Cursor::new(&code[..]);
         let result = self.execute_bytecode(&mut cursor);
         self.context.block_stack.truncate(block_depth_before);
         if result.is_err() {
@@ -1737,35 +1809,42 @@ impl Executor {
         Ok(())
     }
 
+    /// The function whose stored body `cursor` reads, which is what makes a
+    /// scan from it safe to remember. `None` for any other bytecode.
+    fn scanned_function(&self, cursor: &Cursor<&[u8]>) -> Option<u32> {
+        let func_idx = self.context.call_stack.last()?.func_idx;
+        let code = self
+            .code
+            .get((func_idx as usize).checked_sub(self.import_func_count)?)?;
+        std::ptr::eq(code.as_ref(), *cursor.get_ref()).then_some(func_idx)
+    }
+
+    /// Move `cursor` to where a scan of kind `kind` from here ends, scanning
+    /// only the first time it is asked from this position.
+    fn scan_forward(
+        &mut self,
+        cursor: &mut Cursor<&[u8]>,
+        kind: u32,
+        scan: impl FnOnce(&mut Cursor<&[u8]>) -> Result<bool, String>,
+    ) -> Result<bool, String> {
+        let Some(func_idx) = self.scanned_function(cursor) else {
+            return scan(cursor);
+        };
+        let key = (func_idx, cursor.position() as u32, kind);
+        if let Some(&(pos, found_else)) = self.scan_targets.get(&key) {
+            cursor.set_position(pos as u64);
+            return Ok(found_else);
+        }
+        let found_else = scan(cursor)?;
+        self.scan_targets
+            .insert(key, (cursor.position() as u32, found_else));
+        Ok(found_else)
+    }
+
     /// Skip bytecode until we find the matching else or end instruction.
     /// Returns true if we stopped at an `else`, false if we stopped at an `end`.
     fn skip_to_else_or_end(&mut self, cursor: &mut Cursor<&[u8]>) -> Result<bool, String> {
-        let mut depth = 0;
-
-        loop {
-            if cursor.position() >= cursor.get_ref().len() as u64 {
-                return Err("Unexpected EOF while seeking else/end".to_string());
-            }
-
-            let instr = decode_instruction(cursor)?;
-            match instr {
-                Instruction::Block(_) | Instruction::Loop(_) | Instruction::If(_) => {
-                    depth += 1;
-                }
-                Instruction::Else if depth == 0 => {
-                    // Found matching else — cursor is now after `else`
-                    return Ok(true);
-                }
-                Instruction::End => {
-                    if depth == 0 {
-                        // Found matching end (no else branch) — cursor is now after `end`
-                        return Ok(false);
-                    }
-                    depth -= 1;
-                }
-                _ => {}
-            }
-        }
+        self.scan_forward(cursor, 0, scan_to_else_or_end)
     }
 
     /// Skip bytecode until we find the matching end instruction
@@ -1775,32 +1854,9 @@ impl Executor {
 
     /// Skip past `n` unmatched end instructions in the bytecode
     fn skip_n_ends(&mut self, cursor: &mut Cursor<&[u8]>, n: usize) -> Result<(), String> {
-        let mut depth: i32 = 0;
-        let mut ends_found: usize = 0;
-
-        loop {
-            if cursor.position() >= cursor.get_ref().len() as u64 {
-                return Err("Unexpected EOF while seeking end".to_string());
-            }
-
-            let instr = decode_instruction(cursor)?;
-            match instr {
-                Instruction::Block(_) | Instruction::Loop(_) | Instruction::If(_) => {
-                    depth += 1;
-                }
-                Instruction::End => {
-                    if depth == 0 {
-                        ends_found += 1;
-                        if ends_found >= n {
-                            return Ok(());
-                        }
-                    } else {
-                        depth -= 1;
-                    }
-                }
-                _ => {}
-            }
-        }
+        let kind = u32::try_from(n).map_err(|_| "branch depth out of range".to_string())?;
+        self.scan_forward(cursor, kind, |c| scan_n_ends(c, n).map(|()| false))
+            .map(|_| ())
     }
 
     /// Resolve a block type to the number of values it takes and leaves.
@@ -1912,7 +1968,7 @@ impl Executor {
             (
                 func_type.params.len(),
                 func_type.results.len(),
-                func.code.clone(),
+                Arc::clone(&self.code[defined_idx]),
                 func.locals.clone(),
             )
         };
@@ -1961,7 +2017,7 @@ impl Executor {
             .push_block(BlockArity::results_only(num_results), false, 0, 0, false);
 
         // Execute function bytecode
-        let mut cursor = Cursor::new(code.as_slice());
+        let mut cursor = Cursor::new(&code[..]);
         let result = self.execute_bytecode(&mut cursor);
 
         // Restore block stack to the depth it had before this call.
@@ -4186,6 +4242,51 @@ mod tests {
             elements: vec![],
             data: vec![],
         }
+    }
+
+    /// Forward scans are remembered per function and position, so the second
+    /// and later taken branches must land exactly where the first scan did.
+    #[test]
+    fn test_remembered_branch_targets_give_the_same_results() {
+        let text = r#"(module
+          (func (export "run") (param $n i32) (result i32) (local $i i32) (local $acc i32)
+            (loop $l
+              (block $out
+                (block $mid
+                  (br_if $out (i32.and (local.get $i) (i32.const 1)))
+                  (br_if $mid (i32.and (local.get $i) (i32.const 2)))
+                  (local.set $acc (i32.add (local.get $acc) (i32.const 100))))
+                (local.set $acc (i32.add (local.get $acc) (i32.const 10))))
+              (if (i32.and (local.get $i) (i32.const 4))
+                (then (local.set $acc (i32.add (local.get $acc) (i32.const 1))))
+                (else (local.set $acc (i32.sub (local.get $acc) (i32.const 1)))))
+              (local.set $i (i32.add (local.get $i) (i32.const 1)))
+              (br_if $l (i32.lt_u (local.get $i) (local.get $n))))
+            (local.get $acc)))"#;
+        let buf = wast::parser::ParseBuffer::new(text).unwrap();
+        let mut wat: wast::Wat = wast::parser::parse(&buf).unwrap();
+        let module = Module::parse(&wat.encode().unwrap()).unwrap();
+        let mut executor = Executor::new(module).unwrap();
+
+        let expected = |n: i32| -> i32 {
+            (0..n)
+                .map(|i| {
+                    let body = if i & 1 != 0 {
+                        0
+                    } else if i & 2 != 0 {
+                        10
+                    } else {
+                        110
+                    };
+                    body + if i & 4 != 0 { 1 } else { -1 }
+                })
+                .sum()
+        };
+        for n in [1, 8, 64, 8] {
+            let got = executor.execute_with_args(0, vec![Value::I32(n)]).unwrap();
+            assert_eq!(got, vec![Value::I32(expected(n))], "n = {n}");
+        }
+        assert!(!executor.scan_targets.is_empty(), "nothing was remembered");
     }
 
     #[test]

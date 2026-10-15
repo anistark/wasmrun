@@ -22,11 +22,11 @@ Runtimes are downloaded on first use with SHA-256 checksum validation.
 
 The OS mode UI provides several panels:
 
+- **Application**: the project at a glance: whether the program is running, **Run** and **Stop**, and links to the address it serves on and, with `--expose`, its public URL. The program opens in its own tab: under the cross-origin isolation the VM needs, the page cannot frame it
 - **Console**: live stdout/stderr with color-coded streams (green for stdout, red for stderr, blue for system) and timestamps
 - **Filesystem**: browse the WASI virtual filesystem populated from your project files
 - **Kernel Status**: active processes, memory usage, WASI capabilities, supported languages
 - **Logs**: structured log trail from kernel, server, and runtime events
-- **Application**: iframe for app output (when running web servers)
 
 ## Virtual Filesystem
 
@@ -42,7 +42,7 @@ Project files are served via `GET /api/project/files` as a base64-encoded JSON b
 A program in the VM has no network of its own. What it gets goes through a local proxy under a policy the project sets in `wasmrun.toml`:
 
 - A port from the policy's `bind_ports` range is bound for the program when it starts, so `server.listen()` in a Node project answers requests on `localhost`
-- Outbound connections go through the same proxy and policy, for a program that calls `sock_open` and `sock_connect`. Node's `net.connect` and `fetch` do not call them yet
+- Outbound connections go through the same proxy and policy: `net.connect`, `http.request` and `fetch` in a Node project (on wasmhub's `20-net` runtime, from v0.6.0), or any program that calls `sock_open` and `sock_connect`
 
 See [Network Policy](./network-isolation.md) and [Serving a Port](./port-forwarding.md).
 
@@ -72,7 +72,8 @@ OS mode exposes a JSON API:
 | `/api/fs/delete/<path>` | POST | Delete file |
 | `/api/project/files` | GET | Get all project files (base64 bundle) |
 | `/api/runtime/<language>` | GET | Serve cached runtime WASM binary |
-| `/api/runtimes` | GET | Available runtimes manifest |
+| `/api/runtimes` | GET | The detected language, the runtime, `[os] entry` and `[os.limits]` |
+| `/api/project/version` | GET | Under `--watch`, a counter that moves when the project changes |
 | `/api/logs` | GET | All structured logs |
 | `/api/logs/recent` | GET | Recent logs |
 | `/api/kernel/start` | POST | Start project |
@@ -82,5 +83,3 @@ OS mode exposes a JSON API:
 | `/api/tunnel/target` | POST | Point the tunnel at the program's port |
 | `/api/tunnel/start` | POST | Reopen the tunnel (`--expose` only) |
 | `/api/tunnel/stop` | POST | Close the tunnel |
-| `/api/processes/<pid>/ports` | GET | List port mappings |
-| `/api/processes/<pid>/forward` | POST | Create port forward |

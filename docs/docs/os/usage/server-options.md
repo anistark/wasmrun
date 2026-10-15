@@ -58,7 +58,35 @@ wasmrun os --port 8421        # or use a different port
 wasmrun os ./my-project --watch
 ```
 
-The flag is accepted and printed at startup, but nothing watches the project yet: the VM is not restarted when a file changes. Project files are fetched fresh on every **Run**, so **Stop** and **Run** in the Console panel picks up an edit.
+The server watches the project, and when a file changes the page restarts the program on the new files, which it fetches fresh. The Console shows `Project changed: restarting`. A program you have not run yet is left alone: the next **Run** gets the new files anyway.
+
+Changes under `node_modules`, `target`, `dist`, `build`, `pkg` and hidden directories are ignored.
+
+## Project settings: `wasmrun.toml`
+
+A `wasmrun.toml` at the project root sets what the flags cannot, read once at startup. A file that does not parse, or an `[os]` key that is misspelled, stops the server before it starts rather than being ignored.
+
+```toml
+[os]
+language = "nodejs"          # instead of detection; --language wins over it
+entry = "src/server.js"      # the file the VM runs, instead of package.json main
+
+[os.limits]
+max_memory_mb = 256          # the VM's linear memory; 0 is no cap
+max_output_mb = 10           # console output kept; the rest is dropped, with a note
+timeout_secs = 0             # how long the program may run; 0 (the default) is until stopped
+
+[os.network]
+allow = ["api.example.com:443"]
+```
+
+| Limit | Default | When it is hit |
+|---|---|---|
+| `max_memory_mb` | 256 | The program is ended with `memory limit exceeded: N MB is past [os.limits] max_memory_mb = M`. It is checked at every WASI call, since the runtime owns its memory |
+| `max_output_mb` | 10 | Output past it is dropped after one `[output limit reached]` line, so a runaway loop cannot fill the page |
+| `timeout_secs` | 0 | The VM is stopped with `Stopped: the program ran past [os.limits] timeout_secs = N` |
+
+The same units and the same `0`-means-unlimited rule as agent mode's limits. `[os.network]` is described in [Network Policy](../network-isolation.md).
 
 ## CORS Configuration
 
