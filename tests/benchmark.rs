@@ -8,8 +8,8 @@
 //! ```
 //!
 //! The JavaScript rows need the nodejs runtime: `WASMRUN_BENCH_NODEJS` names a
-//! `nodejs-20.wasm`, or the one in `~/.wasmrun/runtimes` is used, and they are
-//! skipped when neither exists. Results also go to `target/benchmark.json`.
+//! `nodejs-20.wasm`, or the one `~/.wasmrun/runtimes/nodejs.json` records as
+//! cached is used, and they are skipped when neither exists. Results also go to `target/benchmark.json`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -68,16 +68,13 @@ fn nodejs_runtime() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("WASMRUN_BENCH_NODEJS") {
         return Some(PathBuf::from(path));
     }
+    // The cache keeps files from earlier releases beside the current one, so
+    // take the file its metadata names rather than any `nodejs-*.wasm`.
     let dir = dirs_home()?.join(".wasmrun/runtimes");
-    std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .map(|e| e.path())
-        .find(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("nodejs-") && n.ends_with(".wasm"))
-        })
+    let meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("nodejs.json")).ok()?).ok()?;
+    let path = dir.join(meta["filename"].as_str()?);
+    path.exists().then_some(path)
 }
 
 fn dirs_home() -> Option<PathBuf> {
@@ -173,6 +170,7 @@ fn benchmark() {
 
     if let Some(node) = nodejs_runtime() {
         let node = path(&node);
+        println!("JS rows on {node}");
         let js = |src: &str| time_exec(&[&node, "eval", src]);
         rows.push(Row {
             name: "js-startup",

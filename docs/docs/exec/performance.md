@@ -11,20 +11,20 @@ Exec mode, agent mode and `wasmrun ps` all run on this interpreter, so the same 
 
 ## Baseline
 
-Wall-clock time through the release binary, process start to exit, median of five runs. Apple M1, measured on the 1.0 branch with the nodejs runtime built for wasmhub v0.6.0.
+Wall-clock time through the release binary, process start to exit, median of five runs. Apple M1, wasmrun 1.0.0 with wasmhub v0.6.0's `20-net` nodejs runtime, the one wasmrun fetches.
 
 | Workload | What it does | Time |
 |---|---|---|
-| startup | Parse and run an empty module | 12 ms |
+| startup | Parse and run an empty module | 15 ms |
 | calls | Recursive `fib(25)`: 242,785 calls | 52 ms |
-| arithmetic | A 10M-iteration loop, about 62M instructions/s | 1.46 s |
-| memory | Write then read 16 MiB as `i32` | 1.17 s |
-| js-startup | The nodejs runtime evaluating `1+1` | 346 ms |
+| arithmetic | A 10M-iteration loop, about 62M instructions/s | 1.45 s |
+| memory | Write then read 16 MiB as `i32` | 1.19 s |
+| js-startup | The nodejs runtime evaluating `1+1` | 345 ms |
 | js-loop | A 10,000-iteration JavaScript loop | 1.05 s |
-| js-json | Build, stringify and parse 200 objects | 494 ms |
-| js-sha256 | `createHash('sha256')` over 64 KiB (native digest) | 461 ms |
+| js-json | Build, stringify and parse 200 objects | 489 ms |
+| js-sha256 | `createHash('sha256')` over 64 KiB (native digest) | 485 ms |
 
-A request to the `nodejs-http-api` example under `wasmrun exec --tcplisten` takes about 100 ms.
+A request to the `nodejs-http-api` example under `wasmrun exec --tcplisten` takes about 160 ms.
 
 ## What to expect
 
@@ -38,6 +38,6 @@ A request to the `nodejs-http-api` example under `wasmrun exec --tcplisten` take
 just bench
 ```
 
-That builds in release and runs `tests/benchmark.rs`, printing the table and writing `target/benchmark.json`. The JavaScript rows need a nodejs runtime: set `WASMRUN_BENCH_NODEJS` to a `nodejs-20.wasm`, or run any JavaScript through wasmrun once so one is cached in `~/.wasmrun/runtimes`. Without one they are skipped.
+That builds in release and runs `tests/benchmark.rs`, printing the table and writing `target/benchmark.json`. The JavaScript rows need a nodejs runtime: set `WASMRUN_BENCH_NODEJS` to a `nodejs-20.wasm`, or run any JavaScript through wasmrun once so one is cached in `~/.wasmrun/runtimes`, where the benchmark uses the build wasmrun itself would. Without one they are skipped.
 
 Compare against the table on the same machine: the absolute numbers move with the hardware, the ratios between rows should not.
