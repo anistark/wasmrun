@@ -23,6 +23,7 @@ wasmrun ./dist/output.wasm
 
 | Command | Description |
 |---|---|
+| [`init`](./init.md) | Create a new project from a template, for any mode |
 | [`run`](./run.md) | Compile and serve a project or WASM file with a dev server |
 | [`compile`](./compile.md) | Compile a project to WebAssembly |
 | [`verify`](./verify.md) | Validate a WASM binary's structure and format |

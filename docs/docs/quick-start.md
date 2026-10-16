@@ -41,7 +41,7 @@ cd my-first-wasm && wasmrun .
 | `nodejs` | OS and agent | `wasmrun os my-app` |
 | `wasi` | Exec | `cargo build --release --target wasm32-wasip1`, then `wasmrun exec` the result |
 
-`--template` (`-t`) picks one and `--directory` (`-d`) a target directory other than the name; `wasmrun new` is the same command. Each template is one of the repository's examples, compiled into wasmrun, with the example's name replaced by yours. It refuses a directory that already exists.
+`--template` (`-t`) picks one and `--directory` (`-d`) a target directory other than the name; `wasmrun new` is the same command. See [init](./server/usage/init.md) for the details. Each template is one of the repository's examples, compiled into wasmrun, with the example's name replaced by yours. It refuses a directory that already exists.
 
 Or build the same project by hand. Create a new directory for your project:
 

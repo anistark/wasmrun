@@ -4391,9 +4391,8 @@ mod tests {
 
     /// Integration test: the 0.21.4 polyfill tail — `URL`/`URLSearchParams`,
     /// `crypto.getRandomValues`/`randomUUID`, and `structuredClone` run
-    /// without ReferenceError, and `fetch` rejects with a clear
-    /// network-not-supported message instead of a bare ReferenceError
-    /// (wasmhub nodejs >= v0.3.2).
+    /// without ReferenceError, and a `fetch` the session's policy refuses
+    /// rejects as Node's does, with an `EACCES` cause (the `20-net` build).
     /// Ignored by default; see test_multi_file_js_require_integration.
     #[test]
     #[ignore]
@@ -4402,7 +4401,7 @@ mod tests {
         let id = server.handle_create_session().unwrap().session_id;
 
         let body = r#"{
-            "source": "const u = new URL('https://example.com:8443/a/../b?x=1'); u.searchParams.append('y', 'z z'); console.log(u.href); const r = crypto.getRandomValues(new Uint8Array(16)); console.log('rand=' + (r.length === 16 && Array.from(r).some(b => b !== 0))); console.log('uuid=' + /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(crypto.randomUUID())); const o = {a: [1, 2], m: new Map([['k', 'v']])}; o.self = o; const c = structuredClone(o); console.log('clone=' + (c.self === c && c.m.get('k') === 'v' && c.a !== o.a)); fetch('http://example.com').catch(e => console.log('fetch=' + /network/.test(e.message)));",
+            "source": "const u = new URL('https://example.com:8443/a/../b?x=1'); u.searchParams.append('y', 'z z'); console.log(u.href); const r = crypto.getRandomValues(new Uint8Array(16)); console.log('rand=' + (r.length === 16 && Array.from(r).some(b => b !== 0))); console.log('uuid=' + /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(crypto.randomUUID())); const o = {a: [1, 2], m: new Map([['k', 'v']])}; o.self = o; const c = structuredClone(o); console.log('clone=' + (c.self === c && c.m.get('k') === 'v' && c.a !== o.a)); fetch('http://example.com').catch(e => console.log('fetch=' + (e.cause && e.cause.code)));",
             "language": "javascript",
             "timeout": 120
         }"#;
@@ -4433,8 +4432,8 @@ mod tests {
             resp.stdout
         );
         assert!(
-            resp.stdout.contains("fetch=true"),
-            "fetch should reject with a clear network-unsupported error: {:?}",
+            resp.stdout.contains("fetch=EACCES"),
+            "a fetch the policy refuses should reject with EACCES: {:?}",
             resp.stdout
         );
 
