@@ -22,11 +22,20 @@ struct Template {
     next: &'static [&'static str],
 }
 
+/// An example's file, through the copy `build.rs` makes in `templates/init/`,
+/// which is what the crate package carries. `build.rs` reads its list of files
+/// from these calls.
 macro_rules! example_file {
     ($example:literal, $path:literal) => {
         (
             $path,
-            include_str!(concat!("../../examples/", $example, "/", $path)),
+            include_str!(concat!(
+                "../../templates/init/",
+                $example,
+                "/",
+                $path,
+                ".tmpl"
+            )),
         )
     };
 }

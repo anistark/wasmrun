@@ -140,7 +140,7 @@ Wasmrun has **four distinct execution modes**, plus a process manager built on o
 - **Uses plugins / browser:** No
 - **Docs:** `docs/docs/ps/`
 
-`wasmrun init` (`src/commands/init.rs`, alias `new`) belongs to no single mode: it scaffolds a project for any of them from templates compiled in from `examples/` with `include_str!`. **Changing an example changes its template**, and `init`'s tests check every template still scaffolds.
+`wasmrun init` (`src/commands/init.rs`, alias `new`) belongs to no single mode: it scaffolds a project for any of them from templates compiled in from `examples/`. `build.rs` copies the files named in `init.rs`'s `example_file!` calls to `templates/init/<example>/<path>.tmpl`, and `include_str!` embeds those copies. **Changing an example changes its template**, and `init`'s tests check every template still scaffolds.
 
 ### Mode Boundaries: Critical Rules
 
@@ -667,6 +667,7 @@ wasmrun init <name> --template rust|go|c|asc|python|nodejs|wasi  # New project (
 
 - **`build.rs` compiles the UI.** If you don't have `pnpm` or `node`, set `SKIP_UI_BUILD=1` to bypass.
 - **The `templates/` directory is gitignored**: it's generated at build time. Don't commit it.
+- **`init` templates reach the crate through `templates/init/`, never `examples/`.** Cargo leaves out any directory with its own `Cargo.toml` when packaging, whatever `include` says, so `rust-hello` and `native-rust` can't ship from `examples/`. The `.tmpl` suffix keeps the copies from tripping the same rule. A build from the package has only the READMEs cargo force-includes under `examples/` and falls back to the packaged copies. Don't point `example_file!` back at `examples/`: the repo builds, but `cargo publish` fails to verify the tarball. Check with `cargo publish --dry-run`, with `ui/` and `docs/` `node_modules` moved aside the way `just publish-crates` does.
 - **Executor is intentionally large.** Don't try to split `executor.rs` into multiple files; the dispatch loop benefits from being co-located.
 - **WASM uses little-endian** byte order for all memory operations.
 - **Division by zero** in WASM should trap (return error), not panic.

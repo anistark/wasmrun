@@ -3,6 +3,13 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    let templates_dir = Path::new("templates");
+    // After the UI, which replaces templates/ wholesale when it builds.
+    build_ui(templates_dir);
+    copy_init_templates(templates_dir);
+}
+
+fn build_ui(templates_dir: &Path) {
     println!("cargo:rerun-if-changed=ui/src");
     println!("cargo:rerun-if-changed=ui/package.json");
     println!("cargo:rerun-if-changed=ui/vite.config.ts");
@@ -11,8 +18,6 @@ fn main() {
     // this script, so the real UI is never built. CI never sets the variable for
     // fmt/clippy, so a local run without it has to actually match.
     println!("cargo:rerun-if-env-changed=SKIP_UI_BUILD");
-
-    let templates_dir = Path::new("templates");
 
     if env::var("SKIP_UI_BUILD").is_ok() {
         eprintln!("Skipping UI build (SKIP_UI_BUILD set)");
@@ -232,6 +237,45 @@ fn fix_html_references(html_path: &Path) {
         }
 
         let _ = fs::write(html_path, updated);
+    }
+}
+
+/// Copy the example files `wasmrun init` embeds into `templates/init/`, each as
+/// `<path>.tmpl`. The crate package cannot carry them from `examples/`: cargo
+/// leaves out any directory with its own `Cargo.toml`, whatever `include` says,
+/// which drops both Rust templates. The suffix keeps the copies from tripping
+/// the same rule. A build from the package uses the copies it shipped with:
+/// its `examples/` holds only the READMEs cargo force-includes.
+fn copy_init_templates(templates_dir: &Path) {
+    use std::fs;
+
+    let init_rs = Path::new("src/commands/init.rs");
+    println!("cargo:rerun-if-changed={}", init_rs.display());
+
+    let init_dir = templates_dir.join("init");
+    let source = fs::read_to_string(init_rs).expect("Failed to read src/commands/init.rs");
+    // The file list is init.rs's own `example_file!("example", "path")` calls.
+    for call in source.split("example_file!(").skip(1) {
+        let mut literals = call.split('"').skip(1).step_by(2);
+        let (Some(example), Some(path)) = (literals.next(), literals.next()) else {
+            continue;
+        };
+        let src = Path::new("examples").join(example).join(path);
+        let dest = init_dir.join(example).join(format!("{path}.tmpl"));
+        if !src.exists() {
+            assert!(
+                dest.exists(),
+                "Init template {} is missing, and so is its copy",
+                src.display()
+            );
+            continue;
+        }
+        println!("cargo:rerun-if-changed={}", src.display());
+        if let Some(parent) = dest.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        fs::copy(&src, &dest)
+            .unwrap_or_else(|e| panic!("Failed to copy init template {}: {e}", src.display()));
     }
 }
 
