@@ -5,6 +5,7 @@ const sidebars: SidebarsConfig = {
     'intro',
     'installation',
     'quick-start',
+    'stability',
   ],
 
   server: [
@@ -21,6 +22,7 @@ const sidebars: SidebarsConfig = {
           collapsed: false,
           link: { type: 'doc', id: 'server/usage/index' },
           items: [
+            'server/usage/init',
             'server/usage/run',
             'server/usage/compile',
             'server/usage/verify',
