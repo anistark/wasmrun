@@ -1,9 +1,11 @@
 overrides:
   colord: ^2.9.4
-  fast-uri: ^3.1.6
-  joi: ^17.13.6
+  fast-uri: ^3.1.8
+  joi: ^17.13.8
   js-yaml: ^4.3.2
+  postcss-selector-parser: ^7.1.6
   qs: ^6.16.0
   serialize-javascript: ^7.1.0
   svgo: ^3.3.5
+  tinypool: ^2.1.2
   uuid: ^11.1.1

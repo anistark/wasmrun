@@ -14,36 +14,36 @@ documentation = "https://docs.rs/wasmrun"
 rust-version = "1.85"
 
 [dependencies]
-clap = { version = "4.6.6", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"] }
 tiny_http = "0.12"
 webbrowser = "1.2.4"
 notify = "8.2.0"
 notify-debouncer-mini = "0.7.0"
-thiserror = "2.0.20"
+thiserror = "2.0.21"
 anyhow = "1.0.104"
 serde = { version = "1.0.229", features = ["derive"] }
-toml = "1.1.4"
-dirs = "6.0.0"
-serde_json = "1.0.151"
+toml = "1.1.8"
+dirs = "7.0.0"
+serde_json = "1.0.154"
 libloading = "0.9.0"
 chrono = { version = "0.4.45", features = ["serde"] }
 regex = "1.13.1"
 base64 = "0.23.1"
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 tempfile = "3.27.0"
-ureq = "3.4.0"
+ureq = "3.4.2"
 ctrlc = { version = "3.5.2", features = ["termination"] }
 tar = "0.4.46"
-flate2 = "1.1.9"
+flate2 = "1.1.10"
 wasmnet = "0.2.0"
-tokio = { version = "1.53.1", default-features = false, features = [
+tokio = { version = "1.54.0", default-features = false, features = [
     "rt-multi-thread",
     "sync",
 ] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
-wast = { version = "257.0.1", default-features = false, features = ["wasm-module"] }
+wast = { version = "262.0.0", default-features = false, features = ["wasm-module"] }
 
 [build-dependencies]
 regex = "1.13.1"

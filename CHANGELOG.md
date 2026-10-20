@@ -77,6 +77,12 @@ wasmrun 1.0. From here the CLI, agent mode's REST API, the config files, what a 
 - OS mode fetched the wasmhub manifest from GitHub on every `GET /api/runtimes`, stalling every other request while it waited. It is fetched once, and a failure is retried after a minute
 - OS mode's language detection ignored `--language`, and called a Node project with no `package.json` unknown
 
+### Security
+- **`rustls` 0.23.46**, past an advisory where TLS 1.3 handshake messages were accepted across encryption level boundaries ([GHSA-2mjx-qc3c-rqvc](https://github.com/advisories/GHSA-2mjx-qc3c-rqvc)). It is in the binary through `ureq`, which fetches wasmhub runtimes and plugins, and `wasmnet`
+- **Fifteen advisories in the UI and docs dependency trees are cleared**, none of which reach the binary: `source-map-js` 1.2.2, `brace-expansion` 5.0.12 and 1.1.21, `proxy-addr` 2.0.8, `compression` 1.8.2, `shell-quote` 1.12.0, `http-cache-semantics` 4.3.0, `joi` 17.13.8 and `fast-uri` 3.1.9 by updating, and `postcss-selector-parser` 7.1.7 and `tinypool` 2.2.0 by `overrides` in `docs/pnpm-workspace.yaml`, past the 6.x and 1.x that cssnano and Docusaurus pin
+  - `braces`, reachable through the `micromatch` Docusaurus matches files with, has a stack-exhaustion advisory and no patched release. It only ever expands the site's own glob patterns at build time
+- Every dependency is on its latest release, including Preact 11, `dirs` 7 and TypeScript 6.0 in `ui/` and `docs/`. TypeScript 7 waits on typescript-eslint, which supports up to 6.0. `docs/tsconfig.json` no longer extends `@docusaurus/tsconfig`, whose `baseUrl` TypeScript 6 deprecates, and its `@site` alias now points at the site root as Docusaurus resolves it
+
 ## [0.23.0](https://github.com/anistark/wasmrun/releases/tag/v0.23.0) - 2026-09-21
 
 ### Added
