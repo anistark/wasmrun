@@ -47,6 +47,10 @@ pub enum WasmrunError {
     #[error("Missing required tools: {tools:?}")]
     MissingTools { tools: Vec<String> },
 
+    /// `wasmrun update` or `wasmrun upgrade` could not finish
+    #[error("{message}")]
+    SelfUpdate { message: String },
+
     /// Generic error with context
     #[error("{context}: {source}")]
     WithContext {
@@ -182,6 +186,13 @@ impl WasmrunError {
     /// missing tools error
     pub fn missing_tools(tools: Vec<String>) -> Self {
         Self::MissingTools { tools }
+    }
+
+    /// `wasmrun update` or `wasmrun upgrade` error
+    pub fn self_update(message: impl Into<String>) -> Self {
+        Self::SelfUpdate {
+            message: message.into(),
+        }
     }
 
     /// Add context to an error

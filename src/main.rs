@@ -295,6 +295,14 @@ fn main() {
             all,
         }) => commands::handle_clean_command(&path.clone(), &positional_path.clone(), *all),
 
+        Some(Commands::Update { check }) => {
+            commands::handle_update_command(commands::UpdateScope::SameMajor, *check)
+        }
+
+        Some(Commands::Upgrade { check }) => {
+            commands::handle_update_command(commands::UpdateScope::Latest, *check)
+        }
+
         None => {
             debug_println!(
                 "No subcommand provided, running default mode (equivalent to 'run' command)"

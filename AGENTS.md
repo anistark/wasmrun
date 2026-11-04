@@ -140,6 +140,8 @@ Wasmrun has **four distinct execution modes**, plus a process manager built on o
 - **Uses plugins / browser:** No
 - **Docs:** `docs/docs/ps/`
 
+`wasmrun update` and `wasmrun upgrade` (`src/commands/update.rs`) belong to no single mode either: they move the installed binary to a newer release through whatever installed it (cargo, Homebrew, the AUR, `.deb`, `.rpm`). `update` stays on the installed major version, `upgrade` does not, and `--check` changes nothing.
+
 `wasmrun init` (`src/commands/init.rs`, alias `new`) belongs to no single mode: it scaffolds a project for any of them from templates compiled in from `examples/`. `build.rs` copies the files named in `init.rs`'s `example_file!` calls to `templates/init/<example>/<path>.tmpl`, and `include_str!` embeds those copies. **Changing an example changes its template**, and `init`'s tests check every template still scaffolds.
 
 ### Mode Boundaries: Critical Rules
@@ -172,6 +174,8 @@ Wasmrun has **four distinct execution modes**, plus a process manager built on o
 | `src/runtime/runtime_cache.rs` | OS, Agent, Process Manager | wasmhub language runtime fetching + caching; prefers the `<latest>-net` nodejs build when the pinned release has one |
 | `src/runtime/wasi_fs.rs` | OS | Virtual in-memory filesystem behind `/api/fs` |
 | `src/commands/init.rs` | All | Project templates, embedded from `examples/` |
+| `src/commands/update.rs` | All | `wasmrun update` and `upgrade`: self-update through the install method |
+| `src/utils/semver.rs` | Agent, `update` | `SemVer`: npm range resolution, comparing published releases |
 | `src/commands/verify.rs` | Standalone (uses core module parser) | WASM verification |
 
 ### Mode Dependency Map
@@ -276,6 +280,7 @@ src/
 │   ├── agent.rs         #   [Agent Mode] REST sandbox server
 │   ├── ps.rs            #   [Process Manager] client commands for the supervisor
 │   ├── init.rs          #   [Shared] project templates, embedded from examples/
+│   ├── update.rs        #   [Shared] update and upgrade: self-update via the install method
 │   ├── compile.rs       #   [Server Mode] compile only
 │   ├── verify.rs        #   [Shared] WASM binary verification
 │   ├── stop.rs          #   [Server Mode] stop every running dev session
@@ -373,7 +378,8 @@ docs/docs/
 ├── installation.md
 ├── intro.md
 ├── quick-start.md
-└── stability.md          # What 1.0 keeps stable (semver surface), upgrading from 0.23
+├── stability.md          # What 1.0 keeps stable (semver surface), upgrading from 0.23
+└── updating.md           # wasmrun update and upgrade, by install method
 ```
 
 When updating documentation, place content in the correct mode's section. Don't document exec features in the server docs, and vice versa.
@@ -456,7 +462,7 @@ pnpm typecheck      # TypeScript check
 ## Testing
 
 - **Unit tests** live alongside source code (standard Rust `#[cfg(test)]` modules).
-- **Integration tests** are in `tests/`: `exec_integration_tests.rs`, `agent_lifecycle_tests.rs`, and `ps_integration_tests.rs` (drives the real binary through a crash loop, stop, restart and shutdown, with `WASMRUN_PS_HOME` pointed at a temp dir).
+- **Integration tests** are in `tests/`: `exec_integration_tests.rs`, `agent_lifecycle_tests.rs`, `ps_integration_tests.rs` (drives the real binary through a crash loop, stop, restart and shutdown, with `WASMRUN_PS_HOME` pointed at a temp dir), and `update_integration_tests.rs` (copies the real binary to each install path, with fake package managers alone on `PATH` and a stub release server).
 - **Benchmark:** `tests/benchmark.rs` is `#[ignore]`d; `just bench` runs it in release and writes `target/benchmark.json`. Compare against `docs/docs/exec/performance.md` on the same machine.
 - **Fuzzing and the spec suite** run inside `cargo test`: `fuzz.rs` with a small default iteration count (`WASMRUN_FUZZ_ITERS`, `WASMRUN_FUZZ_SEED`), `spec_suite.rs` against a per-file baseline when `_tests/testsuite` exists (`just spec-suite-fetch`). A fuzz panic message carries the seed that reproduces it.
 - **Test count:** ~900 tests across unit and integration suites.
@@ -563,6 +569,8 @@ wasmrun ps stop [name] | restart <name>        # Stop one, or the supervisor and
 
 # Any mode
 wasmrun init <name> --template rust|go|c|asc|python|nodejs|wasi  # New project (alias: new)
+wasmrun update [--check]          # Newest minor or patch release of this major, through the install method
+wasmrun upgrade [--check]         # Newest release, including a new major version
 ```
 
 ---
@@ -596,6 +604,7 @@ wasmrun init <name> --template rust|go|c|asc|python|nodejs|wasi  # New project (
 | `src/ps/supervisor.rs` | Process Manager | Monitor threads, restart policy, backoff |
 | `src/ps/control.rs` | Process Manager | Loopback control API, token, state file |
 | `src/commands/init.rs` | All | Templates embedded from `examples/` |
+| `src/commands/update.rs` | All | Self-update: install detection, release sources, the major-version rule |
 | `src/utils/command.rs` | Server | `CommandExecutor`: how plugins spawn toolchains, incl. Windows shims |
 | `src/plugin/mod.rs` | Server | Plugin system definitions |
 | `build.rs` | All | Build script; compiles UI into templates |
@@ -688,6 +697,7 @@ wasmrun init <name> --template rust|go|c|asc|python|nodejs|wasi  # New project (
 - **Outbound sockets have one ABI in two places.** `sock_open` and `sock_connect` are wasmrun extensions (Preview 1 has neither), implemented in `src/runtime/wasi/syscalls.rs` and again in the browser shim. The host is a string so the policy sees the name, and a refused destination is `EACCES`. Change both together. The shim's `sock_connect` blocks on `Atomics.wait` until the page answers through `netInbox.ts`, so it only works inside the VM worker.
 - **`wasmrun stop` finds sessions through a registry, not a PID file.** Each dev session writes `<temp>/wasmrun/servers/<pid>` holding its UI URL and removes it on exit (Ctrl+C or SIGTERM through a `ctrlc` handler). An entry counts only while its process is a `wasmrun` and its port answers; keep both checks, or `stop` can signal a reused PID.
 - **`cargo search` is fuzzy.** It lists whatever ranks first, so `SystemUtils::get_latest_crates_version` compares the crate name (treating `-` and `_` as equal) before trusting a version. `plugin install` relies on that to refuse a name crates.io does not have.
+- **`wasmrun update` must never run an installer over a copy it can't place.** A binary in `~/.cargo/bin` counts as cargo only when `.crates2.json` records it from crates.io: `cargo install --path .` lands in the same directory. Homebrew is the exact `Cellar/wasmrun/<version>/bin/wasmrun` tail, never a substring, so a checkout under `homebrew-tools/` stays unplaced. The release sources are environment variables only (`WASMRUN_UPDATE_INDEX`, `WASMRUN_UPDATE_RELEASES`), never `wasmrun.toml`, because that file comes from the current directory and the result can run under `sudo`. Only `.deb` and `.rpm` ask the GitHub API, which allows 60 requests an hour per address.
 - **A sandbox has no network unless configured.** `NetworkAccess::denied()` is the default in both modes; egress comes from `--allow-net` or a tenant's `[tenants.network]` table. Don't "fix" a failing connection by widening the default.
 
 ---

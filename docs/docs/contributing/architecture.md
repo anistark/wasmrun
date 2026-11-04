@@ -72,6 +72,7 @@ Each command is implemented in its own file:
 | **verify.rs** | `wasmrun verify`, `wasmrun inspect` | WASM verification and inspection |
 | **clean.rs** | `wasmrun clean` | Build artifact cleanup |
 | **stop.rs** | `wasmrun stop` | Stop every running dev session |
+| **update.rs** | `wasmrun update`, `wasmrun upgrade` | Move this install to a newer release through whatever installed it |
 
 ### Plugin System (src/plugin/)
 

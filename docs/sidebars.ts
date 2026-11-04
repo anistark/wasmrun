@@ -6,6 +6,7 @@ const sidebars: SidebarsConfig = {
     'installation',
     'quick-start',
     'stability',
+    'updating',
   ],
 
   server: [

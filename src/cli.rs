@@ -602,6 +602,20 @@ pub enum Commands {
         )]
         all: bool,
     },
+
+    /// Update wasmrun to the newest minor or patch release of its major version
+    Update {
+        /// Show what would change without changing anything
+        #[arg(long, help = "Show the install method, version and command, and stop")]
+        check: bool,
+    },
+
+    /// Upgrade wasmrun to the newest release, including a new major version
+    Upgrade {
+        /// Show what would change without changing anything
+        #[arg(long, help = "Show the install method, version and command, and stop")]
+        check: bool,
+    },
 }
 
 /// Plugin management subcommands
