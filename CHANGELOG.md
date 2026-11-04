@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`wasmrun update` and `wasmrun upgrade` keep wasmrun current.** Both work out how this copy was installed and hand over to that tool: cargo, Homebrew, the AUR, or a `.deb` or `.rpm` package. `update` takes the newest minor or patch release of the installed major version, `upgrade` the newest release there is, and `--check` shows the install method, the version and the exact command without changing anything. What landed is read back from `wasmrun --version` on `PATH`, so a package manager that had nothing newer to offer is reported as such. A copy built from source or moved by hand is left alone, with instructions and a non-zero exit. Homebrew and the AUR can't be held to a major version, so `update` holds back there once a new one is out. See [Updating Wasmrun](https://wasmrun.readthedocs.io/en/latest/docs/updating)
+- **Homebrew in the install docs**: `brew install anistark/tools/wasmrun`
+
+### Changed
+- A project directory named `update` or `upgrade` needs a path now that those are commands: `wasmrun ./update`
+
 ## [1.0.0](https://github.com/anistark/wasmrun/releases/tag/v1.0.0) - 2026-10-20
 
 wasmrun 1.0. From here the CLI, agent mode's REST API, the config files, what a guest program sees and the plugin ABI follow semantic versioning: [Stability and Upgrading](https://wasmrun.readthedocs.io/en/latest/docs/stability) lists what that covers, what it does not, and what changed from 0.23.

@@ -36,7 +36,28 @@ On Arch Linux, install from the [AUR](https://aur.archlinux.org/packages/wasmrun
 yay -S wasmrun-bin
 ```
 
+With Homebrew:
+
+```sh
+brew install anistark/tools/wasmrun
+```
+
 For other installation methods (DEB, RPM, from source), see the [Installation Guide](https://wasmrun.readthedocs.io/en/latest/docs/installation).
+
+### Updating
+
+```sh
+# The newest minor or patch release of your major version
+wasmrun update
+
+# The newest release there is, including a new major version
+wasmrun upgrade
+
+# Show the install method, version and command, and change nothing
+wasmrun update --check
+```
+
+Both hand over to whatever installed this copy: cargo, Homebrew, the AUR, or a `.deb` or `.rpm` package. See [Updating Wasmrun](https://wasmrun.readthedocs.io/en/latest/docs/updating).
 
 ### Basic Usage
 

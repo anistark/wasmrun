@@ -25,6 +25,7 @@
 
 use crate::agent::api::ApiError;
 use crate::agent::limits::{dir_size, ResourceLimits};
+use crate::utils::SemVer;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
@@ -1177,97 +1178,6 @@ fn http_get_bytes(url: &str, max_bytes: u64) -> std::result::Result<Vec<u8>, Str
 
 // ── npm semver (subset) ─────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SemVer {
-    major: u64,
-    minor: u64,
-    patch: u64,
-    pre: Option<String>,
-}
-
-impl SemVer {
-    pub fn parse(s: &str) -> std::result::Result<Self, String> {
-        let s = s.trim().trim_start_matches('v');
-        let (core, pre) = match s.split_once('-') {
-            Some((c, p)) => (c, Some(p.split('+').next().unwrap_or(p).to_string())),
-            None => (s.split('+').next().unwrap_or(s), None),
-        };
-        let mut parts = core.split('.');
-        let mut next_num = |what: &str| {
-            parts
-                .next()
-                .ok_or(format!("missing {what}"))?
-                .parse::<u64>()
-                .map_err(|_| format!("invalid {what}"))
-        };
-        let major = next_num("major")?;
-        let minor = next_num("minor")?;
-        let patch = next_num("patch")?;
-        if parts.next().is_some() {
-            return Err("too many version components".into());
-        }
-        Ok(Self {
-            major,
-            minor,
-            patch,
-            pre,
-        })
-    }
-}
-
-impl PartialOrd for SemVer {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for SemVer {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.major, self.minor, self.patch)
-            .cmp(&(other.major, other.minor, other.patch))
-            .then_with(|| match (&self.pre, &other.pre) {
-                (None, None) => std::cmp::Ordering::Equal,
-                // A prerelease sorts below its release.
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (Some(a), Some(b)) => cmp_prerelease(a, b),
-            })
-    }
-}
-
-/// Semver prerelease ordering: numeric identifiers compare numerically and
-/// sort below alphanumeric ones. String comparison gets `alpha.10` vs
-/// `alpha.2` backwards.
-fn cmp_prerelease(a: &str, b: &str) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-    let mut ai = a.split('.');
-    let mut bi = b.split('.');
-    loop {
-        match (ai.next(), bi.next()) {
-            (None, None) => return Ordering::Equal,
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-            (Some(x), Some(y)) => {
-                let ord = match (x.parse::<u64>(), y.parse::<u64>()) {
-                    (Ok(nx), Ok(ny)) => nx.cmp(&ny),
-                    (Ok(_), Err(_)) => Ordering::Less,
-                    (Err(_), Ok(_)) => Ordering::Greater,
-                    (Err(_), Err(_)) => x.cmp(y),
-                };
-                if ord != Ordering::Equal {
-                    return ord;
-                }
-            }
-        }
-    }
-}
-
-impl SemVer {
-    fn core(&self) -> (u64, u64, u64) {
-        (self.major, self.minor, self.patch)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     Lt,
@@ -1579,17 +1489,6 @@ fn zeroed(v: &SemVer, prec: Precision) -> SemVer {
     match prec {
         Precision::Patch => v.clone(),
         _ => SemVer::exact(v.major, v.minor, v.patch),
-    }
-}
-
-impl SemVer {
-    fn exact(major: u64, minor: u64, patch: u64) -> Self {
-        Self {
-            major,
-            minor,
-            patch,
-            pre: None,
-        }
     }
 }
 

@@ -22,6 +22,16 @@ This installs the latest stable version from [crates.io](https://crates.io/crate
 
 If you don't have Rust installed, get it from [rustup.rs](https://rustup.rs/).
 
+## Homebrew
+
+On macOS and Linux, Wasmrun is in the [`anistark/tools`](https://github.com/anistark/homebrew-tools) tap:
+
+```sh
+brew install anistark/tools/wasmrun
+```
+
+The formula builds from the crate, so it needs a moment to compile.
+
 ## Prebuilt Packages
 
 ### DEB Package (Debian/Ubuntu/Pop!_OS)
@@ -167,29 +177,18 @@ wasmrun plugin install wasmasc
 
 ## Updating Wasmrun
 
-### Cargo Installation
-
-If you installed via Cargo, update with:
+`wasmrun update` moves to the newest minor or patch release of your major version, and `wasmrun upgrade` to the newest release there is, through whichever of the methods above installed this copy:
 
 ```sh
-cargo install wasmrun --force
+wasmrun update
+
+# See what would happen first
+wasmrun update --check
 ```
 
-### Package Manager Installation
+See [Updating Wasmrun](./updating.md) for what each install method runs.
 
-For DEB/RPM packages:
-1. Download the latest package from GitHub Releases
-2. Install it (will upgrade existing installation)
-
-For the AUR package, update with your AUR helper:
-
-```sh
-yay -S wasmrun-bin
-# or
-paru -S wasmrun-bin
-```
-
-### From Source
+A copy built from source is left alone. Update it with:
 
 ```sh
 cd wasmrun
@@ -262,6 +261,12 @@ sudo apt remove wasmrun
 sudo rpm -e wasmrun
 # or
 sudo dnf remove wasmrun
+```
+
+### Homebrew
+
+```sh
+brew uninstall wasmrun
 ```
 
 ### Arch Linux (AUR)

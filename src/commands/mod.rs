@@ -10,6 +10,7 @@ mod plugin;
 mod ps;
 mod run;
 mod stop;
+mod update;
 mod verify;
 
 pub use agent::handle_agent_command;
@@ -22,4 +23,5 @@ pub use plugin::run_plugin_command;
 pub use ps::handle_ps_command;
 pub use run::{handle_run_command, RunOptions};
 pub use stop::handle_stop_command;
+pub use update::{handle_update_command, UpdateScope};
 pub use verify::{handle_inspect_command, handle_verify_command, verify_wasm};
